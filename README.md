@@ -114,6 +114,9 @@ plot and the same data highlight everywhere.
 **Own bus (gloss ↔ gloss, no dependency).** Give the widgets a shared `group`:
 
 ```r
+
+df$hp <- mtcars$hp
+
 p1 <- vplot(df) |> mark_point(x = wt, y = mpg, data_id = model) |> as_widget(group = "cars")
 p2 <- vplot(df) |> mark_point(x = hp, y = qsec, data_id = model) |> as_widget(group = "cars")
 # in an HTML doc, selecting a point in p1 highlights the same car in p2
