@@ -105,3 +105,40 @@ Both layers use the same CSS-variable mechanism, so a plot can set a theme defau
 built-in look. (You can also override the raw CSS classes — `.gloss-hl`,
 `[data-key].gloss-selected`, `.gloss-tip`, … — from the host document, but the
 arguments above are the supported API.)
+
+## Linking views
+
+Selection can be **linked across views** by data key — select or brush in one
+plot and the same data highlight everywhere.
+
+**Own bus (gloss ↔ gloss, no dependency).** Give the widgets a shared `group`:
+
+```r
+p1 <- vplot(df) |> mark_point(x = wt, y = mpg, data_id = model) |> as_widget(group = "cars")
+p2 <- vplot(df) |> mark_point(x = hp, y = qsec, data_id = model) |> as_widget(group = "cars")
+# in an HTML doc, selecting a point in p1 highlights the same car in p2
+```
+
+Selection **projects by field**: if the marks declare `hover_group`, clicking one
+element selects the whole series (select one cylinder count → all its cars).
+
+**crosstalk (interop with plotly, leaflet, DT, and `filter_*` inputs).** Wrap the
+data in a [crosstalk](https://rstudio.github.io/crosstalk/) `SharedData` (its key
+must match your `data_id`) and pass it to `as_widget()`:
+
+```r
+library(crosstalk)
+sd <- SharedData$new(df, key = ~model, group = "cars")
+
+bscols(
+  vplot(sd$origData()) |> mark_point(x = wt, y = mpg, data_id = model) |> as_widget(crosstalk = sd),
+  DT::datatable(sd)      # selecting rows / points links both ways
+)
+filter_slider("hp", "Horsepower", sd, ~hp)   # crosstalk's filter inputs hide non-matching marks
+```
+
+gloss uses its own selection engine and layers crosstalk on top as an optional
+bridge (a `SelectionHandle` + `FilterHandle`), so a crosstalk filter hides the
+non-matching marks (display-tier cross-filter) and selection round-trips with the
+other widgets. The crosstalk client library is pulled in only when you pass a
+`SharedData`.

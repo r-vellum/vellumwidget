@@ -40,6 +40,8 @@ interface Options {
   nearest: boolean;
   selectMode: "single" | "multiple";
   style?: StyleOpts;
+  group?: string | null; // own cross-widget linking group (gloss <-> gloss)
+  crosstalk?: string | null; // crosstalk group (interop + filter_* controls)
 }
 
 // Widget-wide interaction theme (Option 1). Each maps to a CSS variable on the
@@ -153,6 +155,7 @@ const GLOSS_CSS = `
 .gloss-root.gloss-mode-pan .gloss-svg-holder svg { cursor: grab; }
 .gloss-root.gloss-panning .gloss-svg-holder svg { cursor: grabbing; }
 .gloss-root [data-key] { cursor: pointer; }
+[data-key].gloss-filtered { display: none; }
 .gloss-hovering [data-key] { opacity: var(--gloss-dim-opacity, 0.28); }
 .gloss-hovering [data-key].gloss-hl { opacity: 1; }
 /* Optional hover stroke, opt-in per element (.gloss-hc) or widget-wide
@@ -234,6 +237,40 @@ function download(blob: Blob, name: string): void {
 
 const DRAG_THRESHOLD = 3; // px before a mousedown becomes a drag (vs a click)
 
+// --- own cross-widget linking bus (gloss <-> gloss, no dependency) ---------
+// Page-global (the bundle loads once, so all widgets share this scope). Members
+// of the same group receive each other's selection sets by data-key. crosstalk
+// (below) is the optional bridge to the wider htmlwidgets ecosystem; this bus is
+// what links vellum widgets when crosstalk is not in play.
+interface BusMember {
+  token: object;
+  onSelect: (keys: string[]) => void;
+}
+const glossBus: Record<string, BusMember[]> = {};
+function busJoin(group: string, m: BusMember): void {
+  (glossBus[group] = glossBus[group] || []).push(m);
+}
+function busPublish(group: string, sender: object, keys: string[]): void {
+  const members = glossBus[group] || [];
+  for (let i = 0; i < members.length; i++) {
+    if (members[i].token !== sender) members[i].onSelect(keys);
+  }
+}
+
+// Minimal shape of the crosstalk globals we use (loaded as an htmlwidgets
+// dependency when a SharedData is passed; absent otherwise).
+interface CrosstalkHandle {
+  on: (type: string, cb: (e: { value: string[] | null; sender?: unknown }) => void) => void;
+  set: (keys: string[] | null, extra?: unknown) => void;
+}
+interface Crosstalk {
+  SelectionHandle: new (group: string) => CrosstalkHandle;
+  FilterHandle: new (group: string) => CrosstalkHandle;
+}
+function getCrosstalk(): Crosstalk | null {
+  return (window as unknown as { crosstalk?: Crosstalk }).crosstalk || null;
+}
+
 HTMLWidgets.widget({
   name: "gloss",
   type: "output",
@@ -262,6 +299,12 @@ HTMLWidgets.widget({
     let vb: ViewBox | null = null; // current viewBox
     let mode: "brush" | "pan" = "brush";
     let lastBrush: Bbox | null = null; // last brushed region (user coords)
+    // Linking state.
+    const selfToken = {}; // identity on the own bus
+    let group: string | null = null; // own-bus group
+    let joined = false; // joined the own bus already (guard re-render)
+    let ctSel: CrosstalkHandle | null = null; // crosstalk selection handle
+    let ctFilt: CrosstalkHandle | null = null; // crosstalk filter handle
 
     // --- coordinates: client px -> SVG user space (viewBox coords) ---
     function toUser(clientX: number, clientY: number): { x: number; y: number } {
@@ -327,29 +370,86 @@ HTMLWidgets.widget({
       hideTip();
     }
 
-    // --- selection ---
+    // --- selection (+ linking) ---
     function refreshSelected(): void {
       clearClass("gloss-selected");
       for (const k in selected) if (selected[k]) addClassForKeys([k], "gloss-selected");
     }
+    function selectedKeys(): string[] {
+      return Object.keys(selected).filter((k) => selected[k]);
+    }
+    // Keys a *click* on `k` toggles together: its hover-group (field projection —
+    // select one, select all sharing the field) or just itself.
+    function projectKeys(k: string): string[] {
+      const g = meta[k] && meta[k].hover_group;
+      return g && groups[g] ? groups[g] : [k];
+    }
+    // Publish the current selection to linked views (own bus + crosstalk). Called
+    // only from local mutations; the incoming appliers below never broadcast, so
+    // there is no feedback loop.
+    function broadcast(): void {
+      const keys = selectedKeys();
+      if (group) busPublish(group, selfToken, keys);
+      if (ctSel) ctSel.set(keys);
+    }
     function toggleSelect(k: string): void {
+      const ks = projectKeys(k);
       if (opts.selectMode === "single") {
-        const onlyThis = selected[k] && Object.keys(selected).filter((x) => selected[x]).length === 1;
+        const allOn = ks.every((x) => selected[x]) && selectedKeys().length === ks.length;
         selected = {};
-        if (!onlyThis) selected[k] = true;
+        if (!allOn) ks.forEach((x) => (selected[x] = true));
       } else {
-        selected[k] = !selected[k];
+        const turnOn = !ks.every((x) => selected[x]);
+        ks.forEach((x) => (selected[x] = turnOn));
       }
       refreshSelected();
+      broadcast();
     }
     function setSelection(keys: string[]): void {
       selected = {};
       for (let i = 0; i < keys.length; i++) selected[keys[i]] = true;
       refreshSelected();
+      broadcast();
     }
     function clearSelection(): void {
       selected = {};
       refreshSelected();
+      broadcast();
+    }
+    // A selection arriving from a linked view — apply WITHOUT re-broadcasting.
+    function applyLinkedSelection(keys: string[]): void {
+      selected = {};
+      for (let i = 0; i < keys.length; i++) selected[keys[i]] = true;
+      refreshSelected();
+    }
+    // Cross-filter (display tier): hide keyed elements whose key is not in the
+    // shown set. `null` clears the filter (show everything).
+    function applyFilter(showKeys: string[] | null): void {
+      clearClass("gloss-filtered");
+      if (showKeys == null) return;
+      const show: Record<string, boolean> = {};
+      for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
+      for (let i = 0; i < elements.length; i++) {
+        const key = elements[i].key;
+        if (!show[key]) addClassForKeys([key], "gloss-filtered");
+      }
+    }
+    // Join the linking channels for this widget's groups (once).
+    function setupLinking(): void {
+      if (joined) return;
+      joined = true;
+      if (group) busJoin(group, { token: selfToken, onSelect: applyLinkedSelection });
+      const ct = getCrosstalk();
+      if (opts.crosstalk && ct) {
+        ctSel = new ct.SelectionHandle(opts.crosstalk);
+        ctFilt = new ct.FilterHandle(opts.crosstalk);
+        ctSel.on("change", function (e) {
+          if (e.sender !== ctSel) applyLinkedSelection(e.value || []);
+        });
+        ctFilt.on("change", function (e) {
+          applyFilter(e.value);
+        });
+      }
     }
 
     // --- viewBox pan/zoom ---
@@ -648,6 +748,7 @@ HTMLWidgets.widget({
         selected = {};
         lastBrush = null;
         mode = "brush";
+        group = opts.group || null;
         for (let i = 0; i < elements.length; i++) {
           const e = elements[i];
           meta[e.key] = e;
@@ -675,6 +776,7 @@ HTMLWidgets.widget({
           buildToolbar();
           setMode("brush");
           applyStyling();
+          setupLinking();
         }
       },
 

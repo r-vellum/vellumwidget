@@ -71,6 +71,7 @@
 .gloss-root.gloss-mode-pan .gloss-svg-holder svg { cursor: grab; }
 .gloss-root.gloss-panning .gloss-svg-holder svg { cursor: grabbing; }
 .gloss-root [data-key] { cursor: pointer; }
+[data-key].gloss-filtered { display: none; }
 .gloss-hovering [data-key] { opacity: var(--gloss-dim-opacity, 0.28); }
 .gloss-hovering [data-key].gloss-hl { opacity: 1; }
 /* Optional hover stroke, opt-in per element (.gloss-hc) or widget-wide
@@ -146,6 +147,19 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
   var DRAG_THRESHOLD = 3;
+  var glossBus = {};
+  function busJoin(group, m) {
+    (glossBus[group] = glossBus[group] || []).push(m);
+  }
+  function busPublish(group, sender, keys) {
+    const members = glossBus[group] || [];
+    for (let i = 0; i < members.length; i++) {
+      if (members[i].token !== sender) members[i].onSelect(keys);
+    }
+  }
+  function getCrosstalk() {
+    return window.crosstalk || null;
+  }
   HTMLWidgets.widget({
     name: "gloss",
     type: "output",
@@ -177,6 +191,11 @@
       let vb = null;
       let mode = "brush";
       let lastBrush = null;
+      const selfToken = {};
+      let group = null;
+      let joined = false;
+      let ctSel = null;
+      let ctFilt = null;
       function toUser(clientX, clientY) {
         if (svgEl && typeof svgEl.getScreenCTM === "function") {
           const ctm = svgEl.getScreenCTM();
@@ -238,24 +257,72 @@
         clearClass("gloss-selected");
         for (const k in selected) if (selected[k]) addClassForKeys([k], "gloss-selected");
       }
+      function selectedKeys() {
+        return Object.keys(selected).filter((k) => selected[k]);
+      }
+      function projectKeys(k) {
+        const g = meta[k] && meta[k].hover_group;
+        return g && groups[g] ? groups[g] : [k];
+      }
+      function broadcast() {
+        const keys = selectedKeys();
+        if (group) busPublish(group, selfToken, keys);
+        if (ctSel) ctSel.set(keys);
+      }
       function toggleSelect(k) {
+        const ks = projectKeys(k);
         if (opts.selectMode === "single") {
-          const onlyThis = selected[k] && Object.keys(selected).filter((x) => selected[x]).length === 1;
+          const allOn = ks.every((x) => selected[x]) && selectedKeys().length === ks.length;
           selected = {};
-          if (!onlyThis) selected[k] = true;
+          if (!allOn) ks.forEach((x) => selected[x] = true);
         } else {
-          selected[k] = !selected[k];
+          const turnOn = !ks.every((x) => selected[x]);
+          ks.forEach((x) => selected[x] = turnOn);
         }
         refreshSelected();
+        broadcast();
       }
       function setSelection(keys) {
         selected = {};
         for (let i = 0; i < keys.length; i++) selected[keys[i]] = true;
         refreshSelected();
+        broadcast();
       }
       function clearSelection() {
         selected = {};
         refreshSelected();
+        broadcast();
+      }
+      function applyLinkedSelection(keys) {
+        selected = {};
+        for (let i = 0; i < keys.length; i++) selected[keys[i]] = true;
+        refreshSelected();
+      }
+      function applyFilter(showKeys) {
+        clearClass("gloss-filtered");
+        if (showKeys == null) return;
+        const show = {};
+        for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
+        for (let i = 0; i < elements.length; i++) {
+          const key = elements[i].key;
+          if (!show[key]) addClassForKeys([key], "gloss-filtered");
+        }
+      }
+      function setupLinking() {
+        if (joined) return;
+        joined = true;
+        if (group) busJoin(group, { token: selfToken, onSelect: applyLinkedSelection });
+        const ct = getCrosstalk();
+        if (opts.crosstalk && ct) {
+          ctSel = new ct.SelectionHandle(opts.crosstalk);
+          ctFilt = new ct.FilterHandle(opts.crosstalk);
+          ctSel.on("change", function(e) {
+            if (e.sender !== ctSel) applyLinkedSelection(e.value || []);
+          });
+          ctFilt.on("change", function(e) {
+            applyFilter(e.value);
+          });
+        }
       }
       function applyViewBox() {
         if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
@@ -525,6 +592,7 @@
           selected = {};
           lastBrush = null;
           mode = "brush";
+          group = opts.group || null;
           for (let i = 0; i < elements.length; i++) {
             const e = elements[i];
             meta[e.key] = e;
@@ -551,6 +619,7 @@
             buildToolbar();
             setMode("brush");
             applyStyling();
+            setupLinking();
           }
         },
         resize: function() {

@@ -116,4 +116,37 @@ test_that("per-element grammar colours flow into the payload, normalised (Option
   expect_equal(e$selected_color, "#333333")
 })
 
+test_that("group option round-trips for own-bus linking (Phase 5)", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+  w <- as_widget(scene, group = "mylink")
+  expect_equal(w$x$options$group, "mylink")
+  expect_null(w$x$options$crosstalk)
+})
+
+test_that("crosstalk = SharedData wires the group + loads crosstalk deps (Phase 5)", {
+  skip_if_not_installed("crosstalk")
+  skip_if_not_installed("quill")
+  df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, id = rownames(mtcars))
+  sd <- crosstalk::SharedData$new(df, key = ~id, group = "ctgrp")
+  w <- quill::vplot(df) |>
+    quill::mark_point(x = wt, y = mpg, data_id = id) |>
+    as_widget(crosstalk = sd)
+  expect_equal(w$x$options$crosstalk, "ctgrp")
+  # the crosstalk client library is attached as a dependency
+  deps <- w$dependencies
+  expect_true(length(deps) > 0)
+  expect_true(any(vapply(deps, function(d) grepl("crosstalk", d$name %||% ""), logical(1))))
+})
+
+test_that("crosstalk accepts a bare group name; absent by default", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+  expect_equal(as_widget(scene, crosstalk = "g")$x$options$crosstalk, "g")
+  w0 <- as_widget(scene)
+  expect_null(w0$x$options$crosstalk)
+  expect_null(w0$dependencies)
+  expect_error(as_widget(scene, crosstalk = 42))
+})
+
 `%||%` <- function(a, b) if (is.null(a)) b else a

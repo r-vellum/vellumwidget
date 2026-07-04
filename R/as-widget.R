@@ -31,6 +31,15 @@
 #'   (default `0.28`); `NULL` keeps the default.
 #' @param select_mode `"multiple"` (default; click toggles each element) or
 #'   `"single"` (click replaces the selection).
+#' @param group Optional linking group name. Widgets sharing a `group` link
+#'   client-side: selecting (or brushing) in one highlights the same data keys in
+#'   the others — no Shiny, no crosstalk. Selection projects by `hover_group` when
+#'   the marks declare it (select one, select the whole series).
+#' @param crosstalk Optional [crosstalk::SharedData] (or a crosstalk group name
+#'   string) to link this widget with the crosstalk ecosystem (plotly, leaflet,
+#'   DT, and crosstalk's `filter_*` inputs). The widget's `data_id`s must match the
+#'   SharedData's keys. A crosstalk filter hides the non-matching elements
+#'   (display-tier cross-filter). Requires the crosstalk package.
 #' @param elementId Optional explicit widget DOM id.
 #' @return An htmlwidget of class `"gloss"`.
 #' @examples
@@ -46,6 +55,7 @@ as_widget <- function(x, width = NULL, height = NULL,
                       tooltip = TRUE, hover = TRUE, select = TRUE,
                       brush = TRUE, zoom = TRUE, toolbar = TRUE, nearest = TRUE,
                       hover_color = NULL, selected_color = NULL, dim_opacity = NULL,
+                      group = NULL, crosstalk = NULL,
                       select_mode = c("multiple", "single"),
                       elementId = NULL) {
   select_mode <- match.arg(select_mode)
@@ -53,6 +63,7 @@ as_widget <- function(x, width = NULL, height = NULL,
   svg <- vellum::scene_svg(scene)
   model <- vellum::scene_model(scene)
   dims <- .svg_dims(svg)
+  ct_group <- .crosstalk_group(crosstalk)
 
   payload <- list(
     svg = svg,
@@ -66,6 +77,8 @@ as_widget <- function(x, width = NULL, height = NULL,
       toolbar = isTRUE(toolbar),
       nearest = isTRUE(nearest),
       selectMode = select_mode,
+      group = group,
+      crosstalk = ct_group,
       style = list(
         hoverColor = .css_color(hover_color),
         selectedColor = .css_color(selected_color),
@@ -74,12 +87,21 @@ as_widget <- function(x, width = NULL, height = NULL,
     )
   )
 
+  # Load crosstalk's client library only when a SharedData/group is used, so a
+  # plain widget carries no crosstalk dependency.
+  deps <- if (!is.null(ct_group) && requireNamespace("crosstalk", quietly = TRUE)) {
+    crosstalk::crosstalkLibs()
+  } else {
+    NULL
+  }
+
   htmlwidgets::createWidget(
     name = "gloss",
     x = payload,
     width = width %||% dims$width,
     height = height %||% dims$height,
     package = "gloss",
+    dependencies = deps,
     elementId = elementId,
     sizingPolicy = htmlwidgets::sizingPolicy(
       defaultWidth = dims$width,
@@ -90,6 +112,21 @@ as_widget <- function(x, width = NULL, height = NULL,
       padding = 0
     )
   )
+}
+
+# Resolve the crosstalk group name from `crosstalk`: a crosstalk::SharedData (use
+# its group), a group-name string, or NULL (no crosstalk).
+.crosstalk_group <- function(crosstalk) {
+  if (is.null(crosstalk)) {
+    return(NULL)
+  }
+  if (inherits(crosstalk, "SharedData")) {
+    return(crosstalk$groupName())
+  }
+  if (is.character(crosstalk) && length(crosstalk) == 1L) {
+    return(crosstalk)
+  }
+  stop("`crosstalk` must be a crosstalk::SharedData, a group-name string, or NULL.", call. = FALSE)
 }
 
 # The keyed elements the JS runtime needs: one record per drawn, keyed element,

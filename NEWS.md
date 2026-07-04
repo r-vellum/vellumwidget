@@ -20,6 +20,13 @@ single terminal `as_widget()` pipe. No Shiny, no server round-trip.
   download SVG, download PNG, fullscreen.
 * Everything is opt-outable via `as_widget()` arguments
   (`tooltip`/`hover`/`select`/`brush`/`zoom`/`toolbar`/`nearest`).
+* **Linked views.** `as_widget(group=)` links gloss widgets client-side (no
+  dependency): selecting/brushing in one highlights the same data keys in the
+  others, projecting by `hover_group` (select one, select the series).
+  `as_widget(crosstalk = SharedData)` bridges to the crosstalk ecosystem
+  (plotly / leaflet / DT and `filter_*` inputs) via a `SelectionHandle` +
+  `FilterHandle`; a crosstalk filter hides the non-matching marks (display-tier
+  cross-filter). crosstalk is a Suggests, loaded only when used.
 * **Customisable interaction styling**, at two composing levels:
   * *Widget theme* — `as_widget(hover_color=, selected_color=, dim_opacity=)`
     sets the look for the whole plot (any R or CSS colour).

@@ -18,6 +18,8 @@ as_widget(
   hover_color = NULL,
   selected_color = NULL,
   dim_opacity = NULL,
+  group = NULL,
+  crosstalk = NULL,
   select_mode = c("multiple", "single"),
   elementId = NULL
 )
@@ -46,6 +48,17 @@ built-in default. A per-mark \code{hover_color}/\code{selected_color} declared i
 
 \item{dim_opacity}{Opacity (0–1) of the non-hovered elements while hovering
 (default \code{0.28}); \code{NULL} keeps the default.}
+
+\item{group}{Optional linking group name. Widgets sharing a \code{group} link
+client-side: selecting (or brushing) in one highlights the same data keys in
+the others — no Shiny, no crosstalk. Selection projects by \code{hover_group} when
+the marks declare it (select one, select the whole series).}
+
+\item{crosstalk}{Optional \link[crosstalk:SharedData]{crosstalk::SharedData} (or a crosstalk group name
+string) to link this widget with the crosstalk ecosystem (plotly, leaflet,
+DT, and crosstalk's \verb{filter_*} inputs). The widget's \code{data_id}s must match the
+SharedData's keys. A crosstalk filter hides the non-matching elements
+(display-tier cross-filter). Requires the crosstalk package.}
 
 \item{select_mode}{\code{"multiple"} (default; click toggles each element) or
 \code{"single"} (click replaces the selection).}

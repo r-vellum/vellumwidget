@@ -93,17 +93,18 @@ ok(!tip.classList.contains("gloss-show"), "tooltip hides on mouseleave");
 ok(!root.classList.contains("gloss-hovering"), "hovering mode cleared");
 ok(el.querySelectorAll(".gloss-hl").length === 0, "highlight classes cleared");
 
-// --- click -> select (both paths of the same key get selected) ---
+// --- click -> select. "a" and "b" share hover_group "g1", so a click projects
+//     to the whole group (field projection): every path of both keys selects. ---
 fire("click", bPaths[0]);
 ok(
   bPaths[0].classList.contains("gloss-selected") && bPaths[1].classList.contains("gloss-selected"),
-  "click selects every element with the clicked key"
+  "click selects every path of the clicked key"
 );
-ok(!aPaths[0].classList.contains("gloss-selected"), "other keys are not selected");
+ok(aPaths[0].classList.contains("gloss-selected"), "click projects selection across the shared hover_group");
 
-// --- click again -> deselect (multiple mode toggles) ---
+// --- click again -> deselect the whole projected group ---
 fire("click", bPaths[0]);
-ok(el.querySelectorAll(".gloss-selected").length === 0, "clicking a selected element deselects it");
+ok(el.querySelectorAll(".gloss-selected").length === 0, "clicking a selected element deselects the group");
 
 // --- tooltip falls back to the key when no tooltip text is provided ---
 const el2 = document.createElement("div");
@@ -234,6 +235,105 @@ ok(pa.style.getPropertyValue("--gloss-selected-stroke") === "#654321", "per-elem
 ok(pb2.style.getPropertyValue("--gloss-hl-stroke") === "", "per-element: unstyled element gets no override");
 ok(!pb2.classList.contains("gloss-hc"), "per-element: unstyled element does not opt into the hover-stroke rule");
 ok(!elP.classList.contains("gloss-hc-all"), "per-element: no widget-wide rule when only some elements are styled");
+
+// ===================== linking: own cross-widget bus (Option group) =====================
+function mount(opts) {
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const inst = widgetDef.factory(e, 100, 100);
+  inst.renderValue(opts);
+  return e;
+}
+function fireOn(svg, type, target, extra) {
+  const ev = new window.MouseEvent(type, Object.assign({ bubbles: true }, extra || {}));
+  Object.defineProperty(ev, "target", { value: target });
+  svg.dispatchEvent(ev);
+}
+const svg2paths =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="30" viewBox="0 0 60 30">' +
+  '<path data-key="x" d="M1 1h9v9z"/><path data-key="y" d="M40 1h9v9z"/></svg>';
+
+const linkOpts = () => ({
+  svg: svg2paths,
+  elements: [{ key: "x", x0: 1, y0: 1, x1: 10, y1: 10 }, { key: "y", x0: 40, y0: 1, x1: 49, y1: 10 }],
+  options: {
+    tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true,
+    nearest: true, selectMode: "multiple", group: "L1"
+  }
+});
+const elA = mount(linkOpts());
+const elB = mount(linkOpts());
+// click "x" in A -> B reflects the same selection (linked by data-key)
+fireOn(elA.querySelector("svg"), "click", elA.querySelector('[data-key="x"]'));
+ok(elA.querySelector('[data-key="x"]').classList.contains("gloss-selected"), "own bus: local selection applied in A");
+ok(elB.querySelector('[data-key="x"]').classList.contains("gloss-selected"), "own bus: selection linked into B");
+ok(!elB.querySelector('[data-key="y"]').classList.contains("gloss-selected"), "own bus: only the linked key is selected in B");
+
+// ===================== selection projection by field (hover_group) =====================
+const elG = mount({
+  svg: svg2paths,
+  elements: [
+    { key: "x", hover_group: "g", x0: 1, y0: 1, x1: 10, y1: 10 },
+    { key: "y", hover_group: "g", x0: 40, y0: 1, x1: 49, y1: 10 }
+  ],
+  options: { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, selectMode: "multiple" }
+});
+fireOn(elG.querySelector("svg"), "click", elG.querySelector('[data-key="x"]'));
+ok(
+  elG.querySelector('[data-key="x"]').classList.contains("gloss-selected") &&
+    elG.querySelector('[data-key="y"]').classList.contains("gloss-selected"),
+  "field projection: clicking one selects the whole hover_group"
+);
+
+// ===================== crosstalk bridge (selection + filter) =====================
+(function () {
+  const chans = {};
+  function ch(group, kind) {
+    chans[group] = chans[group] || { selection: [], filter: [] };
+    return chans[group][kind];
+  }
+  function Handle(group, kind) {
+    this._ls = [];
+    ch(group, kind).push(this);
+    const self = this;
+    this.on = function (t, cb) { self._ls.push(cb); };
+    this.set = function (v) {
+      ch(group, kind).forEach(function (h) {
+        h._ls.forEach(function (cb) { cb({ value: v, sender: self }); });
+      });
+    };
+  }
+  window.crosstalk = {
+    SelectionHandle: function (g) { Handle.call(this, g, "selection"); },
+    FilterHandle: function (g) { Handle.call(this, g, "filter"); },
+    _ch: ch
+  };
+})();
+
+const elC = mount({
+  svg: svg2paths,
+  elements: [{ key: "x", x0: 1, y0: 1, x1: 10, y1: 10 }, { key: "y", x0: 40, y0: 1, x1: 49, y1: 10 }],
+  options: {
+    tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true,
+    nearest: true, selectMode: "multiple", crosstalk: "G"
+  }
+});
+// local select -> pushed to the crosstalk selection channel
+fireOn(elC.querySelector("svg"), "click", elC.querySelector('[data-key="y"]'));
+const selVal = window.crosstalk._ch("G", "selection")[0]._ls; // ensure handle exists
+ok(window.crosstalk._ch("G", "selection").length >= 1, "crosstalk: widget created a SelectionHandle in the group");
+// incoming selection from a peer handle -> applied in the widget
+const peerSel = new window.crosstalk.SelectionHandle("G");
+peerSel.set(["x"]);
+ok(elC.querySelector('[data-key="x"]').classList.contains("gloss-selected"), "crosstalk: incoming selection highlights the key");
+ok(!elC.querySelector('[data-key="y"]').classList.contains("gloss-selected"), "crosstalk: incoming selection replaces the prior one");
+// incoming filter -> non-matching elements hidden (display-tier cross-filter)
+const peerFilt = new window.crosstalk.FilterHandle("G");
+peerFilt.set(["x"]);
+ok(elC.querySelector('[data-key="y"]').classList.contains("gloss-filtered"), "crosstalk: filter hides the non-matching element");
+ok(!elC.querySelector('[data-key="x"]').classList.contains("gloss-filtered"), "crosstalk: filter keeps the matching element");
+peerFilt.set(null);
+ok(!elC.querySelector('[data-key="y"]').classList.contains("gloss-filtered"), "crosstalk: null filter clears the cross-filter");
 
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);
