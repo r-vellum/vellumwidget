@@ -59,3 +59,49 @@ npm install            # esbuild + typescript (+ jsdom for tests)
 npm run build          # srcts/index.ts -> inst/htmlwidgets/gloss.js
 node tests/js/behavior.test.js   # headless DOM behaviour suite
 ```
+
+## Styling the interactions
+
+Hover/selection appearance is customisable at two levels that compose — a
+widget-wide **theme** and per-element **grammar** colours. Both accept any R or
+CSS colour; per-element colours win over the theme, which wins over the built-in
+defaults.
+
+**1. Widget theme** — `as_widget()` arguments set the look for the whole plot:
+
+```r
+library(quill)
+library(gloss)
+
+df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, model = rownames(mtcars))
+
+vplot(df) |>
+  mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
+  as_widget(
+    hover_color    = "steelblue",  # outline on hover (default: none, just dim-others)
+    selected_color = "orange",     # outline on click-select
+    dim_opacity    = 0.15          # how much the non-hovered marks fade (default 0.28)
+  )
+```
+
+**2. Per-element (data-driven) grammar** — declare `hover_color` / `selected_color`
+on the mark, just like `tooltip`/`data_id`. They can be constants or mapped from a
+column, so different marks highlight differently:
+
+```r
+df$cyl <- factor(mtcars$cyl)
+
+vplot(df) |>
+  mark_point(
+    x = wt, y = mpg, data_id = model,
+    hover_color    = ifelse(mtcars$cyl == 8, "firebrick", "steelblue"),
+    selected_color = "black"
+  ) |>
+  as_widget()          # a per-element colour overrides any widget theme
+```
+
+Both layers use the same CSS-variable mechanism, so a plot can set a theme default
+*and* override it per element in the same pipe. Anything not set falls back to the
+built-in look. (You can also override the raw CSS classes — `.gloss-hl`,
+`[data-key].gloss-selected`, `.gloss-tip`, … — from the host document, but the
+arguments above are the supported API.)

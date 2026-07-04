@@ -26,6 +26,8 @@ interface ElemMeta extends Partial<Bbox> {
   key: string;
   tooltip?: string;
   hover_group?: string;
+  hover_color?: string; // per-element hover outline (Option 2; overrides the theme)
+  selected_color?: string; // per-element selected outline (Option 2)
 }
 
 interface Options {
@@ -37,6 +39,16 @@ interface Options {
   toolbar: boolean;
   nearest: boolean;
   selectMode: "single" | "multiple";
+  style?: StyleOpts;
+}
+
+// Widget-wide interaction theme (Option 1). Each maps to a CSS variable on the
+// widget root; unset falls back to the built-in default. Per-element grammar
+// styling (Option 2, carried in ElemMeta) overrides these via the same variables.
+interface StyleOpts {
+  hoverColor?: string | null; // outline colour for the hovered element(s)
+  selectedColor?: string | null; // outline colour for selected elements
+  dimOpacity?: number | null; // opacity of non-hovered elements while hovering
 }
 
 interface Payload {
@@ -141,9 +153,19 @@ const GLOSS_CSS = `
 .gloss-root.gloss-mode-pan .gloss-svg-holder svg { cursor: grab; }
 .gloss-root.gloss-panning .gloss-svg-holder svg { cursor: grabbing; }
 .gloss-root [data-key] { cursor: pointer; }
-.gloss-hovering [data-key] { opacity: 0.28; }
+.gloss-hovering [data-key] { opacity: var(--gloss-dim-opacity, 0.28); }
 .gloss-hovering [data-key].gloss-hl { opacity: 1; }
-[data-key].gloss-selected { stroke: #111827; stroke-width: 1.4px; paint-order: stroke fill; }
+/* Optional hover stroke, opt-in per element (.gloss-hc) or widget-wide
+   (.gloss-hc-all on the root). Never applied to a mark that has no hover colour,
+   so a bordered shape is not clobbered on hover. Colour resolves from the nearest
+   --gloss-hl-stroke (element var overrides the root var). */
+.gloss-hc-all [data-key].gloss-hl, [data-key].gloss-hc.gloss-hl {
+  stroke: var(--gloss-hl-stroke); stroke-width: var(--gloss-hl-width, 2px); paint-order: stroke fill;
+}
+[data-key].gloss-selected {
+  stroke: var(--gloss-selected-stroke, #111827);
+  stroke-width: var(--gloss-selected-width, 1.4px); paint-order: stroke fill;
+}
 .gloss-tip {
   position: absolute; left: 0; top: 0; pointer-events: none; z-index: 20;
   background: rgba(17,24,39,0.94); color: #fff;
@@ -171,7 +193,7 @@ const GLOSS_CSS = `
 .gloss-toolbar button.gloss-active { background: rgba(37,99,235,0.18); }
 @media (prefers-color-scheme: dark) {
   .gloss-tip { background: rgba(243,244,246,0.96); color: #111827; }
-  [data-key].gloss-selected { stroke: #f9fafb; }
+  [data-key].gloss-selected { stroke: var(--gloss-selected-stroke, #f9fafb); }
   .gloss-toolbar { background: rgba(31,41,55,0.9); }
   .gloss-toolbar button { color: #f3f4f6; }
   .gloss-toolbar button:hover { background: rgba(255,255,255,0.12); }
@@ -565,6 +587,45 @@ HTMLWidgets.widget({
       toolbarEl = bar;
     }
 
+    // Apply the interaction styling: the widget-wide theme (Option 1) as CSS
+    // variables on the root, and per-element grammar colours (Option 2) as CSS
+    // variables on the elements themselves — which override the root by
+    // custom-property inheritance. A mark only gains a hover stroke if some hover
+    // colour applies to it (root `gloss-hc-all` or its own `gloss-hc`), so
+    // hover-uncoloured shapes keep their own borders untouched.
+    function applyStyling(): void {
+      const s = opts.style || {};
+      const setRoot = (name: string, v: string | number | null | undefined) => {
+        if (v != null && v !== "") el.style.setProperty(name, String(v));
+        else el.style.removeProperty(name);
+      };
+      setRoot("--gloss-dim-opacity", s.dimOpacity);
+      setRoot("--gloss-selected-stroke", s.selectedColor);
+      if (s.hoverColor != null && s.hoverColor !== "") {
+        el.style.setProperty("--gloss-hl-stroke", s.hoverColor);
+        el.classList.add("gloss-hc-all");
+      } else {
+        el.style.removeProperty("--gloss-hl-stroke");
+        el.classList.remove("gloss-hc-all");
+      }
+      // Per-element overrides.
+      for (let i = 0; i < elements.length; i++) {
+        const e = elements[i];
+        if (e.hover_color == null && e.selected_color == null) continue;
+        const nodes = elementsForKey(e.key);
+        for (let j = 0; j < nodes.length; j++) {
+          const n = nodes[j] as unknown as HTMLElement;
+          if (e.hover_color != null) {
+            n.style.setProperty("--gloss-hl-stroke", e.hover_color);
+            n.classList.add("gloss-hc");
+          }
+          if (e.selected_color != null) {
+            n.style.setProperty("--gloss-selected-stroke", e.selected_color);
+          }
+        }
+      }
+    }
+
     function wire(svg: SVGSVGElement): void {
       svg.addEventListener("mousemove", onHoverMove);
       svg.addEventListener("mouseleave", clearHover);
@@ -613,6 +674,7 @@ HTMLWidgets.widget({
           wire(svgEl);
           buildToolbar();
           setMode("brush");
+          applyStyling();
         }
       },
 

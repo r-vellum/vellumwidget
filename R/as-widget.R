@@ -22,6 +22,13 @@
 #'   pan-zoom (via the SVG `viewBox`), and the on-hover toolbar (all `TRUE`).
 #' @param nearest When `TRUE` (default), hover snaps to the nearest mark within a
 #'   small radius when the cursor is not directly over one (helps sparse points).
+#' @param hover_color,selected_color Outline colours for hovered / selected
+#'   elements (any R or CSS colour), applied widget-wide. `hover_color = NULL`
+#'   (default) keeps the plain dim-others hover; `selected_color = NULL` uses the
+#'   built-in default. A per-mark `hover_color`/`selected_color` declared in
+#'   `quill` overrides these for that mark.
+#' @param dim_opacity Opacity (0–1) of the non-hovered elements while hovering
+#'   (default `0.28`); `NULL` keeps the default.
 #' @param select_mode `"multiple"` (default; click toggles each element) or
 #'   `"single"` (click replaces the selection).
 #' @param elementId Optional explicit widget DOM id.
@@ -38,6 +45,7 @@
 as_widget <- function(x, width = NULL, height = NULL,
                       tooltip = TRUE, hover = TRUE, select = TRUE,
                       brush = TRUE, zoom = TRUE, toolbar = TRUE, nearest = TRUE,
+                      hover_color = NULL, selected_color = NULL, dim_opacity = NULL,
                       select_mode = c("multiple", "single"),
                       elementId = NULL) {
   select_mode <- match.arg(select_mode)
@@ -57,7 +65,12 @@ as_widget <- function(x, width = NULL, height = NULL,
       zoom = isTRUE(zoom),
       toolbar = isTRUE(toolbar),
       nearest = isTRUE(nearest),
-      selectMode = select_mode
+      selectMode = select_mode,
+      style = list(
+        hoverColor = .css_color(hover_color),
+        selectedColor = .css_color(selected_color),
+        dimOpacity = if (is.null(dim_opacity)) NULL else as.numeric(dim_opacity)
+      )
     )
   )
 
@@ -104,6 +117,9 @@ as_widget <- function(x, width = NULL, height = NULL,
     )
     if (!is.null(m$tooltip)) rec$tooltip <- as.character(m$tooltip)
     if (!is.null(m$hover_group)) rec$hover_group <- as.character(m$hover_group)
+    # Per-element grammar styling (Option 2), normalised to CSS colours.
+    if (!is.null(m$hover_color)) rec$hover_color <- .css_color(m$hover_color)
+    if (!is.null(m$selected_color)) rec$selected_color <- .css_color(m$selected_color)
     rec
   })
 }
@@ -123,6 +139,31 @@ as_widget <- function(x, width = NULL, height = NULL,
 }
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
+
+# Normalise an R or CSS colour to a CSS colour string (hex, with alpha when
+# present), so users can pass R colour names ("steelblue", "grey35") or numbers.
+# NULL/NA -> NULL (no override). Vectorised (for per-element colours).
+.css_color <- function(x) {
+  if (is.null(x)) {
+    return(NULL)
+  }
+  out <- rep(NA_character_, length(x))
+  ok <- !is.na(x)
+  if (any(ok)) {
+    m <- grDevices::col2rgb(x[ok], alpha = TRUE)
+    hex <- ifelse(
+      m[4L, ] < 255L,
+      sprintf("#%02x%02x%02x%02x", m[1L, ], m[2L, ], m[3L, ], m[4L, ]),
+      sprintf("#%02x%02x%02x", m[1L, ], m[2L, ], m[3L, ])
+    )
+    out[ok] <- hex
+  }
+  if (length(out) == 1L) {
+    if (is.na(out)) NULL else out
+  } else {
+    out
+  }
+}
 
 #' Shiny bindings for gloss widgets
 #'

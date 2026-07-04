@@ -89,4 +89,31 @@ test_that("hover_group is carried into the element table", {
   expect_equal(hg, c("g", "g"))
 })
 
+test_that("widget theme args normalise to CSS colours in the payload (Option 1)", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+  s <- as_widget(scene, hover_color = "steelblue", selected_color = "orange",
+                 dim_opacity = 0.1)$x$options$style
+  expect_equal(s$hoverColor, "#4682b4") # R colour name -> hex
+  expect_equal(s$selectedColor, "#ffa500")
+  expect_equal(s$dimOpacity, 0.1)
+  # defaults: NULL (fall back to the built-in CSS)
+  s0 <- as_widget(scene)$x$options$style
+  expect_null(s0$hoverColor)
+  expect_null(s0$selectedColor)
+  expect_null(s0$dimOpacity)
+})
+
+test_that("per-element grammar colours flow into the payload, normalised (Option 2)", {
+  skip_if_not_installed("quill")
+  df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg)
+  w <- quill::vplot(df) |>
+    quill::mark_point(x = wt, y = mpg, data_id = seq_len(nrow(df)),
+                      hover_color = "red", selected_color = "grey20") |>
+    as_widget()
+  e <- w$x$elements[[1]]
+  expect_equal(e$hover_color, "#ff0000")
+  expect_equal(e$selected_color, "#333333")
+})
+
 `%||%` <- function(a, b) if (is.null(a)) b else a

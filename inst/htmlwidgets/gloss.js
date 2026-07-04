@@ -71,9 +71,19 @@
 .gloss-root.gloss-mode-pan .gloss-svg-holder svg { cursor: grab; }
 .gloss-root.gloss-panning .gloss-svg-holder svg { cursor: grabbing; }
 .gloss-root [data-key] { cursor: pointer; }
-.gloss-hovering [data-key] { opacity: 0.28; }
+.gloss-hovering [data-key] { opacity: var(--gloss-dim-opacity, 0.28); }
 .gloss-hovering [data-key].gloss-hl { opacity: 1; }
-[data-key].gloss-selected { stroke: #111827; stroke-width: 1.4px; paint-order: stroke fill; }
+/* Optional hover stroke, opt-in per element (.gloss-hc) or widget-wide
+   (.gloss-hc-all on the root). Never applied to a mark that has no hover colour,
+   so a bordered shape is not clobbered on hover. Colour resolves from the nearest
+   --gloss-hl-stroke (element var overrides the root var). */
+.gloss-hc-all [data-key].gloss-hl, [data-key].gloss-hc.gloss-hl {
+  stroke: var(--gloss-hl-stroke); stroke-width: var(--gloss-hl-width, 2px); paint-order: stroke fill;
+}
+[data-key].gloss-selected {
+  stroke: var(--gloss-selected-stroke, #111827);
+  stroke-width: var(--gloss-selected-width, 1.4px); paint-order: stroke fill;
+}
 .gloss-tip {
   position: absolute; left: 0; top: 0; pointer-events: none; z-index: 20;
   background: rgba(17,24,39,0.94); color: #fff;
@@ -101,7 +111,7 @@
 .gloss-toolbar button.gloss-active { background: rgba(37,99,235,0.18); }
 @media (prefers-color-scheme: dark) {
   .gloss-tip { background: rgba(243,244,246,0.96); color: #111827; }
-  [data-key].gloss-selected { stroke: #f9fafb; }
+  [data-key].gloss-selected { stroke: var(--gloss-selected-stroke, #f9fafb); }
   .gloss-toolbar { background: rgba(31,41,55,0.9); }
   .gloss-toolbar button { color: #f3f4f6; }
   .gloss-toolbar button:hover { background: rgba(255,255,255,0.12); }
@@ -463,6 +473,37 @@
         el.appendChild(bar);
         toolbarEl = bar;
       }
+      function applyStyling() {
+        const s = opts.style || {};
+        const setRoot = (name, v) => {
+          if (v != null && v !== "") el.style.setProperty(name, String(v));
+          else el.style.removeProperty(name);
+        };
+        setRoot("--gloss-dim-opacity", s.dimOpacity);
+        setRoot("--gloss-selected-stroke", s.selectedColor);
+        if (s.hoverColor != null && s.hoverColor !== "") {
+          el.style.setProperty("--gloss-hl-stroke", s.hoverColor);
+          el.classList.add("gloss-hc-all");
+        } else {
+          el.style.removeProperty("--gloss-hl-stroke");
+          el.classList.remove("gloss-hc-all");
+        }
+        for (let i = 0; i < elements.length; i++) {
+          const e = elements[i];
+          if (e.hover_color == null && e.selected_color == null) continue;
+          const nodes = elementsForKey(e.key);
+          for (let j = 0; j < nodes.length; j++) {
+            const n = nodes[j];
+            if (e.hover_color != null) {
+              n.style.setProperty("--gloss-hl-stroke", e.hover_color);
+              n.classList.add("gloss-hc");
+            }
+            if (e.selected_color != null) {
+              n.style.setProperty("--gloss-selected-stroke", e.selected_color);
+            }
+          }
+        }
+      }
       function wire(svg) {
         svg.addEventListener("mousemove", onHoverMove);
         svg.addEventListener("mouseleave", clearHover);
@@ -509,6 +550,7 @@
             wire(svgEl);
             buildToolbar();
             setMode("brush");
+            applyStyling();
           }
         },
         resize: function() {

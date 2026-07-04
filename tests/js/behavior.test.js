@@ -193,5 +193,47 @@ ok(after && after.w < 200, "wheel zoom-in shrinks the viewBox width");
 el3.querySelector('.gloss-toolbar [data-act="reset"]').dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 ok(svg3.getAttribute("viewBox") === before, "reset restores the original viewBox");
 
+// ===================== styling: widget theme (Option 1) =====================
+const elS = document.createElement("div");
+document.body.appendChild(elS);
+widgetDef.factory(elS, 100, 100).renderValue({
+  svg: '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50"><path data-key="a" d="M1 1h9v9z"/></svg>',
+  elements: [{ key: "a", x0: 1, y0: 1, x1: 10, y1: 10 }],
+  options: {
+    tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true,
+    nearest: true, selectMode: "multiple",
+    style: { hoverColor: "#ff0000", selectedColor: "#00ff00", dimOpacity: 0.5 }
+  }
+});
+ok(elS.style.getPropertyValue("--gloss-dim-opacity") === "0.5", "theme: dim-opacity var set on root");
+ok(elS.style.getPropertyValue("--gloss-hl-stroke") === "#ff0000", "theme: hover-stroke var set on root");
+ok(elS.style.getPropertyValue("--gloss-selected-stroke") === "#00ff00", "theme: selected-stroke var set on root");
+ok(elS.classList.contains("gloss-hc-all"), "theme: hover colour enables the widget-wide hover-stroke rule");
+
+// ===================== styling: per-element grammar (Option 2) =====================
+const elP = document.createElement("div");
+document.body.appendChild(elP);
+widgetDef.factory(elP, 100, 100).renderValue({
+  svg:
+    '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50">' +
+    '<path data-key="a" d="M1 1h9v9z"/><path data-key="b" d="M20 20h9v9z"/></svg>',
+  elements: [
+    { key: "a", hover_color: "#123456", selected_color: "#654321", x0: 1, y0: 1, x1: 10, y1: 10 },
+    { key: "b", x0: 20, y0: 20, x1: 29, y1: 29 } // no per-element style
+  ],
+  options: {
+    tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true,
+    nearest: true, selectMode: "multiple"
+  }
+});
+const pa = elP.querySelector('[data-key="a"]');
+const pb2 = elP.querySelector('[data-key="b"]');
+ok(pa.style.getPropertyValue("--gloss-hl-stroke") === "#123456", "per-element: hover-stroke var set on the element");
+ok(pa.classList.contains("gloss-hc"), "per-element: element opts into the hover-stroke rule");
+ok(pa.style.getPropertyValue("--gloss-selected-stroke") === "#654321", "per-element: selected-stroke var set on the element");
+ok(pb2.style.getPropertyValue("--gloss-hl-stroke") === "", "per-element: unstyled element gets no override");
+ok(!pb2.classList.contains("gloss-hc"), "per-element: unstyled element does not opt into the hover-stroke rule");
+ok(!elP.classList.contains("gloss-hc-all"), "per-element: no widget-wide rule when only some elements are styled");
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

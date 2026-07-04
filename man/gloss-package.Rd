@@ -6,7 +6,7 @@
 \alias{gloss-package}
 \title{gloss: Interactive Web Widgets for Vellum Scenes}
 \description{
-Turns a 'vellum' scene (or a 'quill' plot) into a self-contained, client-side interactive HTML widget: hover tooltips, hover highlighting, and click selection, driven by the per-element data keys and 'scene_model()' metadata that 'vellum' emits. Requires no Shiny and no server round-trip. Named after the manuscript gloss -- an annotation revealed on the page.
+Turns a 'vellum' scene (or a 'quill' plot) into a self-contained, client-side interactive HTML widget: hover tooltips and highlighting, click selection, rectangular brush-select, pan/zoom, and a toolbar -- driven by the per-element data keys, bounding boxes, and 'scene_model()' metadata that 'vellum' emits. Requires no Shiny and no server round-trip. Named after the manuscript gloss -- an annotation revealed on the page.
 }
 \author{
 \strong{Maintainer}: David Schoch \email{david.schoch@cynkra.com}

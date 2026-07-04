@@ -15,6 +15,9 @@ as_widget(
   zoom = TRUE,
   toolbar = TRUE,
   nearest = TRUE,
+  hover_color = NULL,
+  selected_color = NULL,
+  dim_opacity = NULL,
   select_mode = c("multiple", "single"),
   elementId = NULL
 )
@@ -34,6 +37,15 @@ pan-zoom (via the SVG \code{viewBox}), and the on-hover toolbar (all \code{TRUE}
 
 \item{nearest}{When \code{TRUE} (default), hover snaps to the nearest mark within a
 small radius when the cursor is not directly over one (helps sparse points).}
+
+\item{hover_color, selected_color}{Outline colours for hovered / selected
+elements (any R or CSS colour), applied widget-wide. \code{hover_color = NULL}
+(default) keeps the plain dim-others hover; \code{selected_color = NULL} uses the
+built-in default. A per-mark \code{hover_color}/\code{selected_color} declared in
+\code{quill} overrides these for that mark.}
+
+\item{dim_opacity}{Opacity (0–1) of the non-hovered elements while hovering
+(default \code{0.28}); \code{NULL} keeps the default.}
 
 \item{select_mode}{\code{"multiple"} (default; click toggles each element) or
 \code{"single"} (click replaces the selection).}
