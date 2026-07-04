@@ -1,0 +1,4 @@
+# htmlwidgets dependency manifest. The gloss runtime is self-contained (it injects
+# its own CSS from JS and uses only the DOM + the HTMLWidgets global), so it
+# declares no third-party dependencies.
+dependencies: []

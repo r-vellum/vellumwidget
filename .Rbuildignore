@@ -1,0 +1,11 @@
+^node_modules$
+^srcts$
+^package\.json$
+^package-lock\.json$
+^esbuild\.js$
+^tsconfig\.json$
+^\.github$
+^_docs$
+^LICENSE\.md$
+^gloss\.Rproj$
+^\.Rproj\.user$

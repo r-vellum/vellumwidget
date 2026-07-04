@@ -1,0 +1,137 @@
+#' Turn a vellum scene (or quill plot) into an interactive widget
+#'
+#' `as_widget()` is the terminal verb of the interactivity pipeline: it compiles
+#' its input to a `vellum` scene, emits the SVG (with per-element `data-key`s) and
+#' the [`vellum::scene_model()`] element table, and bundles them with the `gloss`
+#' JavaScript runtime into a self-contained [htmlwidgets::createWidget()] widget.
+#' The result does hover tooltips, hover highlighting, and click selection
+#' entirely client-side --- no Shiny, no server round-trip.
+#'
+#' Interactivity is driven by the keys/metadata a plot declares. In `quill` these
+#' come from the reserved `data_id` / `tooltip` / `hover_group` mark arguments; a
+#' plot that declares none renders as a static (but still embeddable) SVG. A
+#' hovered element with a `data_id` but no `tooltip` shows its key.
+#'
+#' @param x A `quill` plot (a `PlotSpec` / `PlotComposition`) or a `vellum`
+#'   scene --- anything [vellum::as_vellum_scene()] accepts.
+#' @param width,height Widget size (any valid CSS size, or `NULL` to size from the
+#'   scene). Passed to [htmlwidgets::createWidget()].
+#' @param tooltip,hover,select Toggles for the three interactions (all `TRUE`).
+#' @param select_mode `"multiple"` (default; click toggles each element) or
+#'   `"single"` (click replaces the selection).
+#' @param elementId Optional explicit widget DOM id.
+#' @return An htmlwidget of class `"gloss"`.
+#' @examples
+#' \dontrun{
+#' library(quill)
+#' df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, model = rownames(mtcars))
+#' vplot(df) |>
+#'   mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
+#'   as_widget()
+#' }
+#' @export
+as_widget <- function(x, width = NULL, height = NULL,
+                      tooltip = TRUE, hover = TRUE, select = TRUE,
+                      select_mode = c("multiple", "single"),
+                      elementId = NULL) {
+  select_mode <- match.arg(select_mode)
+  scene <- vellum::as_vellum_scene(x)
+  svg <- vellum::scene_svg(scene)
+  model <- vellum::scene_model(scene)
+  dims <- .svg_dims(svg)
+
+  payload <- list(
+    svg = svg,
+    elements = .gloss_elements(model),
+    options = list(
+      tooltip = isTRUE(tooltip),
+      hover = isTRUE(hover),
+      select = isTRUE(select),
+      selectMode = select_mode
+    )
+  )
+
+  htmlwidgets::createWidget(
+    name = "gloss",
+    x = payload,
+    width = width %||% dims$width,
+    height = height %||% dims$height,
+    package = "gloss",
+    elementId = elementId,
+    sizingPolicy = htmlwidgets::sizingPolicy(
+      defaultWidth = dims$width,
+      defaultHeight = dims$height,
+      browser.fill = FALSE,
+      viewer.fill = FALSE,
+      knitr.figure = FALSE,
+      padding = 0
+    )
+  )
+}
+
+# The keyed elements the JS runtime needs: one record per distinct `data_id`,
+# carrying its tooltip and hover-group. Elements without a key (panel background,
+# gridlines, legend glyphs) are dropped -- they are not interactive.
+.gloss_elements <- function(model) {
+  el <- model$elements
+  if (is.null(el) || !nrow(el)) {
+    return(list())
+  }
+  keep <- !is.na(el$key)
+  if (!any(keep)) {
+    return(list())
+  }
+  el <- el[keep, , drop = FALSE]
+  el <- el[!duplicated(el$key), , drop = FALSE]
+  meta <- el$meta
+  lapply(seq_len(nrow(el)), function(i) {
+    m <- if (length(meta) >= i) meta[[i]] else NULL
+    rec <- list(key = el$key[[i]])
+    if (!is.null(m$tooltip)) rec$tooltip <- as.character(m$tooltip)
+    if (!is.null(m$hover_group)) rec$hover_group <- as.character(m$hover_group)
+    rec
+  })
+}
+
+# Pixel width/height declared on the emitted <svg> (its intrinsic size), used to
+# size the widget container. Falls back to NULL (let htmlwidgets decide).
+.svg_dims <- function(svg) {
+  head <- substr(svg, 1L, 400L)
+  grab <- function(attr) {
+    m <- regmatches(head, regexpr(sprintf('%s="[0-9.]+"', attr), head))
+    if (!length(m)) {
+      return(NULL)
+    }
+    as.numeric(sub(sprintf('%s="([0-9.]+)"', attr), "\\1", m))
+  }
+  list(width = grab("width"), height = grab("height"))
+}
+
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
+#' Shiny bindings for gloss widgets
+#'
+#' Standard [htmlwidgets] output/render helpers so a `gloss` widget can appear in
+#' a Shiny app or an interactive R Markdown document. (Server-side selection
+#' read-back is a future addition; today the widget is client-side only.)
+#'
+#' @param outputId Shiny output slot id.
+#' @param width,height Widget size.
+#' @param expr An expression producing a `gloss` widget.
+#' @param env,quoted Standard non-standard-evaluation plumbing.
+#' @return `glossOutput()`: a Shiny output UI element. `renderGloss()`: a Shiny
+#'   render function.
+#' @name gloss-shiny
+#' @export
+glossOutput <- function(outputId, width = "100%", height = "400px") {
+  htmlwidgets::shinyWidgetOutput(outputId, "gloss", width, height, package = "gloss")
+}
+
+#' @rdname gloss-shiny
+#' @export
+renderGloss <- function(expr, env = parent.frame(), quoted = FALSE) {
+  if (!quoted) {
+    expr <- substitute(expr)
+  }
+  htmlwidgets::shinyRenderWidget(expr, glossOutput, env, quoted = TRUE)
+}

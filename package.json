@@ -1,0 +1,15 @@
+{
+  "name": "gloss-js",
+  "version": "0.0.0",
+  "private": true,
+  "description": "JavaScript runtime for the gloss htmlwidget (built into inst/htmlwidgets/gloss.js).",
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.23.0",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.4.0"
+  }
+}
