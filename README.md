@@ -13,7 +13,8 @@ per-element `data-key`s, bounding boxes, and a `scene_model()` element table,
 
 **Interactions:** hover (tooltip + highlight, with nearest-mark snapping and
 `hover_group` linking) · click-select (single/multiple) · drag a rectangle to
-brush-select · wheel / pan-drag to pan-zoom · toolbar (mode toggle,
+brush-select · wheel / pan-drag to pan-zoom · discrete-legend interaction (hover
+a swatch to highlight its series, click to select it) · toolbar (mode toggle,
 zoom-to-selection, reset, save SVG/PNG, fullscreen). Each is opt-outable via an
 `as_widget()` argument.
 
@@ -36,7 +37,8 @@ vplot(df) |>
 and the element table, and returns an htmlwidget. It also accepts a bare `vellum`
 scene. Declare interactivity in `quill` with the reserved mark arguments
 `data_id` (the join key), `tooltip`, and `hover_group` (links elements for shared
-highlighting). A plot that declares none renders as a static — but still
+highlighting); discrete `color`/`shape` legends then become interactive
+automatically. A plot that declares none renders as a static — but still
 embeddable — SVG.
 
 ## How it depends
@@ -145,3 +147,26 @@ bridge (a `SelectionHandle` + `FilterHandle`), so a crosstalk filter hides the
 non-matching marks (display-tier cross-filter) and selection round-trips with the
 other widgets. The crosstalk client library is pulled in only when you pass a
 `SharedData`.
+
+## Legend interaction
+
+When a plot maps a **discrete** `color` or `shape` scale and declares any
+interactivity (e.g. a `data_id`), each legend swatch becomes a handle for its
+whole data series — **no extra arguments needed**:
+
+```r
+df <- data.frame(
+  wt = mtcars$wt, mpg = mtcars$mpg,
+  model = rownames(mtcars), cyl = factor(mtcars$cyl)
+)
+vplot(df) |>
+  mark_point(x = wt, y = mpg, color = cyl, data_id = model) |>
+  as_widget()
+# hover the "6" swatch -> all six-cylinder cars highlight (the swatch stays lit);
+# click it -> the whole series is selected (respecting single/multiple mode).
+```
+
+`quill` tags each swatch with the series it drives and each mark with its series
+membership; gloss projects a swatch event onto every mark in that series, reusing
+the same highlight/select machinery as `hover_group`. Selecting via a swatch also
+links across views and into crosstalk, exactly like selecting a mark.

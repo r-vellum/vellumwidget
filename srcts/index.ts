@@ -28,6 +28,8 @@ interface ElemMeta extends Partial<Bbox> {
   hover_group?: string;
   hover_color?: string; // per-element hover outline (Option 2; overrides the theme)
   selected_color?: string; // per-element selected outline (Option 2)
+  legend?: string[] | string; // series this mark belongs to ("<aes>:<value>")
+  legend_for?: string; // a legend swatch: the series it highlights/selects
 }
 
 interface Options {
@@ -156,7 +158,7 @@ const GLOSS_CSS = `
 .gloss-root.gloss-panning .gloss-svg-holder svg { cursor: grabbing; }
 .gloss-root [data-key] { cursor: pointer; }
 [data-key].gloss-filtered { display: none; }
-.gloss-hovering [data-key] { opacity: var(--gloss-dim-opacity, 0.28); }
+.gloss-hovering [data-key]:not(.gloss-legend) { opacity: var(--gloss-dim-opacity, 0.28); }
 .gloss-hovering [data-key].gloss-hl { opacity: 1; }
 /* Optional hover stroke, opt-in per element (.gloss-hc) or widget-wide
    (.gloss-hc-all on the root). Never applied to a mark that has no hover colour,
@@ -289,6 +291,7 @@ HTMLWidgets.widget({
     let toolbarEl: HTMLElement | null = null;
     let meta: Record<string, ElemMeta> = {};
     let groups: Record<string, string[]> = {};
+    let legendIndex: Record<string, string[]> = {}; // series key -> member element keys
     let elements: ElemMeta[] = [];
     let selected: Record<string, boolean> = {};
     let opts: Options = {
@@ -342,15 +345,20 @@ HTMLWidgets.widget({
       const nodes = holder.querySelectorAll("." + cls);
       for (let i = 0; i < nodes.length; i++) nodes[i].classList.remove(cls);
     }
-    function highlightKeys(k: string): string[] {
-      const g = meta[k] && meta[k].hover_group;
+    // The keys a hover or click on `k` acts on: a legend swatch drives its whole
+    // series (`legend_for` -> the marks whose `legend` contains it); a mark
+    // projects by its `hover_group`; otherwise just itself.
+    function linkedKeys(k: string): string[] {
+      const m = meta[k];
+      if (m && m.legend_for != null) return (legendIndex[m.legend_for] || []).concat([k]);
+      const g = m && m.hover_group;
       return g && groups[g] ? groups[g] : [k];
     }
     function setHover(k: string): void {
       if (!opts.hover) return;
       el.classList.add("gloss-hovering");
       clearClass("gloss-hl");
-      addClassForKeys(highlightKeys(k), "gloss-hl");
+      addClassForKeys(linkedKeys(k), "gloss-hl");
     }
     function showTip(clientX: number, clientY: number, k: string): void {
       const m = meta[k];
@@ -378,12 +386,6 @@ HTMLWidgets.widget({
     function selectedKeys(): string[] {
       return Object.keys(selected).filter((k) => selected[k]);
     }
-    // Keys a *click* on `k` toggles together: its hover-group (field projection —
-    // select one, select all sharing the field) or just itself.
-    function projectKeys(k: string): string[] {
-      const g = meta[k] && meta[k].hover_group;
-      return g && groups[g] ? groups[g] : [k];
-    }
     // Publish the current selection to linked views (own bus + crosstalk). Called
     // only from local mutations; the incoming appliers below never broadcast, so
     // there is no feedback loop.
@@ -393,7 +395,7 @@ HTMLWidgets.widget({
       if (ctSel) ctSel.set(keys);
     }
     function toggleSelect(k: string): void {
-      const ks = projectKeys(k);
+      const ks = linkedKeys(k);
       if (opts.selectMode === "single") {
         const allOn = ks.every((x) => selected[x]) && selectedKeys().length === ks.length;
         selected = {};
@@ -708,10 +710,10 @@ HTMLWidgets.widget({
         el.style.removeProperty("--gloss-hl-stroke");
         el.classList.remove("gloss-hc-all");
       }
-      // Per-element overrides.
+      // Per-element overrides + legend-swatch tagging.
       for (let i = 0; i < elements.length; i++) {
         const e = elements[i];
-        if (e.hover_color == null && e.selected_color == null) continue;
+        if (e.hover_color == null && e.selected_color == null && e.legend_for == null) continue;
         const nodes = elementsForKey(e.key);
         for (let j = 0; j < nodes.length; j++) {
           const n = nodes[j] as unknown as HTMLElement;
@@ -722,6 +724,9 @@ HTMLWidgets.widget({
           if (e.selected_color != null) {
             n.style.setProperty("--gloss-selected-stroke", e.selected_color);
           }
+          // A legend swatch stays fully visible during hover (not dimmed with the
+          // rest), so the legend remains readable while a series is emphasised.
+          if (e.legend_for != null) n.classList.add("gloss-legend");
         }
       }
     }
@@ -745,6 +750,7 @@ HTMLWidgets.widget({
         elements = x.elements || [];
         meta = {};
         groups = {};
+        legendIndex = {};
         selected = {};
         lastBrush = null;
         mode = "brush";
@@ -753,6 +759,12 @@ HTMLWidgets.widget({
           const e = elements[i];
           meta[e.key] = e;
           if (e.hover_group != null) (groups[e.hover_group] = groups[e.hover_group] || []).push(e.key);
+          if (e.legend != null) {
+            const series = Array.isArray(e.legend) ? e.legend : [e.legend];
+            for (let s = 0; s < series.length; s++) {
+              (legendIndex[series[s]] = legendIndex[series[s]] || []).push(e.key);
+            }
+          }
         }
 
         if (!holder) {

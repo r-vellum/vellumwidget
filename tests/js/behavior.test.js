@@ -335,5 +335,43 @@ ok(!elC.querySelector('[data-key="x"]').classList.contains("gloss-filtered"), "c
 peerFilt.set(null);
 ok(!elC.querySelector('[data-key="y"]').classList.contains("gloss-filtered"), "crosstalk: null filter clears the cross-filter");
 
+// ===================== legend interaction =====================
+const elL = mount({
+  svg:
+    '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
+    '<path data-key="p1" d="M1 1h5v5z"/><path data-key="p2" d="M10 1h5v5z"/>' +
+    '<path data-key="q1" d="M20 1h5v5z"/>' +
+    '<path data-key="legend:color:s" d="M70 1h5v5z"/>' +
+    '<path data-key="legend:color:t" d="M70 12h5v5z"/></svg>',
+  elements: [
+    { key: "p1", legend: ["color:s"], x0: 1, y0: 1, x1: 6, y1: 6 },
+    { key: "p2", legend: ["color:s"], x0: 10, y0: 1, x1: 15, y1: 6 },
+    { key: "q1", legend: ["color:t"], x0: 20, y0: 1, x1: 25, y1: 6 },
+    { key: "legend:color:s", legend_for: "color:s", tooltip: "s", x0: 70, y0: 1, x1: 75, y1: 6 },
+    { key: "legend:color:t", legend_for: "color:t", tooltip: "t", x0: 70, y0: 12, x1: 75, y1: 17 }
+  ],
+  options: { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: false, selectMode: "multiple" }
+});
+const swatchS = elL.querySelector('[data-key="legend:color:s"]');
+ok(!!swatchS, "legend swatch element is present with its colon key");
+ok(swatchS.classList.contains("gloss-legend"), "legend swatch is tagged gloss-legend (stays visible on hover)");
+// hover the "s" swatch -> its whole series (p1, p2) highlights, but not q1
+fireOn(elL.querySelector("svg"), "mousemove", swatchS);
+ok(
+  elL.querySelector('[data-key="p1"]').classList.contains("gloss-hl") &&
+    elL.querySelector('[data-key="p2"]').classList.contains("gloss-hl"),
+  "hovering a legend swatch highlights its whole series"
+);
+ok(!elL.querySelector('[data-key="q1"]').classList.contains("gloss-hl"), "other series is not highlighted");
+fireOn(elL.querySelector("svg"), "mouseleave", elL.querySelector("svg"));
+// click the "s" swatch -> selects the series
+fireOn(elL.querySelector("svg"), "click", swatchS);
+ok(
+  elL.querySelector('[data-key="p1"]').classList.contains("gloss-selected") &&
+    elL.querySelector('[data-key="p2"]').classList.contains("gloss-selected"),
+  "clicking a legend swatch selects its whole series"
+);
+ok(!elL.querySelector('[data-key="q1"]').classList.contains("gloss-selected"), "other series is not selected");
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

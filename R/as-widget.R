@@ -152,11 +152,16 @@ as_widget <- function(x, width = NULL, height = NULL,
       key = el$key[[i]],
       x0 = el$x0[[i]], y0 = el$y0[[i]], x1 = el$x1[[i]], y1 = el$y1[[i]]
     )
-    if (!is.null(m$tooltip)) rec$tooltip <- as.character(m$tooltip)
-    if (!is.null(m$hover_group)) rec$hover_group <- as.character(m$hover_group)
+    # Exact `[[` access, not `$` — `$` partial-matches, so `m$legend` would wrongly
+    # pick up a swatch's `legend_for`.
+    if (!is.null(m[["tooltip"]])) rec$tooltip <- as.character(m[["tooltip"]])
+    if (!is.null(m[["hover_group"]])) rec$hover_group <- as.character(m[["hover_group"]])
     # Per-element grammar styling (Option 2), normalised to CSS colours.
-    if (!is.null(m$hover_color)) rec$hover_color <- .css_color(m$hover_color)
-    if (!is.null(m$selected_color)) rec$selected_color <- .css_color(m$selected_color)
+    if (!is.null(m[["hover_color"]])) rec$hover_color <- .css_color(m[["hover_color"]])
+    if (!is.null(m[["selected_color"]])) rec$selected_color <- .css_color(m[["selected_color"]])
+    # Legend linking: a mark's series membership, or a swatch's series it drives.
+    if (!is.null(m[["legend"]])) rec$legend <- as.character(m[["legend"]])
+    if (!is.null(m[["legend_for"]])) rec$legend_for <- as.character(m[["legend_for"]])
     rec
   })
 }

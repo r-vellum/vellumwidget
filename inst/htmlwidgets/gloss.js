@@ -72,7 +72,7 @@
 .gloss-root.gloss-panning .gloss-svg-holder svg { cursor: grabbing; }
 .gloss-root [data-key] { cursor: pointer; }
 [data-key].gloss-filtered { display: none; }
-.gloss-hovering [data-key] { opacity: var(--gloss-dim-opacity, 0.28); }
+.gloss-hovering [data-key]:not(.gloss-legend) { opacity: var(--gloss-dim-opacity, 0.28); }
 .gloss-hovering [data-key].gloss-hl { opacity: 1; }
 /* Optional hover stroke, opt-in per element (.gloss-hc) or widget-wide
    (.gloss-hc-all on the root). Never applied to a mark that has no hover colour,
@@ -175,6 +175,7 @@
       let toolbarEl = null;
       let meta = {};
       let groups = {};
+      let legendIndex = {};
       let elements = [];
       let selected = {};
       let opts = {
@@ -228,15 +229,17 @@
         const nodes = holder.querySelectorAll("." + cls);
         for (let i = 0; i < nodes.length; i++) nodes[i].classList.remove(cls);
       }
-      function highlightKeys(k) {
-        const g = meta[k] && meta[k].hover_group;
+      function linkedKeys(k) {
+        const m = meta[k];
+        if (m && m.legend_for != null) return (legendIndex[m.legend_for] || []).concat([k]);
+        const g = m && m.hover_group;
         return g && groups[g] ? groups[g] : [k];
       }
       function setHover(k) {
         if (!opts.hover) return;
         el.classList.add("gloss-hovering");
         clearClass("gloss-hl");
-        addClassForKeys(highlightKeys(k), "gloss-hl");
+        addClassForKeys(linkedKeys(k), "gloss-hl");
       }
       function showTip(clientX, clientY, k) {
         const m = meta[k];
@@ -260,17 +263,13 @@
       function selectedKeys() {
         return Object.keys(selected).filter((k) => selected[k]);
       }
-      function projectKeys(k) {
-        const g = meta[k] && meta[k].hover_group;
-        return g && groups[g] ? groups[g] : [k];
-      }
       function broadcast() {
         const keys = selectedKeys();
         if (group) busPublish(group, selfToken, keys);
         if (ctSel) ctSel.set(keys);
       }
       function toggleSelect(k) {
-        const ks = projectKeys(k);
+        const ks = linkedKeys(k);
         if (opts.selectMode === "single") {
           const allOn = ks.every((x) => selected[x]) && selectedKeys().length === ks.length;
           selected = {};
@@ -557,7 +556,7 @@
         }
         for (let i = 0; i < elements.length; i++) {
           const e = elements[i];
-          if (e.hover_color == null && e.selected_color == null) continue;
+          if (e.hover_color == null && e.selected_color == null && e.legend_for == null) continue;
           const nodes = elementsForKey(e.key);
           for (let j = 0; j < nodes.length; j++) {
             const n = nodes[j];
@@ -568,6 +567,7 @@
             if (e.selected_color != null) {
               n.style.setProperty("--gloss-selected-stroke", e.selected_color);
             }
+            if (e.legend_for != null) n.classList.add("gloss-legend");
           }
         }
       }
@@ -589,6 +589,7 @@
           elements = x.elements || [];
           meta = {};
           groups = {};
+          legendIndex = {};
           selected = {};
           lastBrush = null;
           mode = "brush";
@@ -597,6 +598,12 @@
             const e = elements[i];
             meta[e.key] = e;
             if (e.hover_group != null) (groups[e.hover_group] = groups[e.hover_group] || []).push(e.key);
+            if (e.legend != null) {
+              const series = Array.isArray(e.legend) ? e.legend : [e.legend];
+              for (let s = 0; s < series.length; s++) {
+                (legendIndex[series[s]] = legendIndex[series[s]] || []).push(e.key);
+              }
+            }
           }
           if (!holder) {
             holder = document.createElement("div");

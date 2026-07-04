@@ -149,4 +149,27 @@ test_that("crosstalk accepts a bare group name; absent by default", {
   expect_error(as_widget(scene, crosstalk = 42))
 })
 
+test_that("discrete legend swatches + series membership flow into the payload (Phase 5)", {
+  skip_if_not_installed("quill")
+  df <- data.frame(
+    wt = mtcars$wt, mpg = mtcars$mpg,
+    model = rownames(mtcars), cyl = factor(mtcars$cyl)
+  )
+  w <- quill::vplot(df) |>
+    quill::mark_point(x = wt, y = mpg, color = cyl, data_id = model) |>
+    as_widget()
+  els <- w$x$elements
+  # swatches carry `legend_for` (and NOT `legend`); marks carry `legend` membership
+  swatches <- Filter(function(e) !is.null(e[["legend_for"]]), els)
+  marks <- Filter(function(e) !is.null(e[["legend"]]), els)
+  expect_equal(length(swatches), nlevels(df$cyl))
+  expect_equal(length(marks), nrow(df))
+  expect_setequal(
+    vapply(swatches, function(e) e[["legend_for"]], character(1)),
+    paste0("color:", levels(df$cyl))
+  )
+  # no swatch leaks a `legend` membership (the `$`-partial-match trap)
+  expect_false(any(vapply(swatches, function(e) !is.null(e[["legend"]]), logical(1))))
+})
+
 `%||%` <- function(a, b) if (is.null(a)) b else a

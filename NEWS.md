@@ -20,6 +20,10 @@ single terminal `as_widget()` pipe. No Shiny, no server round-trip.
   download SVG, download PNG, fullscreen.
 * Everything is opt-outable via `as_widget()` arguments
   (`tooltip`/`hover`/`select`/`brush`/`zoom`/`toolbar`/`nearest`).
+* **Legend interaction.** For a discrete `color`/`shape` scale on an interactive
+  plot, each legend swatch drives its whole data series: hovering a swatch
+  highlights the series (the swatch stays lit), clicking it selects the series
+  (and links across views / crosstalk). Automatic — no extra arguments.
 * **Linked views.** `as_widget(group=)` links gloss widgets client-side (no
   dependency): selecting/brushing in one highlights the same data keys in the
   others, projecting by `hover_group` (select one, select the series).
