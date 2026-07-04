@@ -4,11 +4,18 @@
 <!-- badges: end -->
 
 **gloss** turns a [vellum](https://github.com/schochastics/vellum) scene — or a
-[quill](../vellumplot) plot — into a self-contained, client-side interactive HTML
-widget: **hover tooltips, hover highlighting, and click selection**, with no Shiny
-and no server round-trip. It is the host adapter of the vellum interactivity
-stack: `vellum` emits per-element `data-key`s and a `scene_model()` element table,
+[quill](https://github.com/schochastics/quill) plot — into a self-contained, client-side interactive HTML
+widget: **hover tooltips + highlighting, click selection, rectangular
+brush-select, pan/zoom, and a toolbar**, with no Shiny and no server round-trip.
+It is the host adapter of the vellum interactivity stack: `vellum` emits
+per-element `data-key`s, bounding boxes, and a `scene_model()` element table,
 `quill` declares what is interactive, and `gloss` hosts it.
+
+**Interactions:** hover (tooltip + highlight, with nearest-mark snapping and
+`hover_group` linking) · click-select (single/multiple) · drag a rectangle to
+brush-select · wheel / pan-drag to pan-zoom · toolbar (mode toggle,
+zoom-to-selection, reset, save SVG/PNG, fullscreen). Each is opt-outable via an
+`as_widget()` argument.
 
 > The name is the manuscript *gloss* — an annotation revealed on the page.
 

@@ -120,5 +120,78 @@ Object.defineProperty(ev2, "target", { value: el2.querySelector('[data-key="k9"]
 svg2.dispatchEvent(ev2);
 ok(el2.querySelector(".gloss-tip").textContent === "k9", "tooltip defaults to the data key");
 
+// ===================== Phase 4: geometry helpers (pure) =====================
+const T = window.__glossTest;
+ok(!!T, "pure geometry helpers exposed for testing");
+
+ok(T.rectsIntersect({ x0: 0, y0: 0, x1: 2, y1: 2 }, { x0: 1, y0: 1, x1: 3, y1: 3 }), "rectsIntersect: overlap");
+ok(!T.rectsIntersect({ x0: 0, y0: 0, x1: 1, y1: 1 }, { x0: 2, y0: 2, x1: 3, y1: 3 }), "rectsIntersect: disjoint");
+
+const els = [
+  { key: "a", x0: 0, y0: 0, x1: 10, y1: 10 },
+  { key: "b", x0: 50, y0: 50, x1: 60, y1: 60 },
+  { key: "c", x0: 5, y0: 5, x1: 15, y1: 15 }
+];
+ok(
+  JSON.stringify(T.brushKeys(els, { x0: -1, y0: -1, x1: 12, y1: 12 }).sort()) === JSON.stringify(["a", "c"]),
+  "brushKeys: selects elements intersecting the brush (a, c)"
+);
+ok(T.brushKeys(els, { x0: 100, y0: 100, x1: 200, y1: 200 }).length === 0, "brushKeys: empty when nothing intersects");
+
+ok(T.nearestKey(els, 55, 55, 100) === "b", "nearestKey: point inside b -> b");
+ok(T.nearestKey(els, 200, 200, 5) === null, "nearestKey: nothing within radius -> null");
+ok(T.nearestKey(els, 12, 12, 100) === "a" || T.nearestKey(els, 12, 12, 100) === "c", "nearestKey: picks a nearby element");
+
+const vb = T.parseViewBox("0 0 200 100");
+ok(vb && vb.w === 200 && vb.h === 100, "parseViewBox parses 'x y w h'");
+const zvb = T.zoomViewBox(vb, 2, 100, 50);
+ok(zvb.w === 100 && zvb.h === 50, "zoomViewBox halves extent at factor 2");
+ok(Math.abs(zvb.x - 50) < 1e-9 && Math.abs(zvb.y - 25) < 1e-9, "zoomViewBox keeps the anchor point fixed");
+ok(T.parseViewBox("garbage") === null, "parseViewBox rejects malformed input");
+
+const ub = T.unionBbox(els, { a: true, b: true });
+ok(ub.x0 === 0 && ub.y0 === 0 && ub.x1 === 60 && ub.y1 === 60, "unionBbox spans the selected keys");
+
+// ===================== Phase 4: toolbar + zoom DOM wiring =====================
+const el3 = document.createElement("div");
+document.body.appendChild(el3);
+const inst3 = widgetDef.factory(el3, 200, 100);
+inst3.renderValue({
+  svg:
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<path data-key="a" d="M0 0h10v10z"/><path data-key="b" d="M50 50h10v10z"/></svg>',
+  elements: [
+    { key: "a", tooltip: "A", x0: 0, y0: 0, x1: 10, y1: 10 },
+    { key: "b", tooltip: "B", x0: 50, y0: 50, x1: 60, y1: 60 }
+  ],
+  options: {
+    tooltip: true, hover: true, select: true, brush: true, zoom: true,
+    toolbar: true, nearest: true, selectMode: "multiple"
+  }
+});
+const svg3 = el3.querySelector("svg");
+const toolbar = el3.querySelector(".gloss-toolbar");
+ok(!!toolbar, "toolbar is rendered");
+ok(!!el3.querySelector(".gloss-brush"), "brush overlay element exists");
+ok(el3.querySelectorAll(".gloss-toolbar button").length >= 5, "toolbar has the expected buttons");
+
+// mode toggle -> pan
+const modeBtn = el3.querySelector('.gloss-toolbar [data-act="mode"]');
+ok(!!modeBtn, "mode toggle button present");
+modeBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+ok(el3.classList.contains("gloss-mode-pan"), "mode toggle switches to pan mode");
+modeBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+ok(!el3.classList.contains("gloss-mode-pan"), "mode toggle switches back to brush mode");
+
+// wheel zoom shrinks the viewBox; reset restores it
+const before = svg3.getAttribute("viewBox");
+const wheel = new window.WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true, clientX: 0, clientY: 0 });
+Object.defineProperty(wheel, "target", { value: svg3 });
+svg3.dispatchEvent(wheel);
+const after = T.parseViewBox(svg3.getAttribute("viewBox"));
+ok(after && after.w < 200, "wheel zoom-in shrinks the viewBox width");
+el3.querySelector('.gloss-toolbar [data-act="reset"]').dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+ok(svg3.getAttribute("viewBox") === before, "reset restores the original viewBox");
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

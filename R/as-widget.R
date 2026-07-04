@@ -16,7 +16,12 @@
 #'   scene --- anything [vellum::as_vellum_scene()] accepts.
 #' @param width,height Widget size (any valid CSS size, or `NULL` to size from the
 #'   scene). Passed to [htmlwidgets::createWidget()].
-#' @param tooltip,hover,select Toggles for the three interactions (all `TRUE`).
+#' @param tooltip,hover,select Toggles for the three hover/click interactions
+#'   (all `TRUE`).
+#' @param brush,zoom,toolbar Toggles for rectangular brush-select, wheel/drag
+#'   pan-zoom (via the SVG `viewBox`), and the on-hover toolbar (all `TRUE`).
+#' @param nearest When `TRUE` (default), hover snaps to the nearest mark within a
+#'   small radius when the cursor is not directly over one (helps sparse points).
 #' @param select_mode `"multiple"` (default; click toggles each element) or
 #'   `"single"` (click replaces the selection).
 #' @param elementId Optional explicit widget DOM id.
@@ -32,6 +37,7 @@
 #' @export
 as_widget <- function(x, width = NULL, height = NULL,
                       tooltip = TRUE, hover = TRUE, select = TRUE,
+                      brush = TRUE, zoom = TRUE, toolbar = TRUE, nearest = TRUE,
                       select_mode = c("multiple", "single"),
                       elementId = NULL) {
   select_mode <- match.arg(select_mode)
@@ -47,6 +53,10 @@ as_widget <- function(x, width = NULL, height = NULL,
       tooltip = isTRUE(tooltip),
       hover = isTRUE(hover),
       select = isTRUE(select),
+      brush = isTRUE(brush),
+      zoom = isTRUE(zoom),
+      toolbar = isTRUE(toolbar),
+      nearest = isTRUE(nearest),
       selectMode = select_mode
     )
   )
@@ -69,9 +79,12 @@ as_widget <- function(x, width = NULL, height = NULL,
   )
 }
 
-# The keyed elements the JS runtime needs: one record per distinct `data_id`,
-# carrying its tooltip and hover-group. Elements without a key (panel background,
-# gridlines, legend glyphs) are dropped -- they are not interactive.
+# The keyed elements the JS runtime needs: one record per drawn, keyed element,
+# carrying its tooltip / hover-group and its device-px bounding box (in the SVG's
+# viewBox coordinate space, so brush/nearest hit-testing needs no rescaling).
+# Elements without a key (panel background, gridlines, legend glyphs) are dropped
+# -- they are not interactive. Not deduplicated: `scene_model()` already yields one
+# row per datum, and the brush needs every element's geometry.
 .gloss_elements <- function(model) {
   el <- model$elements
   if (is.null(el) || !nrow(el)) {
@@ -82,11 +95,13 @@ as_widget <- function(x, width = NULL, height = NULL,
     return(list())
   }
   el <- el[keep, , drop = FALSE]
-  el <- el[!duplicated(el$key), , drop = FALSE]
   meta <- el$meta
   lapply(seq_len(nrow(el)), function(i) {
     m <- if (length(meta) >= i) meta[[i]] else NULL
-    rec <- list(key = el$key[[i]])
+    rec <- list(
+      key = el$key[[i]],
+      x0 = el$x0[[i]], y0 = el$y0[[i]], x1 = el$x1[[i]], y1 = el$y1[[i]]
+    )
     if (!is.null(m$tooltip)) rec$tooltip <- as.character(m$tooltip)
     if (!is.null(m$hover_group)) rec$hover_group <- as.character(m$hover_group)
     rec

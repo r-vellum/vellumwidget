@@ -4,10 +4,11 @@ Version: 0.0.0.9000
 Authors@R:
     person("David", "Schoch", , "david.schoch@cynkra.com", role = c("aut", "cre"))
 Description: Turns a 'vellum' scene (or a 'quill' plot) into a self-contained,
-    client-side interactive HTML widget: hover tooltips, hover highlighting, and
-    click selection, driven by the per-element data keys and 'scene_model()'
-    metadata that 'vellum' emits. Requires no Shiny and no server round-trip.
-    Named after the manuscript gloss -- an annotation revealed on the page.
+    client-side interactive HTML widget: hover tooltips and highlighting, click
+    selection, rectangular brush-select, pan/zoom, and a toolbar -- driven by the
+    per-element data keys, bounding boxes, and 'scene_model()' metadata that
+    'vellum' emits. Requires no Shiny and no server round-trip. Named after the
+    manuscript gloss -- an annotation revealed on the page.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)

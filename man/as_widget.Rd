@@ -11,6 +11,10 @@ as_widget(
   tooltip = TRUE,
   hover = TRUE,
   select = TRUE,
+  brush = TRUE,
+  zoom = TRUE,
+  toolbar = TRUE,
+  nearest = TRUE,
   select_mode = c("multiple", "single"),
   elementId = NULL
 )
@@ -22,7 +26,14 @@ scene --- anything \code{\link[vellum:as_vellum_scene]{vellum::as_vellum_scene()
 \item{width, height}{Widget size (any valid CSS size, or \code{NULL} to size from the
 scene). Passed to \code{\link[htmlwidgets:createWidget]{htmlwidgets::createWidget()}}.}
 
-\item{tooltip, hover, select}{Toggles for the three interactions (all \code{TRUE}).}
+\item{tooltip, hover, select}{Toggles for the three hover/click interactions
+(all \code{TRUE}).}
+
+\item{brush, zoom, toolbar}{Toggles for rectangular brush-select, wheel/drag
+pan-zoom (via the SVG \code{viewBox}), and the on-hover toolbar (all \code{TRUE}).}
+
+\item{nearest}{When \code{TRUE} (default), hover snaps to the nearest mark within a
+small radius when the cursor is not directly over one (helps sparse points).}
 
 \item{select_mode}{\code{"multiple"} (default; click toggles each element) or
 \code{"single"} (click replaces the selection).}

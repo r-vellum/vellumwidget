@@ -52,6 +52,30 @@ test_that("select_mode is validated and passed through", {
   expect_error(as_widget(scene, select_mode = "nope"))
 })
 
+test_that("elements carry a device-px bbox for brush/nearest hit-testing", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(
+      c(0.25, 0.75), 0.5, size = vellum::unit(4, "mm"),
+      gp = vellum::gpar(fill = "red"), key = c("a", "b")
+    ))
+  w <- as_widget(scene)
+  e <- w$x$elements[[1]]
+  expect_true(all(c("x0", "y0", "x1", "y1") %in% names(e)))
+  expect_true(is.numeric(e$x0) && e$x1 > e$x0 && e$y1 > e$y0)
+  # bbox is in the SVG's viewBox (device-px) space: centre near 0.25*200 = 50
+  cx <- (e$x0 + e$x1) / 2
+  expect_true(abs(cx - 50) < 5)
+})
+
+test_that("Phase 4 option toggles round-trip into the payload", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+  o <- as_widget(scene)$x$options
+  expect_true(o$brush && o$zoom && o$toolbar && o$nearest)
+  o2 <- as_widget(scene, brush = FALSE, zoom = FALSE, toolbar = FALSE, nearest = FALSE)$x$options
+  expect_false(o2$brush || o2$zoom || o2$toolbar || o2$nearest)
+})
+
 test_that("hover_group is carried into the element table", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(
