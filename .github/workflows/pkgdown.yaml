@@ -2,12 +2,10 @@
 # Builds the gloss pkgdown site and deploys it to GitHub Pages. gloss depends
 # on vellum, which is compiled from source, so a Rust toolchain is set up
 # before dependencies are installed.
+# pkgdown CI is disabled while this repo is private: an automatic Pages deploy
+# would expose the docs. Only manual runs are possible for now. Re-enable by
+# restoring the push / pull_request / release triggers below.
 on:
-  push:
-    branches: [main, master]
-  pull_request:
-  release:
-    types: [published]
   workflow_dispatch:
 
 name: pkgdown.yaml
