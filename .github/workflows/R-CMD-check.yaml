@@ -1,0 +1,63 @@
+# Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
+# `gloss` builds on `vellum`, whose backend is Rust (extendr). The extra
+# `setup-rust-toolchain` step provides the compiler that building `vellum` from
+# source (via the `Remotes:` entry in DESCRIPTION) needs; everything else is the
+# standard r-lib R-CMD-check flow.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  # `vellum` and `gloss` are version-locked and co-released: a nightly run
+  # catches a cross-layer break in `vellum`'s `main` before it bricks a release.
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+name: R-CMD-check.yaml
+
+permissions: read-all
+
+jobs:
+  R-CMD-check:
+    runs-on: ${{ matrix.config.os }}
+
+    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {os: macos-latest,   r: 'release'}
+          - {os: ubuntu-latest,  r: 'devel', http-user-agent: 'release'}
+          - {os: ubuntu-latest,  r: 'release'}
+          - {os: ubuntu-latest,  r: 'oldrel-1'}
+          # Windows is deferred: `vellum`'s Rust toolchain needs the GNU target
+          # wired to Rtools, which is finicky on CI. Add once that is proven.
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Rust compiler for building `vellum` (SystemRequirements: Cargo, rustc).
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.config.r }}
+          http-user-agent: ${{ matrix.config.http-user-agent }}
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck
+          needs: check
+
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          upload-snapshots: true
+          build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'

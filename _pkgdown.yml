@@ -1,0 +1,90 @@
+url: https://schochastics.github.io/gloss/
+
+template:
+  bootstrap: 5
+  math-rendering: mathjax
+  bslib:
+    # A parchment / sepia palette echoing the vellum & quill hex logos.
+    bg: "#faf5ea"
+    fg: "#2c2113"
+    primary: "#6b4f2c"
+    secondary: "#8a7350"
+    border-radius: "0.5rem"
+    navbar-bg: "#efe6d2"
+    navbar-light-brand-color: "#4a371f"
+    link-color: "#7a5320"
+    code-bg: "#f2e9d6"
+    base_font: {google: "Spectral"}
+    heading_font: {google: "Spectral SC"}
+    code_font: {google: "JetBrains Mono"}
+  includes:
+    in_header: |
+      <meta name="theme-color" content="#efe6d2">
+  opengraph:
+    twitter:
+      creator: "@schochastics"
+      card: summary_large_image
+
+home:
+  title: Interactive web widgets for vellum scenes
+  description: >
+    gloss turns a vellum scene (or a quill plot) into a self-contained,
+    client-side interactive HTML widget -- hover, select, brush, pan/zoom, and
+    linked views -- with no Shiny and no server round-trip.
+  sidebar:
+    structure: [ecosystem, links, license, community, citation, authors, dev]
+    components:
+      ecosystem:
+        title: The ecosystem
+        text: >
+          [vellum](https://schochastics.github.io/vellum/) · the parchment
+          (backend)<br>
+          [quill](https://schochastics.github.io/quill/) · the pen (grammar)<br>
+          [gloss](https://schochastics.github.io/gloss/) · the gloss
+          (interactivity)<br>
+          [scriptorium](https://schochastics.github.io/scriptorium/) · loads
+          them together
+
+navbar:
+  structure:
+    left: [reference, news]
+    right: [search, vellum, quill, scriptorium, github]
+  components:
+    vellum:
+      icon: fa-scroll
+      href: https://schochastics.github.io/vellum/
+      aria-label: vellum
+    quill:
+      icon: fa-feather-pointed
+      href: https://schochastics.github.io/quill/
+      aria-label: quill
+    scriptorium:
+      icon: fa-book
+      href: https://schochastics.github.io/scriptorium/
+      aria-label: scriptorium
+    github:
+      icon: fa-github
+      href: https://github.com/schochastics/gloss
+      aria-label: GitHub
+
+reference:
+- title: Building a widget
+  desc: >
+    Compile a `quill` plot or a raw `vellum` scene into a self-contained,
+    client-side interactive HTML widget.
+  contents:
+  - as_widget
+
+- title: Shiny
+  desc: Output and render bindings for embedding a gloss widget in a Shiny app.
+  contents:
+  - glossOutput
+
+- title: Package
+  contents:
+  - gloss-package
+
+footer:
+  structure:
+    left: developed_by
+    right: built_with

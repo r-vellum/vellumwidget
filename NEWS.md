@@ -1,7 +1,9 @@
-# gloss 0.0.0.9000
+# gloss 0.1.0
 
-Client-side interactive HTML widgets for `vellum` scenes / `quill` plots, via a
-single terminal `as_widget()` pipe. No Shiny, no server round-trip.
+First release. gloss turns a `vellum` scene or a `quill` plot into a
+self-contained, client-side interactive HTML widget via a single terminal
+`as_widget()` pipe — no Shiny, no server round-trip. Everything below ships in
+this first release.
 
 ## Features
 
