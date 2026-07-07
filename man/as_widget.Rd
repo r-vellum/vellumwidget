@@ -81,6 +81,11 @@ Interactivity is driven by the keys/metadata a plot declares. In \code{quill} th
 come from the reserved \code{data_id} / \code{tooltip} / \code{hover_group} mark arguments; a
 plot that declares none renders as a static (but still embeddable) SVG. A
 hovered element with a \code{data_id} but no \code{tooltip} shows its key.
+
+The scene metadata \code{gloss} reads --- the \code{\link[vellum:scene_model]{vellum::scene_model()}} element
+table and the SVG \code{data-key} / \verb{data-vellum-*} attributes --- is specified in
+vellum's "The scene contract" vignette
+(\code{vignette("scene-contract", package = "vellum")}).
 }
 \examples{
 \dontrun{

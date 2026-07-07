@@ -6,7 +6,18 @@
 \alias{gloss-package}
 \title{gloss: Interactive Web Widgets for Vellum Scenes}
 \description{
+\if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
+
 Turns a 'vellum' scene (or a 'quill' plot) into a self-contained, client-side interactive HTML widget: hover tooltips and highlighting, click selection, rectangular brush-select, pan/zoom, and a toolbar -- driven by the per-element data keys, bounding boxes, and 'scene_model()' metadata that 'vellum' emits. Requires no Shiny and no server round-trip. Named after the manuscript gloss -- an annotation revealed on the page.
+}
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://schochastics.github.io/gloss/}
+  \item \url{https://github.com/schochastics/gloss}
+  \item Report bugs at \url{https://github.com/schochastics/gloss/issues}
+}
+
 }
 \author{
 \strong{Maintainer}: David Schoch \email{david.schoch@cynkra.com}

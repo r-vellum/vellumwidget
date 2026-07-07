@@ -12,6 +12,11 @@
 #' plot that declares none renders as a static (but still embeddable) SVG. A
 #' hovered element with a `data_id` but no `tooltip` shows its key.
 #'
+#' The scene metadata `gloss` reads --- the [`vellum::scene_model()`] element
+#' table and the SVG `data-key` / `data-vellum-*` attributes --- is specified in
+#' vellum's "The scene contract" vignette
+#' (`vignette("scene-contract", package = "vellum")`).
+#'
 #' @param x A `quill` plot (a `PlotSpec` / `PlotComposition`) or a `vellum`
 #'   scene --- anything [vellum::as_vellum_scene()] accepts.
 #' @param width,height Widget size (any valid CSS size, or `NULL` to size from the
