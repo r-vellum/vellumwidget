@@ -4,13 +4,16 @@
 # source (via the `Remotes:` entry in DESCRIPTION) needs; everything else is the
 # standard r-lib R-CMD-check flow.
 on:
-  push:
-    branches: [main, master]
-  pull_request:
+  # Auto-triggers (push / pull_request) removed to conserve GitHub Actions
+  # minutes — run this manually from the Actions tab (workflow_dispatch), or
+  # re-add push/pull_request when ready.
+  #
   # `vellum` and `gloss` are version-locked and co-released: a nightly run
   # catches a cross-layer break in `vellum`'s `main` before it bricks a release.
-  schedule:
-    - cron: "0 4 * * *"
+  # Commented out to save minutes — kept as a reminder it existed; restore
+  # before release.
+  # schedule:
+  #   - cron: "0 4 * * *"
   workflow_dispatch:
 
 name: R-CMD-check.yaml
@@ -27,10 +30,10 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {os: macos-latest,   r: 'release'}
-          - {os: ubuntu-latest,  r: 'devel', http-user-agent: 'release'}
+          # Trimmed to a single Linux job to conserve Actions minutes. The full
+          # matrix (macOS + R devel/release/oldrel-1) lived here — macOS bills at
+          # 10x, so it was the dominant cost. Restore before release.
           - {os: ubuntu-latest,  r: 'release'}
-          - {os: ubuntu-latest,  r: 'oldrel-1'}
           # Windows is deferred: `vellum`'s Rust toolchain needs the GNU target
           # wired to Rtools, which is finicky on CI. Add once that is proven.
 
