@@ -1,7 +1,7 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-\# gloss
+# gloss
 <a href="https://schochastics.github.io/gloss/"><img src="man/figures/logo.png" align="right" height="138" alt="gloss website" /></a>
 
 <!-- badges: start -->
