@@ -15,15 +15,17 @@ URL: https://schochastics.github.io/gloss/,
 BugReports: https://github.com/schochastics/gloss/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
+Depends:
+    R (>= 4.2)
 Imports:
+    grDevices,
     htmlwidgets,
-    htmltools,
-    jsonlite,
     vellum (>= 0.1.1.9000)
 Suggests:
+    crosstalk,
     quill,
     testthat (>= 3.0.0)
 Remotes:
     schochastics/vellum
 Config/testthat/edition: 3
-Config/roxygen2/version: 8.0.0.9000
+RoxygenNote: 8.0.0.9000

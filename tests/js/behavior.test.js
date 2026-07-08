@@ -539,6 +539,28 @@ ok(!elL.querySelector('[data-key="q1"]').classList.contains("gloss-selected"), "
   const svgAlt = elAlt.querySelector("svg");
   ok(svgAlt.getAttribute("aria-label") === "My explicit alt.", "alt: explicit alt becomes the aria-label");
   ok(svgAlt.getAttribute("aria-labelledby") === null, "alt: vellum's aria-labelledby is removed so alt wins the accessible name");
+
+  // roving tabindex skips marks hidden by a cross-filter (gloss-filtered)
+  const elF = mount({
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 30">' +
+      '<path data-key="a" d="M1 1h9v9z"/><path data-key="b" d="M30 1h9v9z"/><path data-key="c" d="M60 1h9v9z"/></svg>',
+    elements: [
+      { key: "a", tooltip: "A", x0: 1, y0: 1, x1: 10, y1: 10 },
+      { key: "b", tooltip: "B", x0: 30, y0: 1, x1: 39, y1: 10 },
+      { key: "c", tooltip: "C", x0: 60, y0: 1, x1: 69, y1: 10 }
+    ],
+    options: { tooltip: true, hover: true, select: true, a11y: true, selectMode: "multiple" }
+  });
+  const svgF = elF.querySelector("svg");
+  const aN = elF.querySelector('[data-key="a"]');
+  const bN = elF.querySelector('[data-key="b"]');
+  const cN = elF.querySelector('[data-key="c"]');
+  bN.classList.add("gloss-filtered"); // simulate a cross-filter hiding "b"
+  aN.dispatchEvent(new window.FocusEvent("focus", { bubbles: false })); // cursor on "a"
+  svgF.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  ok(cN.getAttribute("tabindex") === "0" && bN.getAttribute("tabindex") !== "0",
+    "a11y: ArrowRight skips a cross-filtered (hidden) mark");
 }
 
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");

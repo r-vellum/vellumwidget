@@ -779,7 +779,7 @@
         return a11yLabel(k) + (selected[k] ? ", selected" : "");
       }
       function announce(msg) {
-        if (liveRegion) liveRegion.textContent = msg;
+        if (liveRegion && liveRegion.textContent !== msg) liveRegion.textContent = msg;
       }
       function showMarkFocus(i) {
         focusIdx = i;
@@ -804,8 +804,13 @@
       }
       function focusRoving(i) {
         if (!focusables.length) return;
+        const dir = i < focusIdx ? -1 : 1;
         if (i < 0) i = 0;
         if (i >= focusables.length) i = focusables.length - 1;
+        while (focusables[i] && focusables[i].node.classList.contains("gloss-filtered")) {
+          i += dir;
+          if (i < 0 || i >= focusables.length) return;
+        }
         if (focusIdx >= 0 && focusables[focusIdx]) {
           focusables[focusIdx].node.setAttribute("tabindex", "-1");
         }

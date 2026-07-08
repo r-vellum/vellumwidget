@@ -972,9 +972,12 @@ HTMLWidgets.widget({
     function focusLabel(k: string): string {
       return a11yLabel(k) + (selected[k] ? ", selected" : "");
     }
-    // Speak `msg` through the polite live region (no-op if a11y is off).
+    // Speak `msg` through the polite live region (no-op if a11y is off). Skip a
+    // repeat of the current text: focusRoving() announces and then moves DOM
+    // focus, whose focus handler announces the same label again — the guard stops
+    // some screen readers speaking it twice.
     function announce(msg: string): void {
-      if (liveRegion) liveRegion.textContent = msg;
+      if (liveRegion && liveRegion.textContent !== msg) liveRegion.textContent = msg;
     }
     // Reflect that mark `focusables[i]` is the focused one: roving index, focus
     // ring + highlight, and a spoken announcement. Pure state/DOM update — does
@@ -1007,8 +1010,16 @@ HTMLWidgets.widget({
     // DOM focus to it.
     function focusRoving(i: number): void {
       if (!focusables.length) return;
+      const dir = i < focusIdx ? -1 : 1;
       if (i < 0) i = 0;
       if (i >= focusables.length) i = focusables.length - 1;
+      // Skip marks hidden by a cross-filter (`gloss-filtered` -> display:none):
+      // focusing one is a no-op, so keep moving in the travel direction; if there
+      // is no visible mark that way, stay put.
+      while (focusables[i] && focusables[i].node.classList.contains("gloss-filtered")) {
+        i += dir;
+        if (i < 0 || i >= focusables.length) return;
+      }
       if (focusIdx >= 0 && focusables[focusIdx]) {
         focusables[focusIdx].node.setAttribute("tabindex", "-1");
       }

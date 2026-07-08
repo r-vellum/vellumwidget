@@ -105,7 +105,9 @@ JavaScript runtime into a self-contained \code{\link[htmlwidgets:createWidget]{h
 The result does hover tooltips, hover highlighting, and click selection
 entirely client-side --- no Shiny, no server round-trip. Pan/zoom, brush, and
 selection work with mouse, touch (drag to pan, two-finger pinch to zoom), and
-keyboard (arrows pan, \code{+}/\code{-} zoom, \code{0} resets) input.
+keyboard input: the arrows pan and \code{+}/\code{-}/\code{0} zoom and reset, except that with
+accessibility on (the default) the arrows move between marks while one is
+focused --- see the \code{a11y} argument.
 }
 \details{
 Interactivity is driven by the keys/metadata a plot declares. In \code{quill} these

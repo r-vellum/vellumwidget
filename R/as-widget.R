@@ -7,7 +7,9 @@
 #' The result does hover tooltips, hover highlighting, and click selection
 #' entirely client-side --- no Shiny, no server round-trip. Pan/zoom, brush, and
 #' selection work with mouse, touch (drag to pan, two-finger pinch to zoom), and
-#' keyboard (arrows pan, `+`/`-` zoom, `0` resets) input.
+#' keyboard input: the arrows pan and `+`/`-`/`0` zoom and reset, except that with
+#' accessibility on (the default) the arrows move between marks while one is
+#' focused --- see the `a11y` argument.
 #'
 #' Interactivity is driven by the keys/metadata a plot declares. In `quill` these
 #' come from the reserved `data_id` / `tooltip` / `hover_group` mark arguments; a
