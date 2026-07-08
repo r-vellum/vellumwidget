@@ -5,7 +5,9 @@
 #' the [`vellum::scene_model()`] element table, and bundles them with the `gloss`
 #' JavaScript runtime into a self-contained [htmlwidgets::createWidget()] widget.
 #' The result does hover tooltips, hover highlighting, and click selection
-#' entirely client-side --- no Shiny, no server round-trip.
+#' entirely client-side --- no Shiny, no server round-trip. Pan/zoom, brush, and
+#' selection work with mouse, touch (drag to pan, two-finger pinch to zoom), and
+#' keyboard (arrows pan, `+`/`-` zoom, `0` resets) input.
 #'
 #' Interactivity is driven by the keys/metadata a plot declares. In `quill` these
 #' come from the reserved `data_id` / `tooltip` / `hover_group` mark arguments; a
@@ -34,6 +36,15 @@
 #'   `quill` overrides these for that mark.
 #' @param dim_opacity Opacity (0–1) of the non-hovered elements while hovering
 #'   (default `0.28`); `NULL` keeps the default.
+#' @param tooltip_style Optional named list styling the tooltip box:
+#'   `background` / `color` (any R or CSS colour), `fontsize`, and `max_width`
+#'   (any CSS length). `NULL` (default) uses the built-in style. Tooltip text is
+#'   rendered as safe HTML — an author-built `tooltip =` (e.g. via `glue()`) may
+#'   use `<b>`/`<i>`/`<br>` for bold/italic/line breaks; data values are escaped
+#'   and only those inert tags are honoured (no scripts/attributes).
+#' @param export_filename,export_scale The download filename base (no extension;
+#'   default `"plot"`) and the PNG resolution multiplier (default `1`) for the
+#'   toolbar's SVG/PNG export. Exports capture the current (zoomed/panned) view.
 #' @param select_mode `"multiple"` (default; click toggles each element) or
 #'   `"single"` (click replaces the selection).
 #' @param group Optional linking group name. Widgets sharing a `group` link
@@ -60,6 +71,8 @@ as_widget <- function(x, width = NULL, height = NULL,
                       tooltip = TRUE, hover = TRUE, select = TRUE,
                       brush = TRUE, zoom = TRUE, toolbar = TRUE, nearest = TRUE,
                       hover_color = NULL, selected_color = NULL, dim_opacity = NULL,
+                      tooltip_style = NULL,
+                      export_filename = NULL, export_scale = NULL,
                       group = NULL, crosstalk = NULL,
                       select_mode = c("multiple", "single"),
                       elementId = NULL) {
@@ -84,11 +97,18 @@ as_widget <- function(x, width = NULL, height = NULL,
       selectMode = select_mode,
       group = group,
       crosstalk = ct_group,
-      style = list(
-        hoverColor = .css_color(hover_color),
-        selectedColor = .css_color(selected_color),
-        dimOpacity = if (is.null(dim_opacity)) NULL else as.numeric(dim_opacity)
-      )
+      style = c(
+        list(
+          hoverColor = .css_color(hover_color),
+          selectedColor = .css_color(selected_color),
+          dimOpacity = if (is.null(dim_opacity)) NULL else as.numeric(dim_opacity)
+        ),
+        .tooltip_style(tooltip_style)
+      ),
+      export = drop_null(list(
+        filename = if (is.null(export_filename)) NULL else as.character(export_filename),
+        scale = if (is.null(export_scale)) NULL else as.numeric(export_scale)
+      ))
     )
   )
 
@@ -118,6 +138,27 @@ as_widget <- function(x, width = NULL, height = NULL,
     )
   )
 }
+
+# Normalise a `tooltip_style` list (background/color/fontsize/max_width) into the
+# JS `style` fields (tipBg/tipFg/tipFontSize/tipMaxWidth). Colours are CSS-
+# normalised; sizes pass through as CSS length strings. NULL -> no entries.
+.tooltip_style <- function(ts) {
+  if (is.null(ts)) {
+    return(list())
+  }
+  if (!is.list(ts)) {
+    stop("`tooltip_style` must be a named list (background/color/fontsize/max_width).", call. = FALSE)
+  }
+  drop_null(list(
+    tipBg = .css_color(ts$background),
+    tipFg = .css_color(ts$color),
+    tipFontSize = if (is.null(ts$fontsize)) NULL else as.character(ts$fontsize),
+    tipMaxWidth = if (is.null(ts$max_width)) NULL else as.character(ts$max_width)
+  ))
+}
+
+# Drop NULL entries from a list (so unset style fields don't reach the payload).
+drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 
 # Resolve the crosstalk group name from `crosstalk`: a crosstalk::SharedData (use
 # its group), a group-name string, or NULL (no crosstalk).

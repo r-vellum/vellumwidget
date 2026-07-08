@@ -77,7 +77,7 @@ function fire(type, target) {
 }
 
 // --- hover -> tooltip + highlight (hover_group links a and b) ---
-fire("mousemove", aPaths[0]);
+fire("pointermove", aPaths[0]);
 ok(tip.textContent === "Alpha", "hover shows the element's tooltip text");
 ok(tip.classList.contains("gloss-show"), "tooltip becomes visible on hover");
 ok(root.classList.contains("gloss-hovering"), "root enters hovering mode (dims others)");
@@ -88,7 +88,7 @@ ok(
 );
 
 // --- hover off -> clear ---
-fire("mouseleave", svgEl);
+fire("pointerleave", svgEl);
 ok(!tip.classList.contains("gloss-show"), "tooltip hides on mouseleave");
 ok(!root.classList.contains("gloss-hovering"), "hovering mode cleared");
 ok(el.querySelectorAll(".gloss-hl").length === 0, "highlight classes cleared");
@@ -116,7 +116,7 @@ inst2.renderValue({
   options: { tooltip: true, hover: true, select: true, selectMode: "multiple" }
 });
 const svg2 = el2.querySelector("svg");
-const ev2 = new window.MouseEvent("mousemove", { bubbles: true });
+const ev2 = new window.MouseEvent("pointermove", { bubbles: true });
 Object.defineProperty(ev2, "target", { value: el2.querySelector('[data-key="k9"]') });
 svg2.dispatchEvent(ev2);
 ok(el2.querySelector(".gloss-tip").textContent === "k9", "tooltip defaults to the data key");
@@ -141,6 +141,39 @@ ok(T.brushKeys(els, { x0: 100, y0: 100, x1: 200, y1: 200 }).length === 0, "brush
 
 ok(T.nearestKey(els, 55, 55, 100) === "b", "nearestKey: point inside b -> b");
 ok(T.nearestKey(els, 200, 200, 5) === null, "nearestKey: nothing within radius -> null");
+
+// ===================== tooltip sanitizer (safe HTML) =====================
+ok(T.sanitizeTip("line1<br>line2") === "line1<br>line2", "sanitizeTip: <br> is allowed");
+ok(T.sanitizeTip("<b>x</b>") === "<b>x</b>", "sanitizeTip: <b></b> is allowed");
+ok(T.sanitizeTip("a & b < c") === "a &amp; b &lt; c", "sanitizeTip: bare &, < are escaped");
+ok(
+  T.sanitizeTip("<script>alert(1)</script>").indexOf("<script") === -1,
+  "sanitizeTip: <script> is neutralised"
+);
+ok(
+  T.sanitizeTip('<span onclick="x()">y</span>').indexOf("<span") === -1,
+  "sanitizeTip: a tag carrying attributes stays escaped (no injection)"
+);
+ok(
+  T.sanitizeTip('<img src=x onerror="alert(1)">').indexOf("<img") === -1,
+  "sanitizeTip: disallowed tag (img) stays escaped"
+);
+
+// tooltip renders as HTML in the DOM (bold + line break)
+{
+  const elH = document.createElement("div");
+  document.body.appendChild(elH);
+  const iH = widgetDef.factory(elH, 200, 100);
+  iH.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><path data-key="h" d="M10 10h5v5h-5z"/></svg>',
+    elements: [{ key: "h", tooltip: "Name: <b>Bob</b><br>Age: 30" }],
+    options: { tooltip: true, hover: true }
+  });
+  fireOn(elH.querySelector("svg"), "pointermove", elH.querySelector('[data-key="h"]'));
+  const tipH = elH.querySelector(".gloss-tip");
+  ok(tipH.querySelector("b") !== null, "tooltip renders <b> as a real element");
+  ok(tipH.innerHTML.indexOf("<br>") !== -1, "tooltip renders <br> as a line break");
+}
 ok(T.nearestKey(els, 12, 12, 100) === "a" || T.nearestKey(els, 12, 12, 100) === "c", "nearestKey: picks a nearby element");
 
 const vb = T.parseViewBox("0 0 200 100");
@@ -193,6 +226,65 @@ const after = T.parseViewBox(svg3.getAttribute("viewBox"));
 ok(after && after.w < 200, "wheel zoom-in shrinks the viewBox width");
 el3.querySelector('.gloss-toolbar [data-act="reset"]').dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 ok(svg3.getAttribute("viewBox") === before, "reset restores the original viewBox");
+
+// ===================== touch: pinch-zoom + keyboard pan =====================
+function firePointer(target, type, id, clientX, clientY, onWindow) {
+  const ev = new window.MouseEvent(type, { bubbles: true, clientX: clientX, clientY: clientY });
+  Object.defineProperty(ev, "pointerId", { value: id });
+  Object.defineProperty(ev, "pointerType", { value: "touch" });
+  Object.defineProperty(ev, "target", { value: target });
+  (onWindow ? window : target).dispatchEvent(ev);
+}
+ok(el3.classList.contains("gloss-gesture"), "gesture class set (touch-action:none) when zoom/brush on");
+const vbPre = T.parseViewBox(svg3.getAttribute("viewBox"));
+// two fingers down 40px apart, then spread to 80px -> zoom in (viewBox shrinks)
+firePointer(svg3, "pointerdown", 1, 80, 50);
+firePointer(svg3, "pointerdown", 2, 120, 50);
+firePointer(svg3, "pointermove", 2, 160, 50, true);
+const vbPinch = T.parseViewBox(svg3.getAttribute("viewBox"));
+ok(vbPinch.w < vbPre.w, "two-finger spread pinch-zooms in (viewBox shrinks)");
+firePointer(svg3, "pointerup", 1, 80, 50, true);
+firePointer(svg3, "pointerup", 2, 160, 50, true);
+
+// keyboard: ArrowRight pans the viewBox in +x; 0 resets
+const vbBeforeKey = T.parseViewBox(svg3.getAttribute("viewBox"));
+el3.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+ok(T.parseViewBox(svg3.getAttribute("viewBox")).x > vbBeforeKey.x, "ArrowRight pans the viewBox right");
+el3.dispatchEvent(new window.KeyboardEvent("keydown", { key: "0", bubbles: true }));
+ok(svg3.getAttribute("viewBox") === before, "key 0 resets the viewBox");
+
+// ===================== export: copy-PNG button (feature-detected) =====================
+// jsdom has no Clipboard API, so the copy button is (correctly) absent. The
+// positive path (button present when navigator.clipboard.write + ClipboardItem
+// exist) is a trivial feature-detect exercised in real browsers.
+ok(!el3.querySelector('.gloss-toolbar [data-act="copy"]'), "copy button absent when the Clipboard API is unavailable");
+ok(!!el3.querySelector('.gloss-toolbar [data-act="png"]'), "PNG download button always present");
+
+// ===================== large-N: node cache serves a hover =====================
+{
+  const N = 4000;
+  let svgN = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">';
+  const elemsN = [];
+  for (let i = 0; i < N; i++) {
+    const x = i % 200, y = Math.floor(i / 200);
+    svgN += '<path data-key="p' + i + '" d="M' + x + " " + y + 'h1v1z"/>';
+    elemsN.push({ key: "p" + i, tooltip: "pt " + i, x0: x, y0: y, x1: x + 1, y1: y + 1 });
+  }
+  svgN += "</svg>";
+  const elN = document.createElement("div");
+  document.body.appendChild(elN);
+  widgetDef.factory(elN, 200, 200).renderValue({
+    svg: svgN, elements: elemsN,
+    options: { tooltip: true, hover: true, select: true, selectMode: "multiple" }
+  });
+  const target = elN.querySelector('[data-key="p2500"]');
+  fireOn(elN.querySelector("svg"), "pointermove", target);
+  ok(target.classList.contains("gloss-hl"), "large-N: hover over a mark highlights it (via node cache)");
+  // brushKeys still correct at scale (pure helper unchanged)
+  const picked = T.brushKeys(elemsN, { x0: 0.2, y0: 0.2, x1: 1.5, y1: 0.5 });
+  ok(picked.indexOf("p0") !== -1 && picked.indexOf("p1") !== -1 && picked.indexOf("p3000") === -1,
+    "large-N: brushKeys selects the overlapping marks and excludes far ones");
+}
 
 // ===================== styling: widget theme (Option 1) =====================
 const elS = document.createElement("div");
@@ -356,14 +448,14 @@ const swatchS = elL.querySelector('[data-key="legend:color:s"]');
 ok(!!swatchS, "legend swatch element is present with its colon key");
 ok(swatchS.classList.contains("gloss-legend"), "legend swatch is tagged gloss-legend (stays visible on hover)");
 // hover the "s" swatch -> its whole series (p1, p2) highlights, but not q1
-fireOn(elL.querySelector("svg"), "mousemove", swatchS);
+fireOn(elL.querySelector("svg"), "pointermove", swatchS);
 ok(
   elL.querySelector('[data-key="p1"]').classList.contains("gloss-hl") &&
     elL.querySelector('[data-key="p2"]').classList.contains("gloss-hl"),
   "hovering a legend swatch highlights its whole series"
 );
 ok(!elL.querySelector('[data-key="q1"]').classList.contains("gloss-hl"), "other series is not highlighted");
-fireOn(elL.querySelector("svg"), "mouseleave", elL.querySelector("svg"));
+fireOn(elL.querySelector("svg"), "pointerleave", elL.querySelector("svg"));
 // click the "s" swatch -> selects the series
 fireOn(elL.querySelector("svg"), "click", swatchS);
 ok(

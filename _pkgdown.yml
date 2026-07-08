@@ -47,8 +47,14 @@ home:
 
 navbar:
   structure:
-    left: [reference, news]
+    left: [articles, reference, news]
     right: [search, vellum, quill, scriptorium, github]
+
+articles:
+- title: Articles
+  navbar: ~
+  contents:
+  - interactivity
   components:
     vellum:
       icon: fa-scroll

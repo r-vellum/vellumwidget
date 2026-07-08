@@ -1,3 +1,29 @@
+# gloss 0.2.0
+
+Interaction-depth release (ROADMAP §4).
+
+* **Rich tooltips.** Tooltip text now renders as *safe* HTML: an author-built
+  `tooltip =` (e.g. via `glue()`) may use `<b>`/`<i>`/`<br>` for bold/italic/
+  line breaks. Data values are escaped and only inert, attribute-free tags are
+  honoured — no scripts, handlers, or attributes (no XSS). New
+  `as_widget(tooltip_style =)` themes the tooltip box (background/color/fontsize/
+  max_width).
+* **Touch + keyboard.** The widget is driven by pointer events, so pan/brush/
+  hover work with mouse, touch, and pen from one path; a two-finger pinch
+  zooms. With the widget focused, arrow keys pan, `+`/`-` zoom, and `0` resets.
+* **Configurable export.** `as_widget(export_filename =, export_scale =)` set the
+  download filename base and a hi-res PNG multiplier; exports capture the current
+  (zoomed/panned) view. A "copy PNG to clipboard" toolbar button appears where
+  the Clipboard API is available.
+* **Large-N performance.** Hover/selection highlighting uses a per-render
+  key→node cache instead of a `querySelectorAll` per key, and the nearest-mark
+  hover scan is throttled to one per animation frame.
+* New "Interactive widgets: a tour" article.
+
+Deferred: a spatial index for hit-testing (the DOM cost was the real bottleneck,
+now cached; bbox scans are cheap and datashade collapses huge clouds to a
+raster); coordinated zoom across linked widgets and URL deep-linking; PDF export.
+
 # gloss 0.1.0
 
 First release. gloss turns a `vellum` scene or a `quill` plot into a

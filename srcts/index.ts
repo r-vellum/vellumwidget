@@ -44,6 +44,7 @@ interface Options {
   style?: StyleOpts;
   group?: string | null; // own cross-widget linking group (gloss <-> gloss)
   crosstalk?: string | null; // crosstalk group (interop + filter_* controls)
+  export?: { filename?: string; scale?: number }; // export filename base + PNG resolution scale
 }
 
 // Widget-wide interaction theme (Option 1). Each maps to a CSS variable on the
@@ -53,6 +54,10 @@ interface StyleOpts {
   hoverColor?: string | null; // outline colour for the hovered element(s)
   selectedColor?: string | null; // outline colour for selected elements
   dimOpacity?: number | null; // opacity of non-hovered elements while hovering
+  tipBg?: string | null; // tooltip background colour
+  tipFg?: string | null; // tooltip text colour
+  tipFontSize?: string | null; // tooltip font size (any CSS length)
+  tipMaxWidth?: string | null; // tooltip max width (any CSS length)
 }
 
 interface Payload {
@@ -154,6 +159,7 @@ const STYLE_ID = "gloss-style";
 const GLOSS_CSS = `
 .gloss-root { position: relative; display: inline-block; max-width: 100%; }
 .gloss-root .gloss-svg-holder svg { max-width: 100%; height: auto; display: block; }
+.gloss-gesture .gloss-svg-holder svg { touch-action: none; }
 .gloss-root.gloss-mode-pan .gloss-svg-holder svg { cursor: grab; }
 .gloss-root.gloss-panning .gloss-svg-holder svg { cursor: grabbing; }
 .gloss-root [data-key] { cursor: pointer; }
@@ -173,9 +179,11 @@ const GLOSS_CSS = `
 }
 .gloss-tip {
   position: absolute; left: 0; top: 0; pointer-events: none; z-index: 20;
-  background: rgba(17,24,39,0.94); color: #fff;
-  font: 12px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  padding: 5px 8px; border-radius: 5px; white-space: pre-wrap; max-width: 320px;
+  background: var(--gloss-tip-bg, rgba(17,24,39,0.94)); color: var(--gloss-tip-fg, #fff);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-size: var(--gloss-tip-fontsize, 12px); line-height: 1.45;
+  padding: 5px 8px; border-radius: 5px; white-space: pre-wrap;
+  max-width: var(--gloss-tip-maxwidth, 320px);
   box-shadow: 0 2px 8px rgba(0,0,0,0.25);
   opacity: 0; transition: opacity 0.08s ease; will-change: transform;
 }
@@ -197,7 +205,7 @@ const GLOSS_CSS = `
 .gloss-toolbar button:hover { background: rgba(0,0,0,0.08); }
 .gloss-toolbar button.gloss-active { background: rgba(37,99,235,0.18); }
 @media (prefers-color-scheme: dark) {
-  .gloss-tip { background: rgba(243,244,246,0.96); color: #111827; }
+  .gloss-tip { background: var(--gloss-tip-bg, rgba(243,244,246,0.96)); color: var(--gloss-tip-fg, #111827); }
   [data-key].gloss-selected { stroke: var(--gloss-selected-stroke, #f9fafb); }
   .gloss-toolbar { background: rgba(31,41,55,0.9); }
   .gloss-toolbar button { color: #f3f4f6; }
@@ -217,6 +225,26 @@ function cssEscape(value: string): string {
   const anyCss = (window as unknown as { CSS?: { escape?: (s: string) => string } }).CSS;
   if (anyCss && typeof anyCss.escape === "function") return anyCss.escape(value);
   return value.replace(/["\\\]\[#.:;,()>~+*^$|=@!%&{}\/\s]/g, "\\$&");
+}
+
+// Render a tooltip string as *safe* HTML: escape everything, then re-enable a
+// fixed allow-list of inert, attribute-free tags. Data values can't inject
+// scripts, event handlers, or attributes (an opening tag carrying attributes
+// stays escaped), so an author can build multi-line / bold tooltips (e.g. via
+// quill's `tooltip =`) with `<br>` / `<b>` without any XSS surface.
+const TIP_TAGS = ["b", "i", "em", "strong", "br", "span"];
+function sanitizeTip(s: string): string {
+  let out = String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  for (const t of TIP_TAGS) {
+    out = out
+      .replace(new RegExp("&lt;" + t + "&gt;", "gi"), "<" + t + ">")
+      .replace(new RegExp("&lt;/" + t + "&gt;", "gi"), "</" + t + ">")
+      .replace(new RegExp("&lt;" + t + "\\s*/&gt;", "gi"), "<" + t + ">");
+  }
+  return out;
 }
 
 function keyOf(target: EventTarget | null): string | null {
@@ -294,6 +322,8 @@ HTMLWidgets.widget({
     let legendIndex: Record<string, string[]> = {}; // series key -> member element keys
     let elements: ElemMeta[] = [];
     let selected: Record<string, boolean> = {};
+    let nodesByKey: Record<string, Element[]> = {}; // key -> SVG nodes (built once per render)
+    let hoverRAF = 0; // rAF handle throttling the O(n) nearest-mark scan
     let opts: Options = {
       tooltip: true, hover: true, select: true, brush: true, zoom: true,
       toolbar: true, nearest: true, selectMode: "multiple"
@@ -330,7 +360,13 @@ HTMLWidgets.widget({
     }
 
     // --- highlight / tooltip (Phase 3) ---
+    // Nodes are cached per render (built in renderValue), so a hover/select that
+    // touches many keys is O(keys) map lookups instead of a `querySelectorAll`
+    // per key — the main per-interaction cost at large N. The DOM is static after
+    // render, so the cache stays valid.
     function elementsForKey(k: string): Element[] {
+      const cached = nodesByKey[k];
+      if (cached) return cached;
       if (!holder) return [];
       return Array.prototype.slice.call(holder.querySelectorAll('[data-key="' + cssEscape(k) + '"]'));
     }
@@ -362,7 +398,7 @@ HTMLWidgets.widget({
     }
     function showTip(clientX: number, clientY: number, k: string): void {
       const m = meta[k];
-      tip.textContent = (m && m.tooltip) || k;
+      tip.innerHTML = sanitizeTip((m && m.tooltip) || k);
       const box = el.getBoundingClientRect();
       tip.style.transform =
         "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) +
@@ -486,33 +522,73 @@ HTMLWidgets.widget({
       brushBox.style.display = "none";
     }
 
-    // --- pointer interaction (hover + drag: brush or pan) ---
+    // --- pointer interaction (hover + drag: brush or pan; touch pinch-zoom) ---
+    // Pointer events unify mouse, touch, and pen, so one code path drives desktop
+    // and mobile. Active pointers are tracked so two down at once = pinch-zoom.
     let down: { cx: number; cy: number; ux: number; uy: number } | null = null;
     let dragging: "" | "brush" | "pan" = "";
     let movedDuringDrag = false;
+    const pointers = new Map<number, { cx: number; cy: number }>();
+    let pinchDist = 0; // > 0 while a two-pointer pinch is in progress
 
     // Hover is SVG-local (fires only over this widget's svg). While a press is
     // in progress the drag handlers (below) own movement, so hover backs off.
-    function onHoverMove(ev: MouseEvent): void {
-      if (down) return;
-      let k = keyOf(ev.target);
-      if (k == null && opts.nearest && elements.length) {
-        const u = toUser(ev.clientX, ev.clientY);
-        const rad = vb ? vb.w * 0.02 : 8; // ~2% of the view width
-        k = nearestKey(elements, u.x, u.y, rad);
-      }
+    function hoverAt(k: string | null, clientX: number, clientY: number): void {
       if (k == null) {
         clearHover();
         return;
       }
       setHover(k);
-      if (opts.tooltip) showTip(ev.clientX, ev.clientY, k);
+      if (opts.tooltip) showTip(clientX, clientY, k);
+    }
+    function onHoverMove(ev: MouseEvent): void {
+      if (down || pinchDist > 0) return;
+      // Directly over a mark: resolve synchronously (cheap, no scan).
+      const k = keyOf(ev.target);
+      if (k != null) {
+        if (hoverRAF) {
+          cancelAnimationFrame(hoverRAF);
+          hoverRAF = 0;
+        }
+        hoverAt(k, ev.clientX, ev.clientY);
+        return;
+      }
+      if (!opts.nearest || !elements.length) {
+        clearHover();
+        return;
+      }
+      // Otherwise the nearest-mark scan is O(n); throttle it to one per frame so
+      // fast pointer moves over a large plot don't run it dozens of times.
+      const cx = ev.clientX;
+      const cy = ev.clientY;
+      if (hoverRAF) return;
+      hoverRAF = requestAnimationFrame(function () {
+        hoverRAF = 0;
+        const u = toUser(cx, cy);
+        const rad = vb ? vb.w * 0.02 : 8; // ~2% of the view width
+        hoverAt(nearestKey(elements, u.x, u.y, rad), cx, cy);
+      });
     }
 
     // Drag move/up are bound to `window` only for the lifetime of a press (added
     // in onDown, removed in onDragUp), so a drag that leaves the svg still
     // resolves without leaking global listeners across widgets.
-    function onDragMove(ev: MouseEvent): void {
+    function onDragMove(ev: PointerEvent): void {
+      if (pointers.has(ev.pointerId)) {
+        pointers.set(ev.pointerId, { cx: ev.clientX, cy: ev.clientY });
+      }
+      // Two active pointers -> pinch-zoom about their midpoint.
+      if (pinchDist > 0 && pointers.size >= 2 && vb) {
+        const pts = Array.from(pointers.values());
+        const d = Math.hypot(pts[0].cx - pts[1].cx, pts[0].cy - pts[1].cy);
+        if (d > 0) {
+          const u = toUser((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
+          vb = zoomViewBox(vb, d / pinchDist, u.x, u.y);
+          applyViewBox();
+          pinchDist = d;
+        }
+        return;
+      }
       if (!down) return;
       if (!dragging) {
         if (Math.abs(ev.clientX - down.cx) + Math.abs(ev.clientY - down.cy) <= DRAG_THRESHOLD) return;
@@ -540,19 +616,47 @@ HTMLWidgets.widget({
       }
     }
 
-    function onDown(ev: MouseEvent): void {
-      if (ev.button !== 0) return;
+    function onDown(ev: PointerEvent): void {
+      // Ignore non-primary mouse buttons; touch/pen have button 0/-1.
+      if (ev.pointerType === "mouse" && ev.button !== 0) return;
+      pointers.set(ev.pointerId, { cx: ev.clientX, cy: ev.clientY });
+      // Drag move/up bind to `window` for the lifetime of a press (addEventListener
+      // dedups identical listeners, so repeated downs don't stack them).
+      window.addEventListener("pointermove", onDragMove);
+      window.addEventListener("pointerup", onDragUp);
+      window.addEventListener("pointercancel", onDragUp);
+      if (pointers.size >= 2 && opts.zoom) {
+        // A second finger: start a pinch, abandoning any nascent single drag.
+        const pts = Array.from(pointers.values());
+        pinchDist = Math.hypot(pts[0].cx - pts[1].cx, pts[0].cy - pts[1].cy);
+        down = null;
+        dragging = "";
+        hideBrush();
+        el.classList.remove("gloss-panning");
+        return;
+      }
       const u = toUser(ev.clientX, ev.clientY);
       down = { cx: ev.clientX, cy: ev.clientY, ux: u.x, uy: u.y };
       dragging = "";
       movedDuringDrag = false;
-      window.addEventListener("mousemove", onDragMove);
-      window.addEventListener("mouseup", onDragUp);
     }
 
-    function onDragUp(ev: MouseEvent): void {
-      window.removeEventListener("mousemove", onDragMove);
-      window.removeEventListener("mouseup", onDragUp);
+    function onDragUp(ev: PointerEvent): void {
+      pointers.delete(ev.pointerId);
+      const wasPinch = pinchDist > 0;
+      if (pointers.size < 2) pinchDist = 0;
+      if (pointers.size === 0) {
+        window.removeEventListener("pointermove", onDragMove);
+        window.removeEventListener("pointerup", onDragUp);
+        window.removeEventListener("pointercancel", onDragUp);
+      }
+      if (wasPinch) {
+        down = null;
+        dragging = "";
+        el.classList.remove("gloss-panning");
+        hideBrush();
+        return;
+      }
       if (dragging === "brush" && down) {
         const p1 = toUser(down.cx, down.cy);
         const p2 = toUser(ev.clientX, ev.clientY);
@@ -598,6 +702,32 @@ HTMLWidgets.widget({
         clearHover();
         hideBrush();
         lastBrush = null;
+        return;
+      }
+      // Keyboard pan/zoom (the root is focusable): arrows pan, +/- zoom, 0 resets.
+      if (!opts.zoom || !vb) return;
+      if (ev.key === "0") {
+        resetZoom();
+        ev.preventDefault();
+        return;
+      }
+      const dx = vb.w * 0.12;
+      const dy = vb.h * 0.12;
+      const cx = vb.x + vb.w / 2;
+      const cy = vb.y + vb.h / 2;
+      let handled = true;
+      switch (ev.key) {
+        case "ArrowLeft": vb.x -= dx; break;
+        case "ArrowRight": vb.x += dx; break;
+        case "ArrowUp": vb.y -= dy; break;
+        case "ArrowDown": vb.y += dy; break;
+        case "+": case "=": vb = zoomViewBox(vb, 1.2, cx, cy); break;
+        case "-": case "_": vb = zoomViewBox(vb, 1 / 1.2, cx, cy); break;
+        default: handled = false;
+      }
+      if (handled) {
+        applyViewBox();
+        ev.preventDefault();
       }
     }
 
@@ -614,34 +744,78 @@ HTMLWidgets.widget({
         }
       }
     }
+    // Export filename base (no extension) and PNG resolution scale, both
+    // overridable via `as_widget(export = ...)`. The serialized SVG always
+    // reflects the *current* viewBox, so a zoomed/panned view exports as shown.
+    function exportName(): string {
+      const n = opts.export && opts.export.filename;
+      return n && String(n).length ? String(n) : "plot";
+    }
+    function exportScale(): number {
+      const s = opts.export && opts.export.scale;
+      return s && s > 0 ? s : 1;
+    }
     function saveSvg(): void {
       if (!svgEl) return;
       const s = new XMLSerializer().serializeToString(svgEl);
-      download(new Blob([s], { type: "image/svg+xml;charset=utf-8" }), "plot.svg");
+      download(new Blob([s], { type: "image/svg+xml;charset=utf-8" }), exportName() + ".svg");
     }
-    function savePng(): void {
-      if (!svgEl) return;
+    // Rasterise the current SVG to a canvas; `then(canvas)` on success, `fail()`
+    // if the canvas is tainted/unsupported. Shared by savePng + copyPng.
+    function toCanvas(then: (c: HTMLCanvasElement) => void, fail: () => void): void {
+      if (!svgEl) return fail();
       const s = new XMLSerializer().serializeToString(svgEl);
       const url = URL.createObjectURL(new Blob([s], { type: "image/svg+xml;charset=utf-8" }));
       const img = new Image();
       img.onload = function () {
+        const k = exportScale();
         const canvas = document.createElement("canvas");
-        canvas.width = vb0 ? vb0.w : img.width;
-        canvas.height = vb0 ? vb0.h : img.height;
+        canvas.width = Math.round((vb0 ? vb0.w : img.width) * k);
+        canvas.height = Math.round((vb0 ? vb0.h : img.height) * k);
         const ctx = canvas.getContext("2d");
+        URL.revokeObjectURL(url);
         if (ctx) {
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          canvas.toBlob(function (b) {
-            if (b) download(b, "plot.png");
-          });
+          then(canvas);
+        } else {
+          fail();
         }
-        URL.revokeObjectURL(url);
       };
       img.onerror = function () {
         URL.revokeObjectURL(url);
-        saveSvg(); // canvas tainted / unsupported -> fall back to SVG
+        fail();
       };
       img.src = url;
+    }
+    function savePng(): void {
+      toCanvas(
+        function (canvas) {
+          canvas.toBlob(function (b) {
+            if (b) download(b, exportName() + ".png");
+          });
+        },
+        saveSvg // canvas tainted / unsupported -> fall back to SVG
+      );
+    }
+    // Copy the current view to the clipboard as a PNG (secure-context only).
+    function canCopy(): boolean {
+      const nav = navigator as unknown as { clipboard?: { write?: unknown } };
+      return !!(nav.clipboard && nav.clipboard.write && typeof ClipboardItem !== "undefined");
+    }
+    function copyPng(): void {
+      if (!canCopy()) return;
+      toCanvas(
+        function (canvas) {
+          canvas.toBlob(function (b) {
+            if (!b) return;
+            const nav = navigator as unknown as {
+              clipboard: { write: (items: unknown[]) => Promise<void> };
+            };
+            nav.clipboard.write([new ClipboardItem({ "image/png": b })]).catch(function () {});
+          });
+        },
+        function () {}
+      );
     }
     function toggleFullscreen(): void {
       const anyEl = el as unknown as { requestFullscreen?: () => void };
@@ -684,6 +858,7 @@ HTMLWidgets.widget({
       }
       btn("svg", "SVG", "Download SVG", saveSvg);
       btn("png", "PNG", "Download PNG", savePng);
+      if (canCopy()) btn("copy", "⧉", "Copy PNG to clipboard", copyPng);
       btn("full", "⛶", "Fullscreen", toggleFullscreen);
       el.appendChild(bar);
       toolbarEl = bar;
@@ -703,6 +878,10 @@ HTMLWidgets.widget({
       };
       setRoot("--gloss-dim-opacity", s.dimOpacity);
       setRoot("--gloss-selected-stroke", s.selectedColor);
+      setRoot("--gloss-tip-bg", s.tipBg);
+      setRoot("--gloss-tip-fg", s.tipFg);
+      setRoot("--gloss-tip-fontsize", s.tipFontSize);
+      setRoot("--gloss-tip-maxwidth", s.tipMaxWidth);
       if (s.hoverColor != null && s.hoverColor !== "") {
         el.style.setProperty("--gloss-hl-stroke", s.hoverColor);
         el.classList.add("gloss-hc-all");
@@ -732,11 +911,14 @@ HTMLWidgets.widget({
     }
 
     function wire(svg: SVGSVGElement): void {
-      svg.addEventListener("mousemove", onHoverMove);
-      svg.addEventListener("mouseleave", clearHover);
-      svg.addEventListener("mousedown", onDown);
+      // Pointer events cover mouse + touch + pen in one path.
+      svg.addEventListener("pointermove", onHoverMove);
+      svg.addEventListener("pointerleave", clearHover);
+      svg.addEventListener("pointerdown", onDown);
       svg.addEventListener("click", onClick);
       if (opts.zoom) svg.addEventListener("wheel", onWheel, { passive: false });
+      // Touch drag/pinch shouldn't scroll the page over an interactive plot.
+      if (opts.zoom || opts.brush) el.classList.add("gloss-gesture");
       el.setAttribute("tabindex", "0");
       el.addEventListener("keydown", onKey);
     }
@@ -776,6 +958,16 @@ HTMLWidgets.widget({
         }
         holder.innerHTML = x.svg;
         svgEl = holder.querySelector("svg");
+        // Cache key -> nodes once (the SVG is static after injection), so hover/
+        // select highlighting avoids a `querySelectorAll` per key.
+        nodesByKey = {};
+        if (holder) {
+          const keyed = holder.querySelectorAll("[data-key]");
+          for (let i = 0; i < keyed.length; i++) {
+            const k = keyed[i].getAttribute("data-key");
+            if (k != null) (nodesByKey[k] = nodesByKey[k] || []).push(keyed[i]);
+          }
+        }
         if (svgEl) {
           vb0 = parseViewBox(svgEl.getAttribute("viewBox"));
           if (!vb0) {
@@ -808,5 +1000,6 @@ HTMLWidgets.widget({
   zoomViewBox,
   parseViewBox,
   fmtViewBox,
-  unionBbox
+  unionBbox,
+  sanitizeTip
 };

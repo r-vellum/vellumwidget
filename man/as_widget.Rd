@@ -18,6 +18,9 @@ as_widget(
   hover_color = NULL,
   selected_color = NULL,
   dim_opacity = NULL,
+  tooltip_style = NULL,
+  export_filename = NULL,
+  export_scale = NULL,
   group = NULL,
   crosstalk = NULL,
   select_mode = c("multiple", "single"),
@@ -49,6 +52,17 @@ built-in default. A per-mark \code{hover_color}/\code{selected_color} declared i
 \item{dim_opacity}{Opacity (0–1) of the non-hovered elements while hovering
 (default \code{0.28}); \code{NULL} keeps the default.}
 
+\item{tooltip_style}{Optional named list styling the tooltip box:
+\code{background} / \code{color} (any R or CSS colour), \code{fontsize}, and \code{max_width}
+(any CSS length). \code{NULL} (default) uses the built-in style. Tooltip text is
+rendered as safe HTML — an author-built \verb{tooltip =} (e.g. via \code{glue()}) may
+use \verb{<b>}/\verb{<i>}/\verb{<br>} for bold/italic/line breaks; data values are escaped
+and only those inert tags are honoured (no scripts/attributes).}
+
+\item{export_filename, export_scale}{The download filename base (no extension;
+default \code{"plot"}) and the PNG resolution multiplier (default \code{1}) for the
+toolbar's SVG/PNG export. Exports capture the current (zoomed/panned) view.}
+
 \item{group}{Optional linking group name. Widgets sharing a \code{group} link
 client-side: selecting (or brushing) in one highlights the same data keys in
 the others — no Shiny, no crosstalk. Selection projects by \code{hover_group} when
@@ -74,7 +88,9 @@ its input to a \code{vellum} scene, emits the SVG (with per-element \code{data-k
 the \code{\link[vellum:scene_model]{vellum::scene_model()}} element table, and bundles them with the \code{gloss}
 JavaScript runtime into a self-contained \code{\link[htmlwidgets:createWidget]{htmlwidgets::createWidget()}} widget.
 The result does hover tooltips, hover highlighting, and click selection
-entirely client-side --- no Shiny, no server round-trip.
+entirely client-side --- no Shiny, no server round-trip. Pan/zoom, brush, and
+selection work with mouse, touch (drag to pan, two-finger pinch to zoom), and
+keyboard (arrows pan, \code{+}/\code{-} zoom, \code{0} resets) input.
 }
 \details{
 Interactivity is driven by the keys/metadata a plot declares. In \code{quill} these

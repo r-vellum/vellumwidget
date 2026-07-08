@@ -68,6 +68,7 @@
   var GLOSS_CSS = `
 .gloss-root { position: relative; display: inline-block; max-width: 100%; }
 .gloss-root .gloss-svg-holder svg { max-width: 100%; height: auto; display: block; }
+.gloss-gesture .gloss-svg-holder svg { touch-action: none; }
 .gloss-root.gloss-mode-pan .gloss-svg-holder svg { cursor: grab; }
 .gloss-root.gloss-panning .gloss-svg-holder svg { cursor: grabbing; }
 .gloss-root [data-key] { cursor: pointer; }
@@ -87,9 +88,11 @@
 }
 .gloss-tip {
   position: absolute; left: 0; top: 0; pointer-events: none; z-index: 20;
-  background: rgba(17,24,39,0.94); color: #fff;
-  font: 12px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  padding: 5px 8px; border-radius: 5px; white-space: pre-wrap; max-width: 320px;
+  background: var(--gloss-tip-bg, rgba(17,24,39,0.94)); color: var(--gloss-tip-fg, #fff);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-size: var(--gloss-tip-fontsize, 12px); line-height: 1.45;
+  padding: 5px 8px; border-radius: 5px; white-space: pre-wrap;
+  max-width: var(--gloss-tip-maxwidth, 320px);
   box-shadow: 0 2px 8px rgba(0,0,0,0.25);
   opacity: 0; transition: opacity 0.08s ease; will-change: transform;
 }
@@ -111,7 +114,7 @@
 .gloss-toolbar button:hover { background: rgba(0,0,0,0.08); }
 .gloss-toolbar button.gloss-active { background: rgba(37,99,235,0.18); }
 @media (prefers-color-scheme: dark) {
-  .gloss-tip { background: rgba(243,244,246,0.96); color: #111827; }
+  .gloss-tip { background: var(--gloss-tip-bg, rgba(243,244,246,0.96)); color: var(--gloss-tip-fg, #111827); }
   [data-key].gloss-selected { stroke: var(--gloss-selected-stroke, #f9fafb); }
   .gloss-toolbar { background: rgba(31,41,55,0.9); }
   .gloss-toolbar button { color: #f3f4f6; }
@@ -129,6 +132,14 @@
     const anyCss = window.CSS;
     if (anyCss && typeof anyCss.escape === "function") return anyCss.escape(value);
     return value.replace(/["\\\]\[#.:;,()>~+*^$|=@!%&{}\/\s]/g, "\\$&");
+  }
+  var TIP_TAGS = ["b", "i", "em", "strong", "br", "span"];
+  function sanitizeTip(s) {
+    let out = String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    for (const t of TIP_TAGS) {
+      out = out.replace(new RegExp("&lt;" + t + "&gt;", "gi"), "<" + t + ">").replace(new RegExp("&lt;/" + t + "&gt;", "gi"), "</" + t + ">").replace(new RegExp("&lt;" + t + "\\s*/&gt;", "gi"), "<" + t + ">");
+    }
+    return out;
   }
   function keyOf(target) {
     const el = target;
@@ -178,6 +189,8 @@
       let legendIndex = {};
       let elements = [];
       let selected = {};
+      let nodesByKey = {};
+      let hoverRAF = 0;
       let opts = {
         tooltip: true,
         hover: true,
@@ -215,6 +228,8 @@
         return { x: view.x + fx * view.w, y: view.y + fy * view.h };
       }
       function elementsForKey(k) {
+        const cached = nodesByKey[k];
+        if (cached) return cached;
         if (!holder) return [];
         return Array.prototype.slice.call(holder.querySelectorAll('[data-key="' + cssEscape(k) + '"]'));
       }
@@ -243,7 +258,7 @@
       }
       function showTip(clientX, clientY, k) {
         const m = meta[k];
-        tip.textContent = m && m.tooltip || k;
+        tip.innerHTML = sanitizeTip(m && m.tooltip || k);
         const box = el.getBoundingClientRect();
         tip.style.transform = "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) + "px) translate(-50%, calc(-100% - 12px))";
         tip.classList.add("gloss-show");
@@ -354,22 +369,56 @@
       let down = null;
       let dragging = "";
       let movedDuringDrag = false;
-      function onHoverMove(ev) {
-        if (down) return;
-        let k = keyOf(ev.target);
-        if (k == null && opts.nearest && elements.length) {
-          const u = toUser(ev.clientX, ev.clientY);
-          const rad = vb ? vb.w * 0.02 : 8;
-          k = nearestKey(elements, u.x, u.y, rad);
-        }
+      const pointers = /* @__PURE__ */ new Map();
+      let pinchDist = 0;
+      function hoverAt(k, clientX, clientY) {
         if (k == null) {
           clearHover();
           return;
         }
         setHover(k);
-        if (opts.tooltip) showTip(ev.clientX, ev.clientY, k);
+        if (opts.tooltip) showTip(clientX, clientY, k);
+      }
+      function onHoverMove(ev) {
+        if (down || pinchDist > 0) return;
+        const k = keyOf(ev.target);
+        if (k != null) {
+          if (hoverRAF) {
+            cancelAnimationFrame(hoverRAF);
+            hoverRAF = 0;
+          }
+          hoverAt(k, ev.clientX, ev.clientY);
+          return;
+        }
+        if (!opts.nearest || !elements.length) {
+          clearHover();
+          return;
+        }
+        const cx = ev.clientX;
+        const cy = ev.clientY;
+        if (hoverRAF) return;
+        hoverRAF = requestAnimationFrame(function() {
+          hoverRAF = 0;
+          const u = toUser(cx, cy);
+          const rad = vb ? vb.w * 0.02 : 8;
+          hoverAt(nearestKey(elements, u.x, u.y, rad), cx, cy);
+        });
       }
       function onDragMove(ev) {
+        if (pointers.has(ev.pointerId)) {
+          pointers.set(ev.pointerId, { cx: ev.clientX, cy: ev.clientY });
+        }
+        if (pinchDist > 0 && pointers.size >= 2 && vb) {
+          const pts = Array.from(pointers.values());
+          const d = Math.hypot(pts[0].cx - pts[1].cx, pts[0].cy - pts[1].cy);
+          if (d > 0) {
+            const u = toUser((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
+            vb = zoomViewBox(vb, d / pinchDist, u.x, u.y);
+            applyViewBox();
+            pinchDist = d;
+          }
+          return;
+        }
         if (!down) return;
         if (!dragging) {
           if (Math.abs(ev.clientX - down.cx) + Math.abs(ev.clientY - down.cy) <= DRAG_THRESHOLD) return;
@@ -397,17 +446,41 @@
         }
       }
       function onDown(ev) {
-        if (ev.button !== 0) return;
+        if (ev.pointerType === "mouse" && ev.button !== 0) return;
+        pointers.set(ev.pointerId, { cx: ev.clientX, cy: ev.clientY });
+        window.addEventListener("pointermove", onDragMove);
+        window.addEventListener("pointerup", onDragUp);
+        window.addEventListener("pointercancel", onDragUp);
+        if (pointers.size >= 2 && opts.zoom) {
+          const pts = Array.from(pointers.values());
+          pinchDist = Math.hypot(pts[0].cx - pts[1].cx, pts[0].cy - pts[1].cy);
+          down = null;
+          dragging = "";
+          hideBrush();
+          el.classList.remove("gloss-panning");
+          return;
+        }
         const u = toUser(ev.clientX, ev.clientY);
         down = { cx: ev.clientX, cy: ev.clientY, ux: u.x, uy: u.y };
         dragging = "";
         movedDuringDrag = false;
-        window.addEventListener("mousemove", onDragMove);
-        window.addEventListener("mouseup", onDragUp);
       }
       function onDragUp(ev) {
-        window.removeEventListener("mousemove", onDragMove);
-        window.removeEventListener("mouseup", onDragUp);
+        pointers.delete(ev.pointerId);
+        const wasPinch = pinchDist > 0;
+        if (pointers.size < 2) pinchDist = 0;
+        if (pointers.size === 0) {
+          window.removeEventListener("pointermove", onDragMove);
+          window.removeEventListener("pointerup", onDragUp);
+          window.removeEventListener("pointercancel", onDragUp);
+        }
+        if (wasPinch) {
+          down = null;
+          dragging = "";
+          el.classList.remove("gloss-panning");
+          hideBrush();
+          return;
+        }
         if (dragging === "brush" && down) {
           const p1 = toUser(down.cx, down.cy);
           const p2 = toUser(ev.clientX, ev.clientY);
@@ -452,6 +525,46 @@
           clearHover();
           hideBrush();
           lastBrush = null;
+          return;
+        }
+        if (!opts.zoom || !vb) return;
+        if (ev.key === "0") {
+          resetZoom();
+          ev.preventDefault();
+          return;
+        }
+        const dx = vb.w * 0.12;
+        const dy = vb.h * 0.12;
+        const cx = vb.x + vb.w / 2;
+        const cy = vb.y + vb.h / 2;
+        let handled = true;
+        switch (ev.key) {
+          case "ArrowLeft":
+            vb.x -= dx;
+            break;
+          case "ArrowRight":
+            vb.x += dx;
+            break;
+          case "ArrowUp":
+            vb.y -= dy;
+            break;
+          case "ArrowDown":
+            vb.y += dy;
+            break;
+          case "+":
+          case "=":
+            vb = zoomViewBox(vb, 1.2, cx, cy);
+            break;
+          case "-":
+          case "_":
+            vb = zoomViewBox(vb, 1 / 1.2, cx, cy);
+            break;
+          default:
+            handled = false;
+        }
+        if (handled) {
+          applyViewBox();
+          ev.preventDefault();
         }
       }
       function setMode(m) {
@@ -466,34 +579,73 @@
           }
         }
       }
+      function exportName() {
+        const n = opts.export && opts.export.filename;
+        return n && String(n).length ? String(n) : "plot";
+      }
+      function exportScale() {
+        const s = opts.export && opts.export.scale;
+        return s && s > 0 ? s : 1;
+      }
       function saveSvg() {
         if (!svgEl) return;
         const s = new XMLSerializer().serializeToString(svgEl);
-        download(new Blob([s], { type: "image/svg+xml;charset=utf-8" }), "plot.svg");
+        download(new Blob([s], { type: "image/svg+xml;charset=utf-8" }), exportName() + ".svg");
       }
-      function savePng() {
-        if (!svgEl) return;
+      function toCanvas(then, fail) {
+        if (!svgEl) return fail();
         const s = new XMLSerializer().serializeToString(svgEl);
         const url = URL.createObjectURL(new Blob([s], { type: "image/svg+xml;charset=utf-8" }));
         const img = new Image();
         img.onload = function() {
+          const k = exportScale();
           const canvas = document.createElement("canvas");
-          canvas.width = vb0 ? vb0.w : img.width;
-          canvas.height = vb0 ? vb0.h : img.height;
+          canvas.width = Math.round((vb0 ? vb0.w : img.width) * k);
+          canvas.height = Math.round((vb0 ? vb0.h : img.height) * k);
           const ctx = canvas.getContext("2d");
+          URL.revokeObjectURL(url);
           if (ctx) {
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob(function(b) {
-              if (b) download(b, "plot.png");
-            });
+            then(canvas);
+          } else {
+            fail();
           }
-          URL.revokeObjectURL(url);
         };
         img.onerror = function() {
           URL.revokeObjectURL(url);
-          saveSvg();
+          fail();
         };
         img.src = url;
+      }
+      function savePng() {
+        toCanvas(
+          function(canvas) {
+            canvas.toBlob(function(b) {
+              if (b) download(b, exportName() + ".png");
+            });
+          },
+          saveSvg
+          // canvas tainted / unsupported -> fall back to SVG
+        );
+      }
+      function canCopy() {
+        const nav = navigator;
+        return !!(nav.clipboard && nav.clipboard.write && typeof ClipboardItem !== "undefined");
+      }
+      function copyPng() {
+        if (!canCopy()) return;
+        toCanvas(
+          function(canvas) {
+            canvas.toBlob(function(b) {
+              if (!b) return;
+              const nav = navigator;
+              nav.clipboard.write([new ClipboardItem({ "image/png": b })]).catch(function() {
+              });
+            });
+          },
+          function() {
+          }
+        );
       }
       function toggleFullscreen() {
         const anyEl = el;
@@ -535,6 +687,7 @@
         }
         btn("svg", "SVG", "Download SVG", saveSvg);
         btn("png", "PNG", "Download PNG", savePng);
+        if (canCopy()) btn("copy", "\u29C9", "Copy PNG to clipboard", copyPng);
         btn("full", "\u26F6", "Fullscreen", toggleFullscreen);
         el.appendChild(bar);
         toolbarEl = bar;
@@ -547,6 +700,10 @@
         };
         setRoot("--gloss-dim-opacity", s.dimOpacity);
         setRoot("--gloss-selected-stroke", s.selectedColor);
+        setRoot("--gloss-tip-bg", s.tipBg);
+        setRoot("--gloss-tip-fg", s.tipFg);
+        setRoot("--gloss-tip-fontsize", s.tipFontSize);
+        setRoot("--gloss-tip-maxwidth", s.tipMaxWidth);
         if (s.hoverColor != null && s.hoverColor !== "") {
           el.style.setProperty("--gloss-hl-stroke", s.hoverColor);
           el.classList.add("gloss-hc-all");
@@ -572,11 +729,12 @@
         }
       }
       function wire(svg) {
-        svg.addEventListener("mousemove", onHoverMove);
-        svg.addEventListener("mouseleave", clearHover);
-        svg.addEventListener("mousedown", onDown);
+        svg.addEventListener("pointermove", onHoverMove);
+        svg.addEventListener("pointerleave", clearHover);
+        svg.addEventListener("pointerdown", onDown);
         svg.addEventListener("click", onClick);
         if (opts.zoom) svg.addEventListener("wheel", onWheel, { passive: false });
+        if (opts.zoom || opts.brush) el.classList.add("gloss-gesture");
         el.setAttribute("tabindex", "0");
         el.addEventListener("keydown", onKey);
       }
@@ -614,6 +772,14 @@
           }
           holder.innerHTML = x.svg;
           svgEl = holder.querySelector("svg");
+          nodesByKey = {};
+          if (holder) {
+            const keyed = holder.querySelectorAll("[data-key]");
+            for (let i = 0; i < keyed.length; i++) {
+              const k = keyed[i].getAttribute("data-key");
+              if (k != null) (nodesByKey[k] = nodesByKey[k] || []).push(keyed[i]);
+            }
+          }
           if (svgEl) {
             vb0 = parseViewBox(svgEl.getAttribute("viewBox"));
             if (!vb0) {
@@ -642,6 +808,7 @@
     zoomViewBox,
     parseViewBox,
     fmtViewBox,
-    unionBbox
+    unionBbox,
+    sanitizeTip
   };
 })();

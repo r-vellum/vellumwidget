@@ -104,6 +104,34 @@ test_that("widget theme args normalise to CSS colours in the payload (Option 1)"
   expect_null(s0$dimOpacity)
 })
 
+test_that("tooltip_style normalises into the payload tip* CSS vars", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+  s <- as_widget(scene, tooltip_style = list(
+    background = "steelblue", color = "white", fontsize = "14px", max_width = "260px"
+  ))$x$options$style
+  expect_equal(s$tipBg, "#4682b4") # colour name -> hex
+  expect_equal(s$tipFg, "#ffffff")
+  expect_equal(s$tipFontSize, "14px")
+  expect_equal(s$tipMaxWidth, "260px")
+  # unset -> no tip* entries at all (built-in CSS defaults apply)
+  s0 <- as_widget(scene)$x$options$style
+  expect_null(s0$tipBg)
+  expect_false("tipFontSize" %in% names(s0))
+})
+
+test_that("export_filename / export_scale round-trip into the payload", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+  ex <- as_widget(scene, export_filename = "myplot", export_scale = 2)$x$options$export
+  expect_equal(ex$filename, "myplot")
+  expect_equal(ex$scale, 2)
+  # unset -> empty (JS falls back to "plot" @ 1x)
+  ex0 <- as_widget(scene)$x$options$export
+  expect_null(ex0$filename)
+  expect_null(ex0$scale)
+})
+
 test_that("per-element grammar colours flow into the payload, normalised (Option 2)", {
   skip_if_not_installed("quill")
   df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg)
