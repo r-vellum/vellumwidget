@@ -13,6 +13,7 @@
 
 declare const HTMLWidgets: {
   widget: (w: unknown) => void;
+  shinyMode?: boolean; // true only inside a live Shiny app (gates the Shiny.* calls)
 };
 
 interface Bbox {
@@ -438,6 +439,24 @@ HTMLWidgets.widget({
       el.classList.remove("gloss-hovering");
       clearClass("gloss-hl");
       hideTip();
+      shinyInput("hover", null); // hover ended -> input$<id>_hover = NULL (deduped)
+    }
+
+    // --- Shiny read-back ---
+    // Push an interaction to a Shiny input (`input$<outputId>_<event>`). A no-op
+    // outside a live Shiny app: HTMLWidgets.shinyMode is false in static HTML /
+    // knitr / pkgdown, so those renders never touch Shiny. `el.id` equals the
+    // output id (already module-namespaced), read lazily here. Use
+    // {priority:"event"} for discrete events (click/brush); omit it for state
+    // (the selection set) so re-setting the same value is a server no-op.
+    function shinyInput(event: string, value: unknown, opts?: { priority?: string }): void {
+      const hw = HTMLWidgets as unknown as { shinyMode?: boolean };
+      const sh = (window as unknown as {
+        Shiny?: { setInputValue?: (id: string, v: unknown, o?: unknown) => void };
+      }).Shiny;
+      if (hw.shinyMode && sh && sh.setInputValue && el.id) {
+        sh.setInputValue(el.id + "_" + event, value, opts);
+      }
     }
 
     // --- selection (+ linking) ---
@@ -455,6 +474,7 @@ HTMLWidgets.widget({
       const keys = selectedKeys();
       if (group) busPublish(group, selfToken, keys);
       if (ctSel) ctSel.set(keys);
+      shinyInput("selected", keys); // deduped state -> input$<id>_selected
     }
     function toggleSelect(k: string): void {
       const ks = linkedKeys(k);
@@ -480,11 +500,14 @@ HTMLWidgets.widget({
       refreshSelected();
       broadcast();
     }
-    // A selection arriving from a linked view — apply WITHOUT re-broadcasting.
+    // A selection arriving from a linked view — apply WITHOUT re-broadcasting to
+    // the JS bus (feedback-loop guard), but still surface it to Shiny so the
+    // server sees this widget's true current selection regardless of source.
     function applyLinkedSelection(keys: string[]): void {
       selected = {};
       for (let i = 0; i < keys.length; i++) selected[keys[i]] = true;
       refreshSelected();
+      shinyInput("selected", selectedKeys());
     }
     // Cross-filter (display tier): hide keyed elements whose key is not in the
     // shown set. `null` clears the filter (show everything).
@@ -561,9 +584,10 @@ HTMLWidgets.widget({
     // in progress the drag handlers (below) own movement, so hover backs off.
     function hoverAt(k: string | null, clientX: number, clientY: number): void {
       if (k == null) {
-        clearHover();
+        clearHover(); // emits hover = null
         return;
       }
+      shinyInput("hover", k); // deduped -> re-fires only when the hovered key changes
       setHover(k);
       if (opts.tooltip) showTip(clientX, clientY, k);
     }
@@ -691,7 +715,10 @@ HTMLWidgets.widget({
           x1: Math.max(p1.x, p2.x), y1: Math.max(p1.y, p2.y)
         };
         lastBrush = rect;
-        if (opts.select) setSelection(brushKeys(elements, rect));
+        const hitKeys = brushKeys(elements, rect);
+        if (opts.select) setSelection(hitKeys); // also pushes _selected
+        // The brushed region + keys, as a discrete gesture event.
+        shinyInput("brush", { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 }, { priority: "event" });
         hideBrush();
       }
       el.classList.remove("gloss-panning");
@@ -705,6 +732,9 @@ HTMLWidgets.widget({
         return;
       } // a drag, not a click
       const k = keyOf(ev.target);
+      // A click is a discrete event (fires every time, even on the same mark);
+      // `key` is null for an empty-space click.
+      shinyInput("click", { key: k }, { priority: "event" });
       if (k != null) {
         if (opts.select) toggleSelect(k);
       } else {
@@ -1204,6 +1234,9 @@ HTMLWidgets.widget({
           applyStyling();
           setupA11y();
           setupLinking();
+          // Publish the (empty) initial selection so a (re-)render clears any
+          // stale value the server held from a previous instance.
+          shinyInput("selected", selectedKeys());
         }
       },
 

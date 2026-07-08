@@ -55,6 +55,7 @@ articles:
   navbar: ~
   contents:
   - interactivity
+  - shiny
   components:
     vellum:
       icon: fa-scroll

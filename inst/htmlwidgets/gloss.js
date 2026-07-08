@@ -291,6 +291,14 @@
         el.classList.remove("gloss-hovering");
         clearClass("gloss-hl");
         hideTip();
+        shinyInput("hover", null);
+      }
+      function shinyInput(event, value, opts2) {
+        const hw = HTMLWidgets;
+        const sh = window.Shiny;
+        if (hw.shinyMode && sh && sh.setInputValue && el.id) {
+          sh.setInputValue(el.id + "_" + event, value, opts2);
+        }
       }
       function refreshSelected() {
         clearClass("gloss-selected");
@@ -303,6 +311,7 @@
         const keys = selectedKeys();
         if (group) busPublish(group, selfToken, keys);
         if (ctSel) ctSel.set(keys);
+        shinyInput("selected", keys);
       }
       function toggleSelect(k) {
         const ks = linkedKeys(k);
@@ -332,6 +341,7 @@
         selected = {};
         for (let i = 0; i < keys.length; i++) selected[keys[i]] = true;
         refreshSelected();
+        shinyInput("selected", selectedKeys());
       }
       function applyFilter(showKeys) {
         clearClass("gloss-filtered");
@@ -397,6 +407,7 @@
           clearHover();
           return;
         }
+        shinyInput("hover", k);
         setHover(k);
         if (opts.tooltip) showTip(clientX, clientY, k);
       }
@@ -512,7 +523,9 @@
             y1: Math.max(p1.y, p2.y)
           };
           lastBrush = rect;
-          if (opts.select) setSelection(brushKeys(elements, rect));
+          const hitKeys = brushKeys(elements, rect);
+          if (opts.select) setSelection(hitKeys);
+          shinyInput("brush", { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 }, { priority: "event" });
           hideBrush();
         }
         el.classList.remove("gloss-panning");
@@ -525,6 +538,7 @@
           return;
         }
         const k = keyOf(ev.target);
+        shinyInput("click", { key: k }, { priority: "event" });
         if (k != null) {
           if (opts.select) toggleSelect(k);
         } else {
@@ -970,6 +984,7 @@
             applyStyling();
             setupA11y();
             setupLinking();
+            shinyInput("selected", selectedKeys());
           }
         },
         resize: function() {

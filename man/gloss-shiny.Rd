@@ -25,6 +25,35 @@ render function.
 }
 \description{
 Standard \link[htmlwidgets:htmlwidgets]{htmlwidgets} output/render helpers so a \code{gloss} widget can appear in
-a Shiny app or an interactive R Markdown document. (Server-side selection
-read-back is a future addition; today the widget is client-side only.)
+a Shiny app or an interactive R Markdown document.
+}
+\section{Reading interactions server-side}{
+A widget rendered as \code{glossOutput("plot")} reports the user's interactions back
+to the server as reactive inputs, keyed by the output id. All values are the
+element \strong{data keys} (the \code{data_id} a \code{quill} mark declares); map them back to
+your data by that key.
+
+\describe{
+\item{\code{input$plot_selected}}{Character vector of the currently selected keys
+(click / brush / keyboard, and any selection arriving from a linked widget).
+Updates as state — re-selecting the same set is a no-op. \code{character(0)} when
+nothing is selected.}
+\item{\code{input$plot_click}}{A list \code{list(key=)} for each click; \code{key} is \code{NULL}
+for a click on empty space. An event input — fires on every click, even the
+same mark twice.}
+\item{\code{input$plot_hover}}{The hovered key, or \code{NULL} when the pointer leaves a
+mark. Updates as state (re-fires only when the hovered key changes).}
+\item{\code{input$plot_brush}}{A list \code{list(keys=, x0=, y0=, x1=, y1=)} when a
+brush gesture completes: the selected keys and the brushed rectangle in the
+scene's device-pixel (viewBox) coordinates. An event input.}
+}
+
+These are emitted only inside a live Shiny session; a static render (knitr,
+pkgdown, \code{htmltools::save_html()}) produces identical output and no input
+traffic. Driving the widget \emph{from} the server (setting selection without a
+re-render) is a planned addition.
+}
+
+\seealso{
+\code{\link[=as_widget]{as_widget()}}
 }

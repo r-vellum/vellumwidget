@@ -563,5 +563,79 @@ ok(!elL.querySelector('[data-key="q1"]').classList.contains("gloss-selected"), "
     "a11y: ArrowRight skips a cross-filtered (hidden) mark");
 }
 
+// ===================== Shiny read-back (input bindings) =====================
+// The bundle reads HTMLWidgets.shinyMode + window.Shiny lazily at emit time, so
+// we drive them from the harness. el.id stands in for the Shiny outputId.
+const shinyElements = [
+  { key: "x", tooltip: "X", x0: 1, y0: 1, x1: 10, y1: 10 },
+  { key: "y", tooltip: "Y", x0: 40, y0: 1, x1: 49, y1: 10 }
+];
+function mountShiny(id, calls) {
+  window.Shiny = { setInputValue: (iid, v, o) => calls.push({ id: iid, v: v, o: o }) };
+  HTMLWidgets.shinyMode = true;
+  const e = document.createElement("div");
+  e.id = id;
+  document.body.appendChild(e);
+  const inst = widgetDef.factory(e, 100, 100);
+  inst.renderValue({
+    svg: svg2paths,
+    elements: shinyElements,
+    options: { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, selectMode: "multiple" }
+  });
+  return e;
+}
+{
+  const calls = [];
+  const e = mountShiny("myplot", calls);
+  const svgE = e.querySelector("svg");
+  const last = (name) => calls.filter((c) => c.id === "myplot_" + name).pop();
+
+  ok(!!last("selected") && last("selected").v.length === 0, "shiny: initial render pushes an empty _selected");
+
+  calls.length = 0;
+  fireOn(svgE, "click", e.querySelector('[data-key="x"]'));
+  ok(last("selected") && JSON.stringify(last("selected").v) === JSON.stringify(["x"]),
+    "shiny: clicking a mark pushes _selected = [key]");
+  ok(!(last("selected").o && last("selected").o.priority === "event"),
+    "shiny: _selected is deduped state (no priority:event)");
+
+  calls.length = 0;
+  fireOn(svgE, "click", e.querySelector('[data-key="x"]')); // toggle off
+  ok(last("selected") && last("selected").v.length === 0, "shiny: toggling a mark off pushes empty _selected");
+
+  // _click: discrete event, carries the key + priority:"event"
+  calls.length = 0;
+  fireOn(svgE, "click", e.querySelector('[data-key="y"]'));
+  ok(last("click") && last("click").v.key === "y" && last("click").o && last("click").o.priority === "event",
+    "shiny: click pushes _click = {key} with priority:event");
+
+  // _hover: deduped, carries the hovered key
+  calls.length = 0;
+  fireOn(svgE, "pointermove", e.querySelector('[data-key="x"]'));
+  ok(last("hover") && last("hover").v === "x", "shiny: hover pushes _hover = key");
+  ok(!(last("hover").o && last("hover").o.priority === "event"), "shiny: _hover is deduped (no priority:event)");
+
+  // _brush: a completed brush drag emits {keys, rect} as an event
+  calls.length = 0;
+  firePointer(svgE, "pointerdown", 1, 5, 5);
+  firePointer(svgE, "pointermove", 1, 55, 25, true);
+  firePointer(svgE, "pointerup", 1, 55, 25, true);
+  ok(last("brush") && Array.isArray(last("brush").v.keys) && typeof last("brush").v.x0 === "number" &&
+    last("brush").o && last("brush").o.priority === "event",
+    "shiny: brush pushes _brush = {keys, x0..x1} with priority:event");
+
+  HTMLWidgets.shinyMode = false;
+  delete window.Shiny;
+}
+// non-Shiny safety: shinyMode off -> zero Shiny calls even if window.Shiny exists
+{
+  const calls = [];
+  window.Shiny = { setInputValue: (iid, v, o) => calls.push({ id: iid, v: v, o: o }) };
+  const e = mount({ svg: svg2paths, elements: shinyElements, options: { select: true } });
+  fireOn(e.querySelector("svg"), "click", e.querySelector('[data-key="x"]'));
+  ok(calls.length === 0, "shiny: no Shiny calls when shinyMode is off (static / knitr safe)");
+  delete window.Shiny;
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

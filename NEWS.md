@@ -1,5 +1,15 @@
 # gloss (development version)
 
+* **Shiny input read-back.** A widget rendered with `glossOutput()` now reports the
+  user's interactions to the server as reactive inputs keyed by the output id:
+  `input$<id>_selected` (selected keys, state), `input$<id>_click` (`list(key=)`,
+  event), `input$<id>_hover` (hovered key or `NULL`, state), and
+  `input$<id>_brush` (`list(keys=, x0=, y0=, x1=, y1=)`, event). Values are element
+  data keys, so they map straight back to your data. Emitted only in a live Shiny
+  session — a static render is unchanged and produces no input traffic. See the new
+  *Using gloss in Shiny* article. (Driving the widget from the server — a
+  `gloss_proxy()` — is a planned follow-up.)
+
 * **Accessibility (`a11y = TRUE`, on by default).** The interactive widget is now
   keyboard- and screen-reader-navigable, not a mute image:
   * the SVG is announced as an interactive chart (`role="graphics-document"` +
