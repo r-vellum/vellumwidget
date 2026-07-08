@@ -524,6 +524,21 @@ ok(!elL.querySelector('[data-key="q1"]').classList.contains("gloss-selected"), "
   ok(elOff.querySelector("svg").getAttribute("role") === "img", "a11y off: svg role is left untouched");
   ok(elOff.querySelector('[data-key="x"]').getAttribute("tabindex") === null, "a11y off: marks are not focusable");
   ok(!elOff.querySelector("table.gloss-data-table"), "a11y off: no data table is built");
+
+  // as_widget(alt=) must win over vellum's inherited <title>/<desc>: vellum labels
+  // the SVG with aria-labelledby, which outranks aria-label, so the widget must
+  // drop it for the explicit alt to become the accessible name.
+  const elAlt = mount({
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" role="img" aria-labelledby="p-t p-d">' +
+      '<title id="p-t">Auto title</title><desc id="p-d">Auto description.</desc>' +
+      '<path data-key="x" d="M1 1h9v9z"/></svg>',
+    elements: [{ key: "x", tooltip: "X", x0: 1, y0: 1, x1: 10, y1: 10 }],
+    options: { tooltip: true, hover: true, select: true, a11y: true, alt: "My explicit alt.", selectMode: "multiple" }
+  });
+  const svgAlt = elAlt.querySelector("svg");
+  ok(svgAlt.getAttribute("aria-label") === "My explicit alt.", "alt: explicit alt becomes the aria-label");
+  ok(svgAlt.getAttribute("aria-labelledby") === null, "alt: vellum's aria-labelledby is removed so alt wins the accessible name");
 }
 
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");

@@ -867,6 +867,7 @@
         svgEl.setAttribute("role", "graphics-document");
         svgEl.setAttribute("aria-roledescription", "interactive chart");
         if (opts.alt) {
+          svgEl.removeAttribute("aria-labelledby");
           svgEl.setAttribute("aria-label", opts.alt);
         } else if (!svgEl.getAttribute("aria-labelledby") && !svgEl.getAttribute("aria-label")) {
           svgEl.setAttribute("aria-label", "Interactive chart");

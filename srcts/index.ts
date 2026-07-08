@@ -1081,6 +1081,9 @@ HTMLWidgets.widget({
       svgEl.setAttribute("role", "graphics-document");
       svgEl.setAttribute("aria-roledescription", "interactive chart");
       if (opts.alt) {
+        // Drop the name vellum referenced via aria-labelledby (its <title>/<desc>);
+        // aria-labelledby outranks aria-label, so it would otherwise defeat `alt`.
+        svgEl.removeAttribute("aria-labelledby");
         svgEl.setAttribute("aria-label", opts.alt);
       } else if (!svgEl.getAttribute("aria-labelledby") && !svgEl.getAttribute("aria-label")) {
         // No name from vellum's <title>/<desc> and none given: label generically.
