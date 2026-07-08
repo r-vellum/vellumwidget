@@ -40,6 +40,8 @@ interface Options {
   zoom: boolean;
   toolbar: boolean;
   nearest: boolean;
+  a11y: boolean; // screen-reader + keyboard accessibility (focusable marks, live region, data table)
+  alt?: string | null; // accessible label for the whole chart (falls back to the SVG's <title>/<desc>)
   selectMode: "single" | "multiple";
   style?: StyleOpts;
   group?: string | null; // own cross-widget linking group (gloss <-> gloss)
@@ -177,6 +179,19 @@ const GLOSS_CSS = `
   stroke: var(--gloss-selected-stroke, #111827);
   stroke-width: var(--gloss-selected-width, 1.4px); paint-order: stroke fill;
 }
+/* Keyboard focus ring on the currently-traversed mark (a11y). */
+[data-key].gloss-focus {
+  stroke: var(--gloss-focus-stroke, #2563eb);
+  stroke-width: var(--gloss-focus-width, 2.5px); paint-order: stroke fill;
+}
+[data-key]:focus { outline: none; }
+[data-key]:focus-visible { outline: 2px solid var(--gloss-focus-stroke, #2563eb); outline-offset: 1px; }
+/* Visually-hidden but exposed to assistive technology (live region + data table). */
+.gloss-sr-only {
+  position: absolute !important; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden; border: 0;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
 .gloss-tip {
   position: absolute; left: 0; top: 0; pointer-events: none; z-index: 20;
   background: var(--gloss-tip-bg, rgba(17,24,39,0.94)); color: var(--gloss-tip-fg, #fff);
@@ -245,6 +260,12 @@ function sanitizeTip(s: string): string {
       .replace(new RegExp("&lt;" + t + "\\s*/&gt;", "gi"), "<" + t + ">");
   }
   return out;
+}
+
+// Plain-text form of a (possibly HTML) tooltip, for an aria-label / table cell:
+// drop tags, collapse whitespace. No DOM, so it is safe in any context.
+function stripTags(s: string): string {
+  return String(s).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function keyOf(target: EventTarget | null): string | null {
@@ -326,8 +347,13 @@ HTMLWidgets.widget({
     let hoverRAF = 0; // rAF handle throttling the O(n) nearest-mark scan
     let opts: Options = {
       tooltip: true, hover: true, select: true, brush: true, zoom: true,
-      toolbar: true, nearest: true, selectMode: "multiple"
+      toolbar: true, nearest: true, a11y: true, selectMode: "multiple"
     };
+    // --- accessibility state ---
+    let liveRegion: HTMLElement | null = null; // aria-live announcer
+    let tableEl: HTMLElement | null = null; // hidden data-table fallback
+    let focusables: { key: string; node: Element }[] = []; // roving-tabindex marks, in draw order
+    let focusIdx = -1; // index into focusables of the currently-focused mark, or -1
     let vb0: ViewBox | null = null; // original viewBox (for reset)
     let vb: ViewBox | null = null; // current viewBox
     let mode: "brush" | "pan" = "brush";
@@ -700,9 +726,35 @@ HTMLWidgets.widget({
       if (ev.key === "Escape") {
         clearSelection();
         clearHover();
+        clearClass("gloss-focus");
         hideBrush();
         lastBrush = null;
+        // Leave mark-traversal mode, returning focus to the widget as a whole.
+        if (markFocused() && typeof el.focus === "function") el.focus();
+        focusIdx = -1;
         return;
+      }
+      // Accessibility: while a mark has keyboard focus, arrows traverse marks
+      // (roving tabindex) and Enter/Space toggles its selection — this takes
+      // precedence over pan/zoom, which owns the arrows when no mark is focused.
+      if (opts.a11y && markFocused()) {
+        const k = focusables[focusIdx].key;
+        if (ev.key === "ArrowRight" || ev.key === "ArrowDown") {
+          focusRoving(focusIdx + 1);
+          ev.preventDefault();
+          return;
+        }
+        if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") {
+          focusRoving(focusIdx - 1);
+          ev.preventDefault();
+          return;
+        }
+        if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
+          if (opts.select) toggleSelect(k);
+          announce(a11yLabel(k) + (selected[k] ? ", selected" : ", not selected"));
+          ev.preventDefault();
+          return;
+        }
       }
       // Keyboard pan/zoom (the root is focusable): arrows pan, +/- zoom, 0 resets.
       if (!opts.zoom || !vb) return;
@@ -910,6 +962,162 @@ HTMLWidgets.widget({
       }
     }
 
+    // --- accessibility (screen reader + keyboard traversal) ---
+    // A stable, plain-text label for a mark: its tooltip (tags stripped) or key.
+    function a11yLabel(k: string): string {
+      const m = meta[k];
+      return m && m.tooltip ? stripTags(m.tooltip) : k;
+    }
+    // The label plus current selection state, for a spoken announcement.
+    function focusLabel(k: string): string {
+      return a11yLabel(k) + (selected[k] ? ", selected" : "");
+    }
+    // Speak `msg` through the polite live region (no-op if a11y is off).
+    function announce(msg: string): void {
+      if (liveRegion) liveRegion.textContent = msg;
+    }
+    // Reflect that mark `focusables[i]` is the focused one: roving index, focus
+    // ring + highlight, and a spoken announcement. Pure state/DOM update — does
+    // not itself move DOM focus (callers decide), so it is reliable regardless of
+    // how focus arrived (Tab, arrow keys, or assistive tech).
+    function showMarkFocus(i: number): void {
+      focusIdx = i;
+      const k = focusables[i].key;
+      clearClass("gloss-focus");
+      addClassForKeys([k], "gloss-focus");
+      setHover(k);
+      announce(focusLabel(k));
+    }
+    // A mark received DOM focus (Tab or assistive tech): adopt it as the cursor.
+    function onMarkFocus(ev: FocusEvent): void {
+      const k = keyOf(ev.target);
+      if (k == null) return;
+      const i = focusables.findIndex((f) => f.key === k);
+      if (i >= 0) showMarkFocus(i);
+    }
+    // Focus left a mark: if it did not move to another mark, exit traversal mode.
+    function onMarkBlur(ev: FocusEvent): void {
+      const to = keyOf((ev as unknown as { relatedTarget: EventTarget | null }).relatedTarget);
+      if (to == null) {
+        focusIdx = -1;
+        clearClass("gloss-focus");
+      }
+    }
+    // Move the roving tabindex to focusable `i` (clamped), update state, and move
+    // DOM focus to it.
+    function focusRoving(i: number): void {
+      if (!focusables.length) return;
+      if (i < 0) i = 0;
+      if (i >= focusables.length) i = focusables.length - 1;
+      if (focusIdx >= 0 && focusables[focusIdx]) {
+        focusables[focusIdx].node.setAttribute("tabindex", "-1");
+      }
+      const f = focusables[i];
+      f.node.setAttribute("tabindex", "0");
+      showMarkFocus(i);
+      const n = f.node as unknown as HTMLElement;
+      if (typeof n.focus === "function") n.focus();
+    }
+    // In mark-traversal mode? (a mark is the current keyboard cursor). Driven by
+    // focusIdx rather than document.activeElement so it is robust across browsers
+    // and assistive tech.
+    function markFocused(): boolean {
+      return opts.a11y && focusIdx >= 0 && !!focusables[focusIdx];
+    }
+    // A visually-hidden data table listing every mark (key + description), so a
+    // screen-reader user gets the underlying data even without traversing marks.
+    function buildDataTable(): void {
+      if (tableEl) {
+        tableEl.remove();
+        tableEl = null;
+      }
+      if (!opts.a11y || !elements.length) return;
+      const tbl = document.createElement("table");
+      tbl.className = "gloss-sr-only gloss-data-table";
+      const cap = document.createElement("caption");
+      cap.textContent = "Data table";
+      tbl.appendChild(cap);
+      const head = document.createElement("tr");
+      const h1 = document.createElement("th");
+      h1.setAttribute("scope", "col");
+      h1.textContent = "Item";
+      const h2 = document.createElement("th");
+      h2.setAttribute("scope", "col");
+      h2.textContent = "Description";
+      head.appendChild(h1);
+      head.appendChild(h2);
+      tbl.appendChild(head);
+      const seen: Record<string, boolean> = {};
+      for (let i = 0; i < elements.length; i++) {
+        const k = elements[i].key;
+        if (seen[k]) continue;
+        seen[k] = true;
+        const tr = document.createElement("tr");
+        const th = document.createElement("th");
+        th.setAttribute("scope", "row");
+        th.textContent = k;
+        const td = document.createElement("td");
+        td.textContent = a11yLabel(k);
+        tr.appendChild(th);
+        tr.appendChild(td);
+        tbl.appendChild(tr);
+      }
+      el.appendChild(tbl);
+      tableEl = tbl;
+    }
+    // Make the rendered scene an accessible, keyboard-navigable chart: label the
+    // svg, expose an aria-live announcer + a data-table fallback, and make each
+    // mark a focusable graphics-symbol carrying a roving tabindex. All gated on
+    // opts.a11y so the default output is unchanged when it is off.
+    function setupA11y(): void {
+      focusables = [];
+      focusIdx = -1;
+      if (!opts.a11y || !svgEl) {
+        buildDataTable(); // (a no-op when a11y is off — also clears a stale table)
+        return;
+      }
+      // The widget is an interactive chart, not a static image (role="img"
+      // would hide the focusable marks from assistive tech).
+      svgEl.setAttribute("role", "graphics-document");
+      svgEl.setAttribute("aria-roledescription", "interactive chart");
+      if (opts.alt) {
+        svgEl.setAttribute("aria-label", opts.alt);
+      } else if (!svgEl.getAttribute("aria-labelledby") && !svgEl.getAttribute("aria-label")) {
+        // No name from vellum's <title>/<desc> and none given: label generically.
+        svgEl.setAttribute("aria-label", "Interactive chart");
+      }
+
+      if (!liveRegion) {
+        liveRegion = document.createElement("div");
+        liveRegion.className = "gloss-sr-only";
+        liveRegion.setAttribute("role", "status");
+        liveRegion.setAttribute("aria-live", "polite");
+        el.appendChild(liveRegion);
+      } else {
+        liveRegion.textContent = "";
+      }
+
+      const seen: Record<string, boolean> = {};
+      for (let i = 0; i < elements.length; i++) {
+        const k = elements[i].key;
+        if (seen[k]) continue;
+        const nodes = nodesByKey[k];
+        if (!nodes || !nodes.length) continue;
+        seen[k] = true;
+        const node = nodes[0];
+        node.setAttribute("role", "graphics-symbol");
+        node.setAttribute("tabindex", "-1");
+        node.setAttribute("aria-label", a11yLabel(k));
+        node.addEventListener("focus", onMarkFocus as EventListener);
+        node.addEventListener("blur", onMarkBlur as EventListener);
+        focusables.push({ key: k, node });
+      }
+      // The first mark carries tabindex=0 so a Tab press enters the mark set.
+      if (focusables.length) focusables[0].node.setAttribute("tabindex", "0");
+
+      buildDataTable();
+    }
+
     function wire(svg: SVGSVGElement): void {
       // Pointer events cover mouse + touch + pen in one path.
       svg.addEventListener("pointermove", onHoverMove);
@@ -926,7 +1134,7 @@ HTMLWidgets.widget({
     return {
       renderValue: function (x: Payload) {
         opts = Object.assign(
-          { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, selectMode: "multiple" },
+          { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple" },
           x.options || {}
         );
         elements = x.elements || [];
@@ -980,6 +1188,7 @@ HTMLWidgets.widget({
           buildToolbar();
           setMode("brush");
           applyStyling();
+          setupA11y();
           setupLinking();
         }
       },

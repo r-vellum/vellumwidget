@@ -29,6 +29,17 @@
 #'   pan-zoom (via the SVG `viewBox`), and the on-hover toolbar (all `TRUE`).
 #' @param nearest When `TRUE` (default), hover snaps to the nearest mark within a
 #'   small radius when the cursor is not directly over one (helps sparse points).
+#' @param a11y Accessibility (default `TRUE`). Makes the widget a keyboard- and
+#'   screen-reader-navigable chart: the SVG is labelled as an interactive chart
+#'   (`role="graphics-document"`), each mark is a focusable `graphics-symbol` with
+#'   a roving tabindex (arrow keys move between marks, Enter/Space select, Escape
+#'   exits), a polite `aria-live` region announces the focused/selected mark, and
+#'   a visually-hidden data table lists every mark for assistive tech. `FALSE`
+#'   restores the previous behaviour (no chart semantics, marks not focusable).
+#' @param alt Accessible label (alt text) for the chart as a whole. Defaults to
+#'   the scene's own title/description — which `quill` sets automatically from the
+#'   plot title and [quill::plot_alt()] — so an explicit value is only needed for
+#'   a raw `vellum` scene or to override.
 #' @param hover_color,selected_color Outline colours for hovered / selected
 #'   elements (any R or CSS colour), applied widget-wide. `hover_color = NULL`
 #'   (default) keeps the plain dim-others hover; `selected_color = NULL` uses the
@@ -70,6 +81,7 @@
 as_widget <- function(x, width = NULL, height = NULL,
                       tooltip = TRUE, hover = TRUE, select = TRUE,
                       brush = TRUE, zoom = TRUE, toolbar = TRUE, nearest = TRUE,
+                      a11y = TRUE, alt = NULL,
                       hover_color = NULL, selected_color = NULL, dim_opacity = NULL,
                       tooltip_style = NULL,
                       export_filename = NULL, export_scale = NULL,
@@ -94,6 +106,8 @@ as_widget <- function(x, width = NULL, height = NULL,
       zoom = isTRUE(zoom),
       toolbar = isTRUE(toolbar),
       nearest = isTRUE(nearest),
+      a11y = isTRUE(a11y),
+      alt = if (is.null(alt)) NULL else as.character(alt),
       selectMode = select_mode,
       group = group,
       crosstalk = ct_group,

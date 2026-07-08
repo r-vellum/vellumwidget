@@ -86,6 +86,19 @@
   stroke: var(--gloss-selected-stroke, #111827);
   stroke-width: var(--gloss-selected-width, 1.4px); paint-order: stroke fill;
 }
+/* Keyboard focus ring on the currently-traversed mark (a11y). */
+[data-key].gloss-focus {
+  stroke: var(--gloss-focus-stroke, #2563eb);
+  stroke-width: var(--gloss-focus-width, 2.5px); paint-order: stroke fill;
+}
+[data-key]:focus { outline: none; }
+[data-key]:focus-visible { outline: 2px solid var(--gloss-focus-stroke, #2563eb); outline-offset: 1px; }
+/* Visually-hidden but exposed to assistive technology (live region + data table). */
+.gloss-sr-only {
+  position: absolute !important; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden; border: 0;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
 .gloss-tip {
   position: absolute; left: 0; top: 0; pointer-events: none; z-index: 20;
   background: var(--gloss-tip-bg, rgba(17,24,39,0.94)); color: var(--gloss-tip-fg, #fff);
@@ -140,6 +153,9 @@
       out = out.replace(new RegExp("&lt;" + t + "&gt;", "gi"), "<" + t + ">").replace(new RegExp("&lt;/" + t + "&gt;", "gi"), "</" + t + ">").replace(new RegExp("&lt;" + t + "\\s*/&gt;", "gi"), "<" + t + ">");
     }
     return out;
+  }
+  function stripTags(s) {
+    return String(s).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   }
   function keyOf(target) {
     const el = target;
@@ -199,8 +215,13 @@
         zoom: true,
         toolbar: true,
         nearest: true,
+        a11y: true,
         selectMode: "multiple"
       };
+      let liveRegion = null;
+      let tableEl = null;
+      let focusables = [];
+      let focusIdx = -1;
       let vb0 = null;
       let vb = null;
       let mode = "brush";
@@ -523,9 +544,31 @@
         if (ev.key === "Escape") {
           clearSelection();
           clearHover();
+          clearClass("gloss-focus");
           hideBrush();
           lastBrush = null;
+          if (markFocused() && typeof el.focus === "function") el.focus();
+          focusIdx = -1;
           return;
+        }
+        if (opts.a11y && markFocused()) {
+          const k = focusables[focusIdx].key;
+          if (ev.key === "ArrowRight" || ev.key === "ArrowDown") {
+            focusRoving(focusIdx + 1);
+            ev.preventDefault();
+            return;
+          }
+          if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") {
+            focusRoving(focusIdx - 1);
+            ev.preventDefault();
+            return;
+          }
+          if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
+            if (opts.select) toggleSelect(k);
+            announce(a11yLabel(k) + (selected[k] ? ", selected" : ", not selected"));
+            ev.preventDefault();
+            return;
+          }
         }
         if (!opts.zoom || !vb) return;
         if (ev.key === "0") {
@@ -728,6 +771,133 @@
           }
         }
       }
+      function a11yLabel(k) {
+        const m = meta[k];
+        return m && m.tooltip ? stripTags(m.tooltip) : k;
+      }
+      function focusLabel(k) {
+        return a11yLabel(k) + (selected[k] ? ", selected" : "");
+      }
+      function announce(msg) {
+        if (liveRegion) liveRegion.textContent = msg;
+      }
+      function showMarkFocus(i) {
+        focusIdx = i;
+        const k = focusables[i].key;
+        clearClass("gloss-focus");
+        addClassForKeys([k], "gloss-focus");
+        setHover(k);
+        announce(focusLabel(k));
+      }
+      function onMarkFocus(ev) {
+        const k = keyOf(ev.target);
+        if (k == null) return;
+        const i = focusables.findIndex((f) => f.key === k);
+        if (i >= 0) showMarkFocus(i);
+      }
+      function onMarkBlur(ev) {
+        const to = keyOf(ev.relatedTarget);
+        if (to == null) {
+          focusIdx = -1;
+          clearClass("gloss-focus");
+        }
+      }
+      function focusRoving(i) {
+        if (!focusables.length) return;
+        if (i < 0) i = 0;
+        if (i >= focusables.length) i = focusables.length - 1;
+        if (focusIdx >= 0 && focusables[focusIdx]) {
+          focusables[focusIdx].node.setAttribute("tabindex", "-1");
+        }
+        const f = focusables[i];
+        f.node.setAttribute("tabindex", "0");
+        showMarkFocus(i);
+        const n = f.node;
+        if (typeof n.focus === "function") n.focus();
+      }
+      function markFocused() {
+        return opts.a11y && focusIdx >= 0 && !!focusables[focusIdx];
+      }
+      function buildDataTable() {
+        if (tableEl) {
+          tableEl.remove();
+          tableEl = null;
+        }
+        if (!opts.a11y || !elements.length) return;
+        const tbl = document.createElement("table");
+        tbl.className = "gloss-sr-only gloss-data-table";
+        const cap = document.createElement("caption");
+        cap.textContent = "Data table";
+        tbl.appendChild(cap);
+        const head = document.createElement("tr");
+        const h1 = document.createElement("th");
+        h1.setAttribute("scope", "col");
+        h1.textContent = "Item";
+        const h2 = document.createElement("th");
+        h2.setAttribute("scope", "col");
+        h2.textContent = "Description";
+        head.appendChild(h1);
+        head.appendChild(h2);
+        tbl.appendChild(head);
+        const seen = {};
+        for (let i = 0; i < elements.length; i++) {
+          const k = elements[i].key;
+          if (seen[k]) continue;
+          seen[k] = true;
+          const tr = document.createElement("tr");
+          const th = document.createElement("th");
+          th.setAttribute("scope", "row");
+          th.textContent = k;
+          const td = document.createElement("td");
+          td.textContent = a11yLabel(k);
+          tr.appendChild(th);
+          tr.appendChild(td);
+          tbl.appendChild(tr);
+        }
+        el.appendChild(tbl);
+        tableEl = tbl;
+      }
+      function setupA11y() {
+        focusables = [];
+        focusIdx = -1;
+        if (!opts.a11y || !svgEl) {
+          buildDataTable();
+          return;
+        }
+        svgEl.setAttribute("role", "graphics-document");
+        svgEl.setAttribute("aria-roledescription", "interactive chart");
+        if (opts.alt) {
+          svgEl.setAttribute("aria-label", opts.alt);
+        } else if (!svgEl.getAttribute("aria-labelledby") && !svgEl.getAttribute("aria-label")) {
+          svgEl.setAttribute("aria-label", "Interactive chart");
+        }
+        if (!liveRegion) {
+          liveRegion = document.createElement("div");
+          liveRegion.className = "gloss-sr-only";
+          liveRegion.setAttribute("role", "status");
+          liveRegion.setAttribute("aria-live", "polite");
+          el.appendChild(liveRegion);
+        } else {
+          liveRegion.textContent = "";
+        }
+        const seen = {};
+        for (let i = 0; i < elements.length; i++) {
+          const k = elements[i].key;
+          if (seen[k]) continue;
+          const nodes = nodesByKey[k];
+          if (!nodes || !nodes.length) continue;
+          seen[k] = true;
+          const node = nodes[0];
+          node.setAttribute("role", "graphics-symbol");
+          node.setAttribute("tabindex", "-1");
+          node.setAttribute("aria-label", a11yLabel(k));
+          node.addEventListener("focus", onMarkFocus);
+          node.addEventListener("blur", onMarkBlur);
+          focusables.push({ key: k, node });
+        }
+        if (focusables.length) focusables[0].node.setAttribute("tabindex", "0");
+        buildDataTable();
+      }
       function wire(svg) {
         svg.addEventListener("pointermove", onHoverMove);
         svg.addEventListener("pointerleave", clearHover);
@@ -741,7 +911,7 @@
       return {
         renderValue: function(x) {
           opts = Object.assign(
-            { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, selectMode: "multiple" },
+            { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple" },
             x.options || {}
           );
           elements = x.elements || [];
@@ -792,6 +962,7 @@
             buildToolbar();
             setMode("brush");
             applyStyling();
+            setupA11y();
             setupLinking();
           }
         },

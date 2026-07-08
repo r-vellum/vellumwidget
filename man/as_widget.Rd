@@ -15,6 +15,8 @@ as_widget(
   zoom = TRUE,
   toolbar = TRUE,
   nearest = TRUE,
+  a11y = TRUE,
+  alt = NULL,
   hover_color = NULL,
   selected_color = NULL,
   dim_opacity = NULL,
@@ -42,6 +44,19 @@ pan-zoom (via the SVG \code{viewBox}), and the on-hover toolbar (all \code{TRUE}
 
 \item{nearest}{When \code{TRUE} (default), hover snaps to the nearest mark within a
 small radius when the cursor is not directly over one (helps sparse points).}
+
+\item{a11y}{Accessibility (default \code{TRUE}). Makes the widget a keyboard- and
+screen-reader-navigable chart: the SVG is labelled as an interactive chart
+(\code{role="graphics-document"}), each mark is a focusable \code{graphics-symbol} with
+a roving tabindex (arrow keys move between marks, Enter/Space select, Escape
+exits), a polite \code{aria-live} region announces the focused/selected mark, and
+a visually-hidden data table lists every mark for assistive tech. \code{FALSE}
+restores the previous behaviour (no chart semantics, marks not focusable).}
+
+\item{alt}{Accessible label (alt text) for the chart as a whole. Defaults to
+the scene's own title/description — which \code{quill} sets automatically from the
+plot title and \code{\link[quill:plot_alt]{quill::plot_alt()}} — so an explicit value is only needed for
+a raw \code{vellum} scene or to override.}
 
 \item{hover_color, selected_color}{Outline colours for hovered / selected
 elements (any R or CSS colour), applied widget-wide. \code{hover_color = NULL}

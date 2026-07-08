@@ -76,6 +76,17 @@ test_that("Phase 4 option toggles round-trip into the payload", {
   expect_false(o2$brush || o2$zoom || o2$toolbar || o2$nearest)
 })
 
+test_that("a11y is on by default and round-trips (with alt) into the payload", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+  o <- as_widget(scene)$x$options
+  expect_true(o$a11y)
+  expect_null(o$alt) # defaults to the scene's own title/desc
+  o2 <- as_widget(scene, a11y = FALSE, alt = "A single red point.")$x$options
+  expect_false(o2$a11y)
+  expect_equal(o2$alt, "A single red point.")
+})
+
 test_that("hover_group is carried into the element table", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(

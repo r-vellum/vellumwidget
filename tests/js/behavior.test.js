@@ -465,5 +465,66 @@ ok(
 );
 ok(!elL.querySelector('[data-key="q1"]').classList.contains("gloss-selected"), "other series is not selected");
 
+// ===================== accessibility (a11y): SR + keyboard =====================
+{
+  const elA11y = mount({
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="30" viewBox="0 0 60 30">' +
+      '<path data-key="x" d="M1 1h9v9z"/><path data-key="y" d="M40 1h9v9z"/></svg>',
+    elements: [
+      { key: "x", tooltip: "Point <b>X</b>", x0: 1, y0: 1, x1: 10, y1: 10 },
+      { key: "y", tooltip: "Point Y", x0: 40, y0: 1, x1: 49, y1: 10 }
+    ],
+    options: {
+      tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true,
+      nearest: true, a11y: true, selectMode: "multiple"
+    }
+  });
+  const svgA = elA11y.querySelector("svg");
+  const xNode = elA11y.querySelector('[data-key="x"]');
+  const yNode = elA11y.querySelector('[data-key="y"]');
+
+  ok(svgA.getAttribute("role") === "graphics-document", "a11y: svg is a graphics-document (not role=img)");
+  ok(svgA.getAttribute("aria-roledescription") === "interactive chart", "a11y: svg has an interactive-chart roledescription");
+  ok(svgA.getAttribute("aria-label") === "Interactive chart", "a11y: svg gets a generic name when none supplied");
+  ok(xNode.getAttribute("role") === "graphics-symbol", "a11y: a mark is a graphics-symbol");
+  ok(xNode.getAttribute("aria-label") === "Point X", "a11y: mark aria-label is its tooltip with tags stripped");
+  ok(xNode.getAttribute("tabindex") === "0", "a11y: first mark holds the roving tabindex (0)");
+  ok(yNode.getAttribute("tabindex") === "-1", "a11y: other marks are -1 (roving tabindex)");
+
+  const live = elA11y.querySelector('[aria-live="polite"]');
+  ok(!!live, "a11y: an aria-live announcer is present");
+  const table = elA11y.querySelector("table.gloss-data-table");
+  ok(!!table, "a11y: a hidden data table is present");
+  ok(table.querySelectorAll("tr").length === 3, "a11y: data table has a header + one row per mark");
+  ok(table.textContent.indexOf("Point Y") !== -1, "a11y: data table lists a mark's description");
+
+  // focus a mark -> announced, focus ring on
+  xNode.dispatchEvent(new window.FocusEvent("focus", { bubbles: false }));
+  ok(xNode.classList.contains("gloss-focus"), "a11y: focusing a mark draws the focus ring");
+  ok(live.textContent === "Point X", "a11y: focusing a mark announces its label");
+
+  // ArrowRight -> roving tabindex moves to the next mark
+  svgA.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  ok(yNode.getAttribute("tabindex") === "0" && xNode.getAttribute("tabindex") === "-1",
+    "a11y: ArrowRight moves the roving tabindex to the next mark");
+  ok(live.textContent === "Point Y", "a11y: arrow navigation announces the newly focused mark");
+
+  // Enter -> selects the focused mark, announced
+  svgA.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  ok(yNode.classList.contains("gloss-selected"), "a11y: Enter selects the focused mark");
+  ok(live.textContent.indexOf("selected") !== -1, "a11y: selection is announced");
+
+  // a11y OFF -> no chart role override, no focusable marks, no table
+  const elOff = mount({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" role="img"><path data-key="x" d="M1 1h9v9z"/></svg>',
+    elements: [{ key: "x", tooltip: "X", x0: 1, y0: 1, x1: 10, y1: 10 }],
+    options: { tooltip: true, hover: true, select: true, a11y: false, selectMode: "multiple" }
+  });
+  ok(elOff.querySelector("svg").getAttribute("role") === "img", "a11y off: svg role is left untouched");
+  ok(elOff.querySelector('[data-key="x"]').getAttribute("tabindex") === null, "a11y off: marks are not focusable");
+  ok(!elOff.querySelector("table.gloss-data-table"), "a11y off: no data table is built");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

@@ -1,3 +1,17 @@
+# gloss (development version)
+
+* **Accessibility (`a11y = TRUE`, on by default).** The interactive widget is now
+  keyboard- and screen-reader-navigable, not a mute image:
+  * the SVG is announced as an interactive chart (`role="graphics-document"` +
+    `aria-roledescription`), labelled from the scene's title/description (which
+    `quill` sets automatically) or an explicit `as_widget(alt =)`;
+  * every mark is a focusable `graphics-symbol` with a **roving tabindex** — arrow
+    keys move between marks, Enter/Space toggles selection, Escape exits;
+  * a polite **`aria-live`** region announces the focused / selected mark;
+  * a visually-hidden **data table** lists every mark for assistive tech.
+  All gated on `a11y`; `a11y = FALSE` restores the previous output exactly. See the
+  quill *Accessibility* article.
+
 # gloss 0.2.0
 
 Interaction-depth release (ROADMAP §4).
