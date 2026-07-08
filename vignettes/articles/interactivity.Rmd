@@ -94,6 +94,20 @@ vplot(df) |>
   as_widget(export_filename = "mtcars", export_scale = 2)
 ```
 
+## Accessibility
+
+Accessibility is on by default (`a11y = TRUE`). The widget announces itself as an
+interactive chart, and every mark is focusable: **Tab** into the chart, use the
+**arrow keys** to move between marks (each announced through a polite live
+region), **Enter**/**Space** to select, and **Escape** to leave traversal mode. A
+visually-hidden data table lists every mark for screen-reader users. The chart's
+accessible name and description come from the plot's title and alt text — which
+`quill` sets automatically — or an explicit `as_widget(alt =)`.
+
+See the [quill *Accessibility*
+article](https://schochastics.github.io/quill/articles/accessibility.html) for
+the full cross-package story (alt text, accessible SVG/PDF, and this widget).
+
 ## Linked views
 
 Widgets sharing a `group` link client-side: selecting or brushing in one
