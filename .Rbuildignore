@@ -8,6 +8,7 @@
 ^_docs$
 ^README\.Rmd$
 ^_pkgdown\.yml$
+^vignettes/articles$
 ^pkgdown$
 ^docs$
 ^LICENSE\.md$
