@@ -2,6 +2,9 @@
 
 ## vellumwidget (development version)
 
+- Adopted vellum’s renamed `vl_*` graphics primitives (grid collision
+  fix).
+
 - **Shiny input read-back.** A widget rendered with
   [`vellumwidgetOutput()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-shiny.md)
   now reports the user’s interactions to the server as reactive inputs
