@@ -142,5 +142,7 @@ vplot(df) |>
 
 ## Shiny
 
-`glossOutput()` / `renderGloss()` embed a widget in a Shiny app (display-tier
-today; server-side selection read-back is planned). See `?gloss-shiny`.
+`glossOutput()` / `renderGloss()` embed a widget in a Shiny app, and the
+widget reports the user's selection, clicks, hovers, and brush back to the
+server as reactive inputs. See the [Shiny article](shiny.html) and
+`?gloss-shiny`.
