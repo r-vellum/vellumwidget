@@ -4,4 +4,4 @@ node_modules/
 .RData
 .DS_Store
 *.tar.gz
-docs/
+docs/vignettes/articles/figure/

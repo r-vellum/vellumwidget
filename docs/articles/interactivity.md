@@ -1,0 +1,142 @@
+# Interactive widgets: a tour
+
+`gloss` turns a `vellum` scene — or, more usually, a `quill` plot — into
+a self-contained, client-side interactive HTML widget. There is one
+verb,
+[`as_widget()`](https://schochastics.github.io/gloss/reference/as_widget.md),
+and it works the same in the RStudio/Positron viewer, a knitr/Quarto
+document, and a Shiny app. No Shiny server and no round-trip are
+required; every interaction runs in the browser.
+
+Interactivity is *declared in the grammar*: a mark’s `data_id`,
+`tooltip`, and `hover_group` arguments flow through the scene as
+per-element metadata that the widget reads. A plot that declares none
+still renders as a static (but embeddable) SVG.
+
+``` r
+
+library(quill)
+df <- data.frame(
+  wt = mtcars$wt, mpg = mtcars$mpg,
+  model = rownames(mtcars), cyl = factor(mtcars$cyl)
+)
+```
+
+## Hover: tooltips and highlighting
+
+Map `tooltip` and `data_id` and hover a point: it shows a tooltip and
+dims the others. `data_id` is the join key; `tooltip` is what the box
+says.
+
+``` r
+
+vplot(df) |>
+  mark_point(x = wt, y = mpg, color = cyl, tooltip = model, data_id = model) |>
+  as_widget()
+```
+
+### HTML tooltips
+
+Tooltip text is rendered as **safe HTML**: build a multi-line, formatted
+string in `tooltip =` (here with `glue`) using `<b>` and `<br>`. Data
+values are escaped, and only inert tags (`<b>`, `<i>`, `<br>`, `<span>`)
+are honoured, so there is no injection risk. Style the box with
+`tooltip_style`.
+
+``` r
+
+df$label <- glue::glue("<b>{df$model}</b><br>{df$mpg} mpg · {df$wt}k lbs")
+vplot(df) |>
+  mark_point(x = wt, y = mpg, tooltip = label, data_id = model) |>
+  as_widget(tooltip_style = list(background = "#1d3557", fontsize = "13px"))
+```
+
+## Select and brush
+
+Click a mark to select it (every mark sharing its `data_id` toggles
+together); drag a rectangle to brush-select. `select_mode = "single"`
+makes a click replace the selection instead of toggling.
+
+``` r
+
+vplot(df) |>
+  mark_point(x = wt, y = mpg, data_id = model, selected_color = "#e63946") |>
+  as_widget()
+```
+
+## Pan, zoom, and the toolbar
+
+Zoom with the mouse wheel, drag to pan (toggle brush/pan on the
+toolbar). On a touch device, drag pans and a two-finger pinch zooms;
+with the widget focused, the arrow keys pan, `+`/`-` zoom, and `0`
+resets. The on-hover toolbar adds zoom-to-selection, reset, SVG/PNG
+download, copy-to-clipboard (where supported), and fullscreen.
+
+Export captures the *current* view, so a zoomed-in region exports as
+shown. Set the download name and a hi-res PNG scale:
+
+``` r
+
+vplot(df) |>
+  mark_point(x = wt, y = mpg, data_id = model) |>
+  as_widget(export_filename = "mtcars", export_scale = 2)
+```
+
+## Accessibility
+
+Accessibility is on by default (`a11y = TRUE`). The widget announces
+itself as an interactive chart, and every mark is focusable: **Tab**
+into the chart, use the **arrow keys** to move between marks (each
+announced through a polite live region), **Enter**/**Space** to select,
+and **Escape** to leave traversal mode. A visually-hidden data table
+lists every mark for screen-reader users. The chart’s accessible name
+and description come from the plot’s title and alt text — which `quill`
+sets automatically — or an explicit `as_widget(alt =)`.
+
+See the [quill *Accessibility*
+article](https://schochastics.github.io/quill/articles/accessibility.html)
+for the full cross-package story (alt text, accessible SVG/PDF, and this
+widget).
+
+## Linked views
+
+Widgets sharing a `group` link client-side: selecting or brushing in one
+highlights the same data keys in the others — no Shiny, no crosstalk.
+Selection projects by `hover_group` when the marks declare it.
+
+``` r
+
+p <- vplot(df) |> mark_point(x = wt, y = mpg, data_id = model, hover_group = cyl)
+htmltools::tagList(
+  as_widget(p, group = "cars", width = 320, height = 240),
+  as_widget(vplot(df) |> mark_point(x = wt, y = mpg, data_id = model, hover_group = cyl),
+            group = "cars", width = 320, height = 240)
+)
+```
+
+For interop with plotly / leaflet / DT and crosstalk’s `filter_*`
+controls, pass a
+[`crosstalk::SharedData`](https://rdrr.io/pkg/crosstalk/man/SharedData.html)
+(or a group name) to `crosstalk =` instead.
+
+## Styling
+
+`hover_color`, `selected_color`, and `dim_opacity` set the widget-wide
+theme; per-mark `hover_color` / `selected_color` declared in `quill`
+override them for that mark. `tooltip_style` themes the tooltip box
+(above).
+
+``` r
+
+vplot(df) |>
+  mark_point(x = wt, y = mpg, data_id = model) |>
+  as_widget(hover_color = "seagreen", selected_color = "firebrick", dim_opacity = 0.15)
+```
+
+## Shiny
+
+[`glossOutput()`](https://schochastics.github.io/gloss/reference/gloss-shiny.md)
+/
+[`renderGloss()`](https://schochastics.github.io/gloss/reference/gloss-shiny.md)
+embed a widget in a Shiny app (display-tier today; server-side selection
+read-back is planned). See `?gloss-shiny`.
