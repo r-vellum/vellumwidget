@@ -1,0 +1,10 @@
+pandoc: 3.8.3
+pkgdown: 2.2.1
+pkgdown_sha: ~
+articles:
+  articles/interactivity: interactivity.html
+  articles/shiny: shiny.html
+last_built: 2026-07-09T14:54Z
+urls:
+  reference: https://r-vellum.github.io/vellumwidget/reference
+  article: https://r-vellum.github.io/vellumwidget/articles
