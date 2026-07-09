@@ -5,9 +5,23 @@
 # behaviour suite (jsdom). It needs neither R nor Rust, so it runs once as its
 # own job rather than riding the R-CMD-check matrix.
 on:
-  # Auto-triggers (push / pull_request, path-filtered to srcts/ and the bundle)
-  # removed to conserve GitHub Actions minutes — run this manually from the
-  # Actions tab (workflow_dispatch), or re-add push/pull_request when ready.
+  push:
+    branches: [main]
+    paths:
+      - 'srcts/**'
+      - 'inst/htmlwidgets/vellumwidget.js'
+      - 'package.json'
+      - 'tsconfig.json'
+      - 'esbuild.js'
+      - '.github/workflows/js.yaml'
+  pull_request:
+    paths:
+      - 'srcts/**'
+      - 'inst/htmlwidgets/vellumwidget.js'
+      - 'package.json'
+      - 'tsconfig.json'
+      - 'esbuild.js'
+      - '.github/workflows/js.yaml'
   workflow_dispatch:
 
 name: js.yaml

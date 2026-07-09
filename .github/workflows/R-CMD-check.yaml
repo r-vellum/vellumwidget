@@ -4,14 +4,12 @@
 # source (via the `Remotes:` entry in DESCRIPTION) needs; everything else is the
 # standard r-lib R-CMD-check flow.
 on:
-  # Auto-triggers (push / pull_request) removed to conserve GitHub Actions
-  # minutes — run this manually from the Actions tab (workflow_dispatch), or
-  # re-add push/pull_request when ready.
-  #
-  # `vellum` and `vellumwidget` are version-locked and co-released: a nightly run
-  # catches a cross-layer break in `vellum`'s `main` before it bricks a release.
-  # Commented out to save minutes — kept as a reminder it existed; restore
-  # before release.
+  push:
+    branches: [main]
+  pull_request:
+  # Nightly cross-layer check kept off for now; restore before release. vellum
+  # and vellumwidget are version-locked and co-released, so a nightly catches a
+  # break in vellum's main before it bricks a release.
   # schedule:
   #   - cron: "0 4 * * *"
   workflow_dispatch:

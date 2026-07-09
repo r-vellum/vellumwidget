@@ -2,10 +2,12 @@
 # Builds the vellumwidget pkgdown site and deploys it to GitHub Pages. vellumwidget depends
 # on vellum, which is compiled from source, so a Rust toolchain is set up
 # before dependencies are installed.
-# pkgdown CI is disabled while this repo is private: an automatic Pages deploy
-# would expose the docs. Only manual runs are possible for now. Re-enable by
-# restoring the push / pull_request / release triggers below.
 on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
   workflow_dispatch:
 
 name: pkgdown.yaml
