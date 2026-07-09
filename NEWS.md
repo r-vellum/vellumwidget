@@ -1,5 +1,7 @@
 # vellumwidget (development version)
 
+* Adopted vellum's renamed `vl_*` graphics primitives (grid collision fix).
+
 * **Shiny input read-back.** A widget rendered with `vellumwidgetOutput()` now reports the
   user's interactions to the server as reactive inputs keyed by the output id:
   `input$<id>_selected` (selected keys, state), `input$<id>_click` (`list(key=)`,

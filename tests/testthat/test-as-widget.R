@@ -27,7 +27,7 @@ test_that("as_widget() works on a raw vellum scene (no vellumplot)", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(
       c(0.3, 0.7), 0.5,
-      gp = vellum::gpar(fill = "red"), key = c("x", "y")
+      gp = vellum::vl_gpar(fill = "red"), key = c("x", "y")
     ))
   w <- as_widget(scene)
   expect_s3_class(w, "vellumwidget")
@@ -47,7 +47,7 @@ test_that("a plot with no interactivity yields a static widget (no keyed element
 
 test_that("select_mode is validated and passed through", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
   expect_equal(as_widget(scene, select_mode = "single")$x$options$selectMode, "single")
   expect_error(as_widget(scene, select_mode = "nope"))
 })
@@ -55,8 +55,8 @@ test_that("select_mode is validated and passed through", {
 test_that("elements carry a device-px bbox for brush/nearest hit-testing", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(
-      c(0.25, 0.75), 0.5, size = vellum::unit(4, "mm"),
-      gp = vellum::gpar(fill = "red"), key = c("a", "b")
+      c(0.25, 0.75), 0.5, size = vellum::vl_unit(4, "mm"),
+      gp = vellum::vl_gpar(fill = "red"), key = c("a", "b")
     ))
   w <- as_widget(scene)
   e <- w$x$elements[[1]]
@@ -69,7 +69,7 @@ test_that("elements carry a device-px bbox for brush/nearest hit-testing", {
 
 test_that("Phase 4 option toggles round-trip into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
   o <- as_widget(scene)$x$options
   expect_true(o$brush && o$zoom && o$toolbar && o$nearest)
   o2 <- as_widget(scene, brush = FALSE, zoom = FALSE, toolbar = FALSE, nearest = FALSE)$x$options
@@ -78,7 +78,7 @@ test_that("Phase 4 option toggles round-trip into the payload", {
 
 test_that("a11y is on by default and round-trips (with alt) into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
   o <- as_widget(scene)$x$options
   expect_true(o$a11y)
   expect_null(o$alt) # defaults to the scene's own title/desc
@@ -91,7 +91,7 @@ test_that("hover_group is carried into the element table", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(
       c(0.3, 0.7), 0.5,
-      gp = vellum::gpar(fill = "red"),
+      gp = vellum::vl_gpar(fill = "red"),
       key = c("a", "b"),
       meta = list(list(hover_group = "g"), list(hover_group = "g"))
     ))
@@ -102,7 +102,7 @@ test_that("hover_group is carried into the element table", {
 
 test_that("widget theme args normalise to CSS colours in the payload (Option 1)", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
   s <- as_widget(scene, hover_color = "steelblue", selected_color = "orange",
                  dim_opacity = 0.1)$x$options$style
   expect_equal(s$hoverColor, "#4682b4") # R colour name -> hex
@@ -117,7 +117,7 @@ test_that("widget theme args normalise to CSS colours in the payload (Option 1)"
 
 test_that("tooltip_style normalises into the payload tip* CSS vars", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
   s <- as_widget(scene, tooltip_style = list(
     background = "steelblue", color = "white", fontsize = "14px", max_width = "260px"
   ))$x$options$style
@@ -133,7 +133,7 @@ test_that("tooltip_style normalises into the payload tip* CSS vars", {
 
 test_that("export_filename / export_scale round-trip into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
   ex <- as_widget(scene, export_filename = "myplot", export_scale = 2)$x$options$export
   expect_equal(ex$filename, "myplot")
   expect_equal(ex$scale, 2)
@@ -157,7 +157,7 @@ test_that("per-element grammar colours flow into the payload, normalised (Option
 
 test_that("group option round-trips for own-bus linking (Phase 5)", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
   w <- as_widget(scene, group = "mylink")
   expect_equal(w$x$options$group, "mylink")
   expect_null(w$x$options$crosstalk)
@@ -180,7 +180,7 @@ test_that("crosstalk = SharedData wires the group + loads crosstalk deps (Phase 
 
 test_that("crosstalk accepts a bare group name; absent by default", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
   expect_equal(as_widget(scene, crosstalk = "g")$x$options$crosstalk, "g")
   w0 <- as_widget(scene)
   expect_null(w0$x$options$crosstalk)

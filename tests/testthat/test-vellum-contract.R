@@ -10,8 +10,8 @@ keyed_scene <- function() {
   vellum::vl_scene(3, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(
       x = c(0.25, 0.75), y = c(0.5, 0.5),
-      size = vellum::unit(6, "mm"),
-      gp = vellum::gpar(fill = "steelblue", col = NA),
+      size = vellum::vl_unit(6, "mm"),
+      gp = vellum::vl_gpar(fill = "steelblue", col = NA),
       key = c("a", "b"),
       meta = list(
         list(tooltip = "Alpha", hover_group = "g1"),
@@ -47,6 +47,6 @@ test_that("vellumwidget_elements() turns the contract into keyed interaction rec
 test_that("an unkeyed scene yields no interaction records (contract additivity)", {
   plain <- vellum::vl_scene(3, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5,
-                                     gp = vellum::gpar(fill = "steelblue", col = NA)))
+                                     gp = vellum::vl_gpar(fill = "steelblue", col = NA)))
   expect_length(vellumwidget_elements(vellum::scene_model(plain)), 0L)
 })
