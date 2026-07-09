@@ -1,17 +1,17 @@
 ---
-title: "Using gloss in Shiny"
+title: "Using vellumwidget in Shiny"
 description: >
-  Embed a gloss widget in a Shiny app and react to what the user does — read the
+  Embed a vellumwidget widget in a Shiny app and react to what the user does — read the
   selection, clicks, hovers, and brush as reactive inputs.
 ---
 
 ```{r}
 #| include: false
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
-library(gloss)
+library(vellumwidget)
 ```
 
-A `gloss` widget is interactive on its own — hover, select, brush, pan/zoom — with
+A `vellumwidget` widget is interactive on its own — hover, select, brush, pan/zoom — with
 no server round-trip. Inside Shiny it also **reports those interactions back** as
 reactive inputs, so an app can respond to what the user does on the plot: filter a
 table to the brushed points, show details for the hovered mark, drive another
@@ -24,16 +24,16 @@ Render a widget with the standard htmlwidgets pair, exactly like `plotly` or `DT
 ```{r}
 #| eval: false
 library(shiny)
-library(quill)
-library(gloss)
+library(vellumplot)
+library(vellumwidget)
 
 ui <- fluidPage(
-  glossOutput("plot", height = "500px"),
+  vellumwidgetOutput("plot", height = "500px"),
   verbatimTextOutput("info")
 )
 
 server <- function(input, output) {
-  output$plot <- renderGloss({
+  output$plot <- renderVellumwidget({
     vplot(mtcars) |>
       mark_point(
         x = wt, y = mpg,
@@ -53,7 +53,7 @@ shinyApp(ui, server)
 
 ## What the widget reports
 
-The inputs are named `<outputId>_<event>` — so for `glossOutput("plot")` they are
+The inputs are named `<outputId>_<event>` — so for `vellumwidgetOutput("plot")` they are
 `input$plot_selected`, `input$plot_click`, `input$plot_hover`, and
 `input$plot_brush`. **Every value is expressed in element keys** — the `data_id`
 you set on the mark — so you map back to your data by that key.
@@ -110,16 +110,16 @@ observeEvent(input$plot_click, {
   hover box shows, not what the input carries.
 - The inputs fire only inside a live Shiny session. A static render (knitr,
   pkgdown, `htmltools::save_html()`) is byte-for-byte identical and emits nothing.
-- The same keys are what a [crosstalk][ct] `SharedData` uses, so a gloss widget can
+- The same keys are what a [crosstalk][ct] `SharedData` uses, so a vellumwidget widget can
   link to `DT`, `plotly`, or `leaflet` client-side *without* Shiny — see
   `as_widget(crosstalk=)`. Shiny inputs and crosstalk are complementary: use Shiny
   when the server needs to react, crosstalk for pure client-side linking.
 - Driving the widget *from* the server — setting the selection or a filter without
-  re-rendering — is a planned addition (a `gloss_proxy()`), not yet available.
+  re-rendering — is a planned addition (a `vellumwidget_proxy()`), not yet available.
 
 [ct]: https://rstudio.github.io/crosstalk/
 
 See the [interactive widgets tour](interactivity.html) for the full set of
 client-side interactions, and the
-[accessibility article](https://schochastics.github.io/quill/articles/accessibility.html)
+[accessibility article](https://r-vellum.github.io/vellumplot/articles/accessibility.html)
 for the keyboard and screen-reader model.

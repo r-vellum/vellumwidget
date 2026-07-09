@@ -1,4 +1,4 @@
 library(testthat)
-library(gloss)
+library(vellumwidget)
 
-test_check("gloss")
+test_check("vellumwidget")

@@ -1,4 +1,4 @@
-// gloss — client-side interactivity runtime for vellum SVG scenes.
+// vellumwidget — client-side interactivity runtime for vellum SVG scenes.
 //
 // A vellum scene renders to SVG where each interactive element carries a
 // `data-key` (its datum's identity); the R side ships a `scene_model()` element
@@ -45,7 +45,7 @@ interface Options {
   alt?: string | null; // accessible label for the whole chart (falls back to the SVG's <title>/<desc>)
   selectMode: "single" | "multiple";
   style?: StyleOpts;
-  group?: string | null; // own cross-widget linking group (gloss <-> gloss)
+  group?: string | null; // own cross-widget linking group (vellumwidget <-> vellumwidget)
   crosstalk?: string | null; // crosstalk group (interop + filter_* controls)
   export?: { filename?: string; scale?: number }; // export filename base + PNG resolution scale
 }
@@ -76,7 +76,7 @@ interface ViewBox {
   h: number;
 }
 
-// ---- pure geometry helpers (exposed on window.__glossTest for headless tests) ----
+// ---- pure geometry helpers (exposed on window.__vellumwidgetTest for headless tests) ----
 
 function rectsIntersect(a: Bbox, b: Bbox): boolean {
   return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
@@ -157,75 +157,75 @@ function unionBbox(elems: ElemMeta[], keys: Record<string, boolean>): Bbox | nul
 
 // ---- DOM helpers ----
 
-const STYLE_ID = "gloss-style";
+const STYLE_ID = "vellumwidget-style";
 
-const GLOSS_CSS = `
-.gloss-root { position: relative; display: inline-block; max-width: 100%; }
-.gloss-root .gloss-svg-holder svg { max-width: 100%; height: auto; display: block; }
-.gloss-gesture .gloss-svg-holder svg { touch-action: none; }
-.gloss-root.gloss-mode-pan .gloss-svg-holder svg { cursor: grab; }
-.gloss-root.gloss-panning .gloss-svg-holder svg { cursor: grabbing; }
-.gloss-root [data-key] { cursor: pointer; }
-[data-key].gloss-filtered { display: none; }
-.gloss-hovering [data-key]:not(.gloss-legend) { opacity: var(--gloss-dim-opacity, 0.28); }
-.gloss-hovering [data-key].gloss-hl { opacity: 1; }
-/* Optional hover stroke, opt-in per element (.gloss-hc) or widget-wide
-   (.gloss-hc-all on the root). Never applied to a mark that has no hover colour,
+const VELLUMWIDGET_CSS = `
+.vellumwidget-root { position: relative; display: inline-block; max-width: 100%; }
+.vellumwidget-root .vellumwidget-svg-holder svg { max-width: 100%; height: auto; display: block; }
+.vellumwidget-gesture .vellumwidget-svg-holder svg { touch-action: none; }
+.vellumwidget-root.vellumwidget-mode-pan .vellumwidget-svg-holder svg { cursor: grab; }
+.vellumwidget-root.vellumwidget-panning .vellumwidget-svg-holder svg { cursor: grabbing; }
+.vellumwidget-root [data-key] { cursor: pointer; }
+[data-key].vellumwidget-filtered { display: none; }
+.vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
+.vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
+/* Optional hover stroke, opt-in per element (.vellumwidget-hc) or widget-wide
+   (.vellumwidget-hc-all on the root). Never applied to a mark that has no hover colour,
    so a bordered shape is not clobbered on hover. Colour resolves from the nearest
-   --gloss-hl-stroke (element var overrides the root var). */
-.gloss-hc-all [data-key].gloss-hl, [data-key].gloss-hc.gloss-hl {
-  stroke: var(--gloss-hl-stroke); stroke-width: var(--gloss-hl-width, 2px); paint-order: stroke fill;
+   --vellumwidget-hl-stroke (element var overrides the root var). */
+.vellumwidget-hc-all [data-key].vellumwidget-hl, [data-key].vellumwidget-hc.vellumwidget-hl {
+  stroke: var(--vellumwidget-hl-stroke); stroke-width: var(--vellumwidget-hl-width, 2px); paint-order: stroke fill;
 }
-[data-key].gloss-selected {
-  stroke: var(--gloss-selected-stroke, #111827);
-  stroke-width: var(--gloss-selected-width, 1.4px); paint-order: stroke fill;
+[data-key].vellumwidget-selected {
+  stroke: var(--vellumwidget-selected-stroke, #111827);
+  stroke-width: var(--vellumwidget-selected-width, 1.4px); paint-order: stroke fill;
 }
 /* Keyboard focus ring on the currently-traversed mark (a11y). */
-[data-key].gloss-focus {
-  stroke: var(--gloss-focus-stroke, #2563eb);
-  stroke-width: var(--gloss-focus-width, 2.5px); paint-order: stroke fill;
+[data-key].vellumwidget-focus {
+  stroke: var(--vellumwidget-focus-stroke, #2563eb);
+  stroke-width: var(--vellumwidget-focus-width, 2.5px); paint-order: stroke fill;
 }
 [data-key]:focus { outline: none; }
-[data-key]:focus-visible { outline: 2px solid var(--gloss-focus-stroke, #2563eb); outline-offset: 1px; }
+[data-key]:focus-visible { outline: 2px solid var(--vellumwidget-focus-stroke, #2563eb); outline-offset: 1px; }
 /* Visually-hidden but exposed to assistive technology (live region + data table). */
-.gloss-sr-only {
+.vellumwidget-sr-only {
   position: absolute !important; width: 1px; height: 1px;
   padding: 0; margin: -1px; overflow: hidden; border: 0;
   clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
 }
-.gloss-tip {
+.vellumwidget-tip {
   position: absolute; left: 0; top: 0; pointer-events: none; z-index: 20;
-  background: var(--gloss-tip-bg, rgba(17,24,39,0.94)); color: var(--gloss-tip-fg, #fff);
+  background: var(--vellumwidget-tip-bg, rgba(17,24,39,0.94)); color: var(--vellumwidget-tip-fg, #fff);
   font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  font-size: var(--gloss-tip-fontsize, 12px); line-height: 1.45;
+  font-size: var(--vellumwidget-tip-fontsize, 12px); line-height: 1.45;
   padding: 5px 8px; border-radius: 5px; white-space: pre-wrap;
-  max-width: var(--gloss-tip-maxwidth, 320px);
+  max-width: var(--vellumwidget-tip-maxwidth, 320px);
   box-shadow: 0 2px 8px rgba(0,0,0,0.25);
   opacity: 0; transition: opacity 0.08s ease; will-change: transform;
 }
-.gloss-tip.gloss-show { opacity: 1; }
-.gloss-brush {
+.vellumwidget-tip.vellumwidget-show { opacity: 1; }
+.vellumwidget-brush {
   position: absolute; pointer-events: none; z-index: 15;
   border: 1px solid #2563eb; background: rgba(37,99,235,0.12); display: none;
 }
-.gloss-toolbar {
+.vellumwidget-toolbar {
   position: absolute; top: 6px; right: 6px; z-index: 25; display: flex; gap: 2px;
   padding: 3px; border-radius: 6px; background: rgba(255,255,255,0.82);
   box-shadow: 0 1px 4px rgba(0,0,0,0.18); opacity: 0; transition: opacity 0.12s;
 }
-.gloss-root:hover .gloss-toolbar { opacity: 1; }
-.gloss-toolbar button {
+.vellumwidget-root:hover .vellumwidget-toolbar { opacity: 1; }
+.vellumwidget-toolbar button {
   border: 0; background: transparent; cursor: pointer; border-radius: 4px;
   font: 13px/1 system-ui, sans-serif; padding: 4px 6px; color: #111827;
 }
-.gloss-toolbar button:hover { background: rgba(0,0,0,0.08); }
-.gloss-toolbar button.gloss-active { background: rgba(37,99,235,0.18); }
+.vellumwidget-toolbar button:hover { background: rgba(0,0,0,0.08); }
+.vellumwidget-toolbar button.vellumwidget-active { background: rgba(37,99,235,0.18); }
 @media (prefers-color-scheme: dark) {
-  .gloss-tip { background: var(--gloss-tip-bg, rgba(243,244,246,0.96)); color: var(--gloss-tip-fg, #111827); }
-  [data-key].gloss-selected { stroke: var(--gloss-selected-stroke, #f9fafb); }
-  .gloss-toolbar { background: rgba(31,41,55,0.9); }
-  .gloss-toolbar button { color: #f3f4f6; }
-  .gloss-toolbar button:hover { background: rgba(255,255,255,0.12); }
+  .vellumwidget-tip { background: var(--vellumwidget-tip-bg, rgba(243,244,246,0.96)); color: var(--vellumwidget-tip-fg, #111827); }
+  [data-key].vellumwidget-selected { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
+  .vellumwidget-toolbar { background: rgba(31,41,55,0.9); }
+  .vellumwidget-toolbar button { color: #f3f4f6; }
+  .vellumwidget-toolbar button:hover { background: rgba(255,255,255,0.12); }
 }
 `;
 
@@ -233,7 +233,7 @@ function ensureStyle(): void {
   if (document.getElementById(STYLE_ID)) return;
   const s = document.createElement("style");
   s.id = STYLE_ID;
-  s.textContent = GLOSS_CSS;
+  s.textContent = VELLUMWIDGET_CSS;
   document.head.appendChild(s);
 }
 
@@ -247,7 +247,7 @@ function cssEscape(value: string): string {
 // fixed allow-list of inert, attribute-free tags. Data values can't inject
 // scripts, event handlers, or attributes (an opening tag carrying attributes
 // stays escaped), so an author can build multi-line / bold tooltips (e.g. via
-// quill's `tooltip =`) with `<br>` / `<b>` without any XSS surface.
+// vellumplot's `tooltip =`) with `<br>` / `<b>` without any XSS surface.
 const TIP_TAGS = ["b", "i", "em", "strong", "br", "span"];
 function sanitizeTip(s: string): string {
   let out = String(s)
@@ -289,7 +289,7 @@ function download(blob: Blob, name: string): void {
 
 const DRAG_THRESHOLD = 3; // px before a mousedown becomes a drag (vs a click)
 
-// --- own cross-widget linking bus (gloss <-> gloss, no dependency) ---------
+// --- own cross-widget linking bus (vellumwidget <-> vellumwidget, no dependency) ---------
 // Page-global (the bundle loads once, so all widgets share this scope). Members
 // of the same group receive each other's selection sets by data-key. crosstalk
 // (below) is the optional bridge to the wider htmlwidgets ecosystem; this bus is
@@ -298,12 +298,12 @@ interface BusMember {
   token: object;
   onSelect: (keys: string[]) => void;
 }
-const glossBus: Record<string, BusMember[]> = {};
+const vellumwidgetBus: Record<string, BusMember[]> = {};
 function busJoin(group: string, m: BusMember): void {
-  (glossBus[group] = glossBus[group] || []).push(m);
+  (vellumwidgetBus[group] = vellumwidgetBus[group] || []).push(m);
 }
 function busPublish(group: string, sender: object, keys: string[]): void {
-  const members = glossBus[group] || [];
+  const members = vellumwidgetBus[group] || [];
   for (let i = 0; i < members.length; i++) {
     if (members[i].token !== sender) members[i].onSelect(keys);
   }
@@ -324,17 +324,17 @@ function getCrosstalk(): Crosstalk | null {
 }
 
 HTMLWidgets.widget({
-  name: "gloss",
+  name: "vellumwidget",
   type: "output",
 
   factory: function (el: HTMLElement) {
     ensureStyle();
-    el.classList.add("gloss-root");
+    el.classList.add("vellumwidget-root");
 
     const tip = document.createElement("div");
-    tip.className = "gloss-tip";
+    tip.className = "vellumwidget-tip";
     const brushBox = document.createElement("div");
-    brushBox.className = "gloss-brush";
+    brushBox.className = "vellumwidget-brush";
 
     let holder: HTMLElement | null = null;
     let svgEl: SVGSVGElement | null = null;
@@ -419,9 +419,9 @@ HTMLWidgets.widget({
     }
     function setHover(k: string): void {
       if (!opts.hover) return;
-      el.classList.add("gloss-hovering");
-      clearClass("gloss-hl");
-      addClassForKeys(linkedKeys(k), "gloss-hl");
+      el.classList.add("vellumwidget-hovering");
+      clearClass("vellumwidget-hl");
+      addClassForKeys(linkedKeys(k), "vellumwidget-hl");
     }
     function showTip(clientX: number, clientY: number, k: string): void {
       const m = meta[k];
@@ -430,14 +430,14 @@ HTMLWidgets.widget({
       tip.style.transform =
         "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) +
         "px) translate(-50%, calc(-100% - 12px))";
-      tip.classList.add("gloss-show");
+      tip.classList.add("vellumwidget-show");
     }
     function hideTip(): void {
-      tip.classList.remove("gloss-show");
+      tip.classList.remove("vellumwidget-show");
     }
     function clearHover(): void {
-      el.classList.remove("gloss-hovering");
-      clearClass("gloss-hl");
+      el.classList.remove("vellumwidget-hovering");
+      clearClass("vellumwidget-hl");
       hideTip();
       shinyInput("hover", null); // hover ended -> input$<id>_hover = NULL (deduped)
     }
@@ -461,8 +461,8 @@ HTMLWidgets.widget({
 
     // --- selection (+ linking) ---
     function refreshSelected(): void {
-      clearClass("gloss-selected");
-      for (const k in selected) if (selected[k]) addClassForKeys([k], "gloss-selected");
+      clearClass("vellumwidget-selected");
+      for (const k in selected) if (selected[k]) addClassForKeys([k], "vellumwidget-selected");
     }
     function selectedKeys(): string[] {
       return Object.keys(selected).filter((k) => selected[k]);
@@ -512,13 +512,13 @@ HTMLWidgets.widget({
     // Cross-filter (display tier): hide keyed elements whose key is not in the
     // shown set. `null` clears the filter (show everything).
     function applyFilter(showKeys: string[] | null): void {
-      clearClass("gloss-filtered");
+      clearClass("vellumwidget-filtered");
       if (showKeys == null) return;
       const show: Record<string, boolean> = {};
       for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
       for (let i = 0; i < elements.length; i++) {
         const key = elements[i].key;
-        if (!show[key]) addClassForKeys([key], "gloss-filtered");
+        if (!show[key]) addClassForKeys([key], "vellumwidget-filtered");
       }
     }
     // Join the linking channels for this widget's groups (once).
@@ -643,7 +643,7 @@ HTMLWidgets.widget({
       if (!dragging) {
         if (Math.abs(ev.clientX - down.cx) + Math.abs(ev.clientY - down.cy) <= DRAG_THRESHOLD) return;
         dragging = mode === "pan" && opts.zoom ? "pan" : opts.brush ? "brush" : "";
-        if (dragging === "pan") el.classList.add("gloss-panning");
+        if (dragging === "pan") el.classList.add("vellumwidget-panning");
         if (dragging === "") return;
         movedDuringDrag = true;
       }
@@ -682,7 +682,7 @@ HTMLWidgets.widget({
         down = null;
         dragging = "";
         hideBrush();
-        el.classList.remove("gloss-panning");
+        el.classList.remove("vellumwidget-panning");
         return;
       }
       const u = toUser(ev.clientX, ev.clientY);
@@ -703,7 +703,7 @@ HTMLWidgets.widget({
       if (wasPinch) {
         down = null;
         dragging = "";
-        el.classList.remove("gloss-panning");
+        el.classList.remove("vellumwidget-panning");
         hideBrush();
         return;
       }
@@ -721,7 +721,7 @@ HTMLWidgets.widget({
         shinyInput("brush", { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 }, { priority: "event" });
         hideBrush();
       }
-      el.classList.remove("gloss-panning");
+      el.classList.remove("vellumwidget-panning");
       down = null;
       dragging = "";
     }
@@ -756,7 +756,7 @@ HTMLWidgets.widget({
       if (ev.key === "Escape") {
         clearSelection();
         clearHover();
-        clearClass("gloss-focus");
+        clearClass("vellumwidget-focus");
         hideBrush();
         lastBrush = null;
         // Leave mark-traversal mode, returning focus to the widget as a whole.
@@ -816,13 +816,13 @@ HTMLWidgets.widget({
     // --- toolbar ---
     function setMode(m: "brush" | "pan"): void {
       mode = m;
-      el.classList.toggle("gloss-mode-pan", m === "pan");
+      el.classList.toggle("vellumwidget-mode-pan", m === "pan");
       if (toolbarEl) {
         const b = toolbarEl.querySelector('[data-act="mode"]');
         if (b) {
           b.textContent = m === "pan" ? "✋" : "▭";
           (b as HTMLElement).title = m === "pan" ? "Pan mode (click to brush-select)" : "Brush-select mode (click to pan)";
-          b.classList.toggle("gloss-active", m === "pan");
+          b.classList.toggle("vellumwidget-active", m === "pan");
         }
       }
     }
@@ -920,7 +920,7 @@ HTMLWidgets.widget({
       }
       if (!opts.toolbar) return;
       const bar = document.createElement("div");
-      bar.className = "gloss-toolbar";
+      bar.className = "vellumwidget-toolbar";
       const btn = (act: string, label: string, title: string, fn: () => void) => {
         const b = document.createElement("button");
         b.setAttribute("data-act", act);
@@ -950,7 +950,7 @@ HTMLWidgets.widget({
     // variables on the root, and per-element grammar colours (Option 2) as CSS
     // variables on the elements themselves — which override the root by
     // custom-property inheritance. A mark only gains a hover stroke if some hover
-    // colour applies to it (root `gloss-hc-all` or its own `gloss-hc`), so
+    // colour applies to it (root `vellumwidget-hc-all` or its own `vellumwidget-hc`), so
     // hover-uncoloured shapes keep their own borders untouched.
     function applyStyling(): void {
       const s = opts.style || {};
@@ -958,18 +958,18 @@ HTMLWidgets.widget({
         if (v != null && v !== "") el.style.setProperty(name, String(v));
         else el.style.removeProperty(name);
       };
-      setRoot("--gloss-dim-opacity", s.dimOpacity);
-      setRoot("--gloss-selected-stroke", s.selectedColor);
-      setRoot("--gloss-tip-bg", s.tipBg);
-      setRoot("--gloss-tip-fg", s.tipFg);
-      setRoot("--gloss-tip-fontsize", s.tipFontSize);
-      setRoot("--gloss-tip-maxwidth", s.tipMaxWidth);
+      setRoot("--vellumwidget-dim-opacity", s.dimOpacity);
+      setRoot("--vellumwidget-selected-stroke", s.selectedColor);
+      setRoot("--vellumwidget-tip-bg", s.tipBg);
+      setRoot("--vellumwidget-tip-fg", s.tipFg);
+      setRoot("--vellumwidget-tip-fontsize", s.tipFontSize);
+      setRoot("--vellumwidget-tip-maxwidth", s.tipMaxWidth);
       if (s.hoverColor != null && s.hoverColor !== "") {
-        el.style.setProperty("--gloss-hl-stroke", s.hoverColor);
-        el.classList.add("gloss-hc-all");
+        el.style.setProperty("--vellumwidget-hl-stroke", s.hoverColor);
+        el.classList.add("vellumwidget-hc-all");
       } else {
-        el.style.removeProperty("--gloss-hl-stroke");
-        el.classList.remove("gloss-hc-all");
+        el.style.removeProperty("--vellumwidget-hl-stroke");
+        el.classList.remove("vellumwidget-hc-all");
       }
       // Per-element overrides + legend-swatch tagging.
       for (let i = 0; i < elements.length; i++) {
@@ -979,15 +979,15 @@ HTMLWidgets.widget({
         for (let j = 0; j < nodes.length; j++) {
           const n = nodes[j] as unknown as HTMLElement;
           if (e.hover_color != null) {
-            n.style.setProperty("--gloss-hl-stroke", e.hover_color);
-            n.classList.add("gloss-hc");
+            n.style.setProperty("--vellumwidget-hl-stroke", e.hover_color);
+            n.classList.add("vellumwidget-hc");
           }
           if (e.selected_color != null) {
-            n.style.setProperty("--gloss-selected-stroke", e.selected_color);
+            n.style.setProperty("--vellumwidget-selected-stroke", e.selected_color);
           }
           // A legend swatch stays fully visible during hover (not dimmed with the
           // rest), so the legend remains readable while a series is emphasised.
-          if (e.legend_for != null) n.classList.add("gloss-legend");
+          if (e.legend_for != null) n.classList.add("vellumwidget-legend");
         }
       }
     }
@@ -1016,8 +1016,8 @@ HTMLWidgets.widget({
     function showMarkFocus(i: number): void {
       focusIdx = i;
       const k = focusables[i].key;
-      clearClass("gloss-focus");
-      addClassForKeys([k], "gloss-focus");
+      clearClass("vellumwidget-focus");
+      addClassForKeys([k], "vellumwidget-focus");
       setHover(k);
       announce(focusLabel(k));
     }
@@ -1033,7 +1033,7 @@ HTMLWidgets.widget({
       const to = keyOf((ev as unknown as { relatedTarget: EventTarget | null }).relatedTarget);
       if (to == null) {
         focusIdx = -1;
-        clearClass("gloss-focus");
+        clearClass("vellumwidget-focus");
       }
     }
     // Move the roving tabindex to focusable `i` (clamped), update state, and move
@@ -1043,10 +1043,10 @@ HTMLWidgets.widget({
       const dir = i < focusIdx ? -1 : 1;
       if (i < 0) i = 0;
       if (i >= focusables.length) i = focusables.length - 1;
-      // Skip marks hidden by a cross-filter (`gloss-filtered` -> display:none):
+      // Skip marks hidden by a cross-filter (`vellumwidget-filtered` -> display:none):
       // focusing one is a no-op, so keep moving in the travel direction; if there
       // is no visible mark that way, stay put.
-      while (focusables[i] && focusables[i].node.classList.contains("gloss-filtered")) {
+      while (focusables[i] && focusables[i].node.classList.contains("vellumwidget-filtered")) {
         i += dir;
         if (i < 0 || i >= focusables.length) return;
       }
@@ -1074,7 +1074,7 @@ HTMLWidgets.widget({
       }
       if (!opts.a11y || !elements.length) return;
       const tbl = document.createElement("table");
-      tbl.className = "gloss-sr-only gloss-data-table";
+      tbl.className = "vellumwidget-sr-only vellumwidget-data-table";
       const cap = document.createElement("caption");
       cap.textContent = "Data table";
       tbl.appendChild(cap);
@@ -1133,7 +1133,7 @@ HTMLWidgets.widget({
 
       if (!liveRegion) {
         liveRegion = document.createElement("div");
-        liveRegion.className = "gloss-sr-only";
+        liveRegion.className = "vellumwidget-sr-only";
         liveRegion.setAttribute("role", "status");
         liveRegion.setAttribute("aria-live", "polite");
         el.appendChild(liveRegion);
@@ -1170,7 +1170,7 @@ HTMLWidgets.widget({
       svg.addEventListener("click", onClick);
       if (opts.zoom) svg.addEventListener("wheel", onWheel, { passive: false });
       // Touch drag/pinch shouldn't scroll the page over an interactive plot.
-      if (opts.zoom || opts.brush) el.classList.add("gloss-gesture");
+      if (opts.zoom || opts.brush) el.classList.add("vellumwidget-gesture");
       el.setAttribute("tabindex", "0");
       el.addEventListener("keydown", onKey);
     }
@@ -1203,7 +1203,7 @@ HTMLWidgets.widget({
 
         if (!holder) {
           holder = document.createElement("div");
-          holder.className = "gloss-svg-holder";
+          holder.className = "vellumwidget-svg-holder";
           el.appendChild(holder);
           el.appendChild(brushBox);
           el.appendChild(tip);
@@ -1248,7 +1248,7 @@ HTMLWidgets.widget({
 });
 
 // Test seam: expose the pure helpers for the headless behaviour suite.
-(window as unknown as { __glossTest?: unknown }).__glossTest = {
+(window as unknown as { __vellumwidgetTest?: unknown }).__vellumwidgetTest = {
   rectsIntersect,
   distToBbox,
   brushKeys,

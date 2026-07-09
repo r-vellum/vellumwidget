@@ -11,5 +11,5 @@
 ^pkgdown$
 ^docs$
 ^LICENSE\.md$
-^gloss\.Rproj$
+^vellumwidget\.Rproj$
 ^\.Rproj\.user$

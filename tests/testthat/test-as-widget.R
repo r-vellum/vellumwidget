@@ -1,15 +1,15 @@
-# as_widget(): compiles a quill plot or a raw vellum scene into a gloss
+# as_widget(): compiles a vellumplot plot or a raw vellum scene into a vellumwidget
 # htmlwidget whose payload carries the SVG (with data-keys) and the keyed
 # element table the JS runtime consumes.
 
-test_that("as_widget() on a quill plot builds a gloss htmlwidget with keyed payload", {
-  skip_if_not_installed("quill")
+test_that("as_widget() on a vellumplot plot builds a vellumwidget htmlwidget with keyed payload", {
+  skip_if_not_installed("vellumplot")
   df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, model = rownames(mtcars))
-  w <- quill::vplot(df) |>
-    quill::mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
     as_widget()
 
-  expect_s3_class(w, "gloss")
+  expect_s3_class(w, "vellumwidget")
   expect_s3_class(w, "htmlwidget")
   expect_match(w$x$svg, 'data-key="Mazda RX4"', fixed = TRUE)
   expect_length(w$x$elements, nrow(df))
@@ -23,24 +23,24 @@ test_that("as_widget() on a quill plot builds a gloss htmlwidget with keyed payl
   expect_equal(w$x$options$selectMode, "multiple")
 })
 
-test_that("as_widget() works on a raw vellum scene (no quill)", {
+test_that("as_widget() works on a raw vellum scene (no vellumplot)", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(
       c(0.3, 0.7), 0.5,
       gp = vellum::gpar(fill = "red"), key = c("x", "y")
     ))
   w <- as_widget(scene)
-  expect_s3_class(w, "gloss")
+  expect_s3_class(w, "vellumwidget")
   expect_match(w$x$svg, 'data-key="x"', fixed = TRUE)
   expect_setequal(vapply(w$x$elements, function(e) e$key, character(1)), c("x", "y"))
 })
 
 test_that("a plot with no interactivity yields a static widget (no keyed elements)", {
-  skip_if_not_installed("quill")
-  w <- quill::vplot(mtcars) |>
-    quill::mark_point(x = wt, y = mpg) |>
+  skip_if_not_installed("vellumplot")
+  w <- vellumplot::vplot(mtcars) |>
+    vellumplot::mark_point(x = wt, y = mpg) |>
     as_widget()
-  expect_s3_class(w, "gloss")
+  expect_s3_class(w, "vellumwidget")
   expect_no_match(w$x$svg, "data-key")
   expect_length(w$x$elements, 0L)
 })
@@ -144,10 +144,10 @@ test_that("export_filename / export_scale round-trip into the payload", {
 })
 
 test_that("per-element grammar colours flow into the payload, normalised (Option 2)", {
-  skip_if_not_installed("quill")
+  skip_if_not_installed("vellumplot")
   df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg)
-  w <- quill::vplot(df) |>
-    quill::mark_point(x = wt, y = mpg, data_id = seq_len(nrow(df)),
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = wt, y = mpg, data_id = seq_len(nrow(df)),
                       hover_color = "red", selected_color = "grey20") |>
     as_widget()
   e <- w$x$elements[[1]]
@@ -165,11 +165,11 @@ test_that("group option round-trips for own-bus linking (Phase 5)", {
 
 test_that("crosstalk = SharedData wires the group + loads crosstalk deps (Phase 5)", {
   skip_if_not_installed("crosstalk")
-  skip_if_not_installed("quill")
+  skip_if_not_installed("vellumplot")
   df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, id = rownames(mtcars))
   sd <- crosstalk::SharedData$new(df, key = ~id, group = "ctgrp")
-  w <- quill::vplot(df) |>
-    quill::mark_point(x = wt, y = mpg, data_id = id) |>
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = wt, y = mpg, data_id = id) |>
     as_widget(crosstalk = sd)
   expect_equal(w$x$options$crosstalk, "ctgrp")
   # the crosstalk client library is attached as a dependency
@@ -189,13 +189,13 @@ test_that("crosstalk accepts a bare group name; absent by default", {
 })
 
 test_that("discrete legend swatches + series membership flow into the payload (Phase 5)", {
-  skip_if_not_installed("quill")
+  skip_if_not_installed("vellumplot")
   df <- data.frame(
     wt = mtcars$wt, mpg = mtcars$mpg,
     model = rownames(mtcars), cyl = factor(mtcars$cyl)
   )
-  w <- quill::vplot(df) |>
-    quill::mark_point(x = wt, y = mpg, color = cyl, data_id = model) |>
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = wt, y = mpg, color = cyl, data_id = model) |>
     as_widget()
   els <- w$x$elements
   # swatches carry `legend_for` (and NOT `legend`); marks carry `legend` membership

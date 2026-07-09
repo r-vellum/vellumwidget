@@ -1,7 +1,7 @@
 # Exercise the built JS runtime in a headless DOM (jsdom). Skipped unless Node
 # and the dev dependencies are present (they are not needed to use the package,
 # only to develop/verify the bundle). The heavy lifting is in tests/js/.
-test_that("the gloss JS runtime passes its headless behaviour suite", {
+test_that("the vellumwidget JS runtime passes its headless behaviour suite", {
   node <- Sys.which("node")
   skip_if(node == "", "Node.js not available")
   script <- testthat::test_path("..", "js", "behavior.test.js")

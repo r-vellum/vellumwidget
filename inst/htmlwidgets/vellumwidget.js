@@ -64,81 +64,81 @@
     }
     return out;
   }
-  var STYLE_ID = "gloss-style";
-  var GLOSS_CSS = `
-.gloss-root { position: relative; display: inline-block; max-width: 100%; }
-.gloss-root .gloss-svg-holder svg { max-width: 100%; height: auto; display: block; }
-.gloss-gesture .gloss-svg-holder svg { touch-action: none; }
-.gloss-root.gloss-mode-pan .gloss-svg-holder svg { cursor: grab; }
-.gloss-root.gloss-panning .gloss-svg-holder svg { cursor: grabbing; }
-.gloss-root [data-key] { cursor: pointer; }
-[data-key].gloss-filtered { display: none; }
-.gloss-hovering [data-key]:not(.gloss-legend) { opacity: var(--gloss-dim-opacity, 0.28); }
-.gloss-hovering [data-key].gloss-hl { opacity: 1; }
-/* Optional hover stroke, opt-in per element (.gloss-hc) or widget-wide
-   (.gloss-hc-all on the root). Never applied to a mark that has no hover colour,
+  var STYLE_ID = "vellumwidget-style";
+  var VELLUMWIDGET_CSS = `
+.vellumwidget-root { position: relative; display: inline-block; max-width: 100%; }
+.vellumwidget-root .vellumwidget-svg-holder svg { max-width: 100%; height: auto; display: block; }
+.vellumwidget-gesture .vellumwidget-svg-holder svg { touch-action: none; }
+.vellumwidget-root.vellumwidget-mode-pan .vellumwidget-svg-holder svg { cursor: grab; }
+.vellumwidget-root.vellumwidget-panning .vellumwidget-svg-holder svg { cursor: grabbing; }
+.vellumwidget-root [data-key] { cursor: pointer; }
+[data-key].vellumwidget-filtered { display: none; }
+.vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
+.vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
+/* Optional hover stroke, opt-in per element (.vellumwidget-hc) or widget-wide
+   (.vellumwidget-hc-all on the root). Never applied to a mark that has no hover colour,
    so a bordered shape is not clobbered on hover. Colour resolves from the nearest
-   --gloss-hl-stroke (element var overrides the root var). */
-.gloss-hc-all [data-key].gloss-hl, [data-key].gloss-hc.gloss-hl {
-  stroke: var(--gloss-hl-stroke); stroke-width: var(--gloss-hl-width, 2px); paint-order: stroke fill;
+   --vellumwidget-hl-stroke (element var overrides the root var). */
+.vellumwidget-hc-all [data-key].vellumwidget-hl, [data-key].vellumwidget-hc.vellumwidget-hl {
+  stroke: var(--vellumwidget-hl-stroke); stroke-width: var(--vellumwidget-hl-width, 2px); paint-order: stroke fill;
 }
-[data-key].gloss-selected {
-  stroke: var(--gloss-selected-stroke, #111827);
-  stroke-width: var(--gloss-selected-width, 1.4px); paint-order: stroke fill;
+[data-key].vellumwidget-selected {
+  stroke: var(--vellumwidget-selected-stroke, #111827);
+  stroke-width: var(--vellumwidget-selected-width, 1.4px); paint-order: stroke fill;
 }
 /* Keyboard focus ring on the currently-traversed mark (a11y). */
-[data-key].gloss-focus {
-  stroke: var(--gloss-focus-stroke, #2563eb);
-  stroke-width: var(--gloss-focus-width, 2.5px); paint-order: stroke fill;
+[data-key].vellumwidget-focus {
+  stroke: var(--vellumwidget-focus-stroke, #2563eb);
+  stroke-width: var(--vellumwidget-focus-width, 2.5px); paint-order: stroke fill;
 }
 [data-key]:focus { outline: none; }
-[data-key]:focus-visible { outline: 2px solid var(--gloss-focus-stroke, #2563eb); outline-offset: 1px; }
+[data-key]:focus-visible { outline: 2px solid var(--vellumwidget-focus-stroke, #2563eb); outline-offset: 1px; }
 /* Visually-hidden but exposed to assistive technology (live region + data table). */
-.gloss-sr-only {
+.vellumwidget-sr-only {
   position: absolute !important; width: 1px; height: 1px;
   padding: 0; margin: -1px; overflow: hidden; border: 0;
   clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
 }
-.gloss-tip {
+.vellumwidget-tip {
   position: absolute; left: 0; top: 0; pointer-events: none; z-index: 20;
-  background: var(--gloss-tip-bg, rgba(17,24,39,0.94)); color: var(--gloss-tip-fg, #fff);
+  background: var(--vellumwidget-tip-bg, rgba(17,24,39,0.94)); color: var(--vellumwidget-tip-fg, #fff);
   font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  font-size: var(--gloss-tip-fontsize, 12px); line-height: 1.45;
+  font-size: var(--vellumwidget-tip-fontsize, 12px); line-height: 1.45;
   padding: 5px 8px; border-radius: 5px; white-space: pre-wrap;
-  max-width: var(--gloss-tip-maxwidth, 320px);
+  max-width: var(--vellumwidget-tip-maxwidth, 320px);
   box-shadow: 0 2px 8px rgba(0,0,0,0.25);
   opacity: 0; transition: opacity 0.08s ease; will-change: transform;
 }
-.gloss-tip.gloss-show { opacity: 1; }
-.gloss-brush {
+.vellumwidget-tip.vellumwidget-show { opacity: 1; }
+.vellumwidget-brush {
   position: absolute; pointer-events: none; z-index: 15;
   border: 1px solid #2563eb; background: rgba(37,99,235,0.12); display: none;
 }
-.gloss-toolbar {
+.vellumwidget-toolbar {
   position: absolute; top: 6px; right: 6px; z-index: 25; display: flex; gap: 2px;
   padding: 3px; border-radius: 6px; background: rgba(255,255,255,0.82);
   box-shadow: 0 1px 4px rgba(0,0,0,0.18); opacity: 0; transition: opacity 0.12s;
 }
-.gloss-root:hover .gloss-toolbar { opacity: 1; }
-.gloss-toolbar button {
+.vellumwidget-root:hover .vellumwidget-toolbar { opacity: 1; }
+.vellumwidget-toolbar button {
   border: 0; background: transparent; cursor: pointer; border-radius: 4px;
   font: 13px/1 system-ui, sans-serif; padding: 4px 6px; color: #111827;
 }
-.gloss-toolbar button:hover { background: rgba(0,0,0,0.08); }
-.gloss-toolbar button.gloss-active { background: rgba(37,99,235,0.18); }
+.vellumwidget-toolbar button:hover { background: rgba(0,0,0,0.08); }
+.vellumwidget-toolbar button.vellumwidget-active { background: rgba(37,99,235,0.18); }
 @media (prefers-color-scheme: dark) {
-  .gloss-tip { background: var(--gloss-tip-bg, rgba(243,244,246,0.96)); color: var(--gloss-tip-fg, #111827); }
-  [data-key].gloss-selected { stroke: var(--gloss-selected-stroke, #f9fafb); }
-  .gloss-toolbar { background: rgba(31,41,55,0.9); }
-  .gloss-toolbar button { color: #f3f4f6; }
-  .gloss-toolbar button:hover { background: rgba(255,255,255,0.12); }
+  .vellumwidget-tip { background: var(--vellumwidget-tip-bg, rgba(243,244,246,0.96)); color: var(--vellumwidget-tip-fg, #111827); }
+  [data-key].vellumwidget-selected { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
+  .vellumwidget-toolbar { background: rgba(31,41,55,0.9); }
+  .vellumwidget-toolbar button { color: #f3f4f6; }
+  .vellumwidget-toolbar button:hover { background: rgba(255,255,255,0.12); }
 }
 `;
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) return;
     const s = document.createElement("style");
     s.id = STYLE_ID;
-    s.textContent = GLOSS_CSS;
+    s.textContent = VELLUMWIDGET_CSS;
     document.head.appendChild(s);
   }
   function cssEscape(value) {
@@ -174,12 +174,12 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
   var DRAG_THRESHOLD = 3;
-  var glossBus = {};
+  var vellumwidgetBus = {};
   function busJoin(group, m) {
-    (glossBus[group] = glossBus[group] || []).push(m);
+    (vellumwidgetBus[group] = vellumwidgetBus[group] || []).push(m);
   }
   function busPublish(group, sender, keys) {
-    const members = glossBus[group] || [];
+    const members = vellumwidgetBus[group] || [];
     for (let i = 0; i < members.length; i++) {
       if (members[i].token !== sender) members[i].onSelect(keys);
     }
@@ -188,15 +188,15 @@
     return window.crosstalk || null;
   }
   HTMLWidgets.widget({
-    name: "gloss",
+    name: "vellumwidget",
     type: "output",
     factory: function(el) {
       ensureStyle();
-      el.classList.add("gloss-root");
+      el.classList.add("vellumwidget-root");
       const tip = document.createElement("div");
-      tip.className = "gloss-tip";
+      tip.className = "vellumwidget-tip";
       const brushBox = document.createElement("div");
-      brushBox.className = "gloss-brush";
+      brushBox.className = "vellumwidget-brush";
       let holder = null;
       let svgEl = null;
       let toolbarEl = null;
@@ -273,23 +273,23 @@
       }
       function setHover(k) {
         if (!opts.hover) return;
-        el.classList.add("gloss-hovering");
-        clearClass("gloss-hl");
-        addClassForKeys(linkedKeys(k), "gloss-hl");
+        el.classList.add("vellumwidget-hovering");
+        clearClass("vellumwidget-hl");
+        addClassForKeys(linkedKeys(k), "vellumwidget-hl");
       }
       function showTip(clientX, clientY, k) {
         const m = meta[k];
         tip.innerHTML = sanitizeTip(m && m.tooltip || k);
         const box = el.getBoundingClientRect();
         tip.style.transform = "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) + "px) translate(-50%, calc(-100% - 12px))";
-        tip.classList.add("gloss-show");
+        tip.classList.add("vellumwidget-show");
       }
       function hideTip() {
-        tip.classList.remove("gloss-show");
+        tip.classList.remove("vellumwidget-show");
       }
       function clearHover() {
-        el.classList.remove("gloss-hovering");
-        clearClass("gloss-hl");
+        el.classList.remove("vellumwidget-hovering");
+        clearClass("vellumwidget-hl");
         hideTip();
         shinyInput("hover", null);
       }
@@ -301,8 +301,8 @@
         }
       }
       function refreshSelected() {
-        clearClass("gloss-selected");
-        for (const k in selected) if (selected[k]) addClassForKeys([k], "gloss-selected");
+        clearClass("vellumwidget-selected");
+        for (const k in selected) if (selected[k]) addClassForKeys([k], "vellumwidget-selected");
       }
       function selectedKeys() {
         return Object.keys(selected).filter((k) => selected[k]);
@@ -344,13 +344,13 @@
         shinyInput("selected", selectedKeys());
       }
       function applyFilter(showKeys) {
-        clearClass("gloss-filtered");
+        clearClass("vellumwidget-filtered");
         if (showKeys == null) return;
         const show = {};
         for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
         for (let i = 0; i < elements.length; i++) {
           const key = elements[i].key;
-          if (!show[key]) addClassForKeys([key], "gloss-filtered");
+          if (!show[key]) addClassForKeys([key], "vellumwidget-filtered");
         }
       }
       function setupLinking() {
@@ -455,7 +455,7 @@
         if (!dragging) {
           if (Math.abs(ev.clientX - down.cx) + Math.abs(ev.clientY - down.cy) <= DRAG_THRESHOLD) return;
           dragging = mode === "pan" && opts.zoom ? "pan" : opts.brush ? "brush" : "";
-          if (dragging === "pan") el.classList.add("gloss-panning");
+          if (dragging === "pan") el.classList.add("vellumwidget-panning");
           if (dragging === "") return;
           movedDuringDrag = true;
         }
@@ -489,7 +489,7 @@
           down = null;
           dragging = "";
           hideBrush();
-          el.classList.remove("gloss-panning");
+          el.classList.remove("vellumwidget-panning");
           return;
         }
         const u = toUser(ev.clientX, ev.clientY);
@@ -509,7 +509,7 @@
         if (wasPinch) {
           down = null;
           dragging = "";
-          el.classList.remove("gloss-panning");
+          el.classList.remove("vellumwidget-panning");
           hideBrush();
           return;
         }
@@ -528,7 +528,7 @@
           shinyInput("brush", { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 }, { priority: "event" });
           hideBrush();
         }
-        el.classList.remove("gloss-panning");
+        el.classList.remove("vellumwidget-panning");
         down = null;
         dragging = "";
       }
@@ -558,7 +558,7 @@
         if (ev.key === "Escape") {
           clearSelection();
           clearHover();
-          clearClass("gloss-focus");
+          clearClass("vellumwidget-focus");
           hideBrush();
           lastBrush = null;
           if (markFocused() && typeof el.focus === "function") el.focus();
@@ -626,13 +626,13 @@
       }
       function setMode(m) {
         mode = m;
-        el.classList.toggle("gloss-mode-pan", m === "pan");
+        el.classList.toggle("vellumwidget-mode-pan", m === "pan");
         if (toolbarEl) {
           const b = toolbarEl.querySelector('[data-act="mode"]');
           if (b) {
             b.textContent = m === "pan" ? "\u270B" : "\u25AD";
             b.title = m === "pan" ? "Pan mode (click to brush-select)" : "Brush-select mode (click to pan)";
-            b.classList.toggle("gloss-active", m === "pan");
+            b.classList.toggle("vellumwidget-active", m === "pan");
           }
         }
       }
@@ -724,7 +724,7 @@
         }
         if (!opts.toolbar) return;
         const bar = document.createElement("div");
-        bar.className = "gloss-toolbar";
+        bar.className = "vellumwidget-toolbar";
         const btn = (act, label, title, fn) => {
           const b = document.createElement("button");
           b.setAttribute("data-act", act);
@@ -755,18 +755,18 @@
           if (v != null && v !== "") el.style.setProperty(name, String(v));
           else el.style.removeProperty(name);
         };
-        setRoot("--gloss-dim-opacity", s.dimOpacity);
-        setRoot("--gloss-selected-stroke", s.selectedColor);
-        setRoot("--gloss-tip-bg", s.tipBg);
-        setRoot("--gloss-tip-fg", s.tipFg);
-        setRoot("--gloss-tip-fontsize", s.tipFontSize);
-        setRoot("--gloss-tip-maxwidth", s.tipMaxWidth);
+        setRoot("--vellumwidget-dim-opacity", s.dimOpacity);
+        setRoot("--vellumwidget-selected-stroke", s.selectedColor);
+        setRoot("--vellumwidget-tip-bg", s.tipBg);
+        setRoot("--vellumwidget-tip-fg", s.tipFg);
+        setRoot("--vellumwidget-tip-fontsize", s.tipFontSize);
+        setRoot("--vellumwidget-tip-maxwidth", s.tipMaxWidth);
         if (s.hoverColor != null && s.hoverColor !== "") {
-          el.style.setProperty("--gloss-hl-stroke", s.hoverColor);
-          el.classList.add("gloss-hc-all");
+          el.style.setProperty("--vellumwidget-hl-stroke", s.hoverColor);
+          el.classList.add("vellumwidget-hc-all");
         } else {
-          el.style.removeProperty("--gloss-hl-stroke");
-          el.classList.remove("gloss-hc-all");
+          el.style.removeProperty("--vellumwidget-hl-stroke");
+          el.classList.remove("vellumwidget-hc-all");
         }
         for (let i = 0; i < elements.length; i++) {
           const e = elements[i];
@@ -775,13 +775,13 @@
           for (let j = 0; j < nodes.length; j++) {
             const n = nodes[j];
             if (e.hover_color != null) {
-              n.style.setProperty("--gloss-hl-stroke", e.hover_color);
-              n.classList.add("gloss-hc");
+              n.style.setProperty("--vellumwidget-hl-stroke", e.hover_color);
+              n.classList.add("vellumwidget-hc");
             }
             if (e.selected_color != null) {
-              n.style.setProperty("--gloss-selected-stroke", e.selected_color);
+              n.style.setProperty("--vellumwidget-selected-stroke", e.selected_color);
             }
-            if (e.legend_for != null) n.classList.add("gloss-legend");
+            if (e.legend_for != null) n.classList.add("vellumwidget-legend");
           }
         }
       }
@@ -798,8 +798,8 @@
       function showMarkFocus(i) {
         focusIdx = i;
         const k = focusables[i].key;
-        clearClass("gloss-focus");
-        addClassForKeys([k], "gloss-focus");
+        clearClass("vellumwidget-focus");
+        addClassForKeys([k], "vellumwidget-focus");
         setHover(k);
         announce(focusLabel(k));
       }
@@ -813,7 +813,7 @@
         const to = keyOf(ev.relatedTarget);
         if (to == null) {
           focusIdx = -1;
-          clearClass("gloss-focus");
+          clearClass("vellumwidget-focus");
         }
       }
       function focusRoving(i) {
@@ -821,7 +821,7 @@
         const dir = i < focusIdx ? -1 : 1;
         if (i < 0) i = 0;
         if (i >= focusables.length) i = focusables.length - 1;
-        while (focusables[i] && focusables[i].node.classList.contains("gloss-filtered")) {
+        while (focusables[i] && focusables[i].node.classList.contains("vellumwidget-filtered")) {
           i += dir;
           if (i < 0 || i >= focusables.length) return;
         }
@@ -844,7 +844,7 @@
         }
         if (!opts.a11y || !elements.length) return;
         const tbl = document.createElement("table");
-        tbl.className = "gloss-sr-only gloss-data-table";
+        tbl.className = "vellumwidget-sr-only vellumwidget-data-table";
         const cap = document.createElement("caption");
         cap.textContent = "Data table";
         tbl.appendChild(cap);
@@ -893,7 +893,7 @@
         }
         if (!liveRegion) {
           liveRegion = document.createElement("div");
-          liveRegion.className = "gloss-sr-only";
+          liveRegion.className = "vellumwidget-sr-only";
           liveRegion.setAttribute("role", "status");
           liveRegion.setAttribute("aria-live", "polite");
           el.appendChild(liveRegion);
@@ -924,7 +924,7 @@
         svg.addEventListener("pointerdown", onDown);
         svg.addEventListener("click", onClick);
         if (opts.zoom) svg.addEventListener("wheel", onWheel, { passive: false });
-        if (opts.zoom || opts.brush) el.classList.add("gloss-gesture");
+        if (opts.zoom || opts.brush) el.classList.add("vellumwidget-gesture");
         el.setAttribute("tabindex", "0");
         el.addEventListener("keydown", onKey);
       }
@@ -955,7 +955,7 @@
           }
           if (!holder) {
             holder = document.createElement("div");
-            holder.className = "gloss-svg-holder";
+            holder.className = "vellumwidget-svg-holder";
             el.appendChild(holder);
             el.appendChild(brushBox);
             el.appendChild(tip);
@@ -992,7 +992,7 @@
       };
     }
   });
-  window.__glossTest = {
+  window.__vellumwidgetTest = {
     rectsIntersect,
     distToBbox,
     brushKeys,

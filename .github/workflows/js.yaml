@@ -1,5 +1,5 @@
-# The gloss runtime is TypeScript in `srcts/`, bundled by esbuild into the
-# committed `inst/htmlwidgets/gloss.js` (so the R package installs with no Node).
+# The vellumwidget runtime is TypeScript in `srcts/`, bundled by esbuild into the
+# committed `inst/htmlwidgets/vellumwidget.js` (so the R package installs with no Node).
 # This workflow guards that bundle: it type-checks the source, rebuilds the
 # bundle and fails if the committed copy is stale, and runs the headless
 # behaviour suite (jsdom). It needs neither R nor Rust, so it runs once as its
@@ -34,15 +34,15 @@ jobs:
         run: npx tsc --noEmit
 
       # Rebuild the bundle and fail if the committed copy is out of sync with
-      # srcts/ — the committed gloss.js is generated, never hand-edited.
+      # srcts/ — the committed vellumwidget.js is generated, never hand-edited.
       - name: Rebuild bundle
         run: node esbuild.js
 
       - name: Verify committed bundle is in sync
         run: |
-          if ! git diff --quiet -- inst/htmlwidgets/gloss.js; then
-            echo "::error::inst/htmlwidgets/gloss.js is stale. Run 'npm run build' and commit the result."
-            git diff -- inst/htmlwidgets/gloss.js
+          if ! git diff --quiet -- inst/htmlwidgets/vellumwidget.js; then
+            echo "::error::inst/htmlwidgets/vellumwidget.js is stale. Run 'npm run build' and commit the result."
+            git diff -- inst/htmlwidgets/vellumwidget.js
             exit 1
           fi
 

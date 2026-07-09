@@ -1,28 +1,28 @@
-# gloss (development version)
+# vellumwidget (development version)
 
-* **Shiny input read-back.** A widget rendered with `glossOutput()` now reports the
+* **Shiny input read-back.** A widget rendered with `vellumwidgetOutput()` now reports the
   user's interactions to the server as reactive inputs keyed by the output id:
   `input$<id>_selected` (selected keys, state), `input$<id>_click` (`list(key=)`,
   event), `input$<id>_hover` (hovered key or `NULL`, state), and
   `input$<id>_brush` (`list(keys=, x0=, y0=, x1=, y1=)`, event). Values are element
   data keys, so they map straight back to your data. Emitted only in a live Shiny
   session — a static render is unchanged and produces no input traffic. See the new
-  *Using gloss in Shiny* article. (Driving the widget from the server — a
-  `gloss_proxy()` — is a planned follow-up.)
+  *Using vellumwidget in Shiny* article. (Driving the widget from the server — a
+  `vellumwidget_proxy()` — is a planned follow-up.)
 
 * **Accessibility (`a11y = TRUE`, on by default).** The interactive widget is now
   keyboard- and screen-reader-navigable, not a mute image:
   * the SVG is announced as an interactive chart (`role="graphics-document"` +
     `aria-roledescription`), labelled from the scene's title/description (which
-    `quill` sets automatically) or an explicit `as_widget(alt =)`;
+    `vellumplot` sets automatically) or an explicit `as_widget(alt =)`;
   * every mark is a focusable `graphics-symbol` with a **roving tabindex** — arrow
     keys move between marks, Enter/Space toggles selection, Escape exits;
   * a polite **`aria-live`** region announces the focused / selected mark;
   * a visually-hidden **data table** lists every mark for assistive tech.
   All gated on `a11y`; `a11y = FALSE` restores the previous output exactly. See the
-  quill *Accessibility* article.
+  vellumplot *Accessibility* article.
 
-# gloss 0.2.0
+# vellumwidget 0.2.0
 
 Interaction-depth release (ROADMAP §4).
 
@@ -48,16 +48,16 @@ Deferred: a spatial index for hit-testing (the DOM cost was the real bottleneck,
 now cached; bbox scans are cheap and datashade collapses huge clouds to a
 raster); coordinated zoom across linked widgets and URL deep-linking; PDF export.
 
-# gloss 0.1.0
+# vellumwidget 0.1.0
 
-First release. gloss turns a `vellum` scene or a `quill` plot into a
+First release. vellumwidget turns a `vellum` scene or a `vellumplot` plot into a
 self-contained, client-side interactive HTML widget via a single terminal
 `as_widget()` pipe — no Shiny, no server round-trip. Everything below ships in
 this first release.
 
 ## Features
 
-* `as_widget()` compiles a `quill` plot or a raw `vellum` scene and bundles its
+* `as_widget()` compiles a `vellumplot` plot or a raw `vellum` scene and bundles its
   SVG + `scene_model()` element table into an htmlwidget.
 * **Hover** — tooltip (from the declared `tooltip`, falling back to the key) and
   highlight with inverse-dim; a hovered element's `hover_group` highlights the
@@ -76,7 +76,7 @@ this first release.
   plot, each legend swatch drives its whole data series: hovering a swatch
   highlights the series (the swatch stays lit), clicking it selects the series
   (and links across views / crosstalk). Automatic — no extra arguments.
-* **Linked views.** `as_widget(group=)` links gloss widgets client-side (no
+* **Linked views.** `as_widget(group=)` links vellumwidget widgets client-side (no
   dependency): selecting/brushing in one highlights the same data keys in the
   others, projecting by `hover_group` (select one, select the series).
   `as_widget(crosstalk = SharedData)` bridges to the crosstalk ecosystem
@@ -86,9 +86,9 @@ this first release.
 * **Customisable interaction styling**, at two composing levels:
   * *Widget theme* — `as_widget(hover_color=, selected_color=, dim_opacity=)`
     sets the look for the whole plot (any R or CSS colour).
-  * *Per-element grammar* — `quill` marks' `hover_color`/`selected_color`
+  * *Per-element grammar* — `vellumplot` marks' `hover_color`/`selected_color`
     (constant or column-mapped) style each element individually and override the
     theme. Both use CSS variables with a defaults ← theme ← per-element cascade.
 
 The JS runtime is TypeScript in `srcts/`, bundled by esbuild into the committed
-`inst/htmlwidgets/gloss.js` (so the R package installs with no Node).
+`inst/htmlwidgets/vellumwidget.js` (so the R package installs with no Node).

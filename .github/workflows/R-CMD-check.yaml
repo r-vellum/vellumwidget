@@ -1,5 +1,5 @@
 # Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
-# `gloss` builds on `vellum`, whose backend is Rust (extendr). The extra
+# `vellumwidget` builds on `vellum`, whose backend is Rust (extendr). The extra
 # `setup-rust-toolchain` step provides the compiler that building `vellum` from
 # source (via the `Remotes:` entry in DESCRIPTION) needs; everything else is the
 # standard r-lib R-CMD-check flow.
@@ -8,7 +8,7 @@ on:
   # minutes — run this manually from the Actions tab (workflow_dispatch), or
   # re-add push/pull_request when ready.
   #
-  # `vellum` and `gloss` are version-locked and co-released: a nightly run
+  # `vellum` and `vellumwidget` are version-locked and co-released: a nightly run
   # catches a cross-layer break in `vellum`'s `main` before it bricks a release.
   # Commented out to save minutes — kept as a reminder it existed; restore
   # before release.

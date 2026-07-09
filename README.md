@@ -1,21 +1,21 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# gloss <a href="https://schochastics.github.io/gloss/"><img src="man/figures/logo.png" align="right" height="138" alt="gloss website" /></a>
+# vellumwidget <a href="https://r-vellum.github.io/vellumwidget/"><img src="man/figures/logo.png" align="right" height="138" alt="vellumwidget website" /></a>
 
 <!-- badges: start -->
 
-[![R-CMD-check](https://github.com/schochastics/gloss/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/schochastics/gloss/actions/workflows/R-CMD-check.yaml)
+[![R-CMD-check](https://github.com/r-vellum/vellumwidget/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/r-vellum/vellumwidget/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
-**gloss** turns a [vellum](https://github.com/schochastics/vellum) scene
-— or a [quill](https://github.com/schochastics/quill) plot — into a
+**vellumwidget** turns a [vellum](https://github.com/r-vellum/vellum) scene
+— or a [vellumplot](https://github.com/r-vellum/vellumplot) plot — into a
 self-contained, client-side interactive HTML widget: **hover tooltips +
 highlighting, click selection, rectangular brush-select, pan/zoom, and a
 toolbar**, with no Shiny and no server round-trip. It is the host
 adapter of the vellum interactivity stack: `vellum` emits per-element
 `data-key`s, bounding boxes, and a `scene_model()` element table,
-`quill` declares what is interactive, and `gloss` hosts it.
+`vellumplot` declares what is interactive, and `vellumwidget` hosts it.
 
 **Interactions:** hover (tooltip + highlight, with nearest-mark snapping
 and `hover_group` linking) · click-select (single/multiple) · drag a
@@ -26,26 +26,26 @@ save SVG/PNG, fullscreen) · keyboard + screen-reader access (Tab in,
 arrow keys move between marks, Enter/Space to select; `a11y`, on by
 default). Each is opt-outable via an `as_widget()` argument.
 
-> The name is the manuscript *gloss* — an annotation revealed on the
+> The name is the manuscript *vellumwidget* — an annotation revealed on the
 > page.
 
 ## Installation
 
 ``` r
 # install.packages("pak")
-pak::pak("schochastics/gloss")
+pak::pak("r-vellum/vellumwidget")
 ```
 
-gloss builds on the [vellum](https://github.com/schochastics/vellum)
-backend (and works with [quill](https://github.com/schochastics/quill)
+vellumwidget builds on the [vellum](https://github.com/r-vellum/vellum)
+backend (and works with [vellumplot](https://github.com/r-vellum/vellumplot)
 plots); pak pulls them in automatically. vellum compiles a Rust crate,
 so a Rust toolchain (`cargo`/`rustc`) is needed to build it.
 
 ## Usage
 
 ``` r
-library(quill)
-library(gloss)
+library(vellumplot)
+library(vellumwidget)
 
 df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, model = rownames(mtcars))
 
@@ -56,7 +56,7 @@ vplot(df) |>
 
 `as_widget()` is terminal: it compiles the plot to a vellum scene, emits
 the SVG and the element table, and returns an htmlwidget. It also
-accepts a bare `vellum` scene. Declare interactivity in `quill` with the
+accepts a bare `vellum` scene. Declare interactivity in `vellumplot` with the
 reserved mark arguments `data_id` (the join key), `tooltip`, and
 `hover_group` (links elements for shared highlighting); discrete
 `color`/`shape` legends then become interactive automatically. A plot
@@ -64,21 +64,21 @@ that declares none renders as a static — but still embeddable — SVG.
 
 ## How it depends
 
-    gloss ──depends──▶ vellum ◀──depends── quill
+    vellumwidget ──depends──▶ vellum ◀──depends── vellumplot
 
-`gloss` depends only on `vellum`’s `scene_svg()` / `scene_model()`
-contract, so it wraps *any* vellum scene, whoever produced it. `quill`
+`vellumwidget` depends only on `vellum`’s `scene_svg()` / `scene_model()`
+contract, so it wraps *any* vellum scene, whoever produced it. `vellumplot`
 is a Suggests (for the examples/tests).
 
 ## Development
 
 The JS runtime is TypeScript in `srcts/`, bundled by esbuild into the
-committed `inst/htmlwidgets/gloss.js` (so the R package installs with no
+committed `inst/htmlwidgets/vellumwidget.js` (so the R package installs with no
 Node):
 
 ``` sh
 npm install            # esbuild + typescript (+ jsdom for tests)
-npm run build          # srcts/index.ts -> inst/htmlwidgets/gloss.js
+npm run build          # srcts/index.ts -> inst/htmlwidgets/vellumwidget.js
 node tests/js/behavior.test.js   # headless DOM behaviour suite
 ```
 
@@ -93,8 +93,8 @@ over the built-in defaults.
 plot:
 
 ``` r
-library(quill)
-library(gloss)
+library(vellumplot)
+library(vellumwidget)
 
 df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, model = rownames(mtcars))
 
@@ -127,7 +127,7 @@ vplot(df) |>
 Both layers use the same CSS-variable mechanism, so a plot can set a
 theme default *and* override it per element in the same pipe. Anything
 not set falls back to the built-in look. (You can also override the raw
-CSS classes — `.gloss-hl`, `[data-key].gloss-selected`, `.gloss-tip`, …
+CSS classes — `.vellumwidget-hl`, `[data-key].vellumwidget-selected`, `.vellumwidget-tip`, …
 — from the host document, but the arguments above are the supported
 API.)
 
@@ -136,7 +136,7 @@ API.)
 Selection can be **linked across views** by data key — select or brush
 in one plot and the same data highlight everywhere.
 
-**Own bus (gloss ↔ gloss, no dependency).** Give the widgets a shared
+**Own bus (vellumwidget ↔ vellumwidget, no dependency).** Give the widgets a shared
 `group`:
 
 ``` r
@@ -168,7 +168,7 @@ bscols(
 filter_slider("hp", "Horsepower", sd, ~hp)   # crosstalk's filter inputs hide non-matching marks
 ```
 
-gloss uses its own selection engine and layers crosstalk on top as an
+vellumwidget uses its own selection engine and layers crosstalk on top as an
 optional bridge (a `SelectionHandle` + `FilterHandle`), so a crosstalk
 filter hides the non-matching marks (display-tier cross-filter) and
 selection round-trips with the other widgets. The crosstalk client
@@ -192,24 +192,24 @@ vplot(df) |>
 # click it -> the whole series is selected (respecting single/multiple mode).
 ```
 
-`quill` tags each swatch with the series it drives and each mark with
-its series membership; gloss projects a swatch event onto every mark in
+`vellumplot` tags each swatch with the series it drives and each mark with
+its series membership; vellumwidget projects a swatch event onto every mark in
 that series, reusing the same highlight/select machinery as
 `hover_group`. Selecting via a swatch also links across views and into
 crosstalk, exactly like selecting a mark.
 
 ## The vellum ecosystem
 
-gloss is the interactivity layer of a small ecosystem of packages that
+vellumwidget is the interactivity layer of a small ecosystem of packages that
 share the vellum scene model:
 
-- **[vellum](https://github.com/schochastics/vellum)** — the parchment:
+- **[vellum](https://github.com/r-vellum/vellum)** — the parchment:
   the low-level graphics backend (Rust scene graph, PNG/SVG/PDF
   renderer).
-- **[quill](https://github.com/schochastics/quill)** — the pen: a
+- **[vellumplot](https://github.com/r-vellum/vellumplot)** — the pen: a
   pipe-first grammar of graphics that compiles a plot spec into a vellum
   scene.
-- **[gloss](https://github.com/schochastics/gloss)** — the gloss: this
+- **[vellumwidget](https://github.com/r-vellum/vellumwidget)** — the vellumwidget: this
   package.
-- **[scriptorium](https://github.com/schochastics/scriptorium)** —
+- **[vellumverse](https://github.com/r-vellum/vellumverse)** —
   installs and loads the whole ecosystem in one step.

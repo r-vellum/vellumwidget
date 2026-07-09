@@ -1,5 +1,5 @@
-// Build the gloss htmlwidget JS binding from the TypeScript source into
-// inst/htmlwidgets/gloss.js. The `HTMLWidgets` (and `Shiny`) globals are injected
+// Build the vellumwidget htmlwidget JS binding from the TypeScript source into
+// inst/htmlwidgets/vellumwidget.js. The `HTMLWidgets` (and `Shiny`) globals are injected
 // by the htmlwidgets framework at render time, so they are used as ambient
 // globals, not bundled. The output is a plain IIFE that registers the widget.
 const esbuild = require("esbuild");
@@ -9,7 +9,7 @@ const watch = process.argv.includes("--watch");
 
 const opts = {
   entryPoints: [path.join(__dirname, "srcts", "index.ts")],
-  outfile: path.join(__dirname, "inst", "htmlwidgets", "gloss.js"),
+  outfile: path.join(__dirname, "inst", "htmlwidgets", "vellumwidget.js"),
   bundle: true,
   format: "iife",
   target: ["es2018"],

@@ -1,10 +1,10 @@
-url: https://schochastics.github.io/gloss/
+url: https://r-vellum.github.io/vellumwidget/
 
 template:
   bootstrap: 5
   math-rendering: mathjax
   bslib:
-    # A parchment / sepia palette echoing the vellum & quill hex logos.
+    # A parchment / sepia palette echoing the vellum & vellumplot hex logos.
     bg: "#faf5ea"
     fg: "#2c2113"
     primary: "#6b4f2c"
@@ -28,7 +28,7 @@ template:
 home:
   title: Interactive web widgets for vellum scenes
   description: >
-    gloss turns a vellum scene (or a quill plot) into a self-contained,
+    vellumwidget turns a vellum scene (or a vellumplot plot) into a self-contained,
     client-side interactive HTML widget -- hover, select, brush, pan/zoom, and
     linked views -- with no Shiny and no server round-trip.
   sidebar:
@@ -37,18 +37,18 @@ home:
       ecosystem:
         title: The ecosystem
         text: >
-          [vellum](https://schochastics.github.io/vellum/) · the parchment
+          [vellum](https://r-vellum.github.io/vellum/) · the parchment
           (backend)<br>
-          [quill](https://schochastics.github.io/quill/) · the pen (grammar)<br>
-          [gloss](https://schochastics.github.io/gloss/) · the gloss
+          [vellumplot](https://r-vellum.github.io/vellumplot/) · the pen (grammar)<br>
+          [vellumwidget](https://r-vellum.github.io/vellumwidget/) · the vellumwidget
           (interactivity)<br>
-          [scriptorium](https://schochastics.github.io/scriptorium/) · loads
+          [vellumverse](https://r-vellum.github.io/vellumverse/) · loads
           them together
 
 navbar:
   structure:
     left: [articles, reference, news]
-    right: [search, vellum, quill, scriptorium, github]
+    right: [search, vellum, vellumplot, vellumverse, github]
 
 articles:
 - title: Articles
@@ -59,37 +59,37 @@ articles:
   components:
     vellum:
       icon: fa-scroll
-      href: https://schochastics.github.io/vellum/
+      href: https://r-vellum.github.io/vellum/
       aria-label: vellum
-    quill:
+    vellumplot:
       icon: fa-feather-pointed
-      href: https://schochastics.github.io/quill/
-      aria-label: quill
-    scriptorium:
+      href: https://r-vellum.github.io/vellumplot/
+      aria-label: vellumplot
+    vellumverse:
       icon: fa-book
-      href: https://schochastics.github.io/scriptorium/
-      aria-label: scriptorium
+      href: https://r-vellum.github.io/vellumverse/
+      aria-label: vellumverse
     github:
       icon: fa-github
-      href: https://github.com/schochastics/gloss
+      href: https://github.com/r-vellum/vellumwidget
       aria-label: GitHub
 
 reference:
 - title: Building a widget
   desc: >
-    Compile a `quill` plot or a raw `vellum` scene into a self-contained,
+    Compile a `vellumplot` plot or a raw `vellum` scene into a self-contained,
     client-side interactive HTML widget.
   contents:
   - as_widget
 
 - title: Shiny
-  desc: Output and render bindings for embedding a gloss widget in a Shiny app.
+  desc: Output and render bindings for embedding a vellumwidget widget in a Shiny app.
   contents:
-  - glossOutput
+  - vellumwidgetOutput
 
 - title: Package
   contents:
-  - gloss-package
+  - vellumwidget-package
 
 footer:
   structure:

@@ -1,8 +1,8 @@
 {
-  "name": "gloss-js",
+  "name": "vellumwidget-js",
   "version": "0.0.0",
   "private": true,
-  "description": "JavaScript runtime for the gloss htmlwidget (built into inst/htmlwidgets/gloss.js).",
+  "description": "JavaScript runtime for the vellumwidget htmlwidget (built into inst/htmlwidgets/vellumwidget.js).",
   "scripts": {
     "build": "node esbuild.js",
     "watch": "node esbuild.js --watch"

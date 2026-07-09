@@ -1,8 +1,8 @@
-#' Turn a vellum scene (or quill plot) into an interactive widget
+#' Turn a vellum scene (or vellumplot plot) into an interactive widget
 #'
 #' `as_widget()` is the terminal verb of the interactivity pipeline: it compiles
 #' its input to a `vellum` scene, emits the SVG (with per-element `data-key`s) and
-#' the [`vellum::scene_model()`] element table, and bundles them with the `gloss`
+#' the [`vellum::scene_model()`] element table, and bundles them with the `vellumwidget`
 #' JavaScript runtime into a self-contained [htmlwidgets::createWidget()] widget.
 #' The result does hover tooltips, hover highlighting, and click selection
 #' entirely client-side --- no Shiny, no server round-trip. Pan/zoom, brush, and
@@ -11,17 +11,17 @@
 #' accessibility on (the default) the arrows move between marks while one is
 #' focused --- see the `a11y` argument.
 #'
-#' Interactivity is driven by the keys/metadata a plot declares. In `quill` these
+#' Interactivity is driven by the keys/metadata a plot declares. In `vellumplot` these
 #' come from the reserved `data_id` / `tooltip` / `hover_group` mark arguments; a
 #' plot that declares none renders as a static (but still embeddable) SVG. A
 #' hovered element with a `data_id` but no `tooltip` shows its key.
 #'
-#' The scene metadata `gloss` reads --- the [`vellum::scene_model()`] element
+#' The scene metadata `vellumwidget` reads --- the [`vellum::scene_model()`] element
 #' table and the SVG `data-key` / `data-vellum-*` attributes --- is specified in
 #' vellum's "The scene contract" vignette
 #' (`vignette("scene-contract", package = "vellum")`).
 #'
-#' @param x A `quill` plot (a `PlotSpec` / `PlotComposition`) or a `vellum`
+#' @param x A `vellumplot` plot (a `PlotSpec` / `PlotComposition`) or a `vellum`
 #'   scene --- anything [vellum::as_vellum_scene()] accepts.
 #' @param width,height Widget size (any valid CSS size, or `NULL` to size from the
 #'   scene). Passed to [htmlwidgets::createWidget()].
@@ -39,14 +39,14 @@
 #'   a visually-hidden data table lists every mark for assistive tech. `FALSE`
 #'   restores the previous behaviour (no chart semantics, marks not focusable).
 #' @param alt Accessible label (alt text) for the chart as a whole. Defaults to
-#'   the scene's own title/description — which `quill` sets automatically from the
-#'   plot title and [quill::plot_alt()] — so an explicit value is only needed for
+#'   the scene's own title/description — which `vellumplot` sets automatically from the
+#'   plot title and [vellumplot::plot_alt()] — so an explicit value is only needed for
 #'   a raw `vellum` scene or to override.
 #' @param hover_color,selected_color Outline colours for hovered / selected
 #'   elements (any R or CSS colour), applied widget-wide. `hover_color = NULL`
 #'   (default) keeps the plain dim-others hover; `selected_color = NULL` uses the
 #'   built-in default. A per-mark `hover_color`/`selected_color` declared in
-#'   `quill` overrides these for that mark.
+#'   `vellumplot` overrides these for that mark.
 #' @param dim_opacity Opacity (0–1) of the non-hovered elements while hovering
 #'   (default `0.28`); `NULL` keeps the default.
 #' @param tooltip_style Optional named list styling the tooltip box:
@@ -70,10 +70,10 @@
 #'   SharedData's keys. A crosstalk filter hides the non-matching elements
 #'   (display-tier cross-filter). Requires the crosstalk package.
 #' @param elementId Optional explicit widget DOM id.
-#' @return An htmlwidget of class `"gloss"`.
+#' @return An htmlwidget of class `"vellumwidget"`.
 #' @examples
 #' \dontrun{
-#' library(quill)
+#' library(vellumplot)
 #' df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, model = rownames(mtcars))
 #' vplot(df) |>
 #'   mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
@@ -99,7 +99,7 @@ as_widget <- function(x, width = NULL, height = NULL,
 
   payload <- list(
     svg = svg,
-    elements = .gloss_elements(model),
+    elements = .vellumwidget_elements(model),
     options = list(
       tooltip = isTRUE(tooltip),
       hover = isTRUE(hover),
@@ -137,11 +137,11 @@ as_widget <- function(x, width = NULL, height = NULL,
   }
 
   htmlwidgets::createWidget(
-    name = "gloss",
+    name = "vellumwidget",
     x = payload,
     width = width %||% dims$width,
     height = height %||% dims$height,
-    package = "gloss",
+    package = "vellumwidget",
     dependencies = deps,
     elementId = elementId,
     sizingPolicy = htmlwidgets::sizingPolicy(
@@ -197,7 +197,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # Elements without a key (panel background, gridlines, legend glyphs) are dropped
 # -- they are not interactive. Not deduplicated: `scene_model()` already yields one
 # row per datum, and the brush needs every element's geometry.
-.gloss_elements <- function(model) {
+.vellumwidget_elements <- function(model) {
   el <- model$elements
   if (is.null(el) || !nrow(el)) {
     return(list())
@@ -269,16 +269,16 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   }
 }
 
-#' Shiny bindings for gloss widgets
+#' Shiny bindings for vellumwidget widgets
 #'
-#' Standard [htmlwidgets] output/render helpers so a `gloss` widget can appear in
+#' Standard [htmlwidgets] output/render helpers so a `vellumwidget` widget can appear in
 #' a Shiny app or an interactive R Markdown document.
 #'
 #' # Reading interactions server-side
 #'
-#' A widget rendered as `glossOutput("plot")` reports the user's interactions back
+#' A widget rendered as `vellumwidgetOutput("plot")` reports the user's interactions back
 #' to the server as reactive inputs, keyed by the output id. All values are the
-#' element **data keys** (the `data_id` a `quill` mark declares); map them back to
+#' element **data keys** (the `data_id` a `vellumplot` mark declares); map them back to
 #' your data by that key.
 #'
 #' \describe{
@@ -303,22 +303,22 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #'
 #' @param outputId Shiny output slot id.
 #' @param width,height Widget size.
-#' @param expr An expression producing a `gloss` widget.
+#' @param expr An expression producing a `vellumwidget` widget.
 #' @param env,quoted Standard non-standard-evaluation plumbing.
-#' @return `glossOutput()`: a Shiny output UI element. `renderGloss()`: a Shiny
+#' @return `vellumwidgetOutput()`: a Shiny output UI element. `renderVellumwidget()`: a Shiny
 #'   render function.
 #' @seealso [as_widget()]
-#' @name gloss-shiny
+#' @name vellumwidget-shiny
 #' @export
-glossOutput <- function(outputId, width = "100%", height = "400px") {
-  htmlwidgets::shinyWidgetOutput(outputId, "gloss", width, height, package = "gloss")
+vellumwidgetOutput <- function(outputId, width = "100%", height = "400px") {
+  htmlwidgets::shinyWidgetOutput(outputId, "vellumwidget", width, height, package = "vellumwidget")
 }
 
-#' @rdname gloss-shiny
+#' @rdname vellumwidget-shiny
 #' @export
-renderGloss <- function(expr, env = parent.frame(), quoted = FALSE) {
+renderVellumwidget <- function(expr, env = parent.frame(), quoted = FALSE) {
   if (!quoted) {
     expr <- substitute(expr)
   }
-  htmlwidgets::shinyRenderWidget(expr, glossOutput, env, quoted = TRUE)
+  htmlwidgets::shinyRenderWidget(expr, vellumwidgetOutput, env, quoted = TRUE)
 }

@@ -1,5 +1,5 @@
 # Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
-# Builds the gloss pkgdown site and deploys it to GitHub Pages. gloss depends
+# Builds the vellumwidget pkgdown site and deploys it to GitHub Pages. vellumwidget depends
 # on vellum, which is compiled from source, so a Rust toolchain is set up
 # before dependencies are installed.
 # pkgdown CI is disabled while this repo is private: an automatic Pages deploy

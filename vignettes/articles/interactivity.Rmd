@@ -1,7 +1,7 @@
 ---
 title: "Interactive widgets: a tour"
 description: >
-  Everything gloss adds on top of a static plot: hover tooltips (including HTML),
+  Everything vellumwidget adds on top of a static plot: hover tooltips (including HTML),
   click-select and brush, pan/zoom by mouse/touch/keyboard, the toolbar and
   export, linked views, and styling.
 ---
@@ -11,12 +11,12 @@ description: >
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  eval = requireNamespace("quill", quietly = TRUE)
+  eval = requireNamespace("vellumplot", quietly = TRUE)
 )
-library(gloss)
+library(vellumwidget)
 ```
 
-`gloss` turns a `vellum` scene — or, more usually, a `quill` plot — into a
+`vellumwidget` turns a `vellum` scene — or, more usually, a `vellumplot` plot — into a
 self-contained, client-side interactive HTML widget. There is one verb,
 `as_widget()`, and it works the same in the RStudio/Positron viewer, a
 knitr/Quarto document, and a Shiny app. No Shiny server and no round-trip are
@@ -29,7 +29,7 @@ embeddable) SVG.
 
 ```{r}
 #| label: setup
-library(quill)
+library(vellumplot)
 df <- data.frame(
   wt = mtcars$wt, mpg = mtcars$mpg,
   model = rownames(mtcars), cyl = factor(mtcars$cyl)
@@ -102,10 +102,10 @@ interactive chart, and every mark is focusable: **Tab** into the chart, use the
 region), **Enter**/**Space** to select, and **Escape** to leave traversal mode. A
 visually-hidden data table lists every mark for screen-reader users. The chart's
 accessible name and description come from the plot's title and alt text — which
-`quill` sets automatically — or an explicit `as_widget(alt =)`.
+`vellumplot` sets automatically — or an explicit `as_widget(alt =)`.
 
-See the [quill *Accessibility*
-article](https://schochastics.github.io/quill/articles/accessibility.html) for
+See the [vellumplot *Accessibility*
+article](https://r-vellum.github.io/vellumplot/articles/accessibility.html) for
 the full cross-package story (alt text, accessible SVG/PDF, and this widget).
 
 ## Linked views
@@ -130,7 +130,7 @@ a `crosstalk::SharedData` (or a group name) to `crosstalk =` instead.
 ## Styling
 
 `hover_color`, `selected_color`, and `dim_opacity` set the widget-wide theme;
-per-mark `hover_color` / `selected_color` declared in `quill` override them for
+per-mark `hover_color` / `selected_color` declared in `vellumplot` override them for
 that mark. `tooltip_style` themes the tooltip box (above).
 
 ```{r}
@@ -142,7 +142,7 @@ vplot(df) |>
 
 ## Shiny
 
-`glossOutput()` / `renderGloss()` embed a widget in a Shiny app, and the
+`vellumwidgetOutput()` / `renderVellumwidget()` embed a widget in a Shiny app, and the
 widget reports the user's selection, clicks, hovers, and brush back to the
 server as reactive inputs. See the [Shiny article](shiny.html) and
-`?gloss-shiny`.
+`?vellumwidget-shiny`.

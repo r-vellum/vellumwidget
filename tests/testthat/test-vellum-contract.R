@@ -1,10 +1,10 @@
-# Cross-layer contract: gloss reads vellum's `scene_model()` element table (via
-# `gloss_elements()`) and the SVG `data-key` attributes. These tests assert the
-# columns and meta keys gloss depends on, so a schema change in vellum (caught by
+# Cross-layer contract: vellumwidget reads vellum's `scene_model()` element table (via
+# `vellumwidget_elements()`) and the SVG `data-key` attributes. These tests assert the
+# columns and meta keys vellumwidget depends on, so a schema change in vellum (caught by
 # the nightly run against vellum's `main`) fails loudly here. The contract is
 # specified in vellum's `vignette("scene-contract")`.
 
-gloss_elements <- getFromNamespace(".gloss_elements", "gloss")
+vellumwidget_elements <- getFromNamespace(".vellumwidget_elements", "vellumwidget")
 
 keyed_scene <- function() {
   vellum::vl_scene(3, 2, dpi = 100) |>
@@ -20,7 +20,7 @@ keyed_scene <- function() {
     ))
 }
 
-test_that("scene_model() exposes the element columns gloss reads", {
+test_that("scene_model() exposes the element columns vellumwidget reads", {
   m <- vellum::scene_model(keyed_scene())
   el <- m$elements
   expect_true(all(c("key", "x0", "y0", "x1", "y1") %in% names(el)))
@@ -29,9 +29,9 @@ test_that("scene_model() exposes the element columns gloss reads", {
   expect_true(is.numeric(el$x0) && is.numeric(el$y1))
 })
 
-test_that("gloss_elements() turns the contract into keyed interaction records", {
+test_that("vellumwidget_elements() turns the contract into keyed interaction records", {
   m <- vellum::scene_model(keyed_scene())
-  els <- gloss_elements(m)
+  els <- vellumwidget_elements(m)
 
   expect_length(els, 2L)
   expect_setequal(vapply(els, function(e) e$key, character(1)), c("a", "b"))
@@ -48,5 +48,5 @@ test_that("an unkeyed scene yields no interaction records (contract additivity)"
   plain <- vellum::vl_scene(3, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5,
                                      gp = vellum::gpar(fill = "steelblue", col = NA)))
-  expect_length(gloss_elements(vellum::scene_model(plain)), 0L)
+  expect_length(vellumwidget_elements(vellum::scene_model(plain)), 0L)
 })

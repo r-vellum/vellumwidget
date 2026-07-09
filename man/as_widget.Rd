@@ -2,7 +2,7 @@
 % Please edit documentation in R/as-widget.R
 \name{as_widget}
 \alias{as_widget}
-\title{Turn a vellum scene (or quill plot) into an interactive widget}
+\title{Turn a vellum scene (or vellumplot plot) into an interactive widget}
 \usage{
 as_widget(
   x,
@@ -30,7 +30,7 @@ as_widget(
 )
 }
 \arguments{
-\item{x}{A \code{quill} plot (a \code{PlotSpec} / \code{PlotComposition}) or a \code{vellum}
+\item{x}{A \code{vellumplot} plot (a \code{PlotSpec} / \code{PlotComposition}) or a \code{vellum}
 scene --- anything \code{\link[vellum:as_vellum_scene]{vellum::as_vellum_scene()}} accepts.}
 
 \item{width, height}{Widget size (any valid CSS size, or \code{NULL} to size from the
@@ -54,15 +54,15 @@ a visually-hidden data table lists every mark for assistive tech. \code{FALSE}
 restores the previous behaviour (no chart semantics, marks not focusable).}
 
 \item{alt}{Accessible label (alt text) for the chart as a whole. Defaults to
-the scene's own title/description — which \code{quill} sets automatically from the
-plot title and \code{\link[quill:plot_alt]{quill::plot_alt()}} — so an explicit value is only needed for
+the scene's own title/description — which \code{vellumplot} sets automatically from the
+plot title and \code{\link[vellumplot:plot_alt]{vellumplot::plot_alt()}} — so an explicit value is only needed for
 a raw \code{vellum} scene or to override.}
 
 \item{hover_color, selected_color}{Outline colours for hovered / selected
 elements (any R or CSS colour), applied widget-wide. \code{hover_color = NULL}
 (default) keeps the plain dim-others hover; \code{selected_color = NULL} uses the
 built-in default. A per-mark \code{hover_color}/\code{selected_color} declared in
-\code{quill} overrides these for that mark.}
+\code{vellumplot} overrides these for that mark.}
 
 \item{dim_opacity}{Opacity (0–1) of the non-hovered elements while hovering
 (default \code{0.28}); \code{NULL} keeps the default.}
@@ -95,12 +95,12 @@ SharedData's keys. A crosstalk filter hides the non-matching elements
 \item{elementId}{Optional explicit widget DOM id.}
 }
 \value{
-An htmlwidget of class \code{"gloss"}.
+An htmlwidget of class \code{"vellumwidget"}.
 }
 \description{
 \code{as_widget()} is the terminal verb of the interactivity pipeline: it compiles
 its input to a \code{vellum} scene, emits the SVG (with per-element \code{data-key}s) and
-the \code{\link[vellum:scene_model]{vellum::scene_model()}} element table, and bundles them with the \code{gloss}
+the \code{\link[vellum:scene_model]{vellum::scene_model()}} element table, and bundles them with the \code{vellumwidget}
 JavaScript runtime into a self-contained \code{\link[htmlwidgets:createWidget]{htmlwidgets::createWidget()}} widget.
 The result does hover tooltips, hover highlighting, and click selection
 entirely client-side --- no Shiny, no server round-trip. Pan/zoom, brush, and
@@ -110,19 +110,19 @@ accessibility on (the default) the arrows move between marks while one is
 focused --- see the \code{a11y} argument.
 }
 \details{
-Interactivity is driven by the keys/metadata a plot declares. In \code{quill} these
+Interactivity is driven by the keys/metadata a plot declares. In \code{vellumplot} these
 come from the reserved \code{data_id} / \code{tooltip} / \code{hover_group} mark arguments; a
 plot that declares none renders as a static (but still embeddable) SVG. A
 hovered element with a \code{data_id} but no \code{tooltip} shows its key.
 
-The scene metadata \code{gloss} reads --- the \code{\link[vellum:scene_model]{vellum::scene_model()}} element
+The scene metadata \code{vellumwidget} reads --- the \code{\link[vellum:scene_model]{vellum::scene_model()}} element
 table and the SVG \code{data-key} / \verb{data-vellum-*} attributes --- is specified in
 vellum's "The scene contract" vignette
 (\code{vignette("scene-contract", package = "vellum")}).
 }
 \examples{
 \dontrun{
-library(quill)
+library(vellumplot)
 df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, model = rownames(mtcars))
 vplot(df) |>
   mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
