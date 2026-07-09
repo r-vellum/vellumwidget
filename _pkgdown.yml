@@ -47,16 +47,12 @@ home:
 
 navbar:
   structure:
-    left: [articles, reference, news]
+    left: [articles, gallery, reference, news]
     right: [search, vellum, vellumplot, vellumverse, github]
-
-articles:
-- title: Articles
-  navbar: ~
-  contents:
-  - articles/interactivity
-  - articles/shiny
   components:
+    gallery:
+      text: Gallery
+      href: https://r-vellum.github.io/vellumgallery/
     vellum:
       icon: fa-scroll
       href: https://r-vellum.github.io/vellum/
@@ -73,6 +69,13 @@ articles:
       icon: fa-github
       href: https://github.com/r-vellum/vellumwidget
       aria-label: GitHub
+
+articles:
+- title: Articles
+  navbar: ~
+  contents:
+  - articles/interactivity
+  - articles/shiny
 
 reference:
 - title: Building a widget
