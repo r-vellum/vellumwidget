@@ -16,7 +16,7 @@ knitr::opts_chunk$set(
 library(vellumwidget)
 ```
 
-`vellumwidget` turns a `vellum` scene — or, more usually, a `vellumplot` plot — into a
+`vellumwidget` turns a `vellum` scene, or more usually a `vellumplot` plot, into a
 self-contained, client-side interactive HTML widget. There is one verb,
 `as_widget()`, and it works the same in the RStudio/Positron viewer, a
 knitr/Quarto document, and a Shiny app. No Shiny server and no round-trip are
@@ -101,8 +101,8 @@ interactive chart, and every mark is focusable: **Tab** into the chart, use the
 **arrow keys** to move between marks (each announced through a polite live
 region), **Enter**/**Space** to select, and **Escape** to leave traversal mode. A
 visually-hidden data table lists every mark for screen-reader users. The chart's
-accessible name and description come from the plot's title and alt text — which
-`vellumplot` sets automatically — or an explicit `as_widget(alt =)`.
+accessible name and description come from the plot's title and alt text (which
+`vellumplot` sets automatically) or an explicit `as_widget(alt =)`.
 
 See the [vellumplot *Accessibility*
 article](https://r-vellum.github.io/vellumplot/articles/accessibility.html) for
@@ -111,7 +111,7 @@ the full cross-package story (alt text, accessible SVG/PDF, and this widget).
 ## Linked views
 
 Widgets sharing a `group` link client-side: selecting or brushing in one
-highlights the same data keys in the others — no Shiny, no crosstalk. Selection
+highlights the same data keys in the others, with no Shiny and no crosstalk. Selection
 projects by `hover_group` when the marks declare it.
 
 ```{r}

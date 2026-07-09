@@ -11,7 +11,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(vellumwidget)
 ```
 
-A `vellumwidget` widget is interactive on its own — hover, select, brush, pan/zoom — with
+A `vellumwidget` widget is interactive on its own (hover, select, brush, pan/zoom) with
 no server round-trip. Inside Shiny it also **reports those interactions back** as
 reactive inputs, so an app can respond to what the user does on the plot: filter a
 table to the brushed points, show details for the hovered mark, drive another
@@ -53,10 +53,10 @@ shinyApp(ui, server)
 
 ## What the widget reports
 
-The inputs are named `<outputId>_<event>` — so for `vellumwidgetOutput("plot")` they are
+The inputs are named `<outputId>_<event>`, so for `vellumwidgetOutput("plot")` they are
 `input$plot_selected`, `input$plot_click`, `input$plot_hover`, and
-`input$plot_brush`. **Every value is expressed in element keys** — the `data_id`
-you set on the mark — so you map back to your data by that key.
+`input$plot_brush`. **Every value is expressed in element keys** (the `data_id`
+you set on the mark), so you map back to your data by that key.
 
 | Input | Value | Kind |
 |---|---|---|
@@ -66,9 +66,9 @@ you set on the mark — so you map back to your data by that key.
 | `input$plot_brush` | `list(keys=, x0=, y0=, x1=, y1=)` — keys + brushed rectangle (device px) | event |
 
 **State vs event.** *State* inputs (`_selected`, `_hover`) update only when the
-value changes, so re-selecting the same set does not re-fire — pair them with
+value changes, so re-selecting the same set does not re-fire; pair them with
 `observe()` / `reactive()`. *Event* inputs (`_click`, `_brush`) fire on every
-occurrence, even a repeat — pair them with `observeEvent()`.
+occurrence, even a repeat; pair them with `observeEvent()`.
 
 ## Reacting to interactions
 
@@ -106,16 +106,16 @@ observeEvent(input$plot_click, {
 ## Notes
 
 - The `data_id` (mark key) is what everything reports; without it the marks are
-  drawn but carry no identity to report. `tooltip` is independent — it is what the
+  drawn but carry no identity to report. `tooltip` is independent; it is what the
   hover box shows, not what the input carries.
 - The inputs fire only inside a live Shiny session. A static render (knitr,
   pkgdown, `htmltools::save_html()`) is byte-for-byte identical and emits nothing.
 - The same keys are what a [crosstalk][ct] `SharedData` uses, so a vellumwidget widget can
-  link to `DT`, `plotly`, or `leaflet` client-side *without* Shiny — see
+  link to `DT`, `plotly`, or `leaflet` client-side *without* Shiny. See
   `as_widget(crosstalk=)`. Shiny inputs and crosstalk are complementary: use Shiny
   when the server needs to react, crosstalk for pure client-side linking.
-- Driving the widget *from* the server — setting the selection or a filter without
-  re-rendering — is a planned addition (a `vellumwidget_proxy()`), not yet available.
+- Driving the widget *from* the server, setting the selection or a filter without
+  re-rendering, is a planned addition (a `vellumwidget_proxy()`) that is not yet available.
 
 [ct]: https://rstudio.github.io/crosstalk/
 
