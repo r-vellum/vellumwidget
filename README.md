@@ -26,9 +26,6 @@ save SVG/PNG, fullscreen) · keyboard + screen-reader access (Tab in,
 arrow keys move between marks, Enter/Space to select; `a11y`, on by
 default). Each is opt-outable via an `as_widget()` argument.
 
-> The name is the manuscript *vellumwidget* — an annotation revealed on the
-> page.
-
 ## Installation
 
 ``` r

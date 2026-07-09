@@ -8,7 +8,7 @@
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Turns a 'vellum' scene (or a 'vellumplot' plot) into a self-contained, client-side interactive HTML widget: hover tooltips and highlighting, click selection, rectangular brush-select, pan/zoom, and a toolbar -- driven by the per-element data keys, bounding boxes, and 'scene_model()' metadata that 'vellum' emits. Requires no Shiny and no server round-trip. Named after the manuscript vellumwidget -- an annotation revealed on the page.
+Turns a 'vellum' scene (or a 'vellumplot' plot) into a self-contained, client-side interactive HTML widget: hover tooltips and highlighting, click selection, rectangular brush-select, pan/zoom, and a toolbar -- driven by the per-element data keys, bounding boxes, and 'scene_model()' metadata that 'vellum' emits. Requires no Shiny and no server round-trip.
 }
 \seealso{
 Useful links:
