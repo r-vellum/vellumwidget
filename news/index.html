@@ -13,7 +13,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -47,7 +47,7 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="development version" id="vellumwidget-development-version">vellumwidget (development version)<a class="anchor" aria-label="anchor" href="#vellumwidget-development-version"></a></h2>
+<h2 class="pkg-version" data-toc-text="0.3.0" id="vellumwidget-030">vellumwidget 0.3.0<a class="anchor" aria-label="anchor" href="#vellumwidget-030"></a></h2>
 <ul><li><p>Adopted vellum’s renamed <code>vl_*</code> graphics primitives (grid collision fix).</p></li>
 <li><p><strong>Shiny input read-back.</strong> A widget rendered with <code><a href="../reference/vellumwidget-shiny.html">vellumwidgetOutput()</a></code> now reports the user’s interactions to the server as reactive inputs keyed by the output id: <code>input$&lt;id&gt;_selected</code> (selected keys, state), <code>input$&lt;id&gt;_click</code> (<code>list(key=)</code>, event), <code>input$&lt;id&gt;_hover</code> (hovered key or <code>NULL</code>, state), and <code>input$&lt;id&gt;_brush</code> (<code>list(keys=, x0=, y0=, x1=, y1=)</code>, event). Values are element data keys, so they map straight back to your data. Emitted only in a live Shiny session — a static render is unchanged and produces no input traffic. See the new <em>Using vellumwidget in Shiny</em> article. (Driving the widget from the server — a <code>vellumwidget_proxy()</code> — is a planned follow-up.)</p></li>
 <li>
