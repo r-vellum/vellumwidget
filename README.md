@@ -206,7 +206,7 @@ share the vellum scene model:
 - **[vellumplot](https://github.com/r-vellum/vellumplot)** — the pen: a
   pipe-first grammar of graphics that compiles a plot spec into a vellum
   scene.
-- **[vellumwidget](https://github.com/r-vellum/vellumwidget)** — the vellumwidget: this
+- **[vellumwidget](https://github.com/r-vellum/vellumwidget)** — the annotation: this
   package.
 - **[vellumverse](https://github.com/r-vellum/vellumverse)** —
   installs and loads the whole ecosystem in one step.
