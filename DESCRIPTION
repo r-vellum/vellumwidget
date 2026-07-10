@@ -19,7 +19,7 @@ Depends:
 Imports:
     grDevices,
     htmlwidgets,
-    vellum (>= 0.1.1.9000)
+    vellum (>= 0.2.0.9000)
 Suggests:
     crosstalk,
     vellumplot,
