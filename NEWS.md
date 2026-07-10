@@ -1,4 +1,4 @@
-# vellumwidget (development version)
+# vellumwidget 0.3.0
 
 * Adopted vellum's renamed `vl_*` graphics primitives (grid collision fix).
 

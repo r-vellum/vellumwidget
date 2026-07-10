@@ -1,6 +1,6 @@
 Package: vellumwidget
 Title: Interactive Web Widgets for Vellum Scenes
-Version: 0.2.0.9000
+Version: 0.3.0
 Authors@R:
     person("David", "Schoch", , "david.schoch@cynkra.com", role = c("aut", "cre"))
 Description: Turns a 'vellum' scene (or a 'vellumplot' plot) into a self-contained,
