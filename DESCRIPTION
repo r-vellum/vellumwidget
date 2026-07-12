@@ -10,7 +10,8 @@ Description: Turns a 'vellum' scene (or a 'vellumplot' plot) into a self-contain
     'vellum' emits. Requires no Shiny and no server round-trip.
 License: MIT + file LICENSE
 URL: https://r-vellum.github.io/vellumwidget/,
-    https://github.com/r-vellum/vellumwidget
+    https://github.com/r-vellum/vellumwidget,
+    https://schochastics.r-universe.dev/vellumwidget
 BugReports: https://github.com/r-vellum/vellumwidget/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
