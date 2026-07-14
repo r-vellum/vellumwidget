@@ -14,7 +14,24 @@
 declare const HTMLWidgets: {
   widget: (w: unknown) => void;
   shinyMode?: boolean; // true only inside a live Shiny app (gates the Shiny.* calls)
+  // Resolve a mounted widget instance (the object its factory returned) by CSS
+  // selector; used by the server->client proxy to find the widget to drive.
+  find?: (selector: string) => WidgetInstance | null;
 };
+
+// The subset of the object a widget's factory returns that the proxy needs: the
+// `_call` seam that routes a server-driven command onto the instance.
+interface WidgetInstance {
+  _call?: (method: string, args: unknown) => void;
+}
+
+// A server->client proxy command (from vellumwidget_proxy()): which widget, which
+// action, and its keys. Delivered via Shiny's "vellumwidget-calls" custom message.
+interface ProxyMessage {
+  id: string;
+  method: string;
+  args?: unknown;
+}
 
 interface Bbox {
   x0: number;
@@ -521,6 +538,33 @@ HTMLWidgets.widget({
         if (!show[key]) addClassForKeys([key], "vellumwidget-filtered");
       }
     }
+    // --- server -> client proxy (vellumwidget_proxy) ---
+    // Route a command from the Shiny server onto this instance, without a
+    // re-render. `args` is normalised to a key array (Shiny may auto-unbox a
+    // length-1 vector to a scalar, so accept scalar/array/absent uniformly).
+    function proxyCall(method: string, args: unknown): void {
+      const keys: string[] = Array.isArray(args)
+        ? (args as string[])
+        : args == null ? [] : [String(args)];
+      switch (method) {
+        case "select": setSelection(keys); break;
+        case "clearSelection": clearSelection(); break;
+        case "filter": applyFilter(keys); break;
+        case "clearFilter": applyFilter(null); break;
+        case "zoom": proxyZoomToKeys(keys); break;
+        case "resetZoom": resetZoom(); break;
+        default: break; // ignore unknown methods (forward-compatible)
+      }
+    }
+    // Frame the given keys' union bbox; empty keys reset to the full view.
+    function proxyZoomToKeys(keys: string[]): void {
+      if (!keys.length) { resetZoom(); return; }
+      const sel: Record<string, boolean> = {};
+      for (let i = 0; i < keys.length; i++) sel[keys[i]] = true;
+      const bb = unionBbox(elements, sel);
+      if (bb) zoomTo(bb);
+    }
+
     // Join the linking channels for this widget's groups (once).
     function setupLinking(): void {
       if (joined) return;
@@ -1237,15 +1281,52 @@ HTMLWidgets.widget({
           // Publish the (empty) initial selection so a (re-)render clears any
           // stale value the server held from a previous instance.
           shinyInput("selected", selectedKeys());
+          // In case Shiny attached after this bundle first evaluated.
+          registerProxyHandler();
         }
       },
 
       resize: function () {
         // The SVG scales via its viewBox; nothing to recompute.
-      }
+      },
+
+      // Server->client proxy seam: vellumwidget_proxy() reaches this instance via
+      // HTMLWidgets.find() and calls `_call` (see the "vellumwidget-calls" handler).
+      _call: proxyCall
     };
   }
 });
+
+// Route a server->client proxy message to its target widget instance. Split out
+// (and given an injectable resolver) so it is unit-testable without a live Shiny.
+function dispatchProxyCall(
+  msg: ProxyMessage | null | undefined,
+  findInstance: (id: string) => WidgetInstance | null
+): void {
+  if (!msg || msg.id == null) return;
+  const inst = findInstance(msg.id);
+  if (inst && typeof inst._call === "function") inst._call(msg.method, msg.args);
+}
+
+// Register the "vellumwidget-calls" custom-message handler once, so a Shiny app can
+// drive rendered widgets via vellumwidget_proxy(). Attempted at load and again on the
+// first render, since Shiny may attach after this bundle evaluates; a module-level
+// guard keeps it to a single registration.
+let proxyHandlerRegistered = false;
+function registerProxyHandler(): void {
+  if (proxyHandlerRegistered) return;
+  const sh = (window as unknown as {
+    Shiny?: { addCustomMessageHandler?: (t: string, cb: (m: ProxyMessage) => void) => void };
+  }).Shiny;
+  if (!sh || typeof sh.addCustomMessageHandler !== "function") return;
+  proxyHandlerRegistered = true;
+  sh.addCustomMessageHandler("vellumwidget-calls", function (msg: ProxyMessage) {
+    dispatchProxyCall(msg, function (id) {
+      return HTMLWidgets.find ? HTMLWidgets.find("#" + id) : null;
+    });
+  });
+}
+registerProxyHandler();
 
 // Test seam: expose the pure helpers for the headless behaviour suite.
 (window as unknown as { __vellumwidgetTest?: unknown }).__vellumwidgetTest = {
@@ -1257,5 +1338,6 @@ HTMLWidgets.widget({
   parseViewBox,
   fmtViewBox,
   unionBbox,
-  sanitizeTip
+  sanitizeTip,
+  dispatchProxyCall
 };

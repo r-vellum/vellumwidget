@@ -637,5 +637,115 @@ function mountShiny(id, calls) {
   delete window.Shiny;
 }
 
+// ===================== server -> client proxy (vellumwidget_proxy) =====================
+// The instance exposes `_call(method, args)`, the seam vellumwidget_proxy() drives via
+// the "vellumwidget-calls" custom message. Exercise each verb's DOM effect directly.
+{
+  const eP = document.createElement("div");
+  document.body.appendChild(eP);
+  const iP = widgetDef.factory(eP, 60, 30);
+  iP.renderValue({
+    svg: svg2paths, // keys x, y with a 0 0 60 30 viewBox
+    elements: [
+      { key: "x", x0: 1, y0: 1, x1: 10, y1: 10 },
+      { key: "y", x0: 40, y0: 1, x1: 49, y1: 10 }
+    ],
+    options: { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, selectMode: "multiple" }
+  });
+  const svgP = eP.querySelector("svg");
+  const px = eP.querySelector('[data-key="x"]');
+  const py = eP.querySelector('[data-key="y"]');
+  ok(typeof iP._call === "function", "proxy: instance exposes the _call seam");
+
+  // select -> the given keys become selected (server-driven, no click)
+  iP._call("select", ["x"]);
+  ok(px.classList.contains("vellumwidget-selected"), "proxy: select() selects the given key");
+  ok(!py.classList.contains("vellumwidget-selected"), "proxy: select() leaves other keys unselected");
+
+  // select with a scalar arg (Shiny may auto-unbox a length-1 vector) still works
+  iP._call("select", "y");
+  ok(py.classList.contains("vellumwidget-selected") && !px.classList.contains("vellumwidget-selected"),
+    "proxy: select() accepts a scalar (auto-unboxed) key and replaces the selection");
+
+  // clearSelection -> nothing selected
+  iP._call("clearSelection");
+  ok(eP.querySelectorAll(".vellumwidget-selected").length === 0, "proxy: clearSelection() clears the selection");
+
+  // filter -> keys not in the show set are marked filtered (display tier)
+  iP._call("filter", ["x"]);
+  ok(py.classList.contains("vellumwidget-filtered"), "proxy: filter() hides keys outside the show set");
+  ok(!px.classList.contains("vellumwidget-filtered"), "proxy: filter() keeps keys in the show set");
+
+  // clearFilter -> filter removed
+  iP._call("clearFilter");
+  ok(eP.querySelectorAll(".vellumwidget-filtered").length === 0, "proxy: clearFilter() removes the filter");
+
+  // zoom -> the viewBox shrinks to frame the requested key
+  const vbFull = svgP.getAttribute("viewBox");
+  iP._call("zoom", ["x"]);
+  const vbZoom = T.parseViewBox(svgP.getAttribute("viewBox"));
+  ok(vbZoom && vbZoom.w < 60, "proxy: zoom() frames the key (viewBox shrinks)");
+
+  // resetZoom -> back to the original view
+  iP._call("resetZoom");
+  ok(svgP.getAttribute("viewBox") === vbFull, "proxy: resetZoom() restores the original viewBox");
+
+  // zoom with empty keys resets to the full view
+  iP._call("zoom", ["x"]);
+  iP._call("zoom", []);
+  ok(svgP.getAttribute("viewBox") === vbFull, "proxy: zoom([]) resets to the full view");
+
+  // unknown method is ignored (forward-compatible), no throw
+  let threw = false;
+  try { iP._call("no_such_method", ["x"]); } catch (e) { threw = true; }
+  ok(!threw, "proxy: an unknown method is ignored without throwing");
+}
+
+// dispatchProxyCall routes a message to the instance resolved by id.
+{
+  const seen = [];
+  const fakeInst = { _call: (m, a) => seen.push({ m: m, a: a }) };
+  const find = (id) => (id === "#plot" ? fakeInst : null);
+  T.dispatchProxyCall({ id: "plot", method: "select", args: ["a", "b"] }, (id) => find("#" + id));
+  ok(seen.length === 1 && seen[0].m === "select" && JSON.stringify(seen[0].a) === '["a","b"]',
+    "dispatchProxyCall: routes method+args to the matched instance's _call");
+  // unknown id -> no-op (no instance found)
+  T.dispatchProxyCall({ id: "missing", method: "select", args: [] }, (id) => find("#" + id));
+  ok(seen.length === 1, "dispatchProxyCall: unknown id is a no-op");
+  // malformed message -> no-op, no throw
+  let dThrew = false;
+  try { T.dispatchProxyCall(null, () => null); T.dispatchProxyCall({}, () => null); } catch (e) { dThrew = true; }
+  ok(!dThrew, "dispatchProxyCall: a null / id-less message is a safe no-op");
+}
+
+// The "vellumwidget-calls" handler is registered once when Shiny is present.
+{
+  const handlers = {};
+  window.Shiny = {
+    setInputValue: () => {},
+    addCustomMessageHandler: (t, cb) => { handlers[t] = cb; }
+  };
+  HTMLWidgets.shinyMode = true;
+  // The bundle registers at load (before Shiny existed here) and again on render;
+  // a render now, with Shiny present, wires the handler up.
+  const eH = document.createElement("div");
+  eH.id = "plotH";
+  document.body.appendChild(eH);
+  const iH = widgetDef.factory(eH, 60, 30);
+  HTMLWidgets.find = (sel) => (sel === "#plotH" ? iH : null);
+  iH.renderValue({
+    svg: svg2paths,
+    elements: [{ key: "x", x0: 1, y0: 1, x1: 10, y1: 10 }, { key: "y", x0: 40, y0: 1, x1: 49, y1: 10 }],
+    options: { select: true, selectMode: "multiple" }
+  });
+  ok(typeof handlers["vellumwidget-calls"] === "function", "proxy: 'vellumwidget-calls' handler registered under Shiny");
+  handlers["vellumwidget-calls"]({ id: "plotH", method: "select", args: ["y"] });
+  ok(eH.querySelector('[data-key="y"]').classList.contains("vellumwidget-selected"),
+    "proxy: a 'vellumwidget-calls' message drives the resolved widget");
+  delete HTMLWidgets.find;
+  HTMLWidgets.shinyMode = false;
+  delete window.Shiny;
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);
