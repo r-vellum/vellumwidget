@@ -106,9 +106,9 @@ output from the selection.</p>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-vellum.github.io/vellumplot/" class="external-link">vellumplot</a></span><span class="op">)</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-vellum.github.io/vellumwidget/">vellumwidget</a></span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">ui</span> <span class="op">&lt;-</span> <span class="fu">fluidPage</span><span class="op">(</span></span>
+<span><span class="va">ui</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/pkg/shiny/man/fluidPage.html" class="external-link">fluidPage</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="../reference/vellumwidget-shiny.html">vellumwidgetOutput</a></span><span class="op">(</span><span class="st">"plot"</span>, height <span class="op">=</span> <span class="st">"500px"</span><span class="op">)</span>,</span>
-<span>  <span class="fu">verbatimTextOutput</span><span class="op">(</span><span class="st">"info"</span><span class="op">)</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/shiny/man/textOutput.html" class="external-link">verbatimTextOutput</a></span><span class="op">(</span><span class="st">"info"</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span></span>
 <span><span class="va">server</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">input</span>, <span class="va">output</span><span class="op">)</span> <span class="op">{</span></span>
@@ -122,12 +122,12 @@ output from the selection.</p>
 <span>      <span class="fu"><a href="../reference/as_widget.html">as_widget</a></span><span class="op">(</span><span class="op">)</span></span>
 <span>  <span class="op">}</span><span class="op">)</span></span>
 <span></span>
-<span>  <span class="va">output</span><span class="op">$</span><span class="va">info</span> <span class="op">&lt;-</span> <span class="fu">renderPrint</span><span class="op">(</span><span class="op">{</span></span>
+<span>  <span class="va">output</span><span class="op">$</span><span class="va">info</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/pkg/shiny/man/renderPrint.html" class="external-link">renderPrint</a></span><span class="op">(</span><span class="op">{</span></span>
 <span>    <span class="va">input</span><span class="op">$</span><span class="va">plot_selected</span> <span class="co"># the keys currently selected</span></span>
 <span>  <span class="op">}</span><span class="op">)</span></span>
 <span><span class="op">}</span></span>
 <span></span>
-<span><span class="fu">shinyApp</span><span class="op">(</span><span class="va">ui</span>, <span class="va">server</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="https://rdrr.io/pkg/shiny/man/shinyApp.html" class="external-link">shinyApp</a></span><span class="op">(</span><span class="va">ui</span>, <span class="va">server</span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="what-the-widget-reports">What the widget reports<a class="anchor" aria-label="anchor" href="#what-the-widget-reports"></a>
@@ -181,9 +181,9 @@ rectangle (device px)</td>
 <p><strong>State vs event.</strong> <em>State</em> inputs
 (<code>_selected</code>, <code>_hover</code>) update only when the value
 changes, so re-selecting the same set does not re-fire; pair them with
-<code>observe()</code> / <code>reactive()</code>. <em>Event</em> inputs
+<code><a href="https://rdrr.io/pkg/shiny/man/observe.html" class="external-link">observe()</a></code> / <code><a href="https://rdrr.io/pkg/shiny/man/reactive.html" class="external-link">reactive()</a></code>. <em>Event</em> inputs
 (<code>_click</code>, <code>_brush</code>) fire on every occurrence,
-even a repeat; pair them with <code>observeEvent()</code>.</p>
+even a repeat; pair them with <code><a href="https://rdrr.io/pkg/shiny/man/observeEvent.html" class="external-link">observeEvent()</a></code>.</p>
 </div>
 <div class="section level2">
 <h2 id="reacting-to-interactions">Reacting to interactions<a class="anchor" aria-label="anchor" href="#reacting-to-interactions"></a>
@@ -191,22 +191,108 @@ even a repeat; pair them with <code>observeEvent()</code>.</p>
 <p>Because everything is keyed, the common patterns are one-liners.
 Filter a table to the brushed points:</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">output</span><span class="op">$</span><span class="va">table</span> <span class="op">&lt;-</span> <span class="fu">renderTable</span><span class="op">(</span><span class="op">{</span></span>
+<code class="sourceCode R"><span><span class="va">output</span><span class="op">$</span><span class="va">table</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/pkg/shiny/man/renderTable.html" class="external-link">renderTable</a></span><span class="op">(</span><span class="op">{</span></span>
 <span>  <span class="va">keys</span> <span class="op">&lt;-</span> <span class="va">input</span><span class="op">$</span><span class="va">plot_brush</span><span class="op">$</span><span class="va">keys</span></span>
 <span>  <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">keys</span><span class="op">)</span><span class="op">)</span> <span class="va">mtcars</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/colnames.html" class="external-link">rownames</a></span><span class="op">(</span><span class="va">mtcars</span><span class="op">)</span> <span class="op"><a href="https://rdrr.io/r/base/match.html" class="external-link">%in%</a></span> <span class="va">keys</span>, <span class="op">]</span> <span class="kw">else</span> <span class="va">mtcars</span><span class="op">[</span><span class="fl">0</span>, <span class="op">]</span></span>
 <span><span class="op">}</span><span class="op">)</span></span></code></pre></div>
 <p>Show the hovered car:</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">output</span><span class="op">$</span><span class="va">detail</span> <span class="op">&lt;-</span> <span class="fu">renderText</span><span class="op">(</span><span class="op">{</span></span>
+<code class="sourceCode R"><span><span class="va">output</span><span class="op">$</span><span class="va">detail</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/pkg/shiny/man/renderPrint.html" class="external-link">renderText</a></span><span class="op">(</span><span class="op">{</span></span>
 <span>  <span class="va">k</span> <span class="op">&lt;-</span> <span class="va">input</span><span class="op">$</span><span class="va">plot_hover</span></span>
 <span>  <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/NULL.html" class="external-link">is.null</a></span><span class="op">(</span><span class="va">k</span><span class="op">)</span><span class="op">)</span> <span class="st">"Hover a point"</span> <span class="kw">else</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span><span class="va">k</span>, <span class="st">"-"</span>, <span class="va">mtcars</span><span class="op">[</span><span class="va">k</span>, <span class="st">"hp"</span><span class="op">]</span>, <span class="st">"hp"</span><span class="op">)</span></span>
 <span><span class="op">}</span><span class="op">)</span></span></code></pre></div>
 <p>Respond to each click:</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu">observeEvent</span><span class="op">(</span><span class="va">input</span><span class="op">$</span><span class="va">plot_click</span>, <span class="op">{</span></span>
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/pkg/shiny/man/observeEvent.html" class="external-link">observeEvent</a></span><span class="op">(</span><span class="va">input</span><span class="op">$</span><span class="va">plot_click</span>, <span class="op">{</span></span>
 <span>  <span class="va">key</span> <span class="op">&lt;-</span> <span class="va">input</span><span class="op">$</span><span class="va">plot_click</span><span class="op">$</span><span class="va">key</span></span>
-<span>  <span class="kw">if</span> <span class="op">(</span><span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NULL.html" class="external-link">is.null</a></span><span class="op">(</span><span class="va">key</span><span class="op">)</span><span class="op">)</span> <span class="fu">showNotification</span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span><span class="st">"clicked"</span>, <span class="va">key</span><span class="op">)</span><span class="op">)</span></span>
+<span>  <span class="kw">if</span> <span class="op">(</span><span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NULL.html" class="external-link">is.null</a></span><span class="op">(</span><span class="va">key</span><span class="op">)</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/pkg/shiny/man/showNotification.html" class="external-link">showNotification</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span><span class="st">"clicked"</span>, <span class="va">key</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="op">}</span><span class="op">)</span></span></code></pre></div>
+</div>
+<div class="section level2">
+<h2 id="driving-the-widget-from-the-server">Driving the widget from the server<a class="anchor" aria-label="anchor" href="#driving-the-widget-from-the-server"></a>
+</h2>
+<p>Reading interactions is one direction; the other is the server
+<em>changing</em> what the widget shows.
+<code><a href="../reference/vellumwidget_proxy.html">vellumwidget_proxy()</a></code> gives you a handle to a widget that is
+<strong>already on the page</strong> and drives it <strong>without
+re-rendering</strong> — the SVG is not rebuilt, so the current pan/zoom
+and the smooth feel are preserved. It works exactly like
+<code>leaflet::leafletProxy()</code>, <code>DT::dataTableProxy()</code>,
+or <code>plotly::plotlyProxy()</code>.</p>
+<p>Call it with the same <code>outputId</code> you gave
+<code><a href="../reference/vellumwidget-shiny.html">vellumwidgetOutput()</a></code>, then pipe the handle through the
+verbs:</p>
+<table class="table">
+<colgroup>
+<col width="50%">
+<col width="50%">
+</colgroup>
+<thead><tr class="header">
+<th>Verb</th>
+<th>Effect</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td>
+<code>vw_select(keys)</code> /
+<code><a href="../reference/vellumwidget-proxy-verbs.html">vw_clear_selection()</a></code>
+</td>
+<td>set / clear the selection</td>
+</tr>
+<tr class="even">
+<td>
+<code>vw_filter(keys)</code> / <code><a href="../reference/vellumwidget-proxy-verbs.html">vw_clear_filter()</a></code>
+</td>
+<td>cross-filter to <code>keys</code> (dim the rest) / remove the
+filter</td>
+</tr>
+<tr class="odd">
+<td>
+<code>vw_zoom(keys)</code> / <code><a href="../reference/vellumwidget-proxy-verbs.html">vw_reset_zoom()</a></code>
+</td>
+<td>frame <code>keys</code> / restore the full view</td>
+</tr>
+</tbody>
+</table>
+<p>All <code>keys</code> are the element <code>data_id</code>s — the
+very same identifiers you get back through
+<code>input$plot_selected</code>. For example, a
+<code>selectInput</code> that highlights cars on the plot, and a button
+that clears everything:</p>
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">ui</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/pkg/shiny/man/fluidPage.html" class="external-link">fluidPage</a></span><span class="op">(</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/shiny/man/selectInput.html" class="external-link">selectInput</a></span><span class="op">(</span><span class="st">"pick"</span>, <span class="st">"Highlight"</span>, choices <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/colnames.html" class="external-link">rownames</a></span><span class="op">(</span><span class="va">mtcars</span><span class="op">)</span>, multiple <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span>,</span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/shiny/man/actionButton.html" class="external-link">actionButton</a></span><span class="op">(</span><span class="st">"reset"</span>, <span class="st">"Reset"</span><span class="op">)</span>,</span>
+<span>  <span class="fu"><a href="../reference/vellumwidget-shiny.html">vellumwidgetOutput</a></span><span class="op">(</span><span class="st">"plot"</span>, height <span class="op">=</span> <span class="st">"500px"</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">server</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">input</span>, <span class="va">output</span>, <span class="va">session</span><span class="op">)</span> <span class="op">{</span></span>
+<span>  <span class="va">output</span><span class="op">$</span><span class="va">plot</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/vellumwidget-shiny.html">renderVellumwidget</a></span><span class="op">(</span><span class="op">{</span></span>
+<span>    <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/vplot.html" class="external-link">vplot</a></span><span class="op">(</span><span class="va">mtcars</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>      <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/mark_point.html" class="external-link">mark_point</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">wt</span>, y <span class="op">=</span> <span class="va">mpg</span>, data_id <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/colnames.html" class="external-link">rownames</a></span><span class="op">(</span><span class="va">mtcars</span><span class="op">)</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>      <span class="fu"><a href="../reference/as_widget.html">as_widget</a></span><span class="op">(</span><span class="op">)</span></span>
+<span>  <span class="op">}</span><span class="op">)</span></span>
+<span></span>
+<span>  <span class="co"># server -&gt; client: highlight and zoom to the picked cars, no re-render</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/shiny/man/observeEvent.html" class="external-link">observeEvent</a></span><span class="op">(</span><span class="va">input</span><span class="op">$</span><span class="va">pick</span>, ignoreNULL <span class="op">=</span> <span class="cn">FALSE</span>, <span class="op">{</span></span>
+<span>    <span class="fu"><a href="../reference/vellumwidget_proxy.html">vellumwidget_proxy</a></span><span class="op">(</span><span class="st">"plot"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>      <span class="fu"><a href="../reference/vellumwidget-proxy-verbs.html">vw_select</a></span><span class="op">(</span><span class="va">input</span><span class="op">$</span><span class="va">pick</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>      <span class="fu"><a href="../reference/vellumwidget-proxy-verbs.html">vw_zoom</a></span><span class="op">(</span><span class="va">input</span><span class="op">$</span><span class="va">pick</span><span class="op">)</span> <span class="co"># empty selection resets the view</span></span>
+<span>  <span class="op">}</span><span class="op">)</span></span>
+<span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/shiny/man/observeEvent.html" class="external-link">observeEvent</a></span><span class="op">(</span><span class="va">input</span><span class="op">$</span><span class="va">reset</span>, <span class="op">{</span></span>
+<span>    <span class="fu"><a href="../reference/vellumwidget_proxy.html">vellumwidget_proxy</a></span><span class="op">(</span><span class="st">"plot"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>      <span class="fu"><a href="../reference/vellumwidget-proxy-verbs.html">vw_clear_selection</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>      <span class="fu"><a href="../reference/vellumwidget-proxy-verbs.html">vw_reset_zoom</a></span><span class="op">(</span><span class="op">)</span></span>
+<span>  <span class="op">}</span><span class="op">)</span></span>
+<span><span class="op">}</span></span></code></pre></div>
+<p>A server-driven <code><a href="../reference/vellumwidget-proxy-verbs.html">vw_select()</a></code> behaves just like a user
+click: it projects across a mark’s <code>hover_group</code>, propagates
+to any linked / crosstalk widgets, and updates
+<code>input$plot_selected</code>. If you also <em>observe</em>
+<code>input$plot_selected</code> and call <code><a href="../reference/vellumwidget-proxy-verbs.html">vw_select()</a></code> from
+there, guard against the echo (e.g. only act when the value actually
+differs) to avoid a feedback loop — the usual Shiny proxy caution.</p>
 </div>
 <div class="section level2">
 <h2 id="notes">Notes<a class="anchor" aria-label="anchor" href="#notes"></a>
@@ -226,9 +312,10 @@ client-side <em>without</em> Shiny. See
 <code>as_widget(crosstalk=)</code>. Shiny inputs and crosstalk are
 complementary: use Shiny when the server needs to react, crosstalk for
 pure client-side linking.</li>
-<li>Driving the widget <em>from</em> the server, setting the selection
-or a filter without re-rendering, is a planned addition (a
-<code>vellumwidget_proxy()</code>) that is not yet available.</li>
+<li>Driving the widget <em>from</em> the server — selection, filter,
+zoom — is <code><a href="../reference/vellumwidget_proxy.html">vellumwidget_proxy()</a></code>, above. Shiny inputs (client
+→ server), crosstalk (client ↔︎ client), and the proxy (server → client)
+are the three linking directions.</li>
 </ul>
 <p>See the <a href="interactivity.html">interactive widgets tour</a> for
 the full set of client-side interactions, and the <a href="https://r-vellum.github.io/vellumplot/articles/accessibility.html" class="external-link">accessibility

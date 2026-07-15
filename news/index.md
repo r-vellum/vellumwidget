@@ -2,6 +2,36 @@
 
 ## vellumwidget (development version)
 
+- **Server-to-client proxy
+  ([`vellumwidget_proxy()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget_proxy.md)).**
+  A Shiny app can now drive an already-rendered widget from the server
+  **without re-rendering it** — no
+  [`renderVellumwidget()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-shiny.md)
+  round-trip, no lost pan/zoom. Get a handle with
+  `vellumwidget_proxy(outputId)` (inside an
+  [`observe()`](https://rdrr.io/pkg/shiny/man/observe.html)), then pipe
+  it through the verbs:
+  - [`vw_select()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md)
+    /
+    [`vw_clear_selection()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md)
+    — set or clear the selection (projects across `hover_group` and
+    propagates to linked / crosstalk widgets, exactly like a user click,
+    and updates `input$<id>_selected`);
+  - [`vw_filter()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md)
+    /
+    [`vw_clear_filter()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md)
+    — cross-filter the widget (show only the given keys, dim the rest;
+    display tier, data untouched);
+  - [`vw_zoom()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md)
+    /
+    [`vw_reset_zoom()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md)
+    — frame a set of keys, or restore the full view.
+
+  All keys are the element `data_id`s — the same identifiers you read
+  back through `input$<id>_selected`. This completes the two-way Shiny
+  story begun with the input read-back in 0.3.0; see the expanded *Using
+  vellumwidget in Shiny* article.
+
 ## vellumwidget 0.3.0
 
 - Adopted vellum’s renamed `vl_*` graphics primitives (grid collision
@@ -17,8 +47,9 @@
   keys, so they map straight back to your data. Emitted only in a live
   Shiny session — a static render is unchanged and produces no input
   traffic. See the new *Using vellumwidget in Shiny* article. (Driving
-  the widget from the server — a `vellumwidget_proxy()` — is a planned
-  follow-up.)
+  the widget from the server — a
+  [`vellumwidget_proxy()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget_proxy.md)
+  — is a planned follow-up.)
 
 - **Accessibility (`a11y = TRUE`, on by default).** The interactive
   widget is now keyboard- and screen-reader-navigable, not a mute image:

@@ -48,11 +48,21 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="development version" id="vellumwidget-development-version">vellumwidget (development version)<a class="anchor" aria-label="anchor" href="#vellumwidget-development-version"></a></h2>
-</div>
+<ul><li>
+<strong>Server-to-client proxy (<code><a href="../reference/vellumwidget_proxy.html">vellumwidget_proxy()</a></code>).</strong> A Shiny app can now drive an already-rendered widget from the server <strong>without re-rendering it</strong> — no <code><a href="../reference/vellumwidget-shiny.html">renderVellumwidget()</a></code> round-trip, no lost pan/zoom. Get a handle with <code>vellumwidget_proxy(outputId)</code> (inside an <code><a href="https://rdrr.io/pkg/shiny/man/observe.html" class="external-link">observe()</a></code>), then pipe it through the verbs:
+<ul><li>
+<code><a href="../reference/vellumwidget-proxy-verbs.html">vw_select()</a></code> / <code><a href="../reference/vellumwidget-proxy-verbs.html">vw_clear_selection()</a></code> — set or clear the selection (projects across <code>hover_group</code> and propagates to linked / crosstalk widgets, exactly like a user click, and updates <code>input$&lt;id&gt;_selected</code>);</li>
+<li>
+<code><a href="../reference/vellumwidget-proxy-verbs.html">vw_filter()</a></code> / <code><a href="../reference/vellumwidget-proxy-verbs.html">vw_clear_filter()</a></code> — cross-filter the widget (show only the given keys, dim the rest; display tier, data untouched);</li>
+<li>
+<code><a href="../reference/vellumwidget-proxy-verbs.html">vw_zoom()</a></code> / <code><a href="../reference/vellumwidget-proxy-verbs.html">vw_reset_zoom()</a></code> — frame a set of keys, or restore the full view.</li>
+</ul>
+All keys are the element <code>data_id</code>s — the same identifiers you read back through <code>input$&lt;id&gt;_selected</code>. This completes the two-way Shiny story begun with the input read-back in 0.3.0; see the expanded <em>Using vellumwidget in Shiny</em> article.</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.3.0" id="vellumwidget-030">vellumwidget 0.3.0<a class="anchor" aria-label="anchor" href="#vellumwidget-030"></a></h2>
 <ul><li><p>Adopted vellum’s renamed <code>vl_*</code> graphics primitives (grid collision fix).</p></li>
-<li><p><strong>Shiny input read-back.</strong> A widget rendered with <code><a href="../reference/vellumwidget-shiny.html">vellumwidgetOutput()</a></code> now reports the user’s interactions to the server as reactive inputs keyed by the output id: <code>input$&lt;id&gt;_selected</code> (selected keys, state), <code>input$&lt;id&gt;_click</code> (<code>list(key=)</code>, event), <code>input$&lt;id&gt;_hover</code> (hovered key or <code>NULL</code>, state), and <code>input$&lt;id&gt;_brush</code> (<code>list(keys=, x0=, y0=, x1=, y1=)</code>, event). Values are element data keys, so they map straight back to your data. Emitted only in a live Shiny session — a static render is unchanged and produces no input traffic. See the new <em>Using vellumwidget in Shiny</em> article. (Driving the widget from the server — a <code>vellumwidget_proxy()</code> — is a planned follow-up.)</p></li>
+<li><p><strong>Shiny input read-back.</strong> A widget rendered with <code><a href="../reference/vellumwidget-shiny.html">vellumwidgetOutput()</a></code> now reports the user’s interactions to the server as reactive inputs keyed by the output id: <code>input$&lt;id&gt;_selected</code> (selected keys, state), <code>input$&lt;id&gt;_click</code> (<code>list(key=)</code>, event), <code>input$&lt;id&gt;_hover</code> (hovered key or <code>NULL</code>, state), and <code>input$&lt;id&gt;_brush</code> (<code>list(keys=, x0=, y0=, x1=, y1=)</code>, event). Values are element data keys, so they map straight back to your data. Emitted only in a live Shiny session — a static render is unchanged and produces no input traffic. See the new <em>Using vellumwidget in Shiny</em> article. (Driving the widget from the server — a <code><a href="../reference/vellumwidget_proxy.html">vellumwidget_proxy()</a></code> — is a planned follow-up.)</p></li>
 <li>
 <p><strong>Accessibility (<code>a11y = TRUE</code>, on by default).</strong> The interactive widget is now keyboard- and screen-reader-navigable, not a mute image:</p>
 <ul><li>the SVG is announced as an interactive chart (<code>role="graphics-document"</code> + <code>aria-roledescription</code>), labelled from the scene’s title/description (which <code>vellumplot</code> sets automatically) or an explicit <code>as_widget(alt =)</code>;</li>
