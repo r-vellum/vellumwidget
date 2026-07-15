@@ -110,12 +110,19 @@ function hasBbox(e: ElemMeta): e is ElemMeta & Bbox {
   return typeof e.x0 === "number" && typeof e.y0 === "number";
 }
 
-// Keys of every element whose bbox intersects the brush rectangle.
+// Distinct keys of every element whose bbox intersects the brush rectangle. A key
+// that spans several elements (an error bar's segments, a box's rect + whiskers)
+// is returned once, so the brush key list and the `_brush` Shiny event never
+// over-count a multi-element mark.
 function brushKeys(elems: ElemMeta[], brush: Bbox): string[] {
   const out: string[] = [];
+  const seen: Record<string, boolean> = {};
   for (let i = 0; i < elems.length; i++) {
     const e = elems[i];
-    if (hasBbox(e) && rectsIntersect(e, brush)) out.push(e.key);
+    if (hasBbox(e) && rectsIntersect(e, brush) && !seen[e.key]) {
+      seen[e.key] = true;
+      out.push(e.key);
+    }
   }
   return out;
 }

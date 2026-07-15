@@ -15,9 +15,13 @@
   }
   function brushKeys(elems, brush) {
     const out = [];
+    const seen = {};
     for (let i = 0; i < elems.length; i++) {
       const e = elems[i];
-      if (hasBbox(e) && rectsIntersect(e, brush)) out.push(e.key);
+      if (hasBbox(e) && rectsIntersect(e, brush) && !seen[e.key]) {
+        seen[e.key] = true;
+        out.push(e.key);
+      }
     }
     return out;
   }

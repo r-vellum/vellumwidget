@@ -212,3 +212,43 @@ test_that("discrete legend swatches + series membership flow into the payload (P
 })
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
+
+# Keyed statistical marks (error bars / boxplots) become interactive: each mark's
+# several SVG elements share one data-key, so the widget hovers/selects them as a
+# unit. Gated on the installed vellumplot actually keying error bars, so this
+# passes regardless of which vellumplot dev version is present.
+.errorbar_keyed <- function() {
+  if (!requireNamespace("vellumplot", quietly = TRUE)) return(FALSE)
+  df <- data.frame(g = c("a", "b"), lo = c(1, 2), hi = c(3, 4))
+  w <- tryCatch(
+    vellumplot::vplot(df) |>
+      vellumplot::mark_errorbar(x = g, ymin = lo, ymax = hi, data_id = g) |>
+      as_widget(),
+    error = function(e) NULL
+  )
+  !is.null(w) && any(grepl("data-key", w$x$svg %||% ""))
+}
+
+test_that("as_widget() keys an error bar's segments to one addressable unit", {
+  skip_if_not_installed("vellumplot")
+  skip_if_not(.errorbar_keyed(), "installed vellumplot does not key error bars yet")
+  df <- data.frame(g = c("a", "b", "c"), lo = c(1, 2, 3), hi = c(3, 4, 5))
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_errorbar(x = g, ymin = lo, ymax = hi, data_id = g, tooltip = g) |>
+    as_widget()
+  keys <- vapply(w$x$elements, function(e) e$key, character(1))
+  # each bar contributes several keyed segment rows sharing its datum key
+  expect_setequal(unique(keys), c("a", "b", "c"))
+  expect_gt(sum(keys == "b"), 1L)
+  expect_match(w$x$svg, 'data-key="b"', fixed = TRUE)
+})
+
+test_that("as_widget() keys each boxplot box by its category", {
+  skip_if_not_installed("vellumplot")
+  skip_if_not(.errorbar_keyed(), "installed vellumplot does not key stat marks yet")
+  w <- vellumplot::vplot(mtcars) |>
+    vellumplot::mark_boxplot(x = factor(cyl), y = mpg, data_id = cyl) |>
+    as_widget()
+  keys <- vapply(w$x$elements, function(e) e$key, character(1))
+  expect_true(all(c("4", "6", "8") %in% keys))
+})
