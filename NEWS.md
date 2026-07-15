@@ -1,5 +1,14 @@
 # vellumwidget (development version)
 
+* **Error bars and boxplots are interactive.** Now that vellumplot keys these
+  statistical marks, the widget hovers, tooltips, clicks/selects, and brushes them
+  as units: an error bar's bar + caps, or a box's rect + median + whiskers, all
+  light up and select together because they share one `data-key` (outliers stay
+  individually addressable). Brush selection no longer double-counts a mark whose
+  key spans several SVG elements — `input$<id>_brush$keys` reports each such key
+  once. No runtime change was needed for the core behaviour; it already grouped
+  every node sharing a key.
+
 # vellumwidget 0.4.0
 
 * **Server-to-client proxy (`vellumwidget_proxy()`).** A Shiny app can now drive an

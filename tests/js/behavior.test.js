@@ -747,5 +747,104 @@ function mountShiny(id, calls) {
   delete window.Shiny;
 }
 
+// ============ keyed statistical marks (error bars & boxplots) ============
+// A statistical mark draws several SVG elements sharing ONE data-key (an error
+// bar = vertical bar + two caps; a box = rect + median + whiskers). They must
+// hover, tooltip, and select as one unit, and the brush key list must not
+// double-count a key that spans several elements.
+{
+  const eb = document.createElement("div");
+  document.body.appendChild(eb);
+  const iEb = widgetDef.factory(eb, 200, 100);
+  const ebSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1">' +
+    '<line data-key="eb1" x1="30" y1="20" x2="30" y2="80"/>' + // bar
+    '<line data-key="eb1" x1="25" y1="80" x2="35" y2="80"/>' + // lower cap
+    '<line data-key="eb1" x1="25" y1="20" x2="35" y2="20"/>' + // upper cap
+    '<line data-key="eb2" x1="90" y1="30" x2="90" y2="70"/>' +
+    "</g></svg>";
+  iEb.renderValue({
+    svg: ebSvg,
+    elements: [
+      { key: "eb1", tooltip: "Group A", x0: 25, y0: 20, x1: 35, y1: 80 },
+      { key: "eb1", tooltip: "Group A", x0: 25, y0: 80, x1: 35, y1: 80 },
+      { key: "eb1", tooltip: "Group A", x0: 25, y0: 20, x1: 35, y1: 20 },
+      { key: "eb2", tooltip: "Group B", x0: 85, y0: 30, x1: 95, y1: 70 }
+    ],
+    options: { tooltip: true, hover: true, select: true, selectMode: "multiple" }
+  });
+  const svgEb = eb.querySelector("svg");
+  const eb1 = eb.querySelectorAll('[data-key="eb1"]');
+  ok(eb1.length === 3, "error bar: three segments share one data-key");
+
+  fireOn(svgEb, "pointermove", eb1[1]); // hover the lower cap
+  ok(
+    eb1[0].classList.contains("vellumwidget-hl") &&
+      eb1[1].classList.contains("vellumwidget-hl") &&
+      eb1[2].classList.contains("vellumwidget-hl"),
+    "error bar: hovering any segment highlights the whole bar"
+  );
+  ok(eb.querySelector(".vellumwidget-tip").textContent === "Group A", "error bar: tooltip from the shared key");
+  fireOn(svgEb, "pointerleave", svgEb);
+
+  fireOn(svgEb, "click", eb1[2]); // click the upper cap
+  ok(
+    eb1[0].classList.contains("vellumwidget-selected") && eb1[2].classList.contains("vellumwidget-selected"),
+    "error bar: clicking any segment selects the whole bar"
+  );
+
+  const TB = window.__vellumwidgetTest;
+  const ebEls = [
+    { key: "eb1", x0: 25, y0: 20, x1: 35, y1: 80 },
+    { key: "eb1", x0: 25, y0: 80, x1: 35, y1: 80 },
+    { key: "eb1", x0: 25, y0: 20, x1: 35, y1: 20 },
+    { key: "eb2", x0: 85, y0: 30, x1: 95, y1: 70 }
+  ];
+  const brushed = TB.brushKeys(ebEls, { x0: 0, y0: 0, x1: 200, y1: 100 });
+  ok(
+    JSON.stringify(brushed.slice().sort()) === JSON.stringify(["eb1", "eb2"]),
+    "brushKeys: a key spanning several elements is returned once (no double-count)"
+  );
+}
+
+{
+  const bx = document.createElement("div");
+  document.body.appendChild(bx);
+  const iBx = widgetDef.factory(bx, 200, 100);
+  const bxSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1">' +
+    '<rect data-key="c6" x="20" y="30" width="30" height="40"/>' + // box
+    '<line data-key="c6" x1="20" y1="50" x2="50" y2="50"/>' + // median
+    '<line data-key="c6" x1="35" y1="10" x2="35" y2="30"/>' + // whisker
+    '<circle data-key="c6-out1" cx="35" cy="5" r="2"/>' + // outlier (own key)
+    "</g></svg>";
+  iBx.renderValue({
+    svg: bxSvg,
+    elements: [
+      { key: "c6", tooltip: "cyl 6", x0: 20, y0: 10, x1: 50, y1: 70 },
+      { key: "c6", tooltip: "cyl 6", x0: 20, y0: 50, x1: 50, y1: 50 },
+      { key: "c6", tooltip: "cyl 6", x0: 35, y0: 10, x1: 35, y1: 30 },
+      { key: "c6-out1", tooltip: "outlier", x0: 33, y0: 3, x1: 37, y1: 7 }
+    ],
+    options: { tooltip: true, hover: true, select: true, selectMode: "multiple" }
+  });
+  const svgBx = bx.querySelector("svg");
+  const box = bx.querySelectorAll('[data-key="c6"]');
+  ok(box.length === 3, "boxplot: rect + median + whisker share the category key");
+  fireOn(svgBx, "pointermove", box[0]); // hover the rect
+  ok(
+    box[0].classList.contains("vellumwidget-hl") &&
+      box[1].classList.contains("vellumwidget-hl") &&
+      box[2].classList.contains("vellumwidget-hl"),
+    "boxplot: hovering the box highlights rect + median + whisker together"
+  );
+  ok(
+    !bx.querySelector('[data-key="c6-out1"]').classList.contains("vellumwidget-hl"),
+    "boxplot: an outlier (its own key) is not part of the box's highlight"
+  );
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);
