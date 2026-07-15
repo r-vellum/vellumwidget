@@ -1,5 +1,21 @@
 # vellumwidget (development version)
 
+* **Server-to-client proxy (`vellumwidget_proxy()`).** A Shiny app can now drive an
+  already-rendered widget from the server **without re-rendering it** — no
+  `renderVellumwidget()` round-trip, no lost pan/zoom. Get a handle with
+  `vellumwidget_proxy(outputId)` (inside an `observe()`), then pipe it through the
+  verbs:
+  * `vw_select()` / `vw_clear_selection()` — set or clear the selection (projects
+    across `hover_group` and propagates to linked / crosstalk widgets, exactly
+    like a user click, and updates `input$<id>_selected`);
+  * `vw_filter()` / `vw_clear_filter()` — cross-filter the widget (show only the
+    given keys, dim the rest; display tier, data untouched);
+  * `vw_zoom()` / `vw_reset_zoom()` — frame a set of keys, or restore the full view.
+
+  All keys are the element `data_id`s — the same identifiers you read back through
+  `input$<id>_selected`. This completes the two-way Shiny story begun with the
+  input read-back in 0.3.0; see the expanded *Using vellumwidget in Shiny* article.
+
 # vellumwidget 0.3.0
 
 * Adopted vellum's renamed `vl_*` graphics primitives (grid collision fix).

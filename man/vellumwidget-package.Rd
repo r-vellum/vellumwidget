@@ -15,6 +15,7 @@ Useful links:
 \itemize{
   \item \url{https://r-vellum.github.io/vellumwidget/}
   \item \url{https://github.com/r-vellum/vellumwidget}
+  \item \url{https://schochastics.r-universe.dev/vellumwidget}
   \item Report bugs at \url{https://github.com/r-vellum/vellumwidget/issues}
 }
 

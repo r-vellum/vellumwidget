@@ -353,6 +353,41 @@
           if (!show[key]) addClassForKeys([key], "vellumwidget-filtered");
         }
       }
+      function proxyCall(method, args) {
+        const keys = Array.isArray(args) ? args : args == null ? [] : [String(args)];
+        switch (method) {
+          case "select":
+            setSelection(keys);
+            break;
+          case "clearSelection":
+            clearSelection();
+            break;
+          case "filter":
+            applyFilter(keys);
+            break;
+          case "clearFilter":
+            applyFilter(null);
+            break;
+          case "zoom":
+            proxyZoomToKeys(keys);
+            break;
+          case "resetZoom":
+            resetZoom();
+            break;
+          default:
+            break;
+        }
+      }
+      function proxyZoomToKeys(keys) {
+        if (!keys.length) {
+          resetZoom();
+          return;
+        }
+        const sel = {};
+        for (let i = 0; i < keys.length; i++) sel[keys[i]] = true;
+        const bb = unionBbox(elements, sel);
+        if (bb) zoomTo(bb);
+      }
       function setupLinking() {
         if (joined) return;
         joined = true;
@@ -985,13 +1020,35 @@
             setupA11y();
             setupLinking();
             shinyInput("selected", selectedKeys());
+            registerProxyHandler();
           }
         },
         resize: function() {
-        }
+        },
+        // Server->client proxy seam: vellumwidget_proxy() reaches this instance via
+        // HTMLWidgets.find() and calls `_call` (see the "vellumwidget-calls" handler).
+        _call: proxyCall
       };
     }
   });
+  function dispatchProxyCall(msg, findInstance) {
+    if (!msg || msg.id == null) return;
+    const inst = findInstance(msg.id);
+    if (inst && typeof inst._call === "function") inst._call(msg.method, msg.args);
+  }
+  var proxyHandlerRegistered = false;
+  function registerProxyHandler() {
+    if (proxyHandlerRegistered) return;
+    const sh = window.Shiny;
+    if (!sh || typeof sh.addCustomMessageHandler !== "function") return;
+    proxyHandlerRegistered = true;
+    sh.addCustomMessageHandler("vellumwidget-calls", function(msg) {
+      dispatchProxyCall(msg, function(id) {
+        return HTMLWidgets.find ? HTMLWidgets.find("#" + id) : null;
+      });
+    });
+  }
+  registerProxyHandler();
   window.__vellumwidgetTest = {
     rectsIntersect,
     distToBbox,
@@ -1001,6 +1058,7 @@
     parseViewBox,
     fmtViewBox,
     unionBbox,
-    sanitizeTip
+    sanitizeTip,
+    dispatchProxyCall
   };
 })();

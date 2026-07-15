@@ -298,8 +298,8 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #'
 #' These are emitted only inside a live Shiny session; a static render (knitr,
 #' pkgdown, `htmltools::save_html()`) produces identical output and no input
-#' traffic. Driving the widget *from* the server (setting selection without a
-#' re-render) is a planned addition.
+#' traffic. To drive the widget *from* the server — set the selection, cross-filter
+#' it, or zoom it without a re-render — use [vellumwidget_proxy()].
 #'
 #' @param outputId Shiny output slot id.
 #' @param width,height Widget size.

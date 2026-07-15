@@ -85,9 +85,13 @@ reference:
   - as_widget
 
 - title: Shiny
-  desc: Output and render bindings for embedding a vellumwidget widget in a Shiny app.
+  desc: >
+    Output and render bindings for embedding a vellumwidget widget in a Shiny app,
+    plus a proxy for driving a rendered widget from the server.
   contents:
   - vellumwidgetOutput
+  - vellumwidget_proxy
+  - vellumwidget-proxy-verbs
 
 - title: Package
   contents:
