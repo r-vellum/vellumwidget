@@ -64,6 +64,26 @@ vplot(df) |>
   as_widget()
 ```
 
+This works for *every* keyed mark, not just points. A statistical mark
+draws several shapes that share one key — an error bar is a bar plus two
+caps, a boxplot box is a rectangle plus median and whiskers — so
+hovering, selecting, or brushing any part lights up and toggles the
+whole mark as a unit (a boxplot’s outliers stay individually
+addressable). Declare `data_id`/`tooltip` on
+[`mark_errorbar()`](https://r-vellum.github.io/vellumplot/reference/mark_boxplot.html),
+[`mark_linerange()`](https://r-vellum.github.io/vellumplot/reference/mark_boxplot.html),
+or
+[`mark_boxplot()`](https://r-vellum.github.io/vellumplot/reference/mark_boxplot.html)
+the same way.
+
+``` r
+
+df2 <- data.frame(g = c("A", "B", "C"), y = c(20, 26, 23), lo = c(17, 24, 21), hi = c(23, 28, 25))
+vplot(df2) |>
+  mark_errorbar(x = g, ymin = lo, ymax = hi, data_id = g, tooltip = g) |>
+  as_widget()
+```
+
 ## Pan, zoom, and the toolbar
 
 Zoom with the mouse wheel, drag to pan (toggle brush/pan on the
