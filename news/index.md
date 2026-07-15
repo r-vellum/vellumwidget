@@ -1,6 +1,6 @@
 # Changelog
 
-## vellumwidget (development version)
+## vellumwidget 0.4.0
 
 - **Server-to-client proxy
   ([`vellumwidget_proxy()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget_proxy.md)).**

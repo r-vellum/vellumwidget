@@ -13,7 +13,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.4.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -43,11 +43,11 @@
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
       <img src="../logo.png" class="logo" alt=""><h1>Changelog</h1>
-      <small>Source: <a href="https://github.com/r-vellum/vellumwidget/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
+      <small>Source: <a href="https://github.com/r-vellum/vellumwidget/blob/v0.4.0/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="development version" id="vellumwidget-development-version">vellumwidget (development version)<a class="anchor" aria-label="anchor" href="#vellumwidget-development-version"></a></h2>
+<h2 class="pkg-version" data-toc-text="0.4.0" id="vellumwidget-040">vellumwidget 0.4.0<a class="anchor" aria-label="anchor" href="#vellumwidget-040"></a></h2>
 <ul><li>
 <strong>Server-to-client proxy (<code><a href="../reference/vellumwidget_proxy.html">vellumwidget_proxy()</a></code>).</strong> A Shiny app can now drive an already-rendered widget from the server <strong>without re-rendering it</strong> — no <code><a href="../reference/vellumwidget-shiny.html">renderVellumwidget()</a></code> round-trip, no lost pan/zoom. Get a handle with <code>vellumwidget_proxy(outputId)</code> (inside an <code><a href="https://rdrr.io/pkg/shiny/man/observe.html" class="external-link">observe()</a></code>), then pipe it through the verbs:
 <ul><li>
