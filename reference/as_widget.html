@@ -106,6 +106,7 @@ focused — see the <code>a11y</code> argument.</p>
 <span>  select_mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"multiple"</span>, <span class="st">"single"</span><span class="op">)</span>,</span>
 <span>  mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"auto"</span>, <span class="st">"svg"</span>, <span class="st">"raster"</span><span class="op">)</span>,</span>
 <span>  raster_threshold <span class="op">=</span> <span class="fl">20000L</span>,</span>
+<span>  text <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"native"</span>, <span class="st">"outline"</span><span class="op">)</span>,</span>
 <span>  elementId <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -221,6 +222,16 @@ until re-rendered.</p></dd>
 <dt id="arg-raster-threshold">raster_threshold<a class="anchor" aria-label="anchor" href="#arg-raster-threshold"></a></dt>
 <dd><p>Keyed-element count above which <code>mode = "auto"</code> switches
 to the raster image (default <code>20000</code>).</p></dd>
+
+
+<dt id="arg-text">text<a class="anchor" aria-label="anchor" href="#arg-text"></a></dt>
+<dd><p>How text is written into the SVG, passed to <code><a href="https://r-vellum.github.io/vellum/reference/scene_svg.html" class="external-link">vellum::scene_svg()</a></code>:
+<code>"native"</code> (default) emits selectable <code>&lt;text&gt;</code> referencing system fonts —
+smaller when the page has the font, post-processable, and better for
+accessibility and LLMs; <code>"outline"</code> emits glyph outlines that are
+pixel-faithful and font-independent but not selectable. Applies to the
+per-element SVG path only; in raster mode (see <code>mode</code>) text is baked into the
+base image and this argument is ignored (with a warning if set explicitly).</p></dd>
 
 
 <dt id="arg-elementid">elementId<a class="anchor" aria-label="anchor" href="#arg-elementid"></a></dt>

@@ -42,6 +42,7 @@ as_widget(
   select_mode = c("multiple", "single"),
   mode = c("auto", "svg", "raster"),
   raster_threshold = 20000L,
+  text = c("native", "outline"),
   elementId = NULL
 )
 ```
@@ -166,6 +167,18 @@ as_widget(
 
   Keyed-element count above which `mode = "auto"` switches to the raster
   image (default `20000`).
+
+- text:
+
+  How text is written into the SVG, passed to
+  [`vellum::scene_svg()`](https://r-vellum.github.io/vellum/reference/scene_svg.html):
+  `"native"` (default) emits selectable `<text>` referencing system
+  fonts — smaller when the page has the font, post-processable, and
+  better for accessibility and LLMs; `"outline"` emits glyph outlines
+  that are pixel-faithful and font-independent but not selectable.
+  Applies to the per-element SVG path only; in raster mode (see `mode`)
+  text is baked into the base image and this argument is ignored (with a
+  warning if set explicitly).
 
 - elementId:
 
