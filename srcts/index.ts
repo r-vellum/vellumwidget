@@ -60,6 +60,7 @@ interface Options {
   zoom: boolean;
   toolbar: boolean;
   nearest: boolean;
+  raster?: boolean; // the marks are a single base image; interaction is index-driven (no per-element DOM nodes)
   a11y: boolean; // screen-reader + keyboard accessibility (focusable marks, live region, data table)
   alt?: string | null; // accessible label for the whole chart (falls back to the SVG's <title>/<desc>)
   selectMode: "single" | "multiple";
@@ -277,6 +278,14 @@ const VELLUMWIDGET_CSS = `
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;
 }
+/* Raster-mode feedback rings (hover / selection), drawn on the overlay since the
+   marks are a base image with no per-element nodes. Colours reuse the same CSS
+   variables as the SVG-mode highlight/selection so theming carries over. */
+.vellumwidget-fb-hov { fill: none; stroke: var(--vellumwidget-hl-stroke, #2563eb); stroke-width: 2px; }
+.vellumwidget-fb-sel { fill: none; stroke: var(--vellumwidget-selected-stroke, #111827); stroke-width: 1.6px; }
+@media (prefers-color-scheme: dark) {
+  .vellumwidget-fb-sel { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
+}
 /* Optional hover stroke, opt-in per element (.vellumwidget-hc) or widget-wide
    (.vellumwidget-hc-all on the root). Never applied to a mark that has no hover colour,
    so a bordered shape is not clobbered on hover. Colour resolves from the nearest
@@ -465,6 +474,17 @@ HTMLWidgets.widget({
     const DIM_OVERLAY_MIN = 2000;
     let largeDim = false; // this render uses the overlay dim path
     let dimLayer: SVGSVGElement | null = null; // overlay carrying the crisp hovered clones
+    // Raster mode: the marks are a single base <image>, so there are no per-element
+    // DOM nodes. Hover/click/brush resolve against the spatial index and draw
+    // feedback rings into two overlay groups instead of toggling classes on marks.
+    let rasterMode = false;
+    let selGroup: SVGGElement | null = null; // persistent selection rings
+    let hovGroup: SVGGElement | null = null; // transient hover ring(s)
+    // Cap on how many selection rings to draw: a huge brush selects thousands of
+    // points, and drawing a ring per point would reintroduce the DOM blowup raster
+    // mode exists to avoid. The selection set itself is always fully tracked and
+    // reported; only the on-canvas rings are bounded.
+    const OVERLAY_MARK_CAP = 2000;
     let opts: Options = {
       tooltip: true, hover: true, select: true, brush: true, zoom: true,
       toolbar: true, nearest: true, a11y: true, selectMode: "multiple"
@@ -610,9 +630,56 @@ HTMLWidgets.widget({
       if (dimLayer) while (dimLayer.firstChild) dimLayer.removeChild(dimLayer.firstChild);
     }
 
+    // --- raster-mode feedback (rings drawn on the overlay, index-driven) ---
+    const SVGNS = "http://www.w3.org/2000/svg";
+    // A ring marking element `k`'s bbox, or null if it has no geometry. Drawn in the
+    // overlay's viewBox space; `non-scaling-stroke` keeps it crisp under zoom.
+    function ringFor(k: string, cls: string): SVGCircleElement | null {
+      const m = meta[k];
+      if (!m || !hasBbox(m)) return null;
+      const cx = (m.x0 + m.x1) / 2;
+      const cy = (m.y0 + m.y1) / 2;
+      const r = Math.max(m.x1 - m.x0, m.y1 - m.y0) / 2 + 2;
+      const c = document.createElementNS(SVGNS, "circle") as SVGCircleElement;
+      c.setAttribute("cx", String(cx));
+      c.setAttribute("cy", String(cy));
+      c.setAttribute("r", String(r));
+      c.setAttribute("class", cls);
+      c.setAttribute("vector-effect", "non-scaling-stroke");
+      return c;
+    }
+    function clearGroup(g: SVGGElement | null): void {
+      if (g) while (g.firstChild) g.removeChild(g.firstChild);
+    }
+    // Redraw the persistent selection rings from the current `selected` set (bounded
+    // by OVERLAY_MARK_CAP; the set itself is always fully tracked/reported).
+    function drawSelFeedback(): void {
+      clearGroup(selGroup);
+      if (!selGroup) return;
+      const keys = selectedKeys();
+      if (keys.length > OVERLAY_MARK_CAP) return;
+      for (let i = 0; i < keys.length; i++) {
+        const c = ringFor(keys[i], "vellumwidget-fb-sel");
+        if (c) selGroup.appendChild(c);
+      }
+    }
+    function drawHovFeedback(keys: string[]): void {
+      clearGroup(hovGroup);
+      if (!hovGroup) return;
+      for (let i = 0; i < keys.length; i++) {
+        const c = ringFor(keys[i], "vellumwidget-fb-hov");
+        if (c) hovGroup.appendChild(c);
+      }
+    }
+
     function setHover(k: string): void {
       if (!opts.hover) return;
       const keys = linkedKeys(k);
+      // Raster mode: no per-element nodes — draw a hover ring on the overlay.
+      if (rasterMode) {
+        drawHovFeedback(keys);
+        return;
+      }
       clearClass("vellumwidget-hl");
       addClassForKeys(keys, "vellumwidget-hl");
       // Large scenes: dim via the holder + clone the hovered marks into the overlay
@@ -633,6 +700,7 @@ HTMLWidgets.widget({
       tip.classList.remove("vellumwidget-show");
     }
     function clearHover(): void {
+      if (rasterMode) clearGroup(hovGroup);
       if (largeDim) hideHighlightOverlay();
       el.classList.remove("vellumwidget-hovering");
       clearClass("vellumwidget-hl");
@@ -659,6 +727,10 @@ HTMLWidgets.widget({
 
     // --- selection (+ linking) ---
     function refreshSelected(): void {
+      if (rasterMode) {
+        drawSelFeedback();
+        return;
+      }
       clearClass("vellumwidget-selected");
       for (const k in selected) if (selected[k]) addClassForKeys([k], "vellumwidget-selected");
     }
@@ -958,7 +1030,14 @@ HTMLWidgets.widget({
         movedDuringDrag = false;
         return;
       } // a drag, not a click
-      const k = keyOf(ev.target);
+      let k = keyOf(ev.target);
+      // Raster mode has no per-element nodes, so resolve the click to the nearest
+      // mark within a small radius (same snap the hover uses).
+      if (k == null && rasterMode && opts.nearest !== false && elements.length) {
+        const u = toUser(ev.clientX, ev.clientY);
+        const rad = vb ? vb.w * 0.02 : 8;
+        k = nearestKeyAt(u.x, u.y, rad);
+      }
       // A click is a discrete event (fires every time, even on the same mark);
       // `key` is null for an empty-space click.
       shinyInput("click", { key: k }, { priority: "event" });
@@ -1344,6 +1423,19 @@ HTMLWidgets.widget({
         buildDataTable(); // (a no-op when a11y is off — also clears a stale table)
         return;
       }
+      if (rasterMode) {
+        // No per-element DOM nodes to focus, and a data table of the (large) element
+        // set would reintroduce the DOM blowup raster mode exists to avoid. Present
+        // the chart as a labelled image; the scene's <title>/<desc> (or `alt`) name it.
+        svgEl.setAttribute("role", "img");
+        if (opts.alt) {
+          svgEl.removeAttribute("aria-labelledby");
+          svgEl.setAttribute("aria-label", opts.alt);
+        } else if (!svgEl.getAttribute("aria-labelledby") && !svgEl.getAttribute("aria-label")) {
+          svgEl.setAttribute("aria-label", "Chart");
+        }
+        return;
+      }
       // The widget is an interactive chart, not a static image (role="img"
       // would hide the focusable marks from assistive tech).
       svgEl.setAttribute("role", "graphics-document");
@@ -1462,10 +1554,21 @@ HTMLWidgets.widget({
             if (w && h) vb0 = { x: 0, y: 0, w: w, h: h };
           }
           vb = vb0 ? { x: vb0.x, y: vb0.y, w: vb0.w, h: vb0.h } : null;
-          // Reset any dim left by a prior render, then arm this render's hover path
-          // and (re)build the spatial index over the new elements.
-          hideHighlightOverlay();
-          largeDim = elements.length > DIM_OVERLAY_MIN;
+          // Reset any dim/feedback left by a prior render, then arm this render's
+          // hover path and (re)build the spatial index over the new elements.
+          hideHighlightOverlay(); // also empties the overlay (removes old feedback groups)
+          rasterMode = !!opts.raster;
+          largeDim = !rasterMode && elements.length > DIM_OVERLAY_MIN;
+          selGroup = null;
+          hovGroup = null;
+          if (rasterMode && dimLayer) {
+            // Two overlay groups: persistent selection rings + a transient hover ring,
+            // drawn from the index since there are no per-element DOM nodes to style.
+            selGroup = document.createElementNS(SVGNS, "g") as SVGGElement;
+            hovGroup = document.createElementNS(SVGNS, "g") as SVGGElement;
+            dimLayer.appendChild(selGroup);
+            dimLayer.appendChild(hovGroup);
+          }
           if (dimLayer && vb0) dimLayer.setAttribute("viewBox", fmtViewBox(vb0));
           buildSpatialIndex();
           wire(svgEl);
@@ -1497,7 +1600,8 @@ HTMLWidgets.widget({
         nearestKeyAt: nearestKeyAt,
         brushKeysIn: brushKeysIn,
         indexSize: function () { return spatialIndex ? spatialIndex.numItems : 0; },
-        largeDim: function () { return largeDim; }
+        largeDim: function () { return largeDim; },
+        rasterMode: function () { return rasterMode; }
       }
     };
   }

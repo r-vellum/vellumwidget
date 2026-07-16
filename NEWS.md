@@ -1,5 +1,19 @@
 # vellumwidget (development version)
 
+* **Very large scatterplots are navigable (raster mode).** `as_widget()` gains a
+  `mode` argument (`"auto"` / `"svg"` / `"raster"`). In `"auto"` (the default), a
+  scene with more than `raster_threshold` keyed elements (default `20000`) is drawn
+  **once as a single embedded image** instead of one SVG node per element, and all
+  interaction — hover tooltips + highlight, click/brush select, pan/zoom — is driven
+  client-side from the element index (bounding boxes + keys) rather than the DOM.
+  A 150k-point keyed scatter that previously produced a ~75 MB SVG with 150,000 DOM
+  nodes now ships as a ~0.8 MB image plus a compact index, with a handful of DOM
+  nodes, and stays smooth to hover and pan. Small and moderate plots are unchanged
+  (they keep the per-element SVG). Trade-offs in raster mode: per-element grammar
+  colours, per-mark screen-reader focus, and display-tier cross-filtering don't
+  apply (there are no per-element nodes), and a zoomed-in view is a scaled raster
+  until re-rendered. Adds a dependency on `base64enc`.
+
 * **Smoother hover, brush, and pan on large plots.** Two client-side changes lift
   the per-interaction cost that made big scatterplots laggy:
   * **Spatial index.** Nearest-mark hover and rectangular brush now hit-test
