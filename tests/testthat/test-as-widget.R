@@ -208,6 +208,47 @@ test_that("discrete legend swatches + series membership flow into the payload (P
   expect_false(any(is_swatch & has_legend))
 })
 
+test_that("mode = 'raster' ships a base image with the element index (no per-element SVG)", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(
+      c(0.25, 0.75), 0.5, size = vellum::vl_unit(4, "mm"),
+      gp = vellum::vl_gpar(fill = "red"), key = c("a", "b"),
+      meta = list(list(tooltip = "Alpha"), list(tooltip = "Beta"))
+    ))
+  w <- as_widget(scene, mode = "raster")
+  expect_true(w$x$options$raster)
+  expect_match(w$x$svg, "<image", fixed = TRUE)
+  expect_match(w$x$svg, "data:image/png;base64,", fixed = TRUE)
+  expect_no_match(w$x$svg, "data-key")
+  # the interaction index still ships (columnar), with geometry + tooltips
+  expect_setequal(w$x$elements$key, c("a", "b"))
+  expect_true(all(c("x0", "y0", "x1", "y1") %in% names(w$x$elements)))
+  expect_equal(w$x$elements$tooltip[match("a", w$x$elements$key)], "Alpha")
+  # widget sized from the rendered raster
+  expect_true(is.numeric(w$width) && w$width > 0)
+})
+
+test_that("mode = 'auto' switches to raster above raster_threshold, stays SVG below", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
+  # 2 keyed elements: default threshold keeps SVG
+  expect_false(as_widget(scene)$x$options$raster)
+  expect_match(as_widget(scene)$x$svg, 'data-key="a"', fixed = TRUE)
+  # a low threshold flips auto to raster
+  expect_true(as_widget(scene, raster_threshold = 1)$x$options$raster)
+  # mode = 'svg' overrides the threshold
+  expect_false(as_widget(scene, mode = "svg", raster_threshold = 1)$x$options$raster)
+})
+
+test_that("raster shell carries the scene title/description for accessibility", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100, title = "My cloud", desc = "A big scatter.") |>
+    vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
+  svg <- as_widget(scene, mode = "raster")$x$svg
+  expect_match(svg, "<title id=\"vw-t\">My cloud</title>", fixed = TRUE)
+  expect_match(svg, "<desc id=\"vw-d\">A big scatter.</desc>", fixed = TRUE)
+  expect_match(svg, "role=\"img\"", fixed = TRUE)
+})
+
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
 # Keyed statistical marks (error bars / boxplots) become interactive: each mark's

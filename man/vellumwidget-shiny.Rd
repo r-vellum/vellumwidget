@@ -50,8 +50,8 @@ scene's device-pixel (viewBox) coordinates. An event input.}
 
 These are emitted only inside a live Shiny session; a static render (knitr,
 pkgdown, \code{htmltools::save_html()}) produces identical output and no input
-traffic. Driving the widget \emph{from} the server (setting selection without a
-re-render) is a planned addition.
+traffic. To drive the widget \emph{from} the server — set the selection, cross-filter
+it, or zoom it without a re-render — use \code{\link[=vellumwidget_proxy]{vellumwidget_proxy()}}.
 }
 
 \seealso{

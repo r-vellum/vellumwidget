@@ -69,6 +69,19 @@
 #'   DT, and crosstalk's `filter_*` inputs). The widget's `data_id`s must match the
 #'   SharedData's keys. A crosstalk filter hides the non-matching elements
 #'   (display-tier cross-filter). Requires the crosstalk package.
+#' @param mode Rendering strategy for the marks. `"auto"` (default) ships a
+#'   per-element SVG for small/moderate plots and switches to a single embedded
+#'   raster image above `raster_threshold` keyed elements; `"svg"` always uses the
+#'   per-element SVG; `"raster"` always uses the image. In raster mode the marks are
+#'   drawn once as a base image and all interaction (hover, click, brush, pan/zoom)
+#'   is driven client-side from the element index (bounding boxes + keys), so a very
+#'   large scatter (100k+ points) stays navigable with a tiny DOM and a small
+#'   payload. The trade-offs of raster mode: per-element grammar colours,
+#'   per-mark screen-reader focus, and display-tier cross-filtering do not apply
+#'   (there are no per-element DOM nodes), and a zoomed-in view is a scaled raster
+#'   until re-rendered.
+#' @param raster_threshold Keyed-element count above which `mode = "auto"` switches
+#'   to the raster image (default `20000`).
 #' @param elementId Optional explicit widget DOM id.
 #' @return An htmlwidget of class `"vellumwidget"`.
 #' @examples
@@ -89,18 +102,39 @@ as_widget <- function(x, width = NULL, height = NULL,
                       export_filename = NULL, export_scale = NULL,
                       group = NULL, crosstalk = NULL,
                       select_mode = c("multiple", "single"),
+                      mode = c("auto", "svg", "raster"),
+                      raster_threshold = 20000L,
                       elementId = NULL) {
   select_mode <- match.arg(select_mode)
+  mode <- match.arg(mode)
   scene <- vellum::as_vellum_scene(x)
-  svg <- vellum::scene_svg(scene)
   model <- vellum::scene_model(scene)
-  dims <- .svg_dims(svg)
   ct_group <- .crosstalk_group(crosstalk)
+
+  # Above `raster_threshold` keyed elements a per-element SVG (one DOM node each)
+  # is too heavy to build, ship, and hover; the raster path draws the scene once as
+  # a single embedded image and drives all interaction from the element index
+  # (bboxes + keys) client-side instead. `mode` forces either path.
+  n_keyed <- if (is.null(model$elements) || !nrow(model$elements)) 0L else sum(!is.na(model$elements$key))
+  use_raster <- switch(mode,
+    raster = TRUE,
+    svg = FALSE,
+    auto = n_keyed > raster_threshold
+  )
+  if (use_raster) {
+    r <- .raster_svg(scene)
+    svg <- r$svg
+    dims <- list(width = r$width, height = r$height)
+  } else {
+    svg <- vellum::scene_svg(scene)
+    dims <- .svg_dims(svg)
+  }
 
   payload <- list(
     svg = svg,
     elements = .vellumwidget_elements(model),
     options = list(
+      raster = use_raster,
       tooltip = isTRUE(tooltip),
       hover = isTRUE(hover),
       select = isTRUE(select),
@@ -288,6 +322,67 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 }
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
+
+# Escape the XML metacharacters for embedding a scene title/description in the
+# raster shell's <title>/<desc>. Kept tiny (no dependency); attribute-safe too.
+.xml_escape <- function(s) {
+  s <- gsub("&", "&amp;", s, fixed = TRUE)
+  s <- gsub("<", "&lt;", s, fixed = TRUE)
+  s <- gsub(">", "&gt;", s, fixed = TRUE)
+  s
+}
+
+# Read a PNG's pixel dimensions from its IHDR chunk (bytes 17-24, big-endian),
+# dependency-free — the ground truth for the raster shell's viewBox so the element
+# bboxes (in the same device-px space) line up with the image.
+.png_dims <- function(path) {
+  con <- file(path, "rb")
+  on.exit(close(con))
+  b <- readBin(con, "raw", n = 24L)
+  if (length(b) < 24L) {
+    return(NULL)
+  }
+  be <- function(v) sum(as.integer(v) * 256^(3:0))
+  list(width = be(b[17:20]), height = be(b[21:24]))
+}
+
+# Render the scene to a PNG and wrap it as a self-contained `<svg><image></svg>`
+# shell in the scene's device-px viewBox space, so the client can pan/zoom it via
+# the viewBox and hit-test element bboxes against it without any rescaling. The
+# scene's title/description (if any) ride along as `<title>`/`<desc>` so the chart
+# keeps an accessible name. The image is a base64 data URI (self-contained widget).
+.raster_svg <- function(scene) {
+  tmp <- tempfile(fileext = ".png")
+  on.exit(unlink(tmp), add = TRUE)
+  vellum::render(scene, tmp)
+  d <- .png_dims(tmp)
+  if (is.null(d)) {
+    stop("could not read the rendered raster dimensions", call. = FALSE)
+  }
+  title <- tryCatch(scene@title, error = function(e) NULL)
+  desc <- tryCatch(scene@desc, error = function(e) NULL)
+  head <- ""
+  ids <- character(0)
+  if (!is.null(title) && nzchar(title)) {
+    head <- paste0(head, sprintf('<title id="vw-t">%s</title>', .xml_escape(title)))
+    ids <- c(ids, "vw-t")
+  }
+  if (!is.null(desc) && nzchar(desc)) {
+    head <- paste0(head, sprintf('<desc id="vw-d">%s</desc>', .xml_escape(desc)))
+    ids <- c(ids, "vw-d")
+  }
+  a11y <- if (length(ids)) sprintf(' role="img" aria-labelledby="%s"', paste(ids, collapse = " ")) else ""
+  uri <- paste0("data:image/png;base64,", base64enc::base64encode(tmp))
+  svg <- sprintf(
+    paste0(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d"%s>',
+      "%s",
+      '<image width="%d" height="%d" preserveAspectRatio="none" href="%s"/></svg>'
+    ),
+    d$width, d$height, d$width, d$height, a11y, head, d$width, d$height, uri
+  )
+  list(svg = svg, width = d$width, height = d$height)
+}
 
 # Normalise an R or CSS colour to a CSS colour string (hex, with alpha when
 # present), so users can pass R colour names ("steelblue", "grey35") or numbers.

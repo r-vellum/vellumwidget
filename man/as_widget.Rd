@@ -26,6 +26,8 @@ as_widget(
   group = NULL,
   crosstalk = NULL,
   select_mode = c("multiple", "single"),
+  mode = c("auto", "svg", "raster"),
+  raster_threshold = 20000L,
   elementId = NULL
 )
 }
@@ -91,6 +93,21 @@ SharedData's keys. A crosstalk filter hides the non-matching elements
 
 \item{select_mode}{\code{"multiple"} (default; click toggles each element) or
 \code{"single"} (click replaces the selection).}
+
+\item{mode}{Rendering strategy for the marks. \code{"auto"} (default) ships a
+per-element SVG for small/moderate plots and switches to a single embedded
+raster image above \code{raster_threshold} keyed elements; \code{"svg"} always uses the
+per-element SVG; \code{"raster"} always uses the image. In raster mode the marks are
+drawn once as a base image and all interaction (hover, click, brush, pan/zoom)
+is driven client-side from the element index (bounding boxes + keys), so a very
+large scatter (100k+ points) stays navigable with a tiny DOM and a small
+payload. The trade-offs of raster mode: per-element grammar colours,
+per-mark screen-reader focus, and display-tier cross-filtering do not apply
+(there are no per-element DOM nodes), and a zoomed-in view is a scaled raster
+until re-rendered.}
+
+\item{raster_threshold}{Keyed-element count above which \code{mode = "auto"} switches
+to the raster image (default \code{20000}).}
 
 \item{elementId}{Optional explicit widget DOM id.}
 }

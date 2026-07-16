@@ -24,6 +24,12 @@ const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", 
 const { window } = dom;
 global.window = window;
 global.document = window.document;
+// The runtime throttles the nearest-mark scan with a bare `requestAnimationFrame`
+// (a browser global). Node has none, and jsdom puts it only on `window`, so make it
+// a synchronous global here — that lets the tests drive the nearest/hover path
+// (used whenever the cursor isn't directly over a mark, e.g. all of raster mode).
+global.requestAnimationFrame = function (cb) { cb(0); return 0; };
+global.cancelAnimationFrame = function () {};
 
 // Capture the widget definition the bundle registers.
 let widgetDef = null;
@@ -981,6 +987,69 @@ function mountShiny(id, calls) {
   fireOn(eBig.querySelector("svg"), "pointerleave", eBig.querySelector("svg"));
   ok(holderBig.style.opacity === "" && dimBig.childNodes.length === 0,
     "large-dim: leaving clears the dim and empties the overlay");
+}
+
+// ============ Phase 4: raster mode (base image + index-driven interaction) ============
+// A very large scene ships as one base <image> with NO per-element DOM nodes; all
+// interaction resolves against the spatial index and draws feedback rings on the
+// overlay. Here we drive selection via the proxy (coordinate-free) and hover via a
+// synthetic event with rAF made synchronous.
+{
+  const N = 12;
+  const key = [], x0 = [], y0 = [], x1 = [], y1 = [], tt = [];
+  for (let i = 0; i < N; i++) { key.push("k" + i); const gx = i * 10; x0.push(gx); y0.push(0); x1.push(gx + 4); y1.push(4); tt.push("pt " + i); }
+  const eR = document.createElement("div");
+  document.body.appendChild(eR);
+  const iR = widgetDef.factory(eR, 120, 20);
+  iR.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="20" viewBox="0 0 120 20" role="img" aria-labelledby="vw-t">' +
+      '<title id="vw-t">My cloud</title><image width="120" height="20" href="data:,"/></svg>',
+    elements: { key: key, x0: x0, y0: y0, x1: x1, y1: y1, tooltip: tt },
+    options: { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, a11y: true, raster: true, selectMode: "multiple" }
+  });
+
+  ok(iR._test.rasterMode() === true, "raster: rasterMode flag on");
+  ok(iR._test.largeDim() === false, "raster: large-dim path off in raster mode");
+  ok(iR._test.indexSize() === N, "raster: spatial index built from the element table");
+  ok(eR.querySelectorAll("[data-key]").length === 0, "raster: no per-element DOM nodes");
+  ok(!!eR.querySelector("image"), "raster: base image present");
+  const dim = eR.querySelector(".vellumwidget-dim-layer");
+  ok(!!dim, "raster: overlay layer present");
+
+  // a11y: labelled image, not graphics-document; no per-element data table blowup
+  const svgR = eR.querySelector("svg");
+  ok(svgR.getAttribute("role") === "img", "raster a11y: chart is a labelled image (role=img)");
+  ok(!eR.querySelector("table.vellumwidget-data-table"), "raster a11y: no per-element data table built");
+
+  // selection (via proxy — no coordinates) draws one ring per key on the overlay
+  iR._call("select", ["k3", "k7"]);
+  ok(dim.querySelectorAll("circle").length === 2, "raster: selection draws one ring per selected key");
+  iR._call("clearSelection");
+  ok(dim.querySelectorAll("circle").length === 0, "raster: clearing selection removes the rings");
+
+  // hover snaps to the nearest mark via the index and draws a hover ring. jsdom has
+  // no getScreenCTM and zero-size rects, so toUser falls back to (0,0); k0's bbox is
+  // at the origin, so the nearest scan resolves to it.
+  fireOn(eR.querySelector("svg"), "pointermove", eR.querySelector("image"));
+  ok(dim.querySelectorAll("circle").length >= 1, "raster: hover snaps to nearest mark and draws a hover ring");
+  ok(eR.querySelector(".vellumwidget-tip").classList.contains("vellumwidget-show"), "raster: hover shows the tooltip");
+  fireOn(eR.querySelector("svg"), "pointerleave", eR.querySelector("svg"));
+  ok(dim.querySelectorAll("circle").length === 0, "raster: leaving clears the hover ring");
+
+  // selection above the ring cap draws no rings (the selection is still tracked)
+  const BIG = 2100, bk = [], bx0 = [], by0 = [], bx1 = [], by1 = [];
+  for (let i = 0; i < BIG; i++) { bk.push("b" + i); bx0.push(i); by0.push(0); bx1.push(i + 1); by1.push(1); }
+  const eB = document.createElement("div");
+  document.body.appendChild(eB);
+  const iB = widgetDef.factory(eB, 100, 20);
+  iB.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2100 20"><image width="2100" height="20" href="data:,"/></svg>',
+    elements: { key: bk, x0: bx0, y0: by0, x1: bx1, y1: by1 },
+    options: { select: true, raster: true, selectMode: "multiple" }
+  });
+  iB._call("select", bk); // 2100 > cap 2000
+  ok(eB.querySelector(".vellumwidget-dim-layer").querySelectorAll("circle").length === 0,
+    "raster: selection above the ring cap draws no rings (still tracked/reported)");
 }
 
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");

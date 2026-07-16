@@ -632,6 +632,14 @@
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;
 }
+/* Raster-mode feedback rings (hover / selection), drawn on the overlay since the
+   marks are a base image with no per-element nodes. Colours reuse the same CSS
+   variables as the SVG-mode highlight/selection so theming carries over. */
+.vellumwidget-fb-hov { fill: none; stroke: var(--vellumwidget-hl-stroke, #2563eb); stroke-width: 2px; }
+.vellumwidget-fb-sel { fill: none; stroke: var(--vellumwidget-selected-stroke, #111827); stroke-width: 1.6px; }
+@media (prefers-color-scheme: dark) {
+  .vellumwidget-fb-sel { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
+}
 /* Optional hover stroke, opt-in per element (.vellumwidget-hc) or widget-wide
    (.vellumwidget-hc-all on the root). Never applied to a mark that has no hover colour,
    so a bordered shape is not clobbered on hover. Colour resolves from the nearest
@@ -769,6 +777,10 @@
       const DIM_OVERLAY_MIN = 2e3;
       let largeDim = false;
       let dimLayer = null;
+      let rasterMode = false;
+      let selGroup = null;
+      let hovGroup = null;
+      const OVERLAY_MARK_CAP = 2e3;
       let opts = {
         tooltip: true,
         hover: true,
@@ -891,9 +903,49 @@
         if (holder) holder.style.opacity = "";
         if (dimLayer) while (dimLayer.firstChild) dimLayer.removeChild(dimLayer.firstChild);
       }
+      const SVGNS = "http://www.w3.org/2000/svg";
+      function ringFor(k, cls) {
+        const m = meta[k];
+        if (!m || !hasBbox(m)) return null;
+        const cx = (m.x0 + m.x1) / 2;
+        const cy = (m.y0 + m.y1) / 2;
+        const r = Math.max(m.x1 - m.x0, m.y1 - m.y0) / 2 + 2;
+        const c = document.createElementNS(SVGNS, "circle");
+        c.setAttribute("cx", String(cx));
+        c.setAttribute("cy", String(cy));
+        c.setAttribute("r", String(r));
+        c.setAttribute("class", cls);
+        c.setAttribute("vector-effect", "non-scaling-stroke");
+        return c;
+      }
+      function clearGroup(g) {
+        if (g) while (g.firstChild) g.removeChild(g.firstChild);
+      }
+      function drawSelFeedback() {
+        clearGroup(selGroup);
+        if (!selGroup) return;
+        const keys = selectedKeys();
+        if (keys.length > OVERLAY_MARK_CAP) return;
+        for (let i = 0; i < keys.length; i++) {
+          const c = ringFor(keys[i], "vellumwidget-fb-sel");
+          if (c) selGroup.appendChild(c);
+        }
+      }
+      function drawHovFeedback(keys) {
+        clearGroup(hovGroup);
+        if (!hovGroup) return;
+        for (let i = 0; i < keys.length; i++) {
+          const c = ringFor(keys[i], "vellumwidget-fb-hov");
+          if (c) hovGroup.appendChild(c);
+        }
+      }
       function setHover(k) {
         if (!opts.hover) return;
         const keys = linkedKeys(k);
+        if (rasterMode) {
+          drawHovFeedback(keys);
+          return;
+        }
         clearClass("vellumwidget-hl");
         addClassForKeys(keys, "vellumwidget-hl");
         if (largeDim) showHighlightOverlay(keys);
@@ -910,6 +962,7 @@
         tip.classList.remove("vellumwidget-show");
       }
       function clearHover() {
+        if (rasterMode) clearGroup(hovGroup);
         if (largeDim) hideHighlightOverlay();
         el.classList.remove("vellumwidget-hovering");
         clearClass("vellumwidget-hl");
@@ -924,6 +977,10 @@
         }
       }
       function refreshSelected() {
+        if (rasterMode) {
+          drawSelFeedback();
+          return;
+        }
         clearClass("vellumwidget-selected");
         for (const k in selected) if (selected[k]) addClassForKeys([k], "vellumwidget-selected");
       }
@@ -1196,7 +1253,12 @@
           movedDuringDrag = false;
           return;
         }
-        const k = keyOf(ev.target);
+        let k = keyOf(ev.target);
+        if (k == null && rasterMode && opts.nearest !== false && elements.length) {
+          const u = toUser(ev.clientX, ev.clientY);
+          const rad = vb ? vb.w * 0.02 : 8;
+          k = nearestKeyAt(u.x, u.y, rad);
+        }
         shinyInput("click", { key: k }, { priority: "event" });
         if (k != null) {
           if (opts.select) toggleSelect(k);
@@ -1542,6 +1604,16 @@
           buildDataTable();
           return;
         }
+        if (rasterMode) {
+          svgEl.setAttribute("role", "img");
+          if (opts.alt) {
+            svgEl.removeAttribute("aria-labelledby");
+            svgEl.setAttribute("aria-label", opts.alt);
+          } else if (!svgEl.getAttribute("aria-labelledby") && !svgEl.getAttribute("aria-label")) {
+            svgEl.setAttribute("aria-label", "Chart");
+          }
+          return;
+        }
         svgEl.setAttribute("role", "graphics-document");
         svgEl.setAttribute("aria-roledescription", "interactive chart");
         if (opts.alt) {
@@ -1642,7 +1714,16 @@
             }
             vb = vb0 ? { x: vb0.x, y: vb0.y, w: vb0.w, h: vb0.h } : null;
             hideHighlightOverlay();
-            largeDim = elements.length > DIM_OVERLAY_MIN;
+            rasterMode = !!opts.raster;
+            largeDim = !rasterMode && elements.length > DIM_OVERLAY_MIN;
+            selGroup = null;
+            hovGroup = null;
+            if (rasterMode && dimLayer) {
+              selGroup = document.createElementNS(SVGNS, "g");
+              hovGroup = document.createElementNS(SVGNS, "g");
+              dimLayer.appendChild(selGroup);
+              dimLayer.appendChild(hovGroup);
+            }
             if (dimLayer && vb0) dimLayer.setAttribute("viewBox", fmtViewBox(vb0));
             buildSpatialIndex();
             wire(svgEl);
@@ -1671,6 +1752,9 @@
           },
           largeDim: function() {
             return largeDim;
+          },
+          rasterMode: function() {
+            return rasterMode;
           }
         }
       };
