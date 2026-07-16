@@ -893,5 +893,95 @@ function mountShiny(id, calls) {
     "columnar: renderValue ingests the columnar payload end-to-end (hover tooltip works)");
 }
 
+// ============ Phase 2: spatial index (nearest / brush) ============
+// The runtime hit-tests hover (nearest) and brush against a Flatbush index instead
+// of an O(n) scan. jsdom has no layout (client->user mapping is degenerate), so we
+// drive the index-backed functions directly via the instance `_test` seam with
+// explicit user-space coordinates, and cross-check against the pure O(n) helpers
+// over the same elements — they must agree.
+{
+  const T2 = window.__vellumwidgetTest;
+  // A grid of marks, shipped columnar (as R now does).
+  const M = 2500; // > DIM_OVERLAY_MIN, so this also puts the widget in large-dim mode
+  const key = [], x0 = [], y0 = [], x1 = [], y1 = [];
+  for (let i = 0; i < M; i++) {
+    const gx = (i % 50) * 4, gy = Math.floor(i / 50) * 4;
+    key.push("p" + i); x0.push(gx); y0.push(gy); x1.push(gx + 2); y1.push(gy + 2);
+  }
+  const cols = { key: key, x0: x0, y0: y0, x1: x1, y1: y1 };
+  const pureEls = T2.normalizeElements(cols);
+
+  const eIdx = document.createElement("div");
+  document.body.appendChild(eIdx);
+  const iIdx = widgetDef.factory(eIdx, 200, 200);
+  iIdx.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">' +
+      '<path data-key="p0" d="M0 0h2v2z"/></svg>',
+    elements: cols,
+    options: { tooltip: true, hover: true, select: true, brush: true, zoom: true, nearest: true, selectMode: "multiple" }
+  });
+
+  ok(iIdx._test && iIdx._test.indexSize() === M, "index: built one entry per bboxed element");
+  ok(iIdx._test.largeDim() === true, "index: >DIM_OVERLAY_MIN elements enables large-dim mode");
+
+  // brush: index result === pure result over the same elements (order-insensitive)
+  const rect = { x0: -1, y0: -1, x1: 9, y1: 9 };
+  const viaIndex = iIdx._test.brushKeysIn(rect).slice().sort();
+  const viaPure = T2.brushKeys(pureEls, rect).slice().sort();
+  ok(viaIndex.length > 0 && JSON.stringify(viaIndex) === JSON.stringify(viaPure),
+    "index: brushKeysIn matches the pure brushKeys over the same region");
+
+  // nearest: index result === pure result
+  const nIndex = iIdx._test.nearestKeyAt(101, 101, 1000);
+  const nPure = T2.nearestKey(pureEls, 101, 101, 1000);
+  ok(nIndex === nPure, "index: nearestKeyAt matches the pure nearestKey");
+  ok(iIdx._test.nearestKeyAt(5000, 5000, 3) === null, "index: nearest returns null beyond maxDist");
+
+  // Correct even for a small scene (index still built; queries agree).
+  const eSmall = document.createElement("div");
+  document.body.appendChild(eSmall);
+  const iSmall = widgetDef.factory(eSmall, 100, 100);
+  const smallCols = { key: ["a", "b", "c"], x0: [0, 50, 5], y0: [0, 50, 5], x1: [10, 60, 15], y1: [10, 60, 15] };
+  iSmall.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path data-key="a" d="M0 0h1v1z"/></svg>',
+    elements: smallCols,
+    options: { hover: true, brush: true, nearest: true, selectMode: "multiple" }
+  });
+  ok(iSmall._test.largeDim() === false, "index: small scene stays on the CSS-dim path");
+  ok(JSON.stringify(iSmall._test.brushKeysIn({ x0: -1, y0: -1, x1: 12, y1: 12 }).slice().sort()) ===
+    JSON.stringify(["a", "c"]), "index: small-scene brush matches expected keys");
+}
+
+// ============ Phase 2: large-scene hover dims via overlay (O(hovered)) ============
+// Above DIM_OVERLAY_MIN, hover must NOT toggle the O(n) `vellumwidget-hovering` dim
+// rule; instead the holder is dimmed once and the hovered mark is cloned crisp into
+// the overlay layer.
+{
+  const key = [], x0 = [], y0 = [], x1 = [], y1 = [];
+  for (let i = 0; i < 2500; i++) { key.push("k" + i); x0.push(i); y0.push(0); x1.push(i + 1); y1.push(1); }
+  const eBig = document.createElement("div");
+  document.body.appendChild(eBig);
+  const iBig = widgetDef.factory(eBig, 200, 100);
+  iBig.renderValue({
+    // Only two marks are actually drawn in the SVG; the 2500 elements just push the
+    // widget into large-dim mode (the overlay clones whichever hovered node exists).
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<path data-key="k0" d="M10 10h5v5z"/><path data-key="k1" d="M40 10h5v5z"/></svg>',
+    elements: { key: key, x0: x0, y0: y0, x1: x1, y1: y1, tooltip: key },
+    options: { tooltip: true, hover: true, select: true, selectMode: "multiple" }
+  });
+  const holderBig = eBig.querySelector(".vellumwidget-svg-holder");
+  const dimBig = eBig.querySelector(".vellumwidget-dim-layer");
+  ok(!!dimBig, "large-dim: an overlay layer is present");
+  fireOn(eBig.querySelector("svg"), "pointermove", eBig.querySelector('[data-key="k0"]'));
+  ok(!eBig.classList.contains("vellumwidget-hovering"),
+    "large-dim: hover does NOT add the O(n) vellumwidget-hovering dim class");
+  ok(holderBig.style.opacity === "0.28", "large-dim: the holder is dimmed once on hover");
+  ok(dimBig.childNodes.length === 1, "large-dim: the hovered mark is cloned into the overlay (crisp)");
+  fireOn(eBig.querySelector("svg"), "pointerleave", eBig.querySelector("svg"));
+  ok(holderBig.style.opacity === "" && dimBig.childNodes.length === 0,
+    "large-dim: leaving clears the dim and empties the overlay");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);
