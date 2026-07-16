@@ -13,6 +13,47 @@
   function hasBbox(e) {
     return typeof e.x0 === "number" && typeof e.y0 === "number";
   }
+  function asColumn(v) {
+    if (v == null) return [];
+    return Array.isArray(v) ? v : [v];
+  }
+  function normalizeElements(raw) {
+    if (raw == null) return [];
+    if (Array.isArray(raw)) return raw;
+    const c = raw;
+    const key = asColumn(c.key);
+    const n = key.length;
+    if (!n) return [];
+    const x0 = asColumn(c.x0);
+    const y0 = asColumn(c.y0);
+    const x1 = asColumn(c.x1);
+    const y1 = asColumn(c.y1);
+    const tooltip = c.tooltip != null ? asColumn(c.tooltip) : null;
+    const hoverGroup = c.hover_group != null ? asColumn(c.hover_group) : null;
+    const hoverColor = c.hover_color != null ? asColumn(c.hover_color) : null;
+    const selectedColor = c.selected_color != null ? asColumn(c.selected_color) : null;
+    const legendFor = c.legend_for != null ? asColumn(c.legend_for) : null;
+    const legend = c.legend != null ? asColumn(c.legend) : null;
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const e = { key: String(key[i]) };
+      if (typeof x0[i] === "number") e.x0 = x0[i];
+      if (typeof y0[i] === "number") e.y0 = y0[i];
+      if (typeof x1[i] === "number") e.x1 = x1[i];
+      if (typeof y1[i] === "number") e.y1 = y1[i];
+      if (tooltip && tooltip[i] != null) e.tooltip = String(tooltip[i]);
+      if (hoverGroup && hoverGroup[i] != null) e.hover_group = String(hoverGroup[i]);
+      if (hoverColor && hoverColor[i] != null) e.hover_color = String(hoverColor[i]);
+      if (selectedColor && selectedColor[i] != null) e.selected_color = String(selectedColor[i]);
+      if (legendFor && legendFor[i] != null) e.legend_for = String(legendFor[i]);
+      if (legend) {
+        const v = legend[i];
+        if (v != null && !(Array.isArray(v) && v.length === 0)) e.legend = v;
+      }
+      out[i] = e;
+    }
+    return out;
+  }
   function brushKeys(elems, brush) {
     const out = [];
     const seen = {};
@@ -973,7 +1014,7 @@
             { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple" },
             x.options || {}
           );
-          elements = x.elements || [];
+          elements = normalizeElements(x.elements);
           meta = {};
           groups = {};
           legendIndex = {};
@@ -1063,6 +1104,7 @@
     fmtViewBox,
     unionBbox,
     sanitizeTip,
-    dispatchProxyCall
+    dispatchProxyCall,
+    normalizeElements
   };
 })();

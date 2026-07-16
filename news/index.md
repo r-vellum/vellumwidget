@@ -2,6 +2,20 @@
 
 ## vellumwidget (development version)
 
+- **Much faster, smaller payload for large plots (columnar element
+  table).** The keyed-element metadata
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  embeds is now serialised in a *columnar* form (one array per field)
+  instead of one JSON object per element. This is a transparent
+  wire-format change — the widget behaves identically — but it removes
+  the per-element serialisation cost that dominated at large N. On a
+  150,000-point keyed scatter the payload build + serialise dropped from
+  **~24 s / 89 MB to ~0.4 s / 12 MB** (~60x faster), so a big
+  interactive scatter is no longer choked by payload generation. Small
+  and moderate plots are unaffected. (This is Phase 1 of vellum’s
+  big-data interactivity plan; the browser-side DOM/hover work for truly
+  huge scatters follows in later phases.)
+
 - **Error bars and boxplots are interactive.** Now that vellumplot keys
   these statistical marks, the widget hovers, tooltips, clicks/selects,
   and brushes them as units: an error bar’s bar + caps, or a box’s
