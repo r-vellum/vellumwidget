@@ -846,5 +846,52 @@ function mountShiny(id, calls) {
   );
 }
 
+// ============ columnar payload ingestion (Phase 1 wire format) ============
+// R now ships `elements` as a columnar object (one array per field) instead of an
+// array of per-element records — far cheaper to serialise at large N. The runtime
+// decodes it back to the same ElemMeta[] via normalizeElements(); a legacy record
+// array (used by the tests above) is still accepted.
+{
+  const T2 = window.__vellumwidgetTest;
+  ok(typeof T2.normalizeElements === "function", "columnar: normalizeElements exposed for testing");
+
+  // n = 1: htmlwidgets auto-unboxes a length-1 column to a scalar; must re-wrap.
+  const one = T2.normalizeElements({ key: "a", x0: 1, y0: 2, x1: 3, y1: 4, tooltip: "A" });
+  ok(one.length === 1 && one[0].key === "a" && one[0].x0 === 1 && one[0].tooltip === "A",
+    "columnar: a single-element (auto-unboxed scalar) payload expands correctly");
+
+  // multi-element: sparse tooltip (null where absent) + ragged legend list-column
+  const many = T2.normalizeElements({
+    key: ["a", "b", "c"],
+    x0: [0, 10, 20], y0: [0, 0, 0], x1: [5, 15, 25], y1: [5, 5, 5],
+    tooltip: ["A", null, "C"],
+    legend: ["color:s", ["color:s", "color:t"], []]
+  });
+  ok(many.length === 3, "columnar: expands one ElemMeta per key");
+  ok(many[0].tooltip === "A" && many[1].tooltip === undefined && many[2].tooltip === "C",
+    "columnar: a null in a column means that element lacks the field");
+  ok(many[0].legend === "color:s" && Array.isArray(many[1].legend) && many[1].legend.length === 2,
+    "columnar: legend list-column keeps scalar vs multi-series shape");
+  ok(many[2].legend === undefined, "columnar: an empty ([]) legend entry is treated as absent");
+  ok(T2.brushKeys(many, { x0: -1, y0: -1, x1: 6, y1: 6 }).length === 1,
+    "columnar: expanded elements carry usable bboxes for hit-testing");
+  ok(T2.normalizeElements([{ key: "z" }]).length === 1, "columnar: a legacy record array is still accepted");
+  ok(T2.normalizeElements([]).length === 0 && T2.normalizeElements(null).length === 0,
+    "columnar: empty / null payloads yield no elements");
+
+  // integration: renderValue accepts the columnar payload and hover still works
+  const elCol = document.createElement("div");
+  document.body.appendChild(elCol);
+  widgetDef.factory(elCol, 200, 100).renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<path data-key="a" d="M10 10h5v5z"/><path data-key="b" d="M40 10h5v5z"/></svg>',
+    elements: { key: ["a", "b"], x0: [10, 40], y0: [10, 10], x1: [15, 45], y1: [15, 15], tooltip: ["Alpha", "Beta"] },
+    options: { tooltip: true, hover: true, select: true, selectMode: "multiple" }
+  });
+  fireOn(elCol.querySelector("svg"), "pointermove", elCol.querySelector('[data-key="a"]'));
+  ok(elCol.querySelector(".vellumwidget-tip").textContent === "Alpha",
+    "columnar: renderValue ingests the columnar payload end-to-end (hover tooltip works)");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

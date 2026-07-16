@@ -29,19 +29,20 @@ test_that("scene_model() exposes the element columns vellumwidget reads", {
   expect_true(is.numeric(el$x0) && is.numeric(el$y1))
 })
 
-test_that("vellumwidget_elements() turns the contract into keyed interaction records", {
+test_that("vellumwidget_elements() turns the contract into a columnar interaction table", {
   m <- vellum::scene_model(keyed_scene())
   els <- vellumwidget_elements(m)
 
-  expect_length(els, 2L)
-  expect_setequal(vapply(els, function(e) e$key, character(1)), c("a", "b"))
-
-  a <- Filter(function(e) e$key == "a", els)[[1]]
-  # bbox fields carried through
-  expect_true(all(c("x0", "y0", "x1", "y1") %in% names(a)))
-  # reserved meta keys read via exact `[[` (no partial-match)
-  expect_identical(a$tooltip, "Alpha")
-  expect_identical(a$hover_group, "g1")
+  # columnar: a named list of equal-length vectors, one entry per keyed element
+  expect_length(els$key, 2L)
+  expect_setequal(els$key, c("a", "b"))
+  # bbox columns carried through
+  expect_true(all(c("x0", "y0", "x1", "y1") %in% names(els)))
+  expect_true(is.numeric(els$x0))
+  # reserved meta keys read via exact `[[` (no partial-match), aligned to `key`
+  ia <- match("a", els$key)
+  expect_identical(els$tooltip[ia], "Alpha")
+  expect_identical(els$hover_group[ia], "g1")
 })
 
 test_that("an unkeyed scene yields no interaction records (contract additivity)", {

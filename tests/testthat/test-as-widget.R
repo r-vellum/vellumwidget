@@ -12,12 +12,13 @@ test_that("as_widget() on a vellumplot plot builds a vellumwidget htmlwidget wit
   expect_s3_class(w, "vellumwidget")
   expect_s3_class(w, "htmlwidget")
   expect_match(w$x$svg, 'data-key="Mazda RX4"', fixed = TRUE)
-  expect_length(w$x$elements, nrow(df))
-  keys <- vapply(w$x$elements, function(e) e$key, character(1))
+  # payload is columnar: one vector per field, aligned by index
+  expect_length(w$x$elements$key, nrow(df))
+  keys <- w$x$elements$key
   expect_setequal(keys, df$model)
   # tooltip carried per element
   i <- which(keys == "Mazda RX4")
-  expect_equal(w$x$elements[[i]]$tooltip, "Mazda RX4")
+  expect_equal(w$x$elements$tooltip[i], "Mazda RX4")
   # options round-trip
   expect_true(w$x$options$tooltip)
   expect_equal(w$x$options$selectMode, "multiple")
@@ -32,7 +33,7 @@ test_that("as_widget() works on a raw vellum scene (no vellumplot)", {
   w <- as_widget(scene)
   expect_s3_class(w, "vellumwidget")
   expect_match(w$x$svg, 'data-key="x"', fixed = TRUE)
-  expect_setequal(vapply(w$x$elements, function(e) e$key, character(1)), c("x", "y"))
+  expect_setequal(w$x$elements$key, c("x", "y"))
 })
 
 test_that("a plot with no interactivity yields a static widget (no keyed elements)", {
@@ -59,11 +60,11 @@ test_that("elements carry a device-px bbox for brush/nearest hit-testing", {
       gp = vellum::vl_gpar(fill = "red"), key = c("a", "b")
     ))
   w <- as_widget(scene)
-  e <- w$x$elements[[1]]
-  expect_true(all(c("x0", "y0", "x1", "y1") %in% names(e)))
-  expect_true(is.numeric(e$x0) && e$x1 > e$x0 && e$y1 > e$y0)
+  el <- w$x$elements
+  expect_true(all(c("x0", "y0", "x1", "y1") %in% names(el)))
+  expect_true(is.numeric(el$x0) && el$x1[1] > el$x0[1] && el$y1[1] > el$y0[1])
   # bbox is in the SVG's viewBox (device-px) space: centre near 0.25*200 = 50
-  cx <- (e$x0 + e$x1) / 2
+  cx <- (el$x0[1] + el$x1[1]) / 2
   expect_true(abs(cx - 50) < 5)
 })
 
@@ -96,8 +97,7 @@ test_that("hover_group is carried into the element table", {
       meta = list(list(hover_group = "g"), list(hover_group = "g"))
     ))
   w <- as_widget(scene)
-  hg <- vapply(w$x$elements, function(e) e$hover_group %||% NA_character_, character(1))
-  expect_equal(hg, c("g", "g"))
+  expect_equal(w$x$elements$hover_group, c("g", "g"))
 })
 
 test_that("widget theme args normalise to CSS colours in the payload (Option 1)", {
@@ -150,9 +150,9 @@ test_that("per-element grammar colours flow into the payload, normalised (Option
     vellumplot::mark_point(x = wt, y = mpg, data_id = seq_len(nrow(df)),
                       hover_color = "red", selected_color = "grey20") |>
     as_widget()
-  e <- w$x$elements[[1]]
-  expect_equal(e$hover_color, "#ff0000")
-  expect_equal(e$selected_color, "#333333")
+  el <- w$x$elements
+  expect_equal(el$hover_color[1], "#ff0000")
+  expect_equal(el$selected_color[1], "#333333")
 })
 
 test_that("group option round-trips for own-bus linking (Phase 5)", {
@@ -197,18 +197,15 @@ test_that("discrete legend swatches + series membership flow into the payload (P
   w <- vellumplot::vplot(df) |>
     vellumplot::mark_point(x = wt, y = mpg, color = cyl, data_id = model) |>
     as_widget()
-  els <- w$x$elements
+  el <- w$x$elements
   # swatches carry `legend_for` (and NOT `legend`); marks carry `legend` membership
-  swatches <- Filter(function(e) !is.null(e[["legend_for"]]), els)
-  marks <- Filter(function(e) !is.null(e[["legend"]]), els)
-  expect_equal(length(swatches), nlevels(df$cyl))
-  expect_equal(length(marks), nrow(df))
-  expect_setequal(
-    vapply(swatches, function(e) e[["legend_for"]], character(1)),
-    paste0("color:", levels(df$cyl))
-  )
+  is_swatch <- !is.na(el$legend_for)
+  has_legend <- lengths(el$legend) > 0L
+  expect_equal(sum(is_swatch), nlevels(df$cyl))
+  expect_equal(sum(has_legend), nrow(df))
+  expect_setequal(el$legend_for[is_swatch], paste0("color:", levels(df$cyl)))
   # no swatch leaks a `legend` membership (the `$`-partial-match trap)
-  expect_false(any(vapply(swatches, function(e) !is.null(e[["legend"]]), logical(1))))
+  expect_false(any(is_swatch & has_legend))
 })
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
@@ -236,7 +233,7 @@ test_that("as_widget() keys an error bar's segments to one addressable unit", {
   w <- vellumplot::vplot(df) |>
     vellumplot::mark_errorbar(x = g, ymin = lo, ymax = hi, data_id = g, tooltip = g) |>
     as_widget()
-  keys <- vapply(w$x$elements, function(e) e$key, character(1))
+  keys <- w$x$elements$key
   # each bar contributes several keyed segment rows sharing its datum key
   expect_setequal(unique(keys), c("a", "b", "c"))
   expect_gt(sum(keys == "b"), 1L)
@@ -249,6 +246,6 @@ test_that("as_widget() keys each boxplot box by its category", {
   w <- vellumplot::vplot(mtcars) |>
     vellumplot::mark_boxplot(x = factor(cyl), y = mpg, data_id = cyl) |>
     as_widget()
-  keys <- vapply(w$x$elements, function(e) e$key, character(1))
+  keys <- w$x$elements$key
   expect_true(all(c("4", "6", "8") %in% keys))
 })
