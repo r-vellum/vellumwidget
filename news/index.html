@@ -13,7 +13,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0.9000</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -48,6 +48,9 @@
       <small>Source: <a href="https://github.com/r-vellum/vellumwidget/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="development version" id="vellumwidget-development-version">vellumwidget (development version)<a class="anchor" aria-label="anchor" href="#vellumwidget-development-version"></a></h2>
+</div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.5.0" id="vellumwidget-050">vellumwidget 0.5.0<a class="anchor" aria-label="anchor" href="#vellumwidget-050"></a></h2>
 <ul><li><p><strong><code>text</code> argument on <code><a href="../reference/as_widget.html">as_widget()</a></code>.</strong> Choose how text is written into the SVG, passed through to <code><a href="https://r-vellum.github.io/vellum/reference/scene_svg.html" class="external-link">vellum::scene_svg()</a></code>: <code>"native"</code> (the default) emits selectable <code>&lt;text&gt;</code> referencing system fonts — smaller when the page has the font, post-processable, and better for accessibility and LLMs — while <code>"outline"</code> emits pixel-faithful, font-independent glyph paths. Applies to the per-element SVG path only; in raster mode text is baked into the base image and the argument is ignored (with a warning if set explicitly) (<a href="https://github.com/r-vellum/vellumwidget/issues/1" class="external-link">#1</a>).</p></li>
