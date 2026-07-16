@@ -2,6 +2,12 @@
 
 ## vellumwidget (development version)
 
+- **New articles.** Two articles document the features added since
+  0.4.0: *Linking views with crosstalk* (coordinating a widget with DT /
+  plotly / leaflet and crosstalk’s `filter_*` inputs) and *Very large
+  scenes* (raster mode, the spatial index, the columnar payload, and
+  crisp zoom).
+
 - **Crisp zoom in raster mode.** When you zoom into a raster-mode plot,
   the base image used to upscale and blur. The widget now redraws the
   points sharply on a `<canvas>` overlay while zoomed in — sampling each

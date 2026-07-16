@@ -13,6 +13,11 @@ Interactivity is *declared in the grammar*: a mark’s `data_id`,
 per-element metadata that the widget reads. A plot that declares none
 still renders as a static (but embeddable) SVG.
 
+Everything here scales to a few thousand marks on the per-element SVG
+path. Past that, the widget switches to a raster strategy so a
+100k-point scatter stays navigable; see [Very large
+scenes](https://r-vellum.github.io/vellumwidget/articles/big-data.md).
+
 ``` r
 
 library(vellumplot)
@@ -138,7 +143,8 @@ htmltools::tagList(
 For interop with plotly / leaflet / DT and crosstalk’s `filter_*`
 controls, pass a
 [`crosstalk::SharedData`](https://rdrr.io/pkg/crosstalk/man/SharedData.html)
-(or a group name) to `crosstalk =` instead.
+(or a group name) to `crosstalk =` instead — see [Linking views with
+crosstalk](https://r-vellum.github.io/vellumwidget/articles/crosstalk.md).
 
 ## Styling
 
