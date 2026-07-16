@@ -1,6 +1,6 @@
 # Changelog
 
-## vellumwidget (development version)
+## vellumwidget 0.5.0
 
 - **`text` argument on
   [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md).**
