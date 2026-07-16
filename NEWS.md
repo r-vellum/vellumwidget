@@ -1,5 +1,13 @@
 # vellumwidget (development version)
 
+* **`text` argument on `as_widget()`.** Choose how text is written into the SVG,
+  passed through to `vellum::scene_svg()`: `"native"` (the default) emits
+  selectable `<text>` referencing system fonts — smaller when the page has the
+  font, post-processable, and better for accessibility and LLMs — while
+  `"outline"` emits pixel-faithful, font-independent glyph paths. Applies to the
+  per-element SVG path only; in raster mode text is baked into the base image and
+  the argument is ignored (with a warning if set explicitly) (#1).
+
 * **New articles.** Two articles document the features added since 0.4.0:
   *Linking views with crosstalk* (coordinating a widget with DT / plotly /
   leaflet and crosstalk's `filter_*` inputs) and *Very large scenes* (raster

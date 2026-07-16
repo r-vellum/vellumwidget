@@ -249,6 +249,32 @@ test_that("raster shell carries the scene title/description for accessibility", 
   expect_match(svg, "role=\"img\"", fixed = TRUE)
 })
 
+test_that("text = 'native' (default) emits selectable <text>; 'outline' emits glyph paths", {
+  scene <- vellum::vl_scene(3, 2, dpi = 96, bg = "white") |>
+    vellum::draw(vellum::text_grob(
+      "Hello widget", x = 0.5, y = 0.5,
+      gp = vellum::vl_gpar(fontsize = 20, col = "black")
+    ))
+  # default is native: selectable text, no glyph outlines
+  svg_default <- as_widget(scene)$x$svg
+  expect_match(svg_default, "<text", fixed = TRUE)
+  # explicit outline: glyph paths, no <text>
+  svg_outline <- as_widget(scene, text = "outline")$x$svg
+  expect_match(svg_outline, "<path", fixed = TRUE)
+  expect_no_match(svg_outline, "<text")
+})
+
+test_that("text is ignored (with a warning) in raster mode", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
+  expect_warning(
+    as_widget(scene, mode = "raster", text = "outline"),
+    "ignored in raster mode"
+  )
+  # not passing `text` explicitly stays quiet
+  expect_no_warning(as_widget(scene, mode = "raster"))
+})
+
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
 # Keyed statistical marks (error bars / boxplots) become interactive: each mark's
