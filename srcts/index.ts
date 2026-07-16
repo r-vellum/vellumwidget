@@ -239,6 +239,19 @@ function fmtViewBox(vb: ViewBox): string {
   return vb.x + " " + vb.y + " " + vb.w + " " + vb.h;
 }
 
+// Is the view zoomed IN relative to the original (so the base raster would be
+// upscaled and blur)? Panning or zooming out keeps the image crisp, so the crisp
+// canvas point-layer only engages when the view is narrower/shorter than original.
+function isZoomedIn(vb: ViewBox, vb0: ViewBox): boolean {
+  return vb.w < vb0.w * 0.999 || vb.h < vb0.h * 0.999;
+}
+
+// Map a point in viewBox (user) space to canvas backing-store pixels for the
+// current view (`cw`/`ch` are the canvas backing-store dimensions).
+function userToCanvas(vb: ViewBox, cw: number, ch: number, x: number, y: number): { px: number; py: number } {
+  return { px: ((x - vb.x) / vb.w) * cw, py: ((y - vb.y) / vb.h) * ch };
+}
+
 // Union bbox of the given keys' elements (for zoom-to-selection), or null.
 function unionBbox(elems: ElemMeta[], keys: Record<string, boolean>): Bbox | null {
   let out: Bbox | null = null;
@@ -274,6 +287,12 @@ const VELLUMWIDGET_CSS = `
    (O(n) per hover), the whole plot is dimmed once via the holder's opacity and the
    hovered marks are re-drawn crisp in this overlay (O(hovered)). See setHover(). */
 .vellumwidget-root .vellumwidget-svg-holder { transition: none; }
+/* Crisp-zoom point layer: above the base image, below the overlay rings. Never
+   intercepts hit-testing (that stays on the base svg). Hidden until zoomed in. */
+.vellumwidget-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 2; display: none;
+}
 .vellumwidget-dim-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;
@@ -480,6 +499,17 @@ HTMLWidgets.widget({
     let rasterMode = false;
     let selGroup: SVGGElement | null = null; // persistent selection rings
     let hovGroup: SVGGElement | null = null; // transient hover ring(s)
+    // Crisp-zoom canvas (Phase 6): when the view is zoomed in, the base image would
+    // upscale and blur, so the points are redrawn crisp on this canvas from data
+    // sampled off the base raster (centre + radius from the index bbox, colour from
+    // the rendered pixel). Falls back to image-only when no 2D context is available.
+    let canvasEl: HTMLCanvasElement | null = null;
+    let ctx: CanvasRenderingContext2D | null = null;
+    let ptCx: Float64Array | null = null; // sampled point centres (viewBox space)
+    let ptCy: Float64Array | null = null;
+    let ptRad: Float64Array | null = null; // sampled point radii (viewBox units)
+    let ptRGB: Uint8Array | null = null; // packed [r,g,b, r,g,b, …] per sampled point
+    let ptN = 0; // number of sampled (drawable) points
     // Cap on how many selection rings to draw: a huge brush selects thousands of
     // points, and drawing a ring per point would reintroduce the DOM blowup raster
     // mode exists to avoid. The selection set itself is always fully tracked and
@@ -628,6 +658,113 @@ HTMLWidgets.widget({
     function hideHighlightOverlay(): void {
       if (holder) holder.style.opacity = "";
       if (dimLayer) while (dimLayer.firstChild) dimLayer.removeChild(dimLayer.firstChild);
+    }
+
+    // --- crisp-zoom canvas point layer (raster mode, Phase 6) ---
+    // Create the canvas once (sits above the base image, below the overlay rings).
+    // `getContext` may be absent (jsdom / very old browsers) — then ctx stays null
+    // and every draw is a no-op, leaving the faithful base image as the only layer.
+    function ensureCanvas(): void {
+      if (canvasEl) return;
+      canvasEl = document.createElement("canvas");
+      canvasEl.className = "vellumwidget-canvas";
+      canvasEl.setAttribute("aria-hidden", "true");
+      el.appendChild(canvasEl);
+      ctx = typeof canvasEl.getContext === "function" ? canvasEl.getContext("2d") : null;
+    }
+    function clearPointData(): void {
+      ptCx = ptCy = ptRad = null;
+      ptRGB = null;
+      ptN = 0;
+      if (canvasEl) canvasEl.style.display = "none";
+    }
+    // Sample each keyed element's colour from the rendered base raster (its centre
+    // pixel) and record centre + radius (from the index bbox). Done once per render,
+    // asynchronously after the image decodes. No colour data crosses the wire — it is
+    // read back from the pixels vellum already drew, so the crisp layer matches them.
+    function sampleBaseRaster(): void {
+      clearPointData();
+      if (!rasterMode || !svgEl || !vb0) return;
+      const imgNode = svgEl.querySelector("image");
+      const href = imgNode && (imgNode.getAttribute("href") || imgNode.getAttribute("xlink:href"));
+      if (!href) return;
+      const off = document.createElement("canvas");
+      const octx = typeof off.getContext === "function" ? off.getContext("2d") : null;
+      if (!octx) return; // no 2D support -> canvas zoom disabled, image-only
+      const iw = Math.max(1, Math.round(vb0.w));
+      const ih = Math.max(1, Math.round(vb0.h));
+      const els = elements; // capture (a later re-render replaces `elements`)
+      const v0 = vb0;
+      const img = new Image();
+      img.onload = function () {
+        // Guard against a re-render having happened before decode finished.
+        if (els !== elements || v0 !== vb0) return;
+        off.width = iw;
+        off.height = ih;
+        octx.drawImage(img, 0, 0, iw, ih);
+        let data: Uint8ClampedArray;
+        try {
+          data = octx.getImageData(0, 0, iw, ih).data;
+        } catch (e) {
+          return; // tainted canvas (shouldn't happen for a same-origin data: URI)
+        }
+        const cx: number[] = [], cy: number[] = [], rad: number[] = [], rgb: number[] = [];
+        for (let i = 0; i < els.length; i++) {
+          const e = els[i];
+          if (!hasBbox(e)) continue;
+          const mx = (e.x0 + e.x1) / 2, my = (e.y0 + e.y1) / 2;
+          const sx = Math.min(iw - 1, Math.max(0, Math.round(mx)));
+          const sy = Math.min(ih - 1, Math.max(0, Math.round(my)));
+          const o = (sy * iw + sx) * 4;
+          if (data[o + 3] < 8) continue; // transparent -> background, not a drawn mark
+          cx.push(mx);
+          cy.push(my);
+          rad.push(Math.max(e.x1 - e.x0, e.y1 - e.y0) / 2 + 0.5);
+          rgb.push(data[o], data[o + 1], data[o + 2]);
+        }
+        ptN = cx.length;
+        ptCx = Float64Array.from(cx);
+        ptCy = Float64Array.from(cy);
+        ptRad = Float64Array.from(rad);
+        ptRGB = Uint8Array.from(rgb);
+        drawPoints(); // in case the view is already zoomed
+      };
+      img.onerror = function () {};
+      img.src = href;
+    }
+    // Redraw the crisp point layer for the current view. Engages only when zoomed in
+    // (otherwise the faithful base image shows and the canvas is hidden). Points
+    // outside the view are culled, so a deep zoom draws only a handful.
+    function drawPoints(): void {
+      if (!rasterMode || !canvasEl || !ctx || !vb || !vb0) return;
+      if (!isZoomedIn(vb, vb0) || !ptCx || !ptCy || !ptRad || !ptRGB || !ptN) {
+        canvasEl.style.display = "none";
+        return;
+      }
+      const rect = (svgEl || el).getBoundingClientRect();
+      const cw = Math.max(1, Math.round(rect.width || vb0.w));
+      const ch = Math.max(1, Math.round(rect.height || vb0.h));
+      const dpr = (window as unknown as { devicePixelRatio?: number }).devicePixelRatio || 1;
+      if (canvasEl.width !== cw * dpr || canvasEl.height !== ch * dpr) {
+        canvasEl.width = cw * dpr;
+        canvasEl.height = ch * dpr;
+      }
+      canvasEl.style.width = cw + "px";
+      canvasEl.style.height = ch + "px";
+      canvasEl.style.display = "block";
+      const W = canvasEl.width, H = canvasEl.height;
+      ctx.clearRect(0, 0, W, H);
+      const rScale = Math.min(W / vb.w, H / vb.h);
+      const x0 = vb.x, y0 = vb.y, x1 = vb.x + vb.w, y1 = vb.y + vb.h;
+      for (let i = 0; i < ptN; i++) {
+        const px = ptCx[i], py = ptCy[i];
+        if (px < x0 || px > x1 || py < y0 || py > y1) continue; // cull off-view
+        const p = userToCanvas(vb, W, H, px, py);
+        ctx.beginPath();
+        ctx.arc(p.px, p.py, Math.max(0.75, ptRad[i] * rScale), 0, 6.283185307179586);
+        ctx.fillStyle = "rgb(" + ptRGB[i * 3] + "," + ptRGB[i * 3 + 1] + "," + ptRGB[i * 3 + 2] + ")";
+        ctx.fill();
+      }
     }
 
     // --- raster-mode feedback (rings drawn on the overlay, index-driven) ---
@@ -841,6 +978,8 @@ HTMLWidgets.widget({
       if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
       // Keep the hover overlay's coordinate space aligned with the base under pan/zoom.
       if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
+      // Redraw the crisp point layer for the new view (no-op unless raster + zoomed in).
+      drawPoints();
     }
     function resetZoom(): void {
       if (vb0) {
@@ -1570,6 +1709,14 @@ HTMLWidgets.widget({
             dimLayer.appendChild(hovGroup);
           }
           if (dimLayer && vb0) dimLayer.setAttribute("viewBox", fmtViewBox(vb0));
+          // Crisp-zoom canvas: sample the base raster (raster mode only); otherwise
+          // make sure any canvas from a prior render is hidden.
+          if (rasterMode) {
+            ensureCanvas();
+            sampleBaseRaster();
+          } else {
+            clearPointData();
+          }
           buildSpatialIndex();
           wire(svgEl);
           buildToolbar();
@@ -1586,7 +1733,9 @@ HTMLWidgets.widget({
       },
 
       resize: function () {
-        // The SVG scales via its viewBox; nothing to recompute.
+        // The SVG scales via its viewBox; only the crisp-zoom canvas is sized in
+        // device pixels, so re-fit it to the new box (no-op unless raster + zoomed).
+        drawPoints();
       },
 
       // Server->client proxy seam: vellumwidget_proxy() reaches this instance via
@@ -1601,7 +1750,9 @@ HTMLWidgets.widget({
         brushKeysIn: brushKeysIn,
         indexSize: function () { return spatialIndex ? spatialIndex.numItems : 0; },
         largeDim: function () { return largeDim; },
-        rasterMode: function () { return rasterMode; }
+        rasterMode: function () { return rasterMode; },
+        hasCanvas: function () { return !!canvasEl; },
+        pointCount: function () { return ptN; }
       }
     };
   }
@@ -1650,5 +1801,7 @@ registerProxyHandler();
   unionBbox,
   sanitizeTip,
   dispatchProxyCall,
-  normalizeElements
+  normalizeElements,
+  isZoomedIn,
+  userToCanvas
 };

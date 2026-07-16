@@ -4,7 +4,15 @@
 // Run with: node tests/js/behavior.test.js
 const fs = require("fs");
 const path = require("path");
-const { JSDOM } = require("jsdom");
+const { JSDOM, VirtualConsole } = require("jsdom");
+// jsdom has no 2D canvas context, so getContext() emits a "Not implemented"
+// jsdomError. The crisp-zoom canvas is written to tolerate a null context (it
+// falls back to the base image), so that message is expected here — drop it to
+// keep the test output clean, but forward anything else.
+const virtualConsole = new VirtualConsole();
+virtualConsole.on("jsdomError", function (err) {
+  if (!/getContext/.test(String(err && err.message))) console.error(err);
+});
 
 const BUNDLE = path.join(__dirname, "..", "..", "inst", "htmlwidgets", "vellumwidget.js");
 
@@ -19,7 +27,8 @@ function ok(cond, msg) {
 }
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
-  pretendToBeVisual: true
+  pretendToBeVisual: true,
+  virtualConsole: virtualConsole
 });
 const { window } = dom;
 global.window = window;
@@ -1050,6 +1059,50 @@ function mountShiny(id, calls) {
   iB._call("select", bk); // 2100 > cap 2000
   ok(eB.querySelector(".vellumwidget-dim-layer").querySelectorAll("circle").length === 0,
     "raster: selection above the ring cap draws no rings (still tracked/reported)");
+}
+
+// ============ Phase 6: crisp-zoom canvas layer (raster mode) ============
+{
+  const T2 = window.__vellumwidgetTest;
+  // pure helpers
+  ok(T2.isZoomedIn({ x: 0, y: 0, w: 50, h: 50 }, { x: 0, y: 0, w: 100, h: 100 }) === true,
+    "canvas: isZoomedIn true when the view is narrower than the original");
+  ok(T2.isZoomedIn({ x: 0, y: 0, w: 100, h: 100 }, { x: 0, y: 0, w: 100, h: 100 }) === false,
+    "canvas: isZoomedIn false at the original extent");
+  ok(T2.isZoomedIn({ x: 0, y: 0, w: 200, h: 200 }, { x: 0, y: 0, w: 100, h: 100 }) === false,
+    "canvas: isZoomedIn false when zoomed out");
+  const p = T2.userToCanvas({ x: 10, y: 10, w: 20, h: 20 }, 100, 100, 20, 20);
+  ok(Math.abs(p.px - 50) < 1e-9 && Math.abs(p.py - 50) < 1e-9,
+    "canvas: userToCanvas maps a viewBox point into canvas pixels");
+
+  // A raster widget creates a canvas layer; jsdom has no 2D context, so the layer
+  // gracefully stays empty and inert (sampling no-ops), and zooming never throws.
+  const eC = document.createElement("div");
+  document.body.appendChild(eC);
+  const iC = widgetDef.factory(eC, 120, 20);
+  iC.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="20" viewBox="0 0 120 20">' +
+      '<image width="120" height="20" href="data:,"/></svg>',
+    elements: { key: ["k0", "k1"], x0: [0, 10], y0: [0, 0], x1: [4, 14], y1: [4, 4] },
+    options: { hover: true, select: true, zoom: true, brush: true, toolbar: true, nearest: true, raster: true, selectMode: "multiple" }
+  });
+  ok(iC._test.hasCanvas() === true, "canvas: raster mode creates the crisp-zoom canvas layer");
+  ok(!!eC.querySelector("canvas.vellumwidget-canvas"), "canvas: the canvas element is in the DOM");
+  ok(iC._test.pointCount() === 0, "canvas: no 2D context (jsdom) -> sampling no-ops, image-only fallback");
+  let threw = false;
+  try { iC._call("zoom", ["k1"]); iC._call("resetZoom"); } catch (e) { threw = true; }
+  ok(!threw, "canvas: zooming a raster widget without a 2D context does not throw");
+
+  // SVG mode never creates a canvas.
+  const eS = document.createElement("div");
+  document.body.appendChild(eS);
+  const iS = widgetDef.factory(eS, 60, 30);
+  iS.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30"><path data-key="a" d="M1 1h9v9z"/></svg>',
+    elements: { key: ["a"], x0: [1], y0: [1], x1: [10], y1: [10] },
+    options: { hover: true, select: true, selectMode: "multiple" }
+  });
+  ok(iS._test.hasCanvas() === false, "canvas: SVG mode does not create a canvas layer");
 }
 
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");

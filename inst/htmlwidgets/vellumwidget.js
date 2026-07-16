@@ -598,6 +598,12 @@
   function fmtViewBox(vb) {
     return vb.x + " " + vb.y + " " + vb.w + " " + vb.h;
   }
+  function isZoomedIn(vb, vb0) {
+    return vb.w < vb0.w * 0.999 || vb.h < vb0.h * 0.999;
+  }
+  function userToCanvas(vb, cw, ch, x, y) {
+    return { px: (x - vb.x) / vb.w * cw, py: (y - vb.y) / vb.h * ch };
+  }
   function unionBbox(elems, keys) {
     let out = null;
     for (let i = 0; i < elems.length; i++) {
@@ -628,6 +634,12 @@
    (O(n) per hover), the whole plot is dimmed once via the holder's opacity and the
    hovered marks are re-drawn crisp in this overlay (O(hovered)). See setHover(). */
 .vellumwidget-root .vellumwidget-svg-holder { transition: none; }
+/* Crisp-zoom point layer: above the base image, below the overlay rings. Never
+   intercepts hit-testing (that stays on the base svg). Hidden until zoomed in. */
+.vellumwidget-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 2; display: none;
+}
 .vellumwidget-dim-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;
@@ -780,6 +792,13 @@
       let rasterMode = false;
       let selGroup = null;
       let hovGroup = null;
+      let canvasEl = null;
+      let ctx = null;
+      let ptCx = null;
+      let ptCy = null;
+      let ptRad = null;
+      let ptRGB = null;
+      let ptN = 0;
       const OVERLAY_MARK_CAP = 2e3;
       let opts = {
         tooltip: true,
@@ -902,6 +921,101 @@
       function hideHighlightOverlay() {
         if (holder) holder.style.opacity = "";
         if (dimLayer) while (dimLayer.firstChild) dimLayer.removeChild(dimLayer.firstChild);
+      }
+      function ensureCanvas() {
+        if (canvasEl) return;
+        canvasEl = document.createElement("canvas");
+        canvasEl.className = "vellumwidget-canvas";
+        canvasEl.setAttribute("aria-hidden", "true");
+        el.appendChild(canvasEl);
+        ctx = typeof canvasEl.getContext === "function" ? canvasEl.getContext("2d") : null;
+      }
+      function clearPointData() {
+        ptCx = ptCy = ptRad = null;
+        ptRGB = null;
+        ptN = 0;
+        if (canvasEl) canvasEl.style.display = "none";
+      }
+      function sampleBaseRaster() {
+        clearPointData();
+        if (!rasterMode || !svgEl || !vb0) return;
+        const imgNode = svgEl.querySelector("image");
+        const href = imgNode && (imgNode.getAttribute("href") || imgNode.getAttribute("xlink:href"));
+        if (!href) return;
+        const off = document.createElement("canvas");
+        const octx = typeof off.getContext === "function" ? off.getContext("2d") : null;
+        if (!octx) return;
+        const iw = Math.max(1, Math.round(vb0.w));
+        const ih = Math.max(1, Math.round(vb0.h));
+        const els = elements;
+        const v0 = vb0;
+        const img = new Image();
+        img.onload = function() {
+          if (els !== elements || v0 !== vb0) return;
+          off.width = iw;
+          off.height = ih;
+          octx.drawImage(img, 0, 0, iw, ih);
+          let data;
+          try {
+            data = octx.getImageData(0, 0, iw, ih).data;
+          } catch (e) {
+            return;
+          }
+          const cx = [], cy = [], rad = [], rgb = [];
+          for (let i = 0; i < els.length; i++) {
+            const e = els[i];
+            if (!hasBbox(e)) continue;
+            const mx = (e.x0 + e.x1) / 2, my = (e.y0 + e.y1) / 2;
+            const sx = Math.min(iw - 1, Math.max(0, Math.round(mx)));
+            const sy = Math.min(ih - 1, Math.max(0, Math.round(my)));
+            const o = (sy * iw + sx) * 4;
+            if (data[o + 3] < 8) continue;
+            cx.push(mx);
+            cy.push(my);
+            rad.push(Math.max(e.x1 - e.x0, e.y1 - e.y0) / 2 + 0.5);
+            rgb.push(data[o], data[o + 1], data[o + 2]);
+          }
+          ptN = cx.length;
+          ptCx = Float64Array.from(cx);
+          ptCy = Float64Array.from(cy);
+          ptRad = Float64Array.from(rad);
+          ptRGB = Uint8Array.from(rgb);
+          drawPoints();
+        };
+        img.onerror = function() {
+        };
+        img.src = href;
+      }
+      function drawPoints() {
+        if (!rasterMode || !canvasEl || !ctx || !vb || !vb0) return;
+        if (!isZoomedIn(vb, vb0) || !ptCx || !ptCy || !ptRad || !ptRGB || !ptN) {
+          canvasEl.style.display = "none";
+          return;
+        }
+        const rect = (svgEl || el).getBoundingClientRect();
+        const cw = Math.max(1, Math.round(rect.width || vb0.w));
+        const ch = Math.max(1, Math.round(rect.height || vb0.h));
+        const dpr = window.devicePixelRatio || 1;
+        if (canvasEl.width !== cw * dpr || canvasEl.height !== ch * dpr) {
+          canvasEl.width = cw * dpr;
+          canvasEl.height = ch * dpr;
+        }
+        canvasEl.style.width = cw + "px";
+        canvasEl.style.height = ch + "px";
+        canvasEl.style.display = "block";
+        const W = canvasEl.width, H = canvasEl.height;
+        ctx.clearRect(0, 0, W, H);
+        const rScale = Math.min(W / vb.w, H / vb.h);
+        const x0 = vb.x, y0 = vb.y, x1 = vb.x + vb.w, y1 = vb.y + vb.h;
+        for (let i = 0; i < ptN; i++) {
+          const px = ptCx[i], py = ptCy[i];
+          if (px < x0 || px > x1 || py < y0 || py > y1) continue;
+          const p = userToCanvas(vb, W, H, px, py);
+          ctx.beginPath();
+          ctx.arc(p.px, p.py, Math.max(0.75, ptRad[i] * rScale), 0, 6.283185307179586);
+          ctx.fillStyle = "rgb(" + ptRGB[i * 3] + "," + ptRGB[i * 3 + 1] + "," + ptRGB[i * 3 + 2] + ")";
+          ctx.fill();
+        }
       }
       const SVGNS = "http://www.w3.org/2000/svg";
       function ringFor(k, cls) {
@@ -1087,6 +1201,7 @@
       function applyViewBox() {
         if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
         if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
+        drawPoints();
       }
       function resetZoom() {
         if (vb0) {
@@ -1380,10 +1495,10 @@
           const canvas = document.createElement("canvas");
           canvas.width = Math.round((vb0 ? vb0.w : img.width) * k);
           canvas.height = Math.round((vb0 ? vb0.h : img.height) * k);
-          const ctx = canvas.getContext("2d");
+          const ctx2 = canvas.getContext("2d");
           URL.revokeObjectURL(url);
-          if (ctx) {
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          if (ctx2) {
+            ctx2.drawImage(img, 0, 0, canvas.width, canvas.height);
             then(canvas);
           } else {
             fail();
@@ -1725,6 +1840,12 @@
               dimLayer.appendChild(hovGroup);
             }
             if (dimLayer && vb0) dimLayer.setAttribute("viewBox", fmtViewBox(vb0));
+            if (rasterMode) {
+              ensureCanvas();
+              sampleBaseRaster();
+            } else {
+              clearPointData();
+            }
             buildSpatialIndex();
             wire(svgEl);
             buildToolbar();
@@ -1737,6 +1858,7 @@
           }
         },
         resize: function() {
+          drawPoints();
         },
         // Server->client proxy seam: vellumwidget_proxy() reaches this instance via
         // HTMLWidgets.find() and calls `_call` (see the "vellumwidget-calls" handler).
@@ -1755,6 +1877,12 @@
           },
           rasterMode: function() {
             return rasterMode;
+          },
+          hasCanvas: function() {
+            return !!canvasEl;
+          },
+          pointCount: function() {
+            return ptN;
           }
         }
       };
@@ -1789,6 +1917,8 @@
     unionBbox,
     sanitizeTip,
     dispatchProxyCall,
-    normalizeElements
+    normalizeElements,
+    isZoomedIn,
+    userToCanvas
   };
 })();
