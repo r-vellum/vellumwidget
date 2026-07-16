@@ -70,9 +70,10 @@ id. All values are the element **data keys** (the `data_id` a
 These are emitted only inside a live Shiny session; a static render
 (knitr, pkgdown,
 [`htmltools::save_html()`](https://rstudio.github.io/htmltools/reference/save_html.html))
-produces identical output and no input traffic. Driving the widget
-*from* the server (setting selection without a re-render) is a planned
-addition.
+produces identical output and no input traffic. To drive the widget
+*from* the server — set the selection, cross-filter it, or zoom it
+without a re-render — use
+[`vellumwidget_proxy()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget_proxy.md).
 
 ## See also
 

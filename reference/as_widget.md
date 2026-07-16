@@ -40,6 +40,8 @@ as_widget(
   group = NULL,
   crosstalk = NULL,
   select_mode = c("multiple", "single"),
+  mode = c("auto", "svg", "raster"),
+  raster_threshold = 20000L,
   elementId = NULL
 )
 ```
@@ -144,6 +146,26 @@ as_widget(
 
   `"multiple"` (default; click toggles each element) or `"single"`
   (click replaces the selection).
+
+- mode:
+
+  Rendering strategy for the marks. `"auto"` (default) ships a
+  per-element SVG for small/moderate plots and switches to a single
+  embedded raster image above `raster_threshold` keyed elements; `"svg"`
+  always uses the per-element SVG; `"raster"` always uses the image. In
+  raster mode the marks are drawn once as a base image and all
+  interaction (hover, click, brush, pan/zoom) is driven client-side from
+  the element index (bounding boxes + keys), so a very large scatter
+  (100k+ points) stays navigable with a tiny DOM and a small payload.
+  The trade-offs of raster mode: per-element grammar colours, per-mark
+  screen-reader focus, and display-tier cross-filtering do not apply
+  (there are no per-element DOM nodes), and a zoomed-in view is a scaled
+  raster until re-rendered.
+
+- raster_threshold:
+
+  Keyed-element count above which `mode = "auto"` switches to the raster
+  image (default `20000`).
 
 - elementId:
 

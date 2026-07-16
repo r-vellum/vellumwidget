@@ -102,6 +102,8 @@ focused — see the <code>a11y</code> argument.</p>
 <span>  group <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  crosstalk <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  select_mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"multiple"</span>, <span class="st">"single"</span><span class="op">)</span>,</span>
+<span>  mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"auto"</span>, <span class="st">"svg"</span>, <span class="st">"raster"</span><span class="op">)</span>,</span>
+<span>  raster_threshold <span class="op">=</span> <span class="fl">20000L</span>,</span>
 <span>  elementId <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -198,6 +200,25 @@ SharedData's keys. A crosstalk filter hides the non-matching elements
 <dt id="arg-select-mode">select_mode<a class="anchor" aria-label="anchor" href="#arg-select-mode"></a></dt>
 <dd><p><code>"multiple"</code> (default; click toggles each element) or
 <code>"single"</code> (click replaces the selection).</p></dd>
+
+
+<dt id="arg-mode">mode<a class="anchor" aria-label="anchor" href="#arg-mode"></a></dt>
+<dd><p>Rendering strategy for the marks. <code>"auto"</code> (default) ships a
+per-element SVG for small/moderate plots and switches to a single embedded
+raster image above <code>raster_threshold</code> keyed elements; <code>"svg"</code> always uses the
+per-element SVG; <code>"raster"</code> always uses the image. In raster mode the marks are
+drawn once as a base image and all interaction (hover, click, brush, pan/zoom)
+is driven client-side from the element index (bounding boxes + keys), so a very
+large scatter (100k+ points) stays navigable with a tiny DOM and a small
+payload. The trade-offs of raster mode: per-element grammar colours,
+per-mark screen-reader focus, and display-tier cross-filtering do not apply
+(there are no per-element DOM nodes), and a zoomed-in view is a scaled raster
+until re-rendered.</p></dd>
+
+
+<dt id="arg-raster-threshold">raster_threshold<a class="anchor" aria-label="anchor" href="#arg-raster-threshold"></a></dt>
+<dd><p>Keyed-element count above which <code>mode = "auto"</code> switches
+to the raster image (default <code>20000</code>).</p></dd>
 
 
 <dt id="arg-elementid">elementId<a class="anchor" aria-label="anchor" href="#arg-elementid"></a></dt>

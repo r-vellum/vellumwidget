@@ -115,8 +115,8 @@ scene's device-pixel (viewBox) coordinates. An event input.</p></dd>
 
 </dl><p>These are emitted only inside a live Shiny session; a static render (knitr,
 pkgdown, <code><a href="https://rstudio.github.io/htmltools/reference/save_html.html" class="external-link">htmltools::save_html()</a></code>) produces identical output and no input
-traffic. Driving the widget <em>from</em> the server (setting selection without a
-re-render) is a planned addition.</p>
+traffic. To drive the widget <em>from</em> the server — set the selection, cross-filter
+it, or zoom it without a re-render — use <code><a href="vellumwidget_proxy.html">vellumwidget_proxy()</a></code>.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
