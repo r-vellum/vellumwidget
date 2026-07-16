@@ -82,6 +82,13 @@
 #'   until re-rendered.
 #' @param raster_threshold Keyed-element count above which `mode = "auto"` switches
 #'   to the raster image (default `20000`).
+#' @param text How text is written into the SVG, passed to [vellum::scene_svg()]:
+#'   `"native"` (default) emits selectable `<text>` referencing system fonts —
+#'   smaller when the page has the font, post-processable, and better for
+#'   accessibility and LLMs; `"outline"` emits glyph outlines that are
+#'   pixel-faithful and font-independent but not selectable. Applies to the
+#'   per-element SVG path only; in raster mode (see `mode`) text is baked into the
+#'   base image and this argument is ignored (with a warning if set explicitly).
 #' @param elementId Optional explicit widget DOM id.
 #' @return An htmlwidget of class `"vellumwidget"`.
 #' @examples
@@ -104,9 +111,12 @@ as_widget <- function(x, width = NULL, height = NULL,
                       select_mode = c("multiple", "single"),
                       mode = c("auto", "svg", "raster"),
                       raster_threshold = 20000L,
+                      text = c("native", "outline"),
                       elementId = NULL) {
   select_mode <- match.arg(select_mode)
   mode <- match.arg(mode)
+  text_set <- !missing(text)
+  text <- match.arg(text)
   scene <- vellum::as_vellum_scene(x)
   model <- vellum::scene_model(scene)
   ct_group <- .crosstalk_group(crosstalk)
@@ -122,11 +132,20 @@ as_widget <- function(x, width = NULL, height = NULL,
     auto = n_keyed > raster_threshold
   )
   if (use_raster) {
+    # Raster mode bakes the marks (text included) into a single PNG, so the SVG
+    # `text` control has nothing to act on. Flag it only when the caller asked
+    # explicitly, so the drop is visible rather than silent.
+    if (text_set) {
+      warning(
+        "`text` is ignored in raster mode; text is rendered into the base image.",
+        call. = FALSE
+      )
+    }
     r <- .raster_svg(scene)
     svg <- r$svg
     dims <- list(width = r$width, height = r$height)
   } else {
-    svg <- vellum::scene_svg(scene)
+    svg <- vellum::scene_svg(scene, text = text)
     dims <- .svg_dims(svg)
   }
 
