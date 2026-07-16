@@ -74,6 +74,8 @@ articles:
   navbar: ~
   contents:
   - articles/interactivity
+  - articles/crosstalk
+  - articles/big-data
   - articles/shiny
 
 reference:
