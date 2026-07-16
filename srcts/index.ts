@@ -11,6 +11,8 @@
 // Element bboxes live in the SVG's viewBox coordinate space (device px), so the
 // same coordinates drive rendering, brushing, and nearest-mark queries.
 
+import Flatbush from "flatbush";
+
 declare const HTMLWidgets: {
   widget: (w: unknown) => void;
   shinyMode?: boolean; // true only inside a live Shiny app (gates the Shiny.* calls)
@@ -267,6 +269,14 @@ const VELLUMWIDGET_CSS = `
 [data-key].vellumwidget-filtered { display: none; }
 .vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
 .vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
+/* Large-scene hover: instead of the CSS rule above restyling every keyed node
+   (O(n) per hover), the whole plot is dimmed once via the holder's opacity and the
+   hovered marks are re-drawn crisp in this overlay (O(hovered)). See setHover(). */
+.vellumwidget-root .vellumwidget-svg-holder { transition: none; }
+.vellumwidget-dim-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 5; overflow: visible;
+}
 /* Optional hover stroke, opt-in per element (.vellumwidget-hc) or widget-wide
    (.vellumwidget-hc-all on the root). Never applied to a mark that has no hover colour,
    so a bordered shape is not clobbered on hover. Colour resolves from the nearest
@@ -443,7 +453,18 @@ HTMLWidgets.widget({
     let elements: ElemMeta[] = [];
     let selected: Record<string, boolean> = {};
     let nodesByKey: Record<string, Element[]> = {}; // key -> SVG nodes (built once per render)
-    let hoverRAF = 0; // rAF handle throttling the O(n) nearest-mark scan
+    let hoverRAF = 0; // rAF handle throttling the nearest-mark scan
+    // Spatial index over element bboxes (built once per render), so nearest-mark
+    // hover and brush hit-testing are O(log n)/O(k) instead of O(n) linear scans —
+    // the per-frame cost that made hover laggy on a large plot. Falls back to the
+    // pure scans when absent (0 bboxed elements).
+    let spatialIndex: Flatbush | null = null;
+    let indexToElem: number[] = []; // flatbush item id -> index into `elements`
+    // Above this many elements, dim on hover via the holder's opacity + a clone
+    // overlay (O(hovered)) rather than the CSS rule that restyles every keyed node.
+    const DIM_OVERLAY_MIN = 2000;
+    let largeDim = false; // this render uses the overlay dim path
+    let dimLayer: SVGSVGElement | null = null; // overlay carrying the crisp hovered clones
     let opts: Options = {
       tooltip: true, hover: true, select: true, brush: true, zoom: true,
       toolbar: true, nearest: true, a11y: true, selectMode: "multiple"
@@ -515,11 +536,89 @@ HTMLWidgets.widget({
       const g = m && m.hover_group;
       return g && groups[g] ? groups[g] : [k];
     }
+    // --- spatial index (nearest / brush) ---
+    // Rebuild the Flatbush index from the current elements' bboxes. Only bboxed
+    // elements are indexed; `indexToElem` maps a flatbush item id back to its
+    // `elements` position. No index (0 bboxed) -> queries fall back to the pure
+    // linear scans, which are correct at any size.
+    function buildSpatialIndex(): void {
+      spatialIndex = null;
+      indexToElem = [];
+      let count = 0;
+      for (let i = 0; i < elements.length; i++) if (hasBbox(elements[i])) count++;
+      if (!count) return;
+      const idx = new Flatbush(count);
+      for (let i = 0; i < elements.length; i++) {
+        const e = elements[i];
+        if (!hasBbox(e)) continue;
+        idx.add(e.x0, e.y0, e.x1, e.y1);
+        indexToElem.push(i);
+      }
+      idx.finish();
+      spatialIndex = idx;
+    }
+    // Nearest element key within `maxDist` of (x, y) — index-backed when available.
+    function nearestKeyAt(x: number, y: number, maxDist: number): string | null {
+      if (spatialIndex) {
+        const ids = spatialIndex.neighbors(x, y, 1, maxDist);
+        return ids.length ? elements[indexToElem[ids[0]]].key : null;
+      }
+      return nearestKey(elements, x, y, maxDist);
+    }
+    // Distinct keys whose bbox intersects `rect` — index-backed when available.
+    // Item ids are mapped back to element order and de-duplicated so a key spanning
+    // several elements is returned once (parity with the pure `brushKeys`).
+    function brushKeysIn(rect: Bbox): string[] {
+      if (!spatialIndex) return brushKeys(elements, rect);
+      const eids = spatialIndex.search(rect.x0, rect.y0, rect.x1, rect.y1)
+        .map((id) => indexToElem[id])
+        .sort((a, b) => a - b);
+      const out: string[] = [];
+      const seen: Record<string, boolean> = {};
+      for (let i = 0; i < eids.length; i++) {
+        const k = elements[eids[i]].key;
+        if (!seen[k]) {
+          seen[k] = true;
+          out.push(k);
+        }
+      }
+      return out;
+    }
+
+    // --- large-scene hover dim (overlay, O(hovered)) ---
+    function dimOpacityVal(): string {
+      const d = opts.style && opts.style.dimOpacity;
+      return d == null || (d as unknown) === "" ? "0.28" : String(d);
+    }
+    // Dim the whole plot once (holder opacity) and clone the highlighted marks into
+    // the overlay so they stay crisp above the dim — O(hovered), not O(n).
+    function showHighlightOverlay(keys: string[]): void {
+      if (!holder || !dimLayer) return;
+      holder.style.opacity = dimOpacityVal();
+      while (dimLayer.firstChild) dimLayer.removeChild(dimLayer.firstChild);
+      for (let i = 0; i < keys.length; i++) {
+        const nodes = elementsForKey(keys[i]);
+        for (let j = 0; j < nodes.length; j++) {
+          const c = nodes[j].cloneNode(true) as Element;
+          c.classList.add("vellumwidget-hl");
+          dimLayer.appendChild(c);
+        }
+      }
+    }
+    function hideHighlightOverlay(): void {
+      if (holder) holder.style.opacity = "";
+      if (dimLayer) while (dimLayer.firstChild) dimLayer.removeChild(dimLayer.firstChild);
+    }
+
     function setHover(k: string): void {
       if (!opts.hover) return;
-      el.classList.add("vellumwidget-hovering");
+      const keys = linkedKeys(k);
       clearClass("vellumwidget-hl");
-      addClassForKeys(linkedKeys(k), "vellumwidget-hl");
+      addClassForKeys(keys, "vellumwidget-hl");
+      // Large scenes: dim via the holder + clone the hovered marks into the overlay
+      // (O(hovered)); otherwise the CSS `.vellumwidget-hovering` rule dims per node.
+      if (largeDim) showHighlightOverlay(keys);
+      else el.classList.add("vellumwidget-hovering");
     }
     function showTip(clientX: number, clientY: number, k: string): void {
       const m = meta[k];
@@ -534,6 +633,7 @@ HTMLWidgets.widget({
       tip.classList.remove("vellumwidget-show");
     }
     function clearHover(): void {
+      if (largeDim) hideHighlightOverlay();
       el.classList.remove("vellumwidget-hovering");
       clearClass("vellumwidget-hl");
       hideTip();
@@ -667,6 +767,8 @@ HTMLWidgets.widget({
     // --- viewBox pan/zoom ---
     function applyViewBox(): void {
       if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
+      // Keep the hover overlay's coordinate space aligned with the base under pan/zoom.
+      if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
     }
     function resetZoom(): void {
       if (vb0) {
@@ -741,7 +843,7 @@ HTMLWidgets.widget({
         hoverRAF = 0;
         const u = toUser(cx, cy);
         const rad = vb ? vb.w * 0.02 : 8; // ~2% of the view width
-        hoverAt(nearestKey(elements, u.x, u.y, rad), cx, cy);
+        hoverAt(nearestKeyAt(u.x, u.y, rad), cx, cy);
       });
     }
 
@@ -840,7 +942,7 @@ HTMLWidgets.widget({
           x1: Math.max(p1.x, p2.x), y1: Math.max(p1.y, p2.y)
         };
         lastBrush = rect;
-        const hitKeys = brushKeys(elements, rect);
+        const hitKeys = brushKeysIn(rect);
         if (opts.select) setSelection(hitKeys); // also pushes _selected
         // The brushed region + keys, as a discrete gesture event.
         shinyInput("brush", { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 }, { priority: "event" });
@@ -1330,6 +1432,13 @@ HTMLWidgets.widget({
           holder = document.createElement("div");
           holder.className = "vellumwidget-svg-holder";
           el.appendChild(holder);
+          // Overlay for the large-scene hover dim (sibling of the holder, so the
+          // holder's dim opacity does not affect it). pointer-events:none, so it
+          // never intercepts hit-testing on the base svg.
+          dimLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
+          dimLayer.setAttribute("class", "vellumwidget-dim-layer");
+          dimLayer.setAttribute("aria-hidden", "true");
+          el.appendChild(dimLayer);
           el.appendChild(brushBox);
           el.appendChild(tip);
         }
@@ -1353,6 +1462,12 @@ HTMLWidgets.widget({
             if (w && h) vb0 = { x: 0, y: 0, w: w, h: h };
           }
           vb = vb0 ? { x: vb0.x, y: vb0.y, w: vb0.w, h: vb0.h } : null;
+          // Reset any dim left by a prior render, then arm this render's hover path
+          // and (re)build the spatial index over the new elements.
+          hideHighlightOverlay();
+          largeDim = elements.length > DIM_OVERLAY_MIN;
+          if (dimLayer && vb0) dimLayer.setAttribute("viewBox", fmtViewBox(vb0));
+          buildSpatialIndex();
           wire(svgEl);
           buildToolbar();
           setMode("brush");
@@ -1373,7 +1488,17 @@ HTMLWidgets.widget({
 
       // Server->client proxy seam: vellumwidget_proxy() reaches this instance via
       // HTMLWidgets.find() and calls `_call` (see the "vellumwidget-calls" handler).
-      _call: proxyCall
+      _call: proxyCall,
+
+      // Test seam: the index-backed query functions + hover-mode flags, so the
+      // headless suite can verify the spatial index with explicit coordinates
+      // (jsdom has no layout, so client->user coordinate mapping is degenerate).
+      _test: {
+        nearestKeyAt: nearestKeyAt,
+        brushKeysIn: brushKeysIn,
+        indexSize: function () { return spatialIndex ? spatialIndex.numItems : 0; },
+        largeDim: function () { return largeDim; }
+      }
     };
   }
 });

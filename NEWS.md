@@ -1,5 +1,17 @@
 # vellumwidget (development version)
 
+* **Smoother hover, brush, and pan on large plots.** Two client-side changes lift
+  the per-interaction cost that made big scatterplots laggy:
+  * **Spatial index.** Nearest-mark hover and rectangular brush now hit-test
+    against a [Flatbush](https://github.com/mourner/flatbush) R-tree
+    (O(log n) / O(k)) instead of scanning every element each time. The nearest-mark
+    scan runs on every pointer move, so this is the change you feel most.
+  * **Cheaper hover dim.** Above a threshold, hovering dims the plot once (via the
+    holder's opacity) and re-draws the hovered marks crisply in a small overlay —
+    O(hovered) — instead of restyling *every* element via CSS (O(n)), which forced
+    a full-scene style recalc on each hover. Small and moderate plots keep the exact
+    previous per-mark dim. (Phase 2 of vellum's big-data interactivity plan.)
+
 * **Much faster, smaller payload for large plots (columnar element table).** The
   keyed-element metadata `as_widget()` embeds is now serialised in a *columnar*
   form (one array per field) instead of one JSON object per element. This is a
