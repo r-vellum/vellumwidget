@@ -1,4 +1,4 @@
-# vellumwidget (development version)
+# vellumwidget 0.5.0
 
 * **`text` argument on `as_widget()`.** Choose how text is written into the SVG,
   passed through to `vellum::scene_svg()`: `"native"` (the default) emits
