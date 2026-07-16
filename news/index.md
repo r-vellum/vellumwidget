@@ -2,6 +2,17 @@
 
 ## vellumwidget (development version)
 
+- **Crisp zoom in raster mode.** When you zoom into a raster-mode plot,
+  the base image used to upscale and blur. The widget now redraws the
+  points sharply on a `<canvas>` overlay while zoomed in — sampling each
+  point’s colour straight from the rendered image and its position/size
+  from the element index, so the crisp layer matches what vellum drew.
+  It engages only when zoomed in (the faithful, anti-aliased base image
+  still shows at the full view), redraws just the points in view, and
+  degrades gracefully to the image alone where a 2D canvas context isn’t
+  available. Entirely client-side; no change to the payload or to
+  small/moderate (SVG-mode) plots.
+
 - **Very large scatterplots are navigable (raster mode).**
   [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
   gains a `mode` argument (`"auto"` / `"svg"` / `"raster"`). In `"auto"`
