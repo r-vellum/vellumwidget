@@ -80,9 +80,31 @@ interface StyleOpts {
   tipMaxWidth?: string | null; // tooltip max width (any CSS length)
 }
 
+// Element metadata arrives from R in a columnar form (one array per field,
+// aligned by index) — far cheaper to serialise to JSON at large N than one object
+// per element. `key` and the bbox are always present; optional meta columns are
+// present only when some element carries them, with `null` where a given element
+// lacks the field. `legend` is ragged (a mark can belong to several series) so it
+// is a list-column (each entry a string, a string[], or absent). A length-1
+// column is auto-unboxed by htmlwidgets to a scalar, so every column is read
+// through `asArray`. A legacy per-record array (`ElemMeta[]`) is still accepted.
+interface ColumnElements {
+  key: string[] | string;
+  x0?: (number | null)[] | number;
+  y0?: (number | null)[] | number;
+  x1?: (number | null)[] | number;
+  y1?: (number | null)[] | number;
+  tooltip?: (string | null)[] | string;
+  hover_group?: (string | null)[] | string;
+  hover_color?: (string | null)[] | string;
+  selected_color?: (string | null)[] | string;
+  legend_for?: (string | null)[] | string;
+  legend?: (string[] | string | null)[] | string[] | string;
+}
+
 interface Payload {
   svg: string;
-  elements: ElemMeta[];
+  elements: ElemMeta[] | ColumnElements;
   options: Options;
 }
 
@@ -108,6 +130,58 @@ function distToBbox(x: number, y: number, b: Bbox): number {
 
 function hasBbox(e: ElemMeta): e is ElemMeta & Bbox {
   return typeof e.x0 === "number" && typeof e.y0 === "number";
+}
+
+// Read a payload column as an array: htmlwidgets auto-unboxes a length-1 vector to
+// a scalar, so wrap those back into a one-element array; `null`/absent -> `[]`.
+function asColumn<T>(v: T[] | T | null | undefined): T[] {
+  if (v == null) return [];
+  return Array.isArray(v) ? v : [v];
+}
+
+// Reconstruct the per-element `ElemMeta[]` view the runtime uses from whichever
+// shape R sent: a columnar `ColumnElements` (the current wire format) or a legacy
+// `ElemMeta[]` (also what the empty case `[]` and the test harness use). Purely a
+// decode step — the resulting objects are identical to the old per-record payload,
+// so nothing downstream changes.
+function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined): ElemMeta[] {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw; // legacy per-record payload (and the empty [])
+  const c = raw as ColumnElements;
+  const key = asColumn<string>(c.key);
+  const n = key.length;
+  if (!n) return [];
+  const x0 = asColumn<number | null>(c.x0);
+  const y0 = asColumn<number | null>(c.y0);
+  const x1 = asColumn<number | null>(c.x1);
+  const y1 = asColumn<number | null>(c.y1);
+  const tooltip = c.tooltip != null ? asColumn<string | null>(c.tooltip) : null;
+  const hoverGroup = c.hover_group != null ? asColumn<string | null>(c.hover_group) : null;
+  const hoverColor = c.hover_color != null ? asColumn<string | null>(c.hover_color) : null;
+  const selectedColor = c.selected_color != null ? asColumn<string | null>(c.selected_color) : null;
+  const legendFor = c.legend_for != null ? asColumn<string | null>(c.legend_for) : null;
+  const legend = c.legend != null ? asColumn<string[] | string | null>(c.legend) : null;
+  const out: ElemMeta[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const e: ElemMeta = { key: String(key[i]) };
+    // Assign bbox only when numeric — a `null` (R `NA`) means "no geometry", which
+    // `hasBbox` must continue to reject.
+    if (typeof x0[i] === "number") e.x0 = x0[i] as number;
+    if (typeof y0[i] === "number") e.y0 = y0[i] as number;
+    if (typeof x1[i] === "number") e.x1 = x1[i] as number;
+    if (typeof y1[i] === "number") e.y1 = y1[i] as number;
+    if (tooltip && tooltip[i] != null) e.tooltip = String(tooltip[i]);
+    if (hoverGroup && hoverGroup[i] != null) e.hover_group = String(hoverGroup[i]);
+    if (hoverColor && hoverColor[i] != null) e.hover_color = String(hoverColor[i]);
+    if (selectedColor && selectedColor[i] != null) e.selected_color = String(selectedColor[i]);
+    if (legendFor && legendFor[i] != null) e.legend_for = String(legendFor[i]);
+    if (legend) {
+      const v = legend[i];
+      if (v != null && !(Array.isArray(v) && v.length === 0)) e.legend = v;
+    }
+    out[i] = e;
+  }
+  return out;
 }
 
 // Distinct keys of every element whose bbox intersects the brush rectangle. A key
@@ -1232,7 +1306,7 @@ HTMLWidgets.widget({
           { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple" },
           x.options || {}
         );
-        elements = x.elements || [];
+        elements = normalizeElements(x.elements);
         meta = {};
         groups = {};
         legendIndex = {};
@@ -1346,5 +1420,6 @@ registerProxyHandler();
   fmtViewBox,
   unionBbox,
   sanitizeTip,
-  dispatchProxyCall
+  dispatchProxyCall,
+  normalizeElements
 };
