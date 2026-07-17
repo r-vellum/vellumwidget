@@ -602,6 +602,7 @@ HTMLWidgets.widget({
     let legendSwatch: Record<string, string[]> = {}; // series key -> its legend swatch element keys
     let legendOff: Record<string, boolean> = {}; // series toggled off via a legend-click (hide/mute)
     let hiddenKeySet: Record<string, boolean> = {}; // member keys currently hidden (legendClick="hide")
+    let filteredKeySet: Record<string, boolean> = {}; // keys hidden by a cross-filter (crosstalk / vw_filter)
     let elements: ElemMeta[] = [];
     let selected: Record<string, boolean> = {};
     let nodesByKey: Record<string, Element[]> = {}; // key -> SVG nodes (built once per render)
@@ -1228,13 +1229,29 @@ HTMLWidgets.widget({
     // shown set. `null` clears the filter (show everything).
     function applyFilter(showKeys: string[] | null): void {
       clearClass("vellumwidget-filtered");
+      filteredKeySet = {};
       if (showKeys == null) return;
       const show: Record<string, boolean> = {};
       for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
       for (let i = 0; i < elements.length; i++) {
         const key = elements[i].key;
-        if (!show[key]) addClassForKeys([key], "vellumwidget-filtered");
+        if (!show[key]) {
+          addClassForKeys([key], "vellumwidget-filtered");
+          filteredKeySet[key] = true;
+        }
       }
+    }
+    // A mark is "inert" when it is hidden by a legend-click (`hide`) or by a
+    // cross-filter: display:none, so it can't be a pointer target, but it is still
+    // in the spatial index. Every geometry-driven hit test (nearest-hover, brush,
+    // lasso, raster click-snap) and keyboard traversal must skip it — otherwise a
+    // hidden datum can be hovered, tooltipped, or (re-)selected. Muted legend marks
+    // stay visible and are NOT inert.
+    function inert(k: string): boolean {
+      return !!hiddenKeySet[k] || !!filteredKeySet[k];
+    }
+    function dropInert(keys: string[]): string[] {
+      return keys.filter((k) => !inert(k));
     }
     // --- server -> client proxy (vellumwidget_proxy) ---
     // Route a command from the Shiny server onto this instance, without a
@@ -1370,10 +1387,10 @@ HTMLWidgets.widget({
     // Hover is SVG-local (fires only over this widget's svg). While a press is
     // in progress the drag handlers (below) own movement, so hover backs off.
     function hoverAt(k: string | null, clientX: number, clientY: number): void {
-      // A mark hidden by a legend-click can't intercept the pointer, but the
-      // nearest/column scans work off the index, which still holds it — drop it so a
-      // hidden series is never silently hovered.
-      if (k != null && hiddenKeySet[k]) k = null;
+      // An inert mark (legend-hidden or cross-filtered) can't intercept the pointer,
+      // but the nearest/column scans work off the index, which still holds it — drop
+      // it so a hidden datum is never silently hovered/tooltipped.
+      if (k != null && inert(k)) k = null;
       if (k == null) {
         clearHover(); // emits hover = null
         return;
@@ -1383,13 +1400,13 @@ HTMLWidgets.widget({
       shinyInput("hover", k); // deduped -> re-fires only when the hovered key changes
       const hm = opts.hoverMode || "closest";
       if (hm === "x" || hm === "y") {
-        const keys = columnKeys(k, hm).filter((key) => !hiddenKeySet[key]);
+        const keys = dropInert(columnKeys(k, hm));
         if (!keys.length) { clearHover(); return; }
         setHoverKeys(keys);
         if (opts.crosshair) drawCrosshair(k, hm);
         if (opts.tooltip) showTipMulti(clientX, clientY, keys);
       } else {
-        const keys = linkedKeys(k).filter((key) => !hiddenKeySet[key]);
+        const keys = dropInert(linkedKeys(k));
         if (!keys.length) { clearHover(); return; }
         setHoverKeys(keys);
         if (opts.crosshair) drawCrosshair(k, "closest");
@@ -1533,7 +1550,7 @@ HTMLWidgets.widget({
           x1: Math.max(p1.x, p2.x), y1: Math.max(p1.y, p2.y)
         };
         lastBrush = rect;
-        const hitKeys = brushKeysIn(rect);
+        const hitKeys = dropInert(brushKeysIn(rect)); // never (re-)select hidden/filtered marks
         if (opts.select) setSelection(hitKeys); // also pushes _selected
         // The brushed region + keys, as a discrete gesture event.
         shinyInput("brush", { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 }, { priority: "event" });
@@ -1541,7 +1558,7 @@ HTMLWidgets.widget({
       } else if (dragging === "lasso") {
         // Close the freehand path and select every mark whose centre is inside it.
         const poly = lassoPts.slice();
-        const hitKeys = lassoKeysIn(poly);
+        const hitKeys = dropInert(lassoKeysIn(poly)); // never (re-)select hidden/filtered marks
         if (poly.length >= 3) {
           const b = polyBounds(poly);
           lastBrush = b; // zoom-to-selection frames the lasso's bounds
@@ -1571,6 +1588,7 @@ HTMLWidgets.widget({
         const u = toUser(ev.clientX, ev.clientY);
         const rad = vb ? vb.w * 0.02 : 8;
         k = nearestKeyAt(u.x, u.y, rad);
+        if (k != null && inert(k)) k = null; // don't click-snap to a hidden/filtered mark
       }
       // A click is a discrete event (fires every time, even on the same mark);
       // `key` is null for an empty-space click.
@@ -1926,10 +1944,10 @@ HTMLWidgets.widget({
       const dir = i < focusIdx ? -1 : 1;
       if (i < 0) i = 0;
       if (i >= focusables.length) i = focusables.length - 1;
-      // Skip marks hidden by a cross-filter (`vellumwidget-filtered` -> display:none):
-      // focusing one is a no-op, so keep moving in the travel direction; if there
-      // is no visible mark that way, stay put.
-      while (focusables[i] && focusables[i].node.classList.contains("vellumwidget-filtered")) {
+      // Skip inert marks (cross-filtered or legend-hidden -> display:none): focusing
+      // one is a no-op, so keep moving in the travel direction; if there is no
+      // visible mark that way, stay put.
+      while (focusables[i] && inert(focusables[i].key)) {
         i += dir;
         if (i < 0 || i >= focusables.length) return;
       }
@@ -2085,6 +2103,7 @@ HTMLWidgets.widget({
         legendSwatch = {};
         legendOff = {};
         hiddenKeySet = {};
+        filteredKeySet = {};
         selected = {};
         lastBrush = null;
         mode = "brush";
@@ -2223,7 +2242,9 @@ HTMLWidgets.widget({
         legendOff: function () { return Object.keys(legendOff).filter((s) => legendOff[s]); },
         lassoKeysIn: lassoKeysIn,
         availableModes: availableModes,
-        mode: function () { return mode; }
+        mode: function () { return mode; },
+        inert: inert,
+        dropInert: dropInert
       }
     };
   }

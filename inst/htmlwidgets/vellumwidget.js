@@ -869,6 +869,7 @@
       let legendSwatch = {};
       let legendOff = {};
       let hiddenKeySet = {};
+      let filteredKeySet = {};
       let elements = [];
       let selected = {};
       let nodesByKey = {};
@@ -1369,13 +1370,23 @@
       }
       function applyFilter(showKeys) {
         clearClass("vellumwidget-filtered");
+        filteredKeySet = {};
         if (showKeys == null) return;
         const show = {};
         for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
         for (let i = 0; i < elements.length; i++) {
           const key = elements[i].key;
-          if (!show[key]) addClassForKeys([key], "vellumwidget-filtered");
+          if (!show[key]) {
+            addClassForKeys([key], "vellumwidget-filtered");
+            filteredKeySet[key] = true;
+          }
         }
+      }
+      function inert(k) {
+        return !!hiddenKeySet[k] || !!filteredKeySet[k];
+      }
+      function dropInert(keys) {
+        return keys.filter((k) => !inert(k));
       }
       function proxyCall(method, args) {
         const keys = Array.isArray(args) ? args : args == null ? [] : [String(args)];
@@ -1496,7 +1507,7 @@
       const pointers = /* @__PURE__ */ new Map();
       let pinchDist = 0;
       function hoverAt(k, clientX, clientY) {
-        if (k != null && hiddenKeySet[k]) k = null;
+        if (k != null && inert(k)) k = null;
         if (k == null) {
           clearHover();
           return;
@@ -1504,7 +1515,7 @@
         shinyInput("hover", k);
         const hm = opts.hoverMode || "closest";
         if (hm === "x" || hm === "y") {
-          const keys = columnKeys(k, hm).filter((key) => !hiddenKeySet[key]);
+          const keys = dropInert(columnKeys(k, hm));
           if (!keys.length) {
             clearHover();
             return;
@@ -1513,7 +1524,7 @@
           if (opts.crosshair) drawCrosshair(k, hm);
           if (opts.tooltip) showTipMulti(clientX, clientY, keys);
         } else {
-          const keys = linkedKeys(k).filter((key) => !hiddenKeySet[key]);
+          const keys = dropInert(linkedKeys(k));
           if (!keys.length) {
             clearHover();
             return;
@@ -1644,13 +1655,13 @@
             y1: Math.max(p1.y, p2.y)
           };
           lastBrush = rect;
-          const hitKeys = brushKeysIn(rect);
+          const hitKeys = dropInert(brushKeysIn(rect));
           if (opts.select) setSelection(hitKeys);
           shinyInput("brush", { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 }, { priority: "event" });
           hideBrush();
         } else if (dragging === "lasso") {
           const poly = lassoPts.slice();
-          const hitKeys = lassoKeysIn(poly);
+          const hitKeys = dropInert(lassoKeysIn(poly));
           if (poly.length >= 3) {
             const b = polyBounds(poly);
             lastBrush = b;
@@ -1674,6 +1685,7 @@
           const u = toUser(ev.clientX, ev.clientY);
           const rad = vb ? vb.w * 0.02 : 8;
           k = nearestKeyAt(u.x, u.y, rad);
+          if (k != null && inert(k)) k = null;
         }
         shinyInput("click", { key: k }, { priority: "event" });
         const series = swatchSeries(k);
@@ -1991,7 +2003,7 @@
         const dir = i < focusIdx ? -1 : 1;
         if (i < 0) i = 0;
         if (i >= focusables.length) i = focusables.length - 1;
-        while (focusables[i] && focusables[i].node.classList.contains("vellumwidget-filtered")) {
+        while (focusables[i] && inert(focusables[i].key)) {
           i += dir;
           if (i < 0 || i >= focusables.length) return;
         }
@@ -2122,6 +2134,7 @@
           legendSwatch = {};
           legendOff = {};
           hiddenKeySet = {};
+          filteredKeySet = {};
           selected = {};
           lastBrush = null;
           mode = "brush";
@@ -2246,7 +2259,9 @@
           availableModes,
           mode: function() {
             return mode;
-          }
+          },
+          inert,
+          dropInert
         }
       };
     }
