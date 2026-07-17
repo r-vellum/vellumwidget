@@ -75,6 +75,9 @@ interface Options {
   legendClick?: "select" | "hide" | "mute";
   navigator?: boolean; // show an overview x-range navigator strip below the plot
   navigatorHeight?: number; // strip height in px (default 56)
+  tooltipDelay?: number; // ms to wait before showing the tooltip on hover (default 0)
+  tooltipFollow?: boolean; // true (default): tip tracks the cursor; false: anchor above the mark
+  tooltipSticky?: boolean; // true: tip accepts pointer events + lingers so links are clickable
   raster?: boolean; // the marks are a single base image; interaction is index-driven (no per-element DOM nodes)
   a11y: boolean; // screen-reader + keyboard accessibility (focusable marks, live region, data table)
   alt?: string | null; // accessible label for the whole chart (falls back to the SVG's <title>/<desc>)
@@ -532,6 +535,8 @@ const VELLUMWIDGET_CSS = `
   opacity: 0; transition: opacity 0.08s ease; will-change: transform;
 }
 .vellumwidget-tip.vellumwidget-show { opacity: 1; }
+/* Sticky tooltip: accepts pointer events so links/buttons inside it are usable. */
+.vellumwidget-tip.vellumwidget-tip-sticky { pointer-events: auto; }
 .vellumwidget-brush {
   position: absolute; pointer-events: none; z-index: 15;
   border: 1px solid #2563eb; background: rgba(37,99,235,0.12); display: none;
@@ -1240,35 +1245,98 @@ HTMLWidgets.widget({
       if (hm !== "y") crosshairLayer.appendChild(crosshairLine(cx, y0, cx, y1));
       if (hm !== "x") crosshairLayer.appendChild(crosshairLine(x0, cy, x1, cy));
     }
+    // --- tooltip: placement, delay, sticky (#14) ---
+    let tipShowTimer = 0; // pending delayed reveal
+    let tipHideTimer = 0; // pending sticky hide grace
+    function tipDelay(): number {
+      const d = opts.tooltipDelay;
+      return typeof d === "number" && d > 0 ? d : 0;
+    }
+    // The hovered mark's centre in client px (for anchor-to-mark placement), or null.
+    function markClient(k: string): { x: number; y: number } | null {
+      const m = meta[k];
+      if (!m || !hasBbox(m) || !svgEl || typeof svgEl.getScreenCTM !== "function") return null;
+      const ctm = svgEl.getScreenCTM();
+      if (!ctm || typeof svgEl.createSVGPoint !== "function") return null;
+      const p = svgEl.createSVGPoint();
+      p.x = (m.x0 + m.x1) / 2;
+      p.y = (m.y0 + m.y1) / 2;
+      const s = p.matrixTransform(ctm);
+      return { x: s.x, y: s.y };
+    }
+    // Position the tip: at the cursor (follow, default) or anchored above the mark
+    // (`tooltip_follow = FALSE`). Auto-flips below when there isn't room above, and
+    // clamps horizontally so it doesn't overflow the widget.
+    function placeTip(clientX: number, clientY: number, anchorKey: string | null): void {
+      const box = el.getBoundingClientRect();
+      let ax = clientX - box.left;
+      let ay = clientY - box.top;
+      if (opts.tooltipFollow === false && anchorKey) {
+        const c = markClient(anchorKey);
+        if (c) { ax = c.x - box.left; ay = c.y - box.top; }
+      }
+      const tw = tip.offsetWidth || 0;
+      const th = tip.offsetHeight || 0;
+      const below = ay - th - 12 < 0; // not enough room above -> flip below
+      if (tw && box.width) ax = Math.max(tw / 2, Math.min(box.width - tw / 2, ax));
+      tip.style.transform =
+        "translate(" + Math.round(ax) + "px," + Math.round(ay) + "px) " +
+        (below ? "translate(-50%, 12px)" : "translate(-50%, calc(-100% - 12px))");
+    }
+    // Reveal the tip: `build()` sets its content, then it is placed and shown. When
+    // hidden and a delay is set, the reveal waits `tooltip_delay` ms (cancelled if
+    // the hover changes first); an already-visible tip updates instantly (no
+    // re-delay while moving between marks).
+    function revealTip(build: () => void, clientX: number, clientY: number, anchorKey: string | null): void {
+      if (tipHideTimer) { clearTimeout(tipHideTimer); tipHideTimer = 0; }
+      const doShow = () => {
+        tipShowTimer = 0;
+        build();
+        placeTip(clientX, clientY, anchorKey);
+        tip.classList.add("vellumwidget-show");
+      };
+      const d = tipDelay();
+      if (d > 0 && !tip.classList.contains("vellumwidget-show")) {
+        if (tipShowTimer) clearTimeout(tipShowTimer);
+        tipShowTimer = (setTimeout(doShow, d) as unknown) as number;
+      } else {
+        doShow();
+      }
+    }
     function showTip(clientX: number, clientY: number, k: string): void {
       const m = meta[k];
-      tip.innerHTML = sanitizeTip((m && m.tooltip) || k);
-      const box = el.getBoundingClientRect();
-      tip.style.transform =
-        "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) +
-        "px) translate(-50%, calc(-100% - 12px))";
-      tip.classList.add("vellumwidget-show");
+      revealTip(() => { tip.innerHTML = sanitizeTip((m && m.tooltip) || k); }, clientX, clientY, k);
     }
     // Unified tooltip: one box listing every mark in the hovered column, one row
-    // per mark (its tooltip, or its key). Positioned like the single tooltip. Rows
-    // are capped so a dense column can't build a runaway box.
+    // per mark (its tooltip, or its key). Rows are capped so a dense column can't
+    // build a runaway box.
     const TIP_MULTI_CAP = 30;
     function showTipMulti(clientX: number, clientY: number, keys: string[]): void {
-      const rows: string[] = [];
-      for (let i = 0; i < keys.length && rows.length < TIP_MULTI_CAP; i++) {
-        const m = meta[keys[i]];
-        rows.push(sanitizeTip((m && m.tooltip) || keys[i]));
-      }
-      if (keys.length > TIP_MULTI_CAP) rows.push("…");
-      tip.innerHTML = rows.join("<br>");
-      const box = el.getBoundingClientRect();
-      tip.style.transform =
-        "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) +
-        "px) translate(-50%, calc(-100% - 12px))";
-      tip.classList.add("vellumwidget-show");
+      revealTip(() => {
+        const rows: string[] = [];
+        for (let i = 0; i < keys.length && rows.length < TIP_MULTI_CAP; i++) {
+          const m = meta[keys[i]];
+          rows.push(sanitizeTip((m && m.tooltip) || keys[i]));
+        }
+        if (keys.length > TIP_MULTI_CAP) rows.push("…");
+        tip.innerHTML = rows.join("<br>");
+      }, clientX, clientY, keys[0] || null);
     }
     function hideTip(): void {
+      if (tipShowTimer) { clearTimeout(tipShowTimer); tipShowTimer = 0; }
+      if (tipHideTimer) { clearTimeout(tipHideTimer); tipHideTimer = 0; }
       tip.classList.remove("vellumwidget-show");
+    }
+    // Hide on hover-out. When sticky, linger briefly so the pointer can travel into
+    // the tip (to click a link); entering the tip cancels this (see wireStickyTip).
+    function scheduleHideTip(): void {
+      if (tipShowTimer) { clearTimeout(tipShowTimer); tipShowTimer = 0; }
+      if (opts.tooltipSticky) {
+        if (tipHideTimer) clearTimeout(tipHideTimer);
+        tipHideTimer = (setTimeout(() => { tipHideTimer = 0; tip.classList.remove("vellumwidget-show"); }, 260) as unknown) as number;
+      } else {
+        tip.classList.remove("vellumwidget-show");
+      }
     }
     function clearHover(): void {
       if (rasterMode) clearGroup(hovGroup);
@@ -1276,7 +1344,7 @@ HTMLWidgets.widget({
       el.classList.remove("vellumwidget-hovering");
       clearClass("vellumwidget-hl");
       clearCrosshair();
-      hideTip();
+      scheduleHideTip(); // immediate, unless sticky (then a short grace to reach the tip)
       shinyInput("hover", null); // hover ended -> input$<id>_hover = NULL (deduped)
     }
 
@@ -2470,6 +2538,13 @@ HTMLWidgets.widget({
           stage.appendChild(dimLayer);
           el.appendChild(brushBox);
           el.appendChild(tip);
+          // Sticky-tooltip support: entering the tip cancels the pending hide (so a
+          // link/button inside it stays reachable); leaving it hides. Inert unless
+          // sticky is on (the tip is pointer-events:none otherwise, so these never fire).
+          tip.addEventListener("pointerenter", function () {
+            if (tipHideTimer) { clearTimeout(tipHideTimer); tipHideTimer = 0; }
+          });
+          tip.addEventListener("pointerleave", function () { hideTip(); });
         }
         holder.innerHTML = x.svg;
         svgEl = holder.querySelector("svg");
@@ -2523,6 +2598,7 @@ HTMLWidgets.widget({
           buildToolbar();
           buildNavigator();
           setMode(availableModes()[0] || "brush"); // first enabled mode is the default
+          tip.classList.toggle("vellumwidget-tip-sticky", !!opts.tooltipSticky);
           applyStyling();
           applyLegend(); // clears any stale legend-off state from a prior render
           setupA11y();

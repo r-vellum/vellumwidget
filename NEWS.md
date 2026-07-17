@@ -1,5 +1,13 @@
 # vellumwidget (development version)
 
+* **Tooltip polish.** `as_widget()` gains `tooltip_delay` (ms to wait before the
+  tooltip appears — the highlight is immediate, only the tooltip waits),
+  `tooltip_follow` (`TRUE`, the default, tracks the cursor; `FALSE` anchors above
+  the mark), and `tooltip_sticky` (the tooltip accepts pointer events and lingers
+  briefly on leave, so tooltips containing links/buttons are usable). The tooltip
+  also now auto-flips below the cursor when there isn't room above and clamps
+  horizontally so it doesn't overflow the widget.
+
 * **Overview navigator (`navigator = TRUE`).** An opt-in strip below the plot that
   renders the whole scene in miniature with a draggable, resizable window marking
   the visible x-range: drag the window to pan, drag a handle to zoom. It stays

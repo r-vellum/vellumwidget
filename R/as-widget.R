@@ -84,6 +84,14 @@
 #'   `vellumplot` overrides these for that mark.
 #' @param dim_opacity Opacity (0–1) of the non-hovered elements while hovering
 #'   (default `0.28`); `NULL` keeps the default.
+#' @param tooltip_delay Milliseconds to wait before the tooltip appears on hover
+#'   (default `0`, i.e. immediate). The highlight is unaffected — only the tooltip
+#'   waits. A short delay (e.g. `250`) calms a dense scatter.
+#' @param tooltip_follow When `TRUE` (default) the tooltip tracks the cursor; when
+#'   `FALSE` it anchors above the hovered mark's centre.
+#' @param tooltip_sticky When `TRUE`, the tooltip accepts pointer events and lingers
+#'   briefly when you leave the mark, so you can move into it — for tooltips that
+#'   contain links or buttons (build the HTML via `tooltip =`). Default `FALSE`.
 #' @param tooltip_style Optional named list styling the tooltip box:
 #'   `background` / `color` (any R or CSS colour), `fontsize`, and `max_width`
 #'   (any CSS length). `NULL` (default) uses the built-in style. Tooltip text is
@@ -146,6 +154,7 @@ as_widget <- function(x, width = NULL, height = NULL,
                       legend_click = c("select", "hide", "mute"),
                       a11y = TRUE, alt = NULL,
                       hover_color = NULL, selected_color = NULL, dim_opacity = NULL,
+                      tooltip_delay = 0, tooltip_follow = TRUE, tooltip_sticky = FALSE,
                       tooltip_style = NULL,
                       export_filename = NULL, export_scale = NULL,
                       group = NULL, crosstalk = NULL,
@@ -211,6 +220,9 @@ as_widget <- function(x, width = NULL, height = NULL,
       hoverMode = hover_mode,
       crosshair = isTRUE(crosshair),
       legendClick = legend_click,
+      tooltipDelay = if (is.null(tooltip_delay)) 0 else as.numeric(tooltip_delay),
+      tooltipFollow = isTRUE(tooltip_follow),
+      tooltipSticky = isTRUE(tooltip_sticky),
       a11y = isTRUE(a11y),
       alt = if (is.null(alt)) NULL else as.character(alt),
       selectMode = select_mode,

@@ -26,6 +26,9 @@ as_widget(
   hover_color = NULL,
   selected_color = NULL,
   dim_opacity = NULL,
+  tooltip_delay = 0,
+  tooltip_follow = TRUE,
+  tooltip_sticky = FALSE,
   tooltip_style = NULL,
   export_filename = NULL,
   export_scale = NULL,
@@ -116,6 +119,17 @@ built-in default. A per-mark \code{hover_color}/\code{selected_color} declared i
 
 \item{dim_opacity}{Opacity (0–1) of the non-hovered elements while hovering
 (default \code{0.28}); \code{NULL} keeps the default.}
+
+\item{tooltip_delay}{Milliseconds to wait before the tooltip appears on hover
+(default \code{0}, i.e. immediate). The highlight is unaffected — only the tooltip
+waits. A short delay (e.g. \code{250}) calms a dense scatter.}
+
+\item{tooltip_follow}{When \code{TRUE} (default) the tooltip tracks the cursor; when
+\code{FALSE} it anchors above the hovered mark's centre.}
+
+\item{tooltip_sticky}{When \code{TRUE}, the tooltip accepts pointer events and lingers
+briefly when you leave the mark, so you can move into it — for tooltips that
+contain links or buttons (build the HTML via \verb{tooltip =}). Default \code{FALSE}.}
 
 \item{tooltip_style}{Optional named list styling the tooltip box:
 \code{background} / \code{color} (any R or CSS colour), \code{fontsize}, and \code{max_width}
