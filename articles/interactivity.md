@@ -180,26 +180,25 @@ SVG/PNG download, copy-to-clipboard (where supported), and fullscreen.
 
 ### Axis-aware zoom
 
-By default, zoom scales the *whole scene* like an image — quick and
-universal, but the axis ticks and labels scale (and blur) with
-everything else. Opt into `axis_zoom = TRUE` and zoom instead scales
-only the plot’s data region and **re-ticks the axes** for the visible
-range, holding the frame — axes, titles, legend — in place, the way a
-charting library zooms. Hover, brush, the crosshair, and the reported
-data range all follow the zoomed region.
+Zoom scales only the plot’s data region and **re-ticks the axes** for
+the visible range, holding the frame — axes, titles, legend — in place,
+the way a charting library zooms (rather than scaling the whole scene
+like an image, where the tick labels grow and blur). Hover, brush, the
+crosshair, and the reported data range all follow the zoomed region.
+This is on by default:
 
 ``` r
 
 vplot(df) |>
   mark_point(x = wt, y = mpg, tooltip = model) |>
-  as_widget(axis_zoom = TRUE)
+  as_widget()
 ```
 
-It is experimental and deliberately narrow: it needs a single **linear**
-cartesian panel (continuous `identity`/`reverse` axes) in SVG mode.
-Plots with log/date/discrete axes, several panels, or in raster mode
-silently fall back to the whole-scene zoom, so turning it on is always
-safe.
+It applies to a single **linear** cartesian panel (continuous
+`identity`/`reverse` axes) in SVG mode. Plots with log/date/discrete
+axes, several panels, or in raster mode silently fall back to the
+whole-scene zoom, so it is always safe to leave on; pass
+`axis_zoom = FALSE` to force the plain whole-scene zoom.
 
 ### Overview navigator
 
@@ -208,6 +207,15 @@ the whole scene in miniature, with a draggable, resizable window marking
 the visible x-range. Drag the window to pan, drag a handle to zoom — it
 stays in sync with the main view (wheel, keyboard, brush, and
 linked-group changes all move it).
+
+The navigator is an **x-range** tool, so zoom is one-dimensional: the
+selected x-range fills the width while the **full y-range stays on
+screen** (values never scroll off the top or bottom), the way a
+time-series range selector behaves. With axis-aware zoom on (the
+default), the x-axis re-ticks crisply as you scrub; on a plot that falls
+back to whole-scene zoom the view stretches horizontally instead (so
+point marks scale anisotropically) — the navigator is aimed at
+line/area/series charts.
 
 ``` r
 
