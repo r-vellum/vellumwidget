@@ -73,6 +73,8 @@ interface Options {
   // (single click) / isolate it (double click). "mute": same, but dim rather than
   // remove. Hover always highlights the series regardless of this policy.
   legendClick?: "select" | "hide" | "mute";
+  navigator?: boolean; // show an overview x-range navigator strip below the plot
+  navigatorHeight?: number; // strip height in px (default 56)
   raster?: boolean; // the marks are a single base image; interaction is index-driven (no per-element DOM nodes)
   a11y: boolean; // screen-reader + keyboard accessibility (focusable marks, live region, data table)
   alt?: string | null; // accessible label for the whole chart (falls back to the SVG's <title>/<desc>)
@@ -534,6 +536,31 @@ const VELLUMWIDGET_CSS = `
   position: absolute; pointer-events: none; z-index: 15;
   border: 1px solid #2563eb; background: rgba(37,99,235,0.12); display: none;
 }
+/* Overview navigator: a full-width strip below the plot (a squashed mini-render
+   of the whole scene) with a draggable/resizable window marking the visible x-range. */
+.vellumwidget-nav {
+  position: relative; width: 100%; margin-top: 4px; box-sizing: border-box;
+  border: 1px solid rgba(0,0,0,0.12); border-radius: 4px; overflow: hidden;
+  background: rgba(0,0,0,0.02); touch-action: none; user-select: none;
+}
+.vellumwidget-nav-mini { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.85; }
+.vellumwidget-nav-mini svg { width: 100%; height: 100%; display: block; }
+/* The two regions outside the window are dimmed; the window itself is clear. */
+.vellumwidget-nav-window {
+  position: absolute; top: 0; bottom: 0; z-index: 2; cursor: grab;
+  border-left: 1px solid #2563eb; border-right: 1px solid #2563eb;
+  background: rgba(37,99,235,0.10); box-shadow: 0 0 0 100vmax rgba(0,0,0,0.12);
+}
+.vellumwidget-nav-window.vellumwidget-nav-grabbing { cursor: grabbing; }
+.vellumwidget-nav-handle {
+  position: absolute; top: 0; bottom: 0; width: 8px; z-index: 3; cursor: ew-resize;
+  background: #2563eb; opacity: 0.35;
+}
+.vellumwidget-nav-handle-l { left: -1px; }
+.vellumwidget-nav-handle-r { right: -1px; }
+@media (prefers-color-scheme: dark) {
+  .vellumwidget-nav { border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.03); }
+}
 .vellumwidget-root.vellumwidget-mode-lasso .vellumwidget-svg-holder svg { cursor: crosshair; }
 .vellumwidget-lasso {
   fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px; stroke-dasharray: 4 3;
@@ -689,6 +716,10 @@ HTMLWidgets.widget({
     let stage: HTMLElement | null = null; // shrink-wraps the base svg; overlays fill it
     let svgEl: SVGSVGElement | null = null;
     let toolbarEl: HTMLElement | null = null;
+    // Overview navigator (opt-in): a strip below the plot with a draggable window
+    // marking the visible x-range. Built once per render when opts.navigator.
+    let navEl: HTMLElement | null = null;
+    let navWindow: HTMLElement | null = null;
     let meta: Record<string, ElemMeta> = {};
     let groups: Record<string, string[]> = {};
     let legendIndex: Record<string, string[]> = {}; // series key -> member element keys
@@ -747,7 +778,7 @@ HTMLWidgets.widget({
     let opts: Options = {
       tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true,
       toolbar: true, nearest: true, a11y: true, selectMode: "multiple",
-      hoverMode: "closest", crosshair: false
+      hoverMode: "closest", crosshair: false, navigator: false
     };
     // --- accessibility state ---
     let liveRegion: HTMLElement | null = null; // aria-live announcer
@@ -1484,6 +1515,7 @@ HTMLWidgets.widget({
       if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
       // Redraw the crisp point layer for the new view (no-op unless raster + zoomed in).
       drawPoints();
+      updateNav(); // keep the navigator window in sync with the view
       // Report on settle: a continuous pan/pinch reports once on release (from
       // onDragUp), not per frame; discrete zooms (wheel, keys, reset, zoom-to) land
       // here with no drag in progress and report immediately.
@@ -1503,6 +1535,117 @@ HTMLWidgets.widget({
       const py = h * pad;
       vb = { x: rect.x0 - px, y: rect.y0 - py, w: w + 2 * px, h: h + 2 * py };
       applyViewBox();
+    }
+
+    // --- overview navigator (opt-in x-range strip) ---
+    // Set the visible x-range from window fractions of the full extent (0..1), then
+    // apply — reused by the drag handlers and the test seam. `xFrac` = left edge,
+    // `wFrac` = width, both fractions of vb0's width; clamped to keep the window
+    // on-strip and a minimum width so it stays grabbable.
+    function navToView(xFrac: number, wFrac: number): void {
+      if (!vb0) return;
+      wFrac = Math.min(1, Math.max(0.02, wFrac));
+      xFrac = Math.min(1 - wFrac, Math.max(0, xFrac));
+      vb = { x: vb0.x + xFrac * vb0.w, y: vb ? vb.y : vb0.y, w: wFrac * vb0.w, h: vb ? vb.h : vb0.h };
+      applyViewBox();
+    }
+    // Reflect the current view in the window's position/size (x only). Called from
+    // applyViewBox so wheel/keyboard/brush/linked changes all move the window too.
+    function updateNav(): void {
+      if (!navWindow || !vb || !vb0 || !vb0.w) return;
+      const xFrac = (vb.x - vb0.x) / vb0.w;
+      const wFrac = vb.w / vb0.w;
+      navWindow.style.left = (xFrac * 100) + "%";
+      navWindow.style.width = (wFrac * 100) + "%";
+    }
+    // Build the navigator strip once: a squashed mini-render of the whole scene
+    // (an inert clone of the base svg at the full viewBox) plus a draggable window
+    // with two resize handles. Drag body -> pan x; drag a handle -> zoom x.
+    function buildNavigator(): void {
+      if (navEl) { navEl.remove(); navEl = null; navWindow = null; }
+      if (!opts.navigator || !svgEl || !vb0) return;
+      const h = opts.navigatorHeight && opts.navigatorHeight > 0 ? opts.navigatorHeight : 56;
+      navEl = document.createElement("div");
+      navEl.className = "vellumwidget-nav";
+      navEl.style.height = h + "px";
+      navEl.setAttribute("aria-hidden", "true"); // the main chart is the accessible view
+      // Mini-render: clone the base svg at the full extent, squashed to fill, inert.
+      const mini = document.createElement("div");
+      mini.className = "vellumwidget-nav-mini";
+      const clone = svgEl.cloneNode(true) as SVGSVGElement;
+      clone.setAttribute("viewBox", fmtViewBox(vb0));
+      clone.setAttribute("preserveAspectRatio", "none");
+      clone.removeAttribute("width");
+      clone.removeAttribute("height");
+      // Drop defs/clip-paths (duplicate ids would clash with the live svg) and any
+      // interactivity/a11y hooks — this is a static backdrop.
+      const defs = clone.querySelector("defs");
+      if (defs) defs.remove();
+      const clipped = clone.querySelectorAll("[clip-path]");
+      for (let i = 0; i < clipped.length; i++) clipped[i].removeAttribute("clip-path");
+      const keyed = clone.querySelectorAll("[data-key],[tabindex],[role]");
+      for (let i = 0; i < keyed.length; i++) {
+        keyed[i].removeAttribute("data-key");
+        keyed[i].removeAttribute("tabindex");
+        keyed[i].removeAttribute("role");
+      }
+      clone.removeAttribute("id");
+      mini.appendChild(clone);
+      navEl.appendChild(mini);
+      navWindow = document.createElement("div");
+      navWindow.className = "vellumwidget-nav-window";
+      const hL = document.createElement("div");
+      hL.className = "vellumwidget-nav-handle vellumwidget-nav-handle-l";
+      const hR = document.createElement("div");
+      hR.className = "vellumwidget-nav-handle vellumwidget-nav-handle-r";
+      navWindow.appendChild(hL);
+      navWindow.appendChild(hR);
+      navEl.appendChild(navWindow);
+      el.appendChild(navEl);
+      wireNavigator(hL, hR);
+      updateNav();
+    }
+    // Pointer drag on the window (pan) and handles (resize). All math in strip
+    // fractions from the strip's client rect, so it is size-independent.
+    function wireNavigator(hL: HTMLElement, hR: HTMLElement): void {
+      if (!navEl || !navWindow) return;
+      let mode: "" | "pan" | "l" | "r" = "";
+      let startFracX = 0, startFracW = 0, startPointer = 0;
+      const stripFrac = (clientX: number): number => {
+        const r = navEl!.getBoundingClientRect();
+        return r.width ? (clientX - r.left) / r.width : 0;
+      };
+      const onMove = (ev: PointerEvent): void => {
+        if (!mode || !vb0) return;
+        const d = stripFrac(ev.clientX) - startPointer;
+        if (mode === "pan") navToView(startFracX + d, startFracW);
+        else if (mode === "l") { const nx = startFracX + d; navToView(nx, startFracW + (startFracX - nx)); }
+        else if (mode === "r") navToView(startFracX, startFracW + d);
+      };
+      const onUp = (ev: PointerEvent): void => {
+        mode = "";
+        navWindow!.classList.remove("vellumwidget-nav-grabbing");
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        if (ev && (ev.target as Element).releasePointerCapture) { /* no-op */ }
+      };
+      const start = (m: "pan" | "l" | "r") => (ev: PointerEvent): void => {
+        if (!vb0) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        mode = m;
+        startFracX = (vb!.x - vb0.x) / vb0.w;
+        startFracW = vb!.w / vb0.w;
+        startPointer = stripFrac(ev.clientX);
+        if (m === "pan") navWindow!.classList.add("vellumwidget-nav-grabbing");
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+        window.addEventListener("pointercancel", onUp);
+      };
+      navWindow.addEventListener("pointerdown", start("pan"));
+      hL.addEventListener("pointerdown", start("l"));
+      hR.addEventListener("pointerdown", start("r"));
     }
 
     // --- brush overlay (screen coords for display; user coords for hit-test) ---
@@ -2268,7 +2411,7 @@ HTMLWidgets.widget({
     return {
       renderValue: function (x: Payload) {
         opts = Object.assign(
-          { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false },
+          { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false, navigator: false },
           x.options || {}
         );
         elements = normalizeElements(x.elements);
@@ -2378,6 +2521,7 @@ HTMLWidgets.widget({
           buildHoverAxis();
           wire(svgEl);
           buildToolbar();
+          buildNavigator();
           setMode(availableModes()[0] || "brush"); // first enabled mode is the default
           applyStyling();
           applyLegend(); // clears any stale legend-off state from a prior render
@@ -2423,7 +2567,13 @@ HTMLWidgets.widget({
         dropInert: dropInert,
         panelAt: panelAt,
         dataRangeOf: dataRangeOf,
-        brushDataFields: brushDataFields
+        brushDataFields: brushDataFields,
+        hasNavigator: function () { return !!navEl; },
+        navToView: navToView,
+        navWindowFrac: function () {
+          if (!navWindow) return null;
+          return { left: parseFloat(navWindow.style.left) || 0, width: parseFloat(navWindow.style.width) || 0 };
+        }
       }
     };
   }

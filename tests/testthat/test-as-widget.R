@@ -170,6 +170,15 @@ test_that("lasso toggle round-trips into the payload (default on)", {
   expect_false(as_widget(scene, lasso = FALSE)$x$options$lasso)
 })
 
+test_that("navigator options round-trip (default off)", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+  expect_false(as_widget(scene)$x$options$navigator) # default FALSE
+  o <- as_widget(scene, navigator = TRUE, navigator_height = 80)$x$options
+  expect_true(o$navigator)
+  expect_equal(o$navigatorHeight, 80)
+})
+
 test_that("hover_mode and crosshair are validated and round-trip into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))

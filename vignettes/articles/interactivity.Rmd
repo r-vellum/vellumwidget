@@ -158,6 +158,21 @@ the arrow keys pan, `+`/`-` zoom, and `0` resets. The on-hover toolbar adds
 zoom-to-selection, reset, SVG/PNG download, copy-to-clipboard (where supported),
 and fullscreen.
 
+### Overview navigator
+
+For long series, `navigator = TRUE` adds a strip below the plot showing the whole
+scene in miniature, with a draggable, resizable window marking the visible
+x-range. Drag the window to pan, drag a handle to zoom — it stays in sync with
+the main view (wheel, keyboard, brush, and linked-group changes all move it).
+
+```{r}
+#| label: navigator
+long <- data.frame(t = 1:200, y = cumsum(rnorm(200)))
+vplot(long) |>
+  mark_line(x = t, y = y) |>
+  as_widget(navigator = TRUE)
+```
+
 Export captures the *current* view, so a zoomed-in region exports as shown. Set
 the download name and a hi-res PNG scale:
 

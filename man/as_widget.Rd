@@ -16,6 +16,8 @@ as_widget(
   zoom = TRUE,
   toolbar = TRUE,
   nearest = TRUE,
+  navigator = FALSE,
+  navigator_height = NULL,
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
   legend_click = c("select", "hide", "mute"),
@@ -58,6 +60,16 @@ are enabled.}
 
 \item{nearest}{When \code{TRUE} (default), hover snaps to the nearest mark within a
 small radius when the cursor is not directly over one (helps sparse points).}
+
+\item{navigator}{Show an overview \strong{range navigator} below the plot (default
+\code{FALSE}): a full-width strip rendering the whole scene in miniature, with a
+draggable, resizable window marking the visible x-range. Drag the window to
+pan, drag a handle to zoom; it stays two-way in sync with the main view
+(wheel/keyboard/brush and linked-group changes all move it). Useful for long
+series. \code{navigator_height} sets the strip height in pixels (default \code{56}).}
+
+\item{navigator_height}{Height of the navigator strip in pixels (default \code{56});
+ignored unless \code{navigator = TRUE}.}
 
 \item{hover_mode}{How hover gathers marks into the tooltip. \code{"closest"}
 (default) shows the single nearest mark. \code{"x"} (or \code{"y"}) gives a \emph{unified}
