@@ -185,8 +185,12 @@ the full cross-package story (alt text, accessible SVG/PDF, and this widget).
 ## Linked views
 
 Widgets sharing a `group` link client-side: selecting or brushing in one
-highlights the same data keys in the others, with no Shiny and no crosstalk. Selection
-projects by `hover_group` when the marks declare it.
+highlights the same data keys in the others, and **panning or zooming one moves
+the others to the same relative view** — with no Shiny and no crosstalk. Selection
+projects by `hover_group` when the marks declare it. Linked pan/zoom shares the
+view as a *fraction* of each widget's own extent, so it stays aligned even when
+the linked plots are different sizes (small multiples). Try zooming one below —
+the other follows.
 
 ```{r}
 #| label: linked

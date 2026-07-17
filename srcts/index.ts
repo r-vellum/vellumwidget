@@ -624,9 +624,21 @@ const DRAG_THRESHOLD = 3; // px before a mousedown becomes a drag (vs a click)
 // of the same group receive each other's selection sets by data-key. crosstalk
 // (below) is the optional bridge to the wider htmlwidgets ecosystem; this bus is
 // what links vellum widgets when crosstalk is not in play.
+// A linked view broadcast: the pan/zoom expressed as a *fraction* of the sender's
+// own original viewBox (`x`/`y` = offset of the view's top-left as a fraction of
+// the full extent; `w`/`h` = the view's size as a fraction). Sharing the fraction
+// (not raw device px) links widgets of different sizes correctly — each applies
+// the same relative pan/zoom to its own viewBox.
+interface ViewFraction {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
 interface BusMember {
   token: object;
   onSelect: (keys: string[]) => void;
+  onView?: (v: ViewFraction) => void; // linked pan/zoom (optional)
 }
 const vellumwidgetBus: Record<string, BusMember[]> = {};
 function busJoin(group: string, m: BusMember): void {
@@ -636,6 +648,13 @@ function busPublish(group: string, sender: object, keys: string[]): void {
   const members = vellumwidgetBus[group] || [];
   for (let i = 0; i < members.length; i++) {
     if (members[i].token !== sender) members[i].onSelect(keys);
+  }
+}
+// Broadcast a view change to the group's other members (linked pan/zoom).
+function busPublishView(group: string, sender: object, v: ViewFraction): void {
+  const members = vellumwidgetBus[group] || [];
+  for (let i = 0; i < members.length; i++) {
+    if (members[i].token !== sender && members[i].onView) members[i].onView!(v);
   }
 }
 
@@ -744,6 +763,7 @@ HTMLWidgets.widget({
     // Linking state.
     const selfToken = {}; // identity on the own bus
     let group: string | null = null; // own-bus group
+    let receivingView = false; // applying a peer's linked view (suppresses re-broadcast)
     let joined = false; // joined the own bus already (guard re-render)
     let ctSel: CrosstalkHandle | null = null; // crosstalk selection handle
     let ctFilt: CrosstalkHandle | null = null; // crosstalk filter handle
@@ -1359,7 +1379,7 @@ HTMLWidgets.widget({
     function setupLinking(): void {
       if (joined) return;
       joined = true;
-      if (group) busJoin(group, { token: selfToken, onSelect: applyLinkedSelection });
+      if (group) busJoin(group, { token: selfToken, onSelect: applyLinkedSelection, onView: applyLinkedView });
       const ct = getCrosstalk();
       if (opts.crosstalk && ct) {
         ctSel = new ct.SelectionHandle(opts.crosstalk);
@@ -1430,6 +1450,32 @@ HTMLWidgets.widget({
         if (d) payload.data = d;
       }
       shinyInput("zoom", payload);
+      // Linked pan/zoom: broadcast the view as a fraction of our own original
+      // viewBox to the group's other members. Suppressed while we are *applying* a
+      // peer's view (feedback-loop guard).
+      if (group && vb0 && !receivingView && vb0.w && vb0.h) {
+        busPublishView(group, selfToken, {
+          x: (vb.x - vb0.x) / vb0.w, y: (vb.y - vb0.y) / vb0.h,
+          w: vb.w / vb0.w, h: vb.h / vb0.h
+        });
+      }
+    }
+    // Apply a linked view from a peer: map its view-fraction onto our own viewBox.
+    // Guarded so re-emitting (Shiny) is fine but we do not re-broadcast to the bus.
+    function applyLinkedView(v: ViewFraction): void {
+      if (!vb0) return;
+      const next = {
+        x: vb0.x + v.x * vb0.w, y: vb0.y + v.y * vb0.h,
+        w: v.w * vb0.w, h: v.h * vb0.h
+      };
+      if (!(next.w > 0) || !(next.h > 0)) return;
+      // No-op if unchanged (avoids redundant work and ping-pong on equal views).
+      if (vb && Math.abs(next.x - vb.x) < 1e-6 && Math.abs(next.y - vb.y) < 1e-6 &&
+          Math.abs(next.w - vb.w) < 1e-6 && Math.abs(next.h - vb.h) < 1e-6) return;
+      receivingView = true;
+      vb = next;
+      applyViewBox(); // reportView() here emits _zoom but skips the bus (guarded)
+      receivingView = false;
     }
     function applyViewBox(): void {
       if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));

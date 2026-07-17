@@ -89,8 +89,11 @@
 #'   `"single"` (click replaces the selection).
 #' @param group Optional linking group name. Widgets sharing a `group` link
 #'   client-side: selecting (or brushing) in one highlights the same data keys in
-#'   the others — no Shiny, no crosstalk. Selection projects by `hover_group` when
-#'   the marks declare it (select one, select the whole series).
+#'   the others, and panning/zooming one **pans/zooms the others** to the same
+#'   relative view — no Shiny, no crosstalk. Selection projects by `hover_group`
+#'   when the marks declare it (select one, select the whole series). Linked
+#'   pan/zoom shares the view as a *fraction* of each widget's own extent, so it
+#'   links correctly even across differently-sized plots (e.g. small multiples).
 #' @param crosstalk Optional [crosstalk::SharedData] (or a crosstalk group name
 #'   string) to link this widget with the crosstalk ecosystem (plotly, leaflet,
 #'   DT, and crosstalk's `filter_*` inputs). The widget's `data_id`s must match the

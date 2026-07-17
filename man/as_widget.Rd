@@ -118,8 +118,11 @@ toolbar's SVG/PNG export. Exports capture the current (zoomed/panned) view.}
 
 \item{group}{Optional linking group name. Widgets sharing a \code{group} link
 client-side: selecting (or brushing) in one highlights the same data keys in
-the others — no Shiny, no crosstalk. Selection projects by \code{hover_group} when
-the marks declare it (select one, select the whole series).}
+the others, and panning/zooming one \strong{pans/zooms the others} to the same
+relative view — no Shiny, no crosstalk. Selection projects by \code{hover_group}
+when the marks declare it (select one, select the whole series). Linked
+pan/zoom shares the view as a \emph{fraction} of each widget's own extent, so it
+links correctly even across differently-sized plots (e.g. small multiples).}
 
 \item{crosstalk}{Optional \link[crosstalk:SharedData]{crosstalk::SharedData} (or a crosstalk group name
 string) to link this widget with the crosstalk ecosystem (plotly, leaflet,
