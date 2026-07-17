@@ -94,6 +94,8 @@ focused — see the <code>a11y</code> argument.</p>
 <span>  zoom <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  toolbar <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  nearest <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  navigator <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  navigator_height <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  hover_mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"closest"</span>, <span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>,</span>
 <span>  crosshair <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  legend_click <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"select"</span>, <span class="st">"hide"</span>, <span class="st">"mute"</span><span class="op">)</span>,</span>
@@ -151,6 +153,20 @@ are enabled.</p></dd>
 <dt id="arg-nearest">nearest<a class="anchor" aria-label="anchor" href="#arg-nearest"></a></dt>
 <dd><p>When <code>TRUE</code> (default), hover snaps to the nearest mark within a
 small radius when the cursor is not directly over one (helps sparse points).</p></dd>
+
+
+<dt id="arg-navigator">navigator<a class="anchor" aria-label="anchor" href="#arg-navigator"></a></dt>
+<dd><p>Show an overview <strong>range navigator</strong> below the plot (default
+<code>FALSE</code>): a full-width strip rendering the whole scene in miniature, with a
+draggable, resizable window marking the visible x-range. Drag the window to
+pan, drag a handle to zoom; it stays two-way in sync with the main view
+(wheel/keyboard/brush and linked-group changes all move it). Useful for long
+series. <code>navigator_height</code> sets the strip height in pixels (default <code>56</code>).</p></dd>
+
+
+<dt id="arg-navigator-height">navigator_height<a class="anchor" aria-label="anchor" href="#arg-navigator-height"></a></dt>
+<dd><p>Height of the navigator strip in pixels (default <code>56</code>);
+ignored unless <code>navigator = TRUE</code>.</p></dd>
 
 
 <dt id="arg-hover-mode">hover_mode<a class="anchor" aria-label="anchor" href="#arg-hover-mode"></a></dt>

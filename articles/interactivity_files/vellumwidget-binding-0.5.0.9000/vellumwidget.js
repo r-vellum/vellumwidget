@@ -806,6 +806,31 @@
   position: absolute; pointer-events: none; z-index: 15;
   border: 1px solid #2563eb; background: rgba(37,99,235,0.12); display: none;
 }
+/* Overview navigator: a full-width strip below the plot (a squashed mini-render
+   of the whole scene) with a draggable/resizable window marking the visible x-range. */
+.vellumwidget-nav {
+  position: relative; width: 100%; margin-top: 4px; box-sizing: border-box;
+  border: 1px solid rgba(0,0,0,0.12); border-radius: 4px; overflow: hidden;
+  background: rgba(0,0,0,0.02); touch-action: none; user-select: none;
+}
+.vellumwidget-nav-mini { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.85; }
+.vellumwidget-nav-mini svg { width: 100%; height: 100%; display: block; }
+/* The two regions outside the window are dimmed; the window itself is clear. */
+.vellumwidget-nav-window {
+  position: absolute; top: 0; bottom: 0; z-index: 2; cursor: grab;
+  border-left: 1px solid #2563eb; border-right: 1px solid #2563eb;
+  background: rgba(37,99,235,0.10); box-shadow: 0 0 0 100vmax rgba(0,0,0,0.12);
+}
+.vellumwidget-nav-window.vellumwidget-nav-grabbing { cursor: grabbing; }
+.vellumwidget-nav-handle {
+  position: absolute; top: 0; bottom: 0; width: 8px; z-index: 3; cursor: ew-resize;
+  background: #2563eb; opacity: 0.35;
+}
+.vellumwidget-nav-handle-l { left: -1px; }
+.vellumwidget-nav-handle-r { right: -1px; }
+@media (prefers-color-scheme: dark) {
+  .vellumwidget-nav { border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.03); }
+}
 .vellumwidget-root.vellumwidget-mode-lasso .vellumwidget-svg-holder svg { cursor: crosshair; }
 .vellumwidget-lasso {
   fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px; stroke-dasharray: 4 3;
@@ -903,6 +928,8 @@
       let stage = null;
       let svgEl = null;
       let toolbarEl = null;
+      let navEl = null;
+      let navWindow = null;
       let meta = {};
       let groups = {};
       let legendIndex = {};
@@ -950,7 +977,8 @@
         a11y: true,
         selectMode: "multiple",
         hoverMode: "closest",
-        crosshair: false
+        crosshair: false,
+        navigator: false
       };
       let liveRegion = null;
       let tableEl = null;
@@ -1553,6 +1581,7 @@
         if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
         if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
         drawPoints();
+        updateNav();
         if (dragging !== "pan" && pinchDist === 0) reportView();
       }
       function resetZoom() {
@@ -1569,6 +1598,108 @@
         const py = h * pad;
         vb = { x: rect.x0 - px, y: rect.y0 - py, w: w + 2 * px, h: h + 2 * py };
         applyViewBox();
+      }
+      function navToView(xFrac, wFrac) {
+        if (!vb0) return;
+        wFrac = Math.min(1, Math.max(0.02, wFrac));
+        xFrac = Math.min(1 - wFrac, Math.max(0, xFrac));
+        vb = { x: vb0.x + xFrac * vb0.w, y: vb ? vb.y : vb0.y, w: wFrac * vb0.w, h: vb ? vb.h : vb0.h };
+        applyViewBox();
+      }
+      function updateNav() {
+        if (!navWindow || !vb || !vb0 || !vb0.w) return;
+        const xFrac = (vb.x - vb0.x) / vb0.w;
+        const wFrac = vb.w / vb0.w;
+        navWindow.style.left = xFrac * 100 + "%";
+        navWindow.style.width = wFrac * 100 + "%";
+      }
+      function buildNavigator() {
+        if (navEl) {
+          navEl.remove();
+          navEl = null;
+          navWindow = null;
+        }
+        if (!opts.navigator || !svgEl || !vb0) return;
+        const h = opts.navigatorHeight && opts.navigatorHeight > 0 ? opts.navigatorHeight : 56;
+        navEl = document.createElement("div");
+        navEl.className = "vellumwidget-nav";
+        navEl.style.height = h + "px";
+        navEl.setAttribute("aria-hidden", "true");
+        const mini = document.createElement("div");
+        mini.className = "vellumwidget-nav-mini";
+        const clone = svgEl.cloneNode(true);
+        clone.setAttribute("viewBox", fmtViewBox(vb0));
+        clone.setAttribute("preserveAspectRatio", "none");
+        clone.removeAttribute("width");
+        clone.removeAttribute("height");
+        const defs = clone.querySelector("defs");
+        if (defs) defs.remove();
+        const clipped = clone.querySelectorAll("[clip-path]");
+        for (let i = 0; i < clipped.length; i++) clipped[i].removeAttribute("clip-path");
+        const keyed = clone.querySelectorAll("[data-key],[tabindex],[role]");
+        for (let i = 0; i < keyed.length; i++) {
+          keyed[i].removeAttribute("data-key");
+          keyed[i].removeAttribute("tabindex");
+          keyed[i].removeAttribute("role");
+        }
+        clone.removeAttribute("id");
+        mini.appendChild(clone);
+        navEl.appendChild(mini);
+        navWindow = document.createElement("div");
+        navWindow.className = "vellumwidget-nav-window";
+        const hL = document.createElement("div");
+        hL.className = "vellumwidget-nav-handle vellumwidget-nav-handle-l";
+        const hR = document.createElement("div");
+        hR.className = "vellumwidget-nav-handle vellumwidget-nav-handle-r";
+        navWindow.appendChild(hL);
+        navWindow.appendChild(hR);
+        navEl.appendChild(navWindow);
+        el.appendChild(navEl);
+        wireNavigator(hL, hR);
+        updateNav();
+      }
+      function wireNavigator(hL, hR) {
+        if (!navEl || !navWindow) return;
+        let mode2 = "";
+        let startFracX = 0, startFracW = 0, startPointer = 0;
+        const stripFrac = (clientX) => {
+          const r = navEl.getBoundingClientRect();
+          return r.width ? (clientX - r.left) / r.width : 0;
+        };
+        const onMove = (ev) => {
+          if (!mode2 || !vb0) return;
+          const d = stripFrac(ev.clientX) - startPointer;
+          if (mode2 === "pan") navToView(startFracX + d, startFracW);
+          else if (mode2 === "l") {
+            const nx = startFracX + d;
+            navToView(nx, startFracW + (startFracX - nx));
+          } else if (mode2 === "r") navToView(startFracX, startFracW + d);
+        };
+        const onUp = (ev) => {
+          mode2 = "";
+          navWindow.classList.remove("vellumwidget-nav-grabbing");
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+          window.removeEventListener("pointercancel", onUp);
+          if (ev && ev.target.releasePointerCapture) {
+          }
+        };
+        const start = (m) => (ev) => {
+          if (!vb0) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          mode2 = m;
+          startFracX = (vb.x - vb0.x) / vb0.w;
+          startFracW = vb.w / vb0.w;
+          startPointer = stripFrac(ev.clientX);
+          if (m === "pan") navWindow.classList.add("vellumwidget-nav-grabbing");
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp);
+          window.addEventListener("pointercancel", onUp);
+        };
+        navWindow.addEventListener("pointerdown", start("pan"));
+        hL.addEventListener("pointerdown", start("l"));
+        hR.addEventListener("pointerdown", start("r"));
       }
       function positionBrush(x, y, w, h) {
         brushBox.style.left = x + "px";
@@ -2229,7 +2360,7 @@
       return {
         renderValue: function(x) {
           opts = Object.assign(
-            { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false },
+            { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false, navigator: false },
             x.options || {}
           );
           elements = normalizeElements(x.elements);
@@ -2317,6 +2448,7 @@
             buildHoverAxis();
             wire(svgEl);
             buildToolbar();
+            buildNavigator();
             setMode(availableModes()[0] || "brush");
             applyStyling();
             applyLegend();
@@ -2370,7 +2502,15 @@
           dropInert,
           panelAt,
           dataRangeOf,
-          brushDataFields
+          brushDataFields,
+          hasNavigator: function() {
+            return !!navEl;
+          },
+          navToView,
+          navWindowFrac: function() {
+            if (!navWindow) return null;
+            return { left: parseFloat(navWindow.style.left) || 0, width: parseFloat(navWindow.style.width) || 0 };
+          }
         }
       };
     }

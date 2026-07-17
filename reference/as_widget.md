@@ -30,6 +30,8 @@ as_widget(
   zoom = TRUE,
   toolbar = TRUE,
   nearest = TRUE,
+  navigator = FALSE,
+  navigator_height = NULL,
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
   legend_click = c("select", "hide", "mute"),
@@ -88,6 +90,21 @@ as_widget(
 
   When `TRUE` (default), hover snaps to the nearest mark within a small
   radius when the cursor is not directly over one (helps sparse points).
+
+- navigator:
+
+  Show an overview **range navigator** below the plot (default `FALSE`):
+  a full-width strip rendering the whole scene in miniature, with a
+  draggable, resizable window marking the visible x-range. Drag the
+  window to pan, drag a handle to zoom; it stays two-way in sync with
+  the main view (wheel/keyboard/brush and linked-group changes all move
+  it). Useful for long series. `navigator_height` sets the strip height
+  in pixels (default `56`).
+
+- navigator_height:
+
+  Height of the navigator strip in pixels (default `56`); ignored unless
+  `navigator = TRUE`.
 
 - hover_mode:
 
