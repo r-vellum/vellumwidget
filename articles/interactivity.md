@@ -56,6 +56,13 @@ vplot(df) |>
   as_widget(tooltip_style = list(background = "#1d3557", fontsize = "13px"))
 ```
 
+Tune its behaviour too: `tooltip_delay` waits a beat before showing
+(calmer on a dense scatter), `tooltip_follow = FALSE` anchors it above
+the mark instead of tracking the cursor, and `tooltip_sticky = TRUE`
+lets you move into the tooltip — useful when the HTML holds a link or
+button. The box auto-flips below the cursor near the top edge and stays
+within the widget.
+
 ### Shared tooltips and a crosshair
 
 On a single scatter, hovering the nearest point is what you want. On a

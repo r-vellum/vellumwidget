@@ -40,6 +40,9 @@ as_widget(
   hover_color = NULL,
   selected_color = NULL,
   dim_opacity = NULL,
+  tooltip_delay = 0,
+  tooltip_follow = TRUE,
+  tooltip_sticky = FALSE,
   tooltip_style = NULL,
   export_filename = NULL,
   export_scale = NULL,
@@ -171,6 +174,24 @@ as_widget(
 
   Opacity (0–1) of the non-hovered elements while hovering (default
   `0.28`); `NULL` keeps the default.
+
+- tooltip_delay:
+
+  Milliseconds to wait before the tooltip appears on hover (default `0`,
+  i.e. immediate). The highlight is unaffected — only the tooltip waits.
+  A short delay (e.g. `250`) calms a dense scatter.
+
+- tooltip_follow:
+
+  When `TRUE` (default) the tooltip tracks the cursor; when `FALSE` it
+  anchors above the hovered mark's centre.
+
+- tooltip_sticky:
+
+  When `TRUE`, the tooltip accepts pointer events and lingers briefly
+  when you leave the mark, so you can move into it — for tooltips that
+  contain links or buttons (build the HTML via `tooltip =`). Default
+  `FALSE`.
 
 - tooltip_style:
 

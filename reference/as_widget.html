@@ -104,6 +104,9 @@ focused — see the <code>a11y</code> argument.</p>
 <span>  hover_color <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  selected_color <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  dim_opacity <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  tooltip_delay <span class="op">=</span> <span class="fl">0</span>,</span>
+<span>  tooltip_follow <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  tooltip_sticky <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  tooltip_style <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  export_filename <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  export_scale <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -227,6 +230,23 @@ built-in default. A per-mark <code>hover_color</code>/<code>selected_color</code
 <dt id="arg-dim-opacity">dim_opacity<a class="anchor" aria-label="anchor" href="#arg-dim-opacity"></a></dt>
 <dd><p>Opacity (0–1) of the non-hovered elements while hovering
 (default <code>0.28</code>); <code>NULL</code> keeps the default.</p></dd>
+
+
+<dt id="arg-tooltip-delay">tooltip_delay<a class="anchor" aria-label="anchor" href="#arg-tooltip-delay"></a></dt>
+<dd><p>Milliseconds to wait before the tooltip appears on hover
+(default <code>0</code>, i.e. immediate). The highlight is unaffected — only the tooltip
+waits. A short delay (e.g. <code>250</code>) calms a dense scatter.</p></dd>
+
+
+<dt id="arg-tooltip-follow">tooltip_follow<a class="anchor" aria-label="anchor" href="#arg-tooltip-follow"></a></dt>
+<dd><p>When <code>TRUE</code> (default) the tooltip tracks the cursor; when
+<code>FALSE</code> it anchors above the hovered mark's centre.</p></dd>
+
+
+<dt id="arg-tooltip-sticky">tooltip_sticky<a class="anchor" aria-label="anchor" href="#arg-tooltip-sticky"></a></dt>
+<dd><p>When <code>TRUE</code>, the tooltip accepts pointer events and lingers
+briefly when you leave the mark, so you can move into it — for tooltips that
+contain links or buttons (build the HTML via <code>tooltip =</code>). Default <code>FALSE</code>.</p></dd>
 
 
 <dt id="arg-tooltip-style">tooltip_style<a class="anchor" aria-label="anchor" href="#arg-tooltip-style"></a></dt>

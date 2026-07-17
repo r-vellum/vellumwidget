@@ -802,6 +802,8 @@
   opacity: 0; transition: opacity 0.08s ease; will-change: transform;
 }
 .vellumwidget-tip.vellumwidget-show { opacity: 1; }
+/* Sticky tooltip: accepts pointer events so links/buttons inside it are usable. */
+.vellumwidget-tip.vellumwidget-tip-sticky { pointer-events: auto; }
 .vellumwidget-brush {
   position: absolute; pointer-events: none; z-index: 15;
   border: 1px solid #2563eb; background: rgba(37,99,235,0.12); display: none;
@@ -1352,28 +1354,102 @@
         if (hm !== "y") crosshairLayer.appendChild(crosshairLine(cx, y0, cx, y1));
         if (hm !== "x") crosshairLayer.appendChild(crosshairLine(x0, cy, x1, cy));
       }
+      let tipShowTimer = 0;
+      let tipHideTimer = 0;
+      function tipDelay() {
+        const d = opts.tooltipDelay;
+        return typeof d === "number" && d > 0 ? d : 0;
+      }
+      function markClient(k) {
+        const m = meta[k];
+        if (!m || !hasBbox(m) || !svgEl || typeof svgEl.getScreenCTM !== "function") return null;
+        const ctm = svgEl.getScreenCTM();
+        if (!ctm || typeof svgEl.createSVGPoint !== "function") return null;
+        const p = svgEl.createSVGPoint();
+        p.x = (m.x0 + m.x1) / 2;
+        p.y = (m.y0 + m.y1) / 2;
+        const s = p.matrixTransform(ctm);
+        return { x: s.x, y: s.y };
+      }
+      function placeTip(clientX, clientY, anchorKey) {
+        const box = el.getBoundingClientRect();
+        let ax = clientX - box.left;
+        let ay = clientY - box.top;
+        if (opts.tooltipFollow === false && anchorKey) {
+          const c = markClient(anchorKey);
+          if (c) {
+            ax = c.x - box.left;
+            ay = c.y - box.top;
+          }
+        }
+        const tw = tip.offsetWidth || 0;
+        const th = tip.offsetHeight || 0;
+        const below = ay - th - 12 < 0;
+        if (tw && box.width) ax = Math.max(tw / 2, Math.min(box.width - tw / 2, ax));
+        tip.style.transform = "translate(" + Math.round(ax) + "px," + Math.round(ay) + "px) " + (below ? "translate(-50%, 12px)" : "translate(-50%, calc(-100% - 12px))");
+      }
+      function revealTip(build, clientX, clientY, anchorKey) {
+        if (tipHideTimer) {
+          clearTimeout(tipHideTimer);
+          tipHideTimer = 0;
+        }
+        const doShow = () => {
+          tipShowTimer = 0;
+          build();
+          placeTip(clientX, clientY, anchorKey);
+          tip.classList.add("vellumwidget-show");
+        };
+        const d = tipDelay();
+        if (d > 0 && !tip.classList.contains("vellumwidget-show")) {
+          if (tipShowTimer) clearTimeout(tipShowTimer);
+          tipShowTimer = setTimeout(doShow, d);
+        } else {
+          doShow();
+        }
+      }
       function showTip(clientX, clientY, k) {
         const m = meta[k];
-        tip.innerHTML = sanitizeTip(m && m.tooltip || k);
-        const box = el.getBoundingClientRect();
-        tip.style.transform = "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) + "px) translate(-50%, calc(-100% - 12px))";
-        tip.classList.add("vellumwidget-show");
+        revealTip(() => {
+          tip.innerHTML = sanitizeTip(m && m.tooltip || k);
+        }, clientX, clientY, k);
       }
       const TIP_MULTI_CAP = 30;
       function showTipMulti(clientX, clientY, keys) {
-        const rows = [];
-        for (let i = 0; i < keys.length && rows.length < TIP_MULTI_CAP; i++) {
-          const m = meta[keys[i]];
-          rows.push(sanitizeTip(m && m.tooltip || keys[i]));
-        }
-        if (keys.length > TIP_MULTI_CAP) rows.push("\u2026");
-        tip.innerHTML = rows.join("<br>");
-        const box = el.getBoundingClientRect();
-        tip.style.transform = "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) + "px) translate(-50%, calc(-100% - 12px))";
-        tip.classList.add("vellumwidget-show");
+        revealTip(() => {
+          const rows = [];
+          for (let i = 0; i < keys.length && rows.length < TIP_MULTI_CAP; i++) {
+            const m = meta[keys[i]];
+            rows.push(sanitizeTip(m && m.tooltip || keys[i]));
+          }
+          if (keys.length > TIP_MULTI_CAP) rows.push("\u2026");
+          tip.innerHTML = rows.join("<br>");
+        }, clientX, clientY, keys[0] || null);
       }
       function hideTip() {
+        if (tipShowTimer) {
+          clearTimeout(tipShowTimer);
+          tipShowTimer = 0;
+        }
+        if (tipHideTimer) {
+          clearTimeout(tipHideTimer);
+          tipHideTimer = 0;
+        }
         tip.classList.remove("vellumwidget-show");
+      }
+      function scheduleHideTip() {
+        if (tipShowTimer) {
+          clearTimeout(tipShowTimer);
+          tipShowTimer = 0;
+        }
+        if (opts.tooltipSticky) {
+          if (tipHideTimer) clearTimeout(tipHideTimer);
+          tipHideTimer = setTimeout(() => {
+            tipHideTimer = 0;
+            tip.classList.remove("vellumwidget-show");
+          }, 260);
+        } else {
+          tip.classList.remove("vellumwidget-show");
+        }
       }
       function clearHover() {
         if (rasterMode) clearGroup(hovGroup);
@@ -1381,7 +1457,7 @@
         el.classList.remove("vellumwidget-hovering");
         clearClass("vellumwidget-hl");
         clearCrosshair();
-        hideTip();
+        scheduleHideTip();
         shinyInput("hover", null);
       }
       function shinyInput(event, value, opts2) {
@@ -2405,6 +2481,15 @@
             stage.appendChild(dimLayer);
             el.appendChild(brushBox);
             el.appendChild(tip);
+            tip.addEventListener("pointerenter", function() {
+              if (tipHideTimer) {
+                clearTimeout(tipHideTimer);
+                tipHideTimer = 0;
+              }
+            });
+            tip.addEventListener("pointerleave", function() {
+              hideTip();
+            });
           }
           holder.innerHTML = x.svg;
           svgEl = holder.querySelector("svg");
@@ -2450,6 +2535,7 @@
             buildToolbar();
             buildNavigator();
             setMode(availableModes()[0] || "brush");
+            tip.classList.toggle("vellumwidget-tip-sticky", !!opts.tooltipSticky);
             applyStyling();
             applyLegend();
             setupA11y();
