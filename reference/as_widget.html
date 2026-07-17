@@ -93,6 +93,8 @@ focused — see the <code>a11y</code> argument.</p>
 <span>  zoom <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  toolbar <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  nearest <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  hover_mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"closest"</span>, <span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>,</span>
+<span>  crosshair <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  a11y <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  alt <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  hover_color <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -138,6 +140,24 @@ pan-zoom (via the SVG <code>viewBox</code>), and the on-hover toolbar (all <code
 <dt id="arg-nearest">nearest<a class="anchor" aria-label="anchor" href="#arg-nearest"></a></dt>
 <dd><p>When <code>TRUE</code> (default), hover snaps to the nearest mark within a
 small radius when the cursor is not directly over one (helps sparse points).</p></dd>
+
+
+<dt id="arg-hover-mode">hover_mode<a class="anchor" aria-label="anchor" href="#arg-hover-mode"></a></dt>
+<dd><p>How hover gathers marks into the tooltip. <code>"closest"</code>
+(default) shows the single nearest mark. <code>"x"</code> (or <code>"y"</code>) gives a <em>unified</em>
+hover: every mark sharing the hovered x (or y) position is highlighted and
+listed together in one box — the shared readout multi-series line and
+time-series charts expect. Unified mode always snaps along its axis, so the
+readout tracks the cursor regardless of <code>nearest</code>. The mark positions come
+from the element index, so no axis metadata is required; the box lists each
+mark's <code>tooltip</code> (one row per series) without a value-axis header.</p></dd>
+
+
+<dt id="arg-crosshair">crosshair<a class="anchor" aria-label="anchor" href="#arg-crosshair"></a></dt>
+<dd><p>Draw a guide rule at the hovered position (default <code>FALSE</code>):
+a vertical rule at the shared x when <code>hover_mode = "x"</code>, a horizontal rule
+when <code>"y"</code>, and a full cross through the mark when <code>"closest"</code>. Colour is the
+<code>--vellumwidget-crosshair-stroke</code> CSS variable (a muted grey by default).</p></dd>
 
 
 <dt id="arg-a-y">a11y<a class="anchor" aria-label="anchor" href="#arg-a-y"></a></dt>

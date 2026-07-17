@@ -11,13 +11,15 @@ table, `vellumplot` declares what is interactive, and `vellumwidget`
 hosts it.
 
 **Interactions:** hover (tooltip + highlight, with nearest-mark snapping
-and `hover_group` linking) · click-select (single/multiple) · drag a
-rectangle to brush-select · wheel / pan-drag to pan-zoom ·
-discrete-legend interaction (hover a swatch to highlight its series,
-click to select it) · toolbar (mode toggle, zoom-to-selection, reset,
-save SVG/PNG, fullscreen) · keyboard + screen-reader access (Tab in,
-arrow keys move between marks, Enter/Space to select; `a11y`, on by
-default). Each is opt-outable via an
+and `hover_group` linking) · shared/unified hover with an optional
+crosshair (`hover_mode = "x"`/`"y"`: one tooltip listing every series at
+the hovered x/y) · click-select (single/multiple) · drag a rectangle to
+brush-select · wheel / pan-drag to pan-zoom · discrete-legend
+interaction (hover a swatch to highlight its series, click to select it)
+· toolbar (mode toggle, zoom-to-selection, reset, save SVG/PNG,
+fullscreen) · keyboard + screen-reader access (Tab in, arrow keys move
+between marks, Enter/Space to select; `a11y`, on by default). Each is
+opt-outable via an
 [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
 argument.
 

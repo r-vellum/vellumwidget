@@ -2,6 +2,25 @@
 
 ## vellumwidget (development version)
 
+- **Shared (unified) hover tooltips and a crosshair.**
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  gains a `hover_mode` argument. The default `"closest"` is unchanged
+  (hover shows the single nearest mark), but `"x"` (or `"y"`) turns on a
+  *unified* hover: every mark sharing the hovered x (or y) position is
+  highlighted at once and listed together in one tooltip box — the
+  shared readout multi-series line and time-series charts expect, where
+  you want every series’ value at the cursor’s x rather than one point.
+  A companion `crosshair` argument (default `FALSE`) draws a guide rule
+  at the hovered position: a vertical rule at the shared x in `"x"`
+  mode, a horizontal one in `"y"` mode, and a full cross through the
+  mark in `"closest"` mode. Both are entirely client-side and need no
+  extra scene metadata — the mark positions come straight from the
+  element index — so they work on any keyed `vellumplot` plot or raw
+  `vellum` scene, and in raster mode. Unified hover snaps along its axis
+  so the readout tracks the cursor anywhere in the plot; the `hover`
+  Shiny input still reports the single nearest (primary) mark, so the
+  read-back contract is unchanged.
+
 - **Fix: hover/selection feedback rings were drawn offset from the
   mark.** When the widget container was larger than the plot’s rendered
   box — which happens routinely, as htmlwidgets stamps an explicit
