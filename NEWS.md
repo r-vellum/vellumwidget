@@ -1,16 +1,16 @@
 # vellumwidget (development version)
 
-* **Axis-aware zoom (`axis_zoom = TRUE`, experimental).** Opt in and wheel/drag
-  zoom scales only the plot's data region and re-ticks the axes for the visible
-  range — holding the frame (axes, titles, legend) in place the way a charting
-  library zooms, rather than the default behaviour of scaling the whole scene like
-  an image. Hit-testing (hover/brush/lasso), the crosshair, and the `input$<id>_zoom`
-  data range all follow the zoomed data region. Requires a single **linear**
-  cartesian panel (continuous `identity`/`reverse` axes) rendered as SVG; plots with
-  log/date/discrete axes, several panels, or in raster mode silently fall back to
-  the ordinary whole-scene zoom. Built on vellum's pannable-panel contract
-  (`vl_viewport(pannable=)`) and the panel scale metadata `vellumplot` emits (needs
-  the current development `vellum`/`vellumplot`). Off by default.
+* **Axis-aware zoom (`axis_zoom`, default `TRUE`).** Wheel/drag zoom scales only
+  the plot's data region and re-ticks the axes for the visible range — holding the
+  frame (axes, titles, legend) in place the way a charting library zooms, rather
+  than scaling the whole scene like an image. Hit-testing (hover/brush/lasso), the
+  crosshair, and the `input$<id>_zoom` data range all follow the zoomed data region.
+  Applies to a single **linear** cartesian panel (continuous `identity`/`reverse`
+  axes) rendered as SVG; plots with log/date/discrete axes, several panels, or in
+  raster mode silently fall back to the ordinary whole-scene zoom, so it is safe to
+  leave on. Set `axis_zoom = FALSE` for the plain whole-scene zoom. Built on vellum's
+  pannable-panel contract (`vl_viewport(pannable=)`) and the panel scale metadata
+  `vellumplot` emits (needs the current development `vellum`/`vellumplot`).
 
 * **Interactive continuous colorbar filter (visualMap).** When a `vellumplot` plot
   maps a continuous `color` scale, its colorbar becomes a range filter: drag the
@@ -32,11 +32,15 @@
 
 * **Overview navigator (`navigator = TRUE`).** An opt-in strip below the plot that
   renders the whole scene in miniature with a draggable, resizable window marking
-  the visible x-range: drag the window to pan, drag a handle to zoom. It stays
-  two-way in sync with the main view — wheel/keyboard/brush, the toolbar, and
-  linked-group pan/zoom all move the window, and moving the window drives them.
-  Useful for scrubbing long series. `navigator_height` sets the strip height
-  (default 56px). Client-side; off by default.
+  the visible x-range: drag the window to pan, drag a handle to zoom. Zoom is
+  **x-only** — the selected x-range fills the width while the full y-range stays on
+  screen (a time-series range selector). With `axis_zoom` (the default) it is
+  rendered through the axis-aware zoom, so the x-axis re-ticks crisply; otherwise
+  the view stretches horizontally. It stays two-way in sync with the main view —
+  wheel/keyboard/brush, the toolbar, and linked-group pan/zoom all move the window,
+  and moving the window drives them. Useful for scrubbing long series.
+  `navigator_height` sets the strip height (default 56px). Client-side; off by
+  default.
 
 * **Linked pan/zoom across a `group`.** Widgets sharing a `group` already linked
   selection and hover; now panning or zooming one moves the others to the same

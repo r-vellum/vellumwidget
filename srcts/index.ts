@@ -1723,7 +1723,10 @@ HTMLWidgets.widget({
     // aspect (`meet`). At the full view the two are visually identical (the viewBox
     // aspect equals the box aspect); the stretch only appears once x is zoomed.
     function applyAspect(): void {
-      const par = xZoom ? "none" : "xMidYMid meet";
+      // Stretch (non-uniform) only for x-only zoom WITHOUT axis_zoom: axis_zoom holds
+      // the frame at vb0 and re-ticks, so it renders the x-only view (via a pan-group
+      // transform whose y-scale is 1) with no stretch and crisp, re-numbered axes.
+      const par = (xZoom && !axisZoomActive) ? "none" : "xMidYMid meet";
       if (svgEl) svgEl.setAttribute("preserveAspectRatio", par);
       if (dimLayer) dimLayer.setAttribute("preserveAspectRatio", par);
       if (crosshairLayer) crosshairLayer.setAttribute("preserveAspectRatio", par);
@@ -3094,11 +3097,11 @@ HTMLWidgets.widget({
           buildToolbar();
           buildNavigator();
           buildColorbar();
-          setupAxisZoom(); // opt-in: scale the data region + re-tick (after the nav clone)
-          // The range navigator drives an x-only zoom (full y stays on screen); a
-          // non-uniform view is how a narrow x-range fills the width. Not while
-          // axis_zoom owns the zoom model, and SVG-only.
-          xZoom = !!opts.navigator && !rasterMode && !axisZoomActive;
+          setupAxisZoom(); // scale the data region + re-tick (after the nav clone)
+          // The range navigator drives an x-only zoom (the full y-range stays on
+          // screen). Rendered through axis_zoom when it's active (fixed frame, crisp
+          // re-ticked x-axis), else via a non-uniform stretch fallback. SVG only.
+          xZoom = !!opts.navigator && !rasterMode;
           applyAspect();
           setMode(availableModes()[0] || "brush"); // first enabled mode is the default
           tip.classList.toggle("vellumwidget-tip-sticky", !!opts.tooltipSticky);

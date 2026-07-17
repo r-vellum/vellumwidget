@@ -1748,7 +1748,7 @@
         receivingView = false;
       }
       function applyAspect() {
-        const par = xZoom ? "none" : "xMidYMid meet";
+        const par = xZoom && !axisZoomActive ? "none" : "xMidYMid meet";
         if (svgEl) svgEl.setAttribute("preserveAspectRatio", par);
         if (dimLayer) dimLayer.setAttribute("preserveAspectRatio", par);
         if (crosshairLayer) crosshairLayer.setAttribute("preserveAspectRatio", par);
@@ -2950,7 +2950,7 @@
             buildNavigator();
             buildColorbar();
             setupAxisZoom();
-            xZoom = !!opts.navigator && !rasterMode && !axisZoomActive;
+            xZoom = !!opts.navigator && !rasterMode;
             applyAspect();
             setMode(availableModes()[0] || "brush");
             tip.classList.toggle("vellumwidget-tip-sticky", !!opts.tooltipSticky);

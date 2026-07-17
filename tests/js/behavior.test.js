@@ -1888,6 +1888,21 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   const noPanSvg = linSvg.replace('<g data-vellum-pan="panel-1-1">', "").replace("</g></g>", "</g>");
   ok(mountAZ({ axisZoom: true }, noPanSvg).inst._test.axisZoomActive() === false,
     "axis_zoom: no pannable group (older vellum) falls back to viewBox zoom");
+
+  // navigator + axis_zoom cooperate: the navigator's x-only zoom is rendered THROUGH
+  // axis_zoom (fixed frame, re-ticked x-axis) rather than the stretch fallback.
+  const nz = mountAZ({ axisZoom: true, navigator: true });
+  ok(nz.inst._test.axisZoomActive() === true, "nav+axis_zoom: axis_zoom drives the navigator");
+  ok(nz.el.querySelector("svg").getAttribute("preserveAspectRatio") === "xMidYMid meet",
+    "nav+axis_zoom: frame is fixed (no stretch) — aspect stays 'meet'");
+  // scrub to a narrow x-range, full y kept (y=0,h=100): the pan transform is x-only
+  // (sy == 1) and the frame viewBox stays put.
+  nz.inst._test.setView({ x: 50, y: 0, w: 100, h: 100 });
+  const tp = /matrix\(([-\d.eE]+) 0 0 ([-\d.eE]+)/.exec(nz.inst._test.panTransform());
+  ok(tp && Math.abs(parseFloat(tp[1]) - 2) < 1e-6 && Math.abs(parseFloat(tp[2]) - 1) < 1e-6,
+    "nav+axis_zoom: pan transform is x-only (sx=2, sy=1) — full y kept, x-range zoomed");
+  ok(nz.el.querySelector("svg").getAttribute("viewBox") === "0 0 200 100",
+    "nav+axis_zoom: base viewBox stays fixed (frame doesn't move)");
 }
 
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
