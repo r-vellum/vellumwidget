@@ -15,8 +15,9 @@ and `hover_group` linking) · shared/unified hover with an optional
 crosshair (`hover_mode = "x"`/`"y"`: one tooltip listing every series at
 the hovered x/y) · click-select (single/multiple) · drag a rectangle to
 brush-select · wheel / pan-drag to pan-zoom · discrete-legend
-interaction (hover a swatch to highlight its series, click to select it)
-· toolbar (mode toggle, zoom-to-selection, reset, save SVG/PNG,
+interaction (hover a swatch to highlight its series, click to select —
+or `legend_click = "hide"` to toggle/isolate series visibility) ·
+toolbar (mode toggle, zoom-to-selection, reset, save SVG/PNG,
 fullscreen) · keyboard + screen-reader access (Tab in, arrow keys move
 between marks, Enter/Space to select; `a11y`, on by default). Each is
 opt-outable via an

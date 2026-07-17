@@ -656,6 +656,13 @@
 .vellumwidget-root.vellumwidget-panning .vellumwidget-svg-holder svg { cursor: grabbing; }
 .vellumwidget-root [data-key] { cursor: pointer; }
 [data-key].vellumwidget-filtered { display: none; }
+/* Legend click-to-hide / -mute (independent of the crosstalk cross-filter above,
+   so the two never clobber each other). hidden removes the series' marks; muted
+   keeps them but fades them right back; legend-off dims the toggled-off swatch
+   so the legend shows which series are on. */
+[data-key].vellumwidget-legend-hidden { display: none; }
+[data-key].vellumwidget-legend-muted { opacity: 0.12; }
+[data-key].vellumwidget-legend.vellumwidget-legend-off { opacity: 0.4; }
 .vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
 .vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
 /* Large-scene hover: instead of the CSS rule above restyling every keyed node
@@ -822,6 +829,9 @@
       let meta = {};
       let groups = {};
       let legendIndex = {};
+      let legendSwatch = {};
+      let legendOff = {};
+      let hiddenKeySet = {};
       let elements = [];
       let selected = {};
       let nodesByKey = {};
@@ -914,6 +924,42 @@
         if (m && m.legend_for != null) return (legendIndex[m.legend_for] || []).concat([k]);
         const g = m && m.hover_group;
         return g && groups[g] ? groups[g] : [k];
+      }
+      function legendPolicy() {
+        return opts.legendClick || "select";
+      }
+      function swatchSeries(k) {
+        if (k == null) return null;
+        const m = meta[k];
+        return m && m.legend_for != null ? m.legend_for : null;
+      }
+      function applyLegend() {
+        clearClass("vellumwidget-legend-hidden");
+        clearClass("vellumwidget-legend-muted");
+        clearClass("vellumwidget-legend-off");
+        hiddenKeySet = {};
+        const pol = legendPolicy();
+        if (pol === "select") return;
+        const cls = pol === "mute" ? "vellumwidget-legend-muted" : "vellumwidget-legend-hidden";
+        for (const s in legendOff) {
+          if (!legendOff[s]) continue;
+          const members = legendIndex[s] || [];
+          addClassForKeys(members, cls);
+          if (pol === "hide") for (let i = 0; i < members.length; i++) hiddenKeySet[members[i]] = true;
+          addClassForKeys(legendSwatch[s] || [], "vellumwidget-legend-off");
+        }
+      }
+      function legendToggle(series) {
+        legendOff[series] = !legendOff[series];
+        applyLegend();
+      }
+      function legendIsolate(series) {
+        const all = Object.keys(legendIndex);
+        const others = all.filter((s) => s !== series);
+        const isolated = !legendOff[series] && others.every((s) => legendOff[s]);
+        legendOff = {};
+        if (!isolated) for (let i = 0; i < others.length; i++) legendOff[others[i]] = true;
+        applyLegend();
       }
       function buildSpatialIndex() {
         spatialIndex = null;
@@ -1362,6 +1408,7 @@
       const pointers = /* @__PURE__ */ new Map();
       let pinchDist = 0;
       function hoverAt(k, clientX, clientY) {
+        if (k != null && hiddenKeySet[k]) k = null;
         if (k == null) {
           clearHover();
           return;
@@ -1369,12 +1416,21 @@
         shinyInput("hover", k);
         const hm = opts.hoverMode || "closest";
         if (hm === "x" || hm === "y") {
-          const keys = columnKeys(k, hm);
+          const keys = columnKeys(k, hm).filter((key) => !hiddenKeySet[key]);
+          if (!keys.length) {
+            clearHover();
+            return;
+          }
           setHoverKeys(keys);
           if (opts.crosshair) drawCrosshair(k, hm);
           if (opts.tooltip) showTipMulti(clientX, clientY, keys);
         } else {
-          setHover(k);
+          const keys = linkedKeys(k).filter((key) => !hiddenKeySet[key]);
+          if (!keys.length) {
+            clearHover();
+            return;
+          }
+          setHoverKeys(keys);
           if (opts.crosshair) drawCrosshair(k, "closest");
           if (opts.tooltip) showTip(clientX, clientY, k);
         }
@@ -1516,12 +1572,21 @@
           k = nearestKeyAt(u.x, u.y, rad);
         }
         shinyInput("click", { key: k }, { priority: "event" });
+        const series = swatchSeries(k);
+        if (series != null && legendPolicy() !== "select") {
+          if (!(ev.detail && ev.detail >= 2)) legendToggle(series);
+          return;
+        }
         if (k != null) {
           if (opts.select) toggleSelect(k);
         } else {
           clearSelection();
           lastBrush = null;
         }
+      }
+      function onDblClick(ev) {
+        const series = swatchSeries(keyOf(ev.target));
+        if (series != null && legendPolicy() !== "select") legendIsolate(series);
       }
       function onWheel(ev) {
         if (!opts.zoom || !vb) return;
@@ -1555,8 +1620,14 @@
             return;
           }
           if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
-            if (opts.select) toggleSelect(k);
-            announce(a11yLabel(k) + (selected[k] ? ", selected" : ", not selected"));
+            const series = swatchSeries(k);
+            if (series != null && legendPolicy() !== "select") {
+              legendToggle(series);
+              announce(a11yLabel(k) + (legendOff[series] ? ", hidden" : ", shown"));
+            } else {
+              if (opts.select) toggleSelect(k);
+              announce(a11yLabel(k) + (selected[k] ? ", selected" : ", not selected"));
+            }
             ev.preventDefault();
             return;
           }
@@ -1910,6 +1981,7 @@
         svg.addEventListener("pointerleave", clearHover);
         svg.addEventListener("pointerdown", onDown);
         svg.addEventListener("click", onClick);
+        svg.addEventListener("dblclick", onDblClick);
         if (opts.zoom) svg.addEventListener("wheel", onWheel, { passive: false });
         if (opts.zoom || opts.brush) el.classList.add("vellumwidget-gesture");
         el.setAttribute("tabindex", "0");
@@ -1925,6 +1997,9 @@
           meta = {};
           groups = {};
           legendIndex = {};
+          legendSwatch = {};
+          legendOff = {};
+          hiddenKeySet = {};
           selected = {};
           lastBrush = null;
           mode = "brush";
@@ -1939,6 +2014,7 @@
                 (legendIndex[series[s]] = legendIndex[series[s]] || []).push(e.key);
               }
             }
+            if (e.legend_for != null) (legendSwatch[e.legend_for] = legendSwatch[e.legend_for] || []).push(e.key);
           }
           if (!holder) {
             stage = document.createElement("div");
@@ -2002,6 +2078,7 @@
             buildToolbar();
             setMode("brush");
             applyStyling();
+            applyLegend();
             setupA11y();
             setupLinking();
             shinyInput("selected", selectedKeys());
@@ -2039,7 +2116,10 @@
             return opts.hoverMode || "closest";
           },
           columnKeys,
-          nearestAxisKey
+          nearestAxisKey,
+          legendOff: function() {
+            return Object.keys(legendOff).filter((s) => legendOff[s]);
+          }
         }
       };
     }

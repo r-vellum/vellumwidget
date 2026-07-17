@@ -120,6 +120,29 @@ vplot(df2) |>
   as_widget()
 ```
 
+## Interactive legends
+
+A discrete `color` or `shape` scale draws an interactive legend
+automatically: hover a swatch to highlight its series, click to select
+it. Set `legend_click = "hide"` to make the legend a **visibility
+toggle** instead — a single click hides or shows a series, and a
+double-click **isolates** it (hides every other series; double-click
+again to bring them all back). This is the reflexive legend interaction
+from plotly and friends. `"mute"` dims the series rather than removing
+it, keeping the layout steady.
+
+``` r
+
+vplot(df) |>
+  mark_point(x = wt, y = mpg, color = cyl, data_id = model) |>
+  as_widget(legend_click = "hide")
+```
+
+Hovering a swatch still highlights its series under every policy, and a
+hidden series drops out of hover and tooltip hit-testing. It works from
+the keyboard too (Tab to a swatch, Enter/Space to toggle) and is
+independent of any crosstalk cross-filter.
+
 ## Pan, zoom, and the toolbar
 
 Zoom with the mouse wheel, drag to pan (toggle brush/pan on the

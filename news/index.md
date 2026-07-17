@@ -2,6 +2,20 @@
 
 ## vellumwidget (development version)
 
+- **Legend click-to-hide and double-click-to-isolate.**
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  gains a `legend_click` argument. The default `"select"` is unchanged
+  (clicking a discrete-legend swatch selects its series). `"hide"` turns
+  the legend into a visibility toggle — a single click hides or shows
+  the series, a double-click isolates it (hides every other series;
+  double-click again to restore all) — the reflexive legend interaction
+  from plotly / ECharts / Highcharts. `"mute"` is the same but dims the
+  series rather than removing it (keeping its layout). Hovering a swatch
+  still highlights its series under every policy, and hidden series drop
+  out of hover/tooltip hit-testing. Works with keyboard (Enter/Space on
+  a focused swatch toggles) and is independent of the crosstalk
+  cross-filter (the two never clobber each other). Entirely client-side.
+
 - **Shared (unified) hover tooltips and a crosshair.**
   [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
   gains a `hover_mode` argument. The default `"closest"` is unchanged

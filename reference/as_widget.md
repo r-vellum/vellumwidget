@@ -31,6 +31,7 @@ as_widget(
   nearest = TRUE,
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
+  legend_click = c("select", "hide", "mute"),
   a11y = TRUE,
   alt = NULL,
   hover_color = NULL,
@@ -97,6 +98,19 @@ as_widget(
   rule when `"y"`, and a full cross through the mark when `"closest"`.
   Colour is the `--vellumwidget-crosshair-stroke` CSS variable (a muted
   grey by default).
+
+- legend_click:
+
+  What clicking a discrete-legend swatch does. `"select"` (default)
+  selects the swatch's whole series (the established behaviour).
+  `"hide"` makes the legend a visibility toggle — a single click
+  hides/shows the series, a double-click isolates it (hides every other
+  series; double-click again to restore all) — the reflexive legend
+  interaction in plotly / ECharts / Highcharts. `"mute"` is the same but
+  dims the series instead of removing it (its layout is kept). Hovering
+  a swatch still highlights its series under every policy. Applies only
+  where the plot draws an interactive legend (a discrete `color` /
+  `shape` scale in `vellumplot`).
 
 - a11y:
 

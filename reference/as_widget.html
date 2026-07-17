@@ -95,6 +95,7 @@ focused — see the <code>a11y</code> argument.</p>
 <span>  nearest <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  hover_mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"closest"</span>, <span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>,</span>
 <span>  crosshair <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  legend_click <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"select"</span>, <span class="st">"hide"</span>, <span class="st">"mute"</span><span class="op">)</span>,</span>
 <span>  a11y <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  alt <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  hover_color <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -158,6 +159,18 @@ mark's <code>tooltip</code> (one row per series) without a value-axis header.</p
 a vertical rule at the shared x when <code>hover_mode = "x"</code>, a horizontal rule
 when <code>"y"</code>, and a full cross through the mark when <code>"closest"</code>. Colour is the
 <code>--vellumwidget-crosshair-stroke</code> CSS variable (a muted grey by default).</p></dd>
+
+
+<dt id="arg-legend-click">legend_click<a class="anchor" aria-label="anchor" href="#arg-legend-click"></a></dt>
+<dd><p>What clicking a discrete-legend swatch does. <code>"select"</code>
+(default) selects the swatch's whole series (the established behaviour).
+<code>"hide"</code> makes the legend a visibility toggle — a single click hides/shows
+the series, a double-click isolates it (hides every other series; double-click
+again to restore all) — the reflexive legend interaction in plotly / ECharts /
+Highcharts. <code>"mute"</code> is the same but dims the series instead of removing it
+(its layout is kept). Hovering a swatch still highlights its series under every
+policy. Applies only where the plot draws an interactive legend (a discrete
+<code>color</code> / <code>shape</code> scale in <code>vellumplot</code>).</p></dd>
 
 
 <dt id="arg-a-y">a11y<a class="anchor" aria-label="anchor" href="#arg-a-y"></a></dt>
