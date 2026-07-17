@@ -89,6 +89,7 @@ interface Options {
   legendClick?: "select" | "hide" | "mute";
   navigator?: boolean; // show an overview x-range navigator strip below the plot
   navigatorHeight?: number; // strip height in px (default 56)
+  axisZoom?: boolean; // axis-aware zoom: scale the data region + re-tick the axes, keeping the frame fixed (linear cartesian panels; SVG only)
   tooltipDelay?: number; // ms to wait before showing the tooltip on hover (default 0)
   tooltipFollow?: boolean; // true (default): tip tracks the cursor; false: anchor above the mark
   tooltipSticky?: boolean; // true: tip accepts pointer events + lingers so links are clickable
@@ -438,6 +439,64 @@ function userToCanvas(vb: ViewBox, cw: number, ch: number, x: number, y: number)
   return { px: ((x - vb.x) / vb.w) * cw, py: ((y - vb.y) / vb.h) * ch };
 }
 
+// --- axis-aware zoom (Phase 2): scale only the pannable panel, not the viewBox ---
+// Under axis_zoom the base SVG viewBox is held fixed at `vb0` (so the axes, titles
+// and legend never move) and the data region is scaled by an affine T instead. T
+// is exactly the transform the viewBox WOULD have applied to the whole scene: it
+// maps the current view rect `vb` onto `vb0`, so marks inside the pan group appear
+// identically zoomed while their clip and the surrounding furniture stay put. One
+// matrix, and its inverse is the single hit-test seam (the device-px scene point
+// under the cursor is T⁻¹(toUser)). See the pannable-panel contract in vellum.
+interface PanTransform { sx: number; sy: number; tx: number; ty: number; }
+function viewToPan(vb: ViewBox, vb0: ViewBox): PanTransform {
+  const sx = vb.w ? vb0.w / vb.w : 1;
+  const sy = vb.h ? vb0.h / vb.h : 1;
+  return { sx: sx, sy: sy, tx: vb0.x - vb.x * sx, ty: vb0.y - vb.y * sy };
+}
+// Inverse of T: a point in the fixed base (vb0) user space -> the device-px scene
+// coordinate under it (which mark sits there). This is what every gesture wants
+// ("what scene point is under the cursor"); under normal zoom it equals toUser,
+// under axis_zoom it is T⁻¹(toUser).
+function panToView(vb: ViewBox, vb0: ViewBox, x: number, y: number): { x: number; y: number } {
+  const t = viewToPan(vb, vb0);
+  return { x: t.sx ? vb.x + (x - vb0.x) / t.sx : x, y: t.sy ? vb.y + (y - vb0.y) / t.sy : y };
+}
+// "Nice" round tick values covering [lo, hi] (1/2/5 x 10^k steps), a handful of
+// them. The client-side re-ticker for a linear axis: vellum's own ticks span the
+// full data range and don't follow a zoom, so we regenerate for the visible range.
+function niceTicks(lo: number, hi: number, count: number): number[] {
+  if (!isFinite(lo) || !isFinite(hi) || hi <= lo || count < 1) return [];
+  const step0 = (hi - lo) / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const norm = step0 / mag;
+  const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+  const out: number[] = [];
+  for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-9; v += step) {
+    out.push(Math.round(v / step) * step); // snap to the grid (kill fp drift)
+  }
+  return out;
+}
+// Format a linear tick value for a given step: enough decimals to tell adjacent
+// ticks apart, trailing zeros trimmed. (Date/log axes fall back to viewBox zoom, so
+// this only ever formats plain numbers.)
+function fmtTick(v: number, step: number): string {
+  if (v === 0) return "0";
+  const decimals = Math.min(20, Math.max(0, -Math.floor(Math.log10(Math.abs(step)) + 1e-9)));
+  let s = v.toFixed(decimals);
+  if (s.indexOf(".") >= 0) s = s.replace(/\.?0+$/, "");
+  return s;
+}
+// Forward axis transform data -> native (inverse of nativeToData). Only ever
+// called for identity/reverse under axis_zoom (native == data numerically), but
+// kept general for symmetry with nativeToData.
+function dataToNative(ax: AxisScale, d: number): number {
+  switch (ax.transform) {
+    case "log10": return Math.log10(d);
+    case "sqrt": return Math.sqrt(d);
+    default: return d; // identity, reverse (the flip lives in the decreasing domain)
+  }
+}
+
 // Union bbox of the given keys' elements (for zoom-to-selection), or null.
 function unionBbox(elems: ElemMeta[], keys: Record<string, boolean>): Bbox | null {
   let out: Bbox | null = null;
@@ -516,6 +575,12 @@ const VELLUMWIDGET_CSS = `
 .vellumwidget-crosshair-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 4; overflow: visible;
+}
+/* Axis-aware zoom: re-ticked axis LABELS overlay (gridlines are drawn inside the
+   base svg's panel, under the marks). Pinned to the fixed base coordinate space. */
+.vellumwidget-retick-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 3; overflow: visible;
 }
 .vellumwidget-crosshair-line {
   stroke: var(--vellumwidget-crosshair-stroke, rgba(75,85,99,0.85));
@@ -831,6 +896,19 @@ HTMLWidgets.widget({
     let focusIdx = -1; // index into focusables of the currently-focused mark, or -1
     let vb0: ViewBox | null = null; // original viewBox (for reset)
     let vb: ViewBox | null = null; // current viewBox
+    // Axis-aware zoom (opt-in). When active, applyViewBox scales `panGroup` by T
+    // instead of moving the base viewBox, and hit-testing routes through panToView.
+    let panGroup: SVGGElement | null = null; // the pannable data group (transformed by T)
+    let outerPanelGroup: SVGGElement | null = null; // its clipped parent (host for re-ticked gridlines)
+    let axisPanel: PanelInfo | null = null; // the single cartesian panel that drives axis_zoom
+    let axisZoomActive = false; // opt-in on + a single linear cartesian pannable panel present
+    let retickLayer: SVGSVGElement | null = null; // overlay carrying re-ticked axis labels (fixed at vb0)
+    let retickGrid: SVGGElement | null = null; // re-ticked gridlines (inside the clipped panel, below marks)
+    const axisStyle = { // presentation scraped from vellum's own axis/grid nodes so the re-tick matches the theme
+      textFill: "#333333", fontFamily: "sans-serif", fontSize: 12,
+      gridStroke: "#ffffff", gridWidth: 1,
+      xBaselineY: 0, yLabelX: 0 // device-px placement of the x/y tick labels
+    };
     let mode: "brush" | "pan" | "lasso" = "brush";
     let lastBrush: Bbox | null = null; // last brushed region (user coords)
     let lassoPts: Pt[] = []; // in-progress lasso path (user/viewBox coords)
@@ -861,6 +939,15 @@ HTMLWidgets.widget({
       const fx = r.width ? (clientX - r.left) / r.width : 0;
       const fy = r.height ? (clientY - r.top) / r.height : 0;
       return { x: view.x + fx * view.w, y: view.y + fy * view.h };
+    }
+    // The device-px scene point under a client position, accounting for axis_zoom's
+    // panel transform. Under normal zoom this is just toUser; under axis_zoom the
+    // marks are scaled by T within a fixed viewBox, so the point under the cursor is
+    // T⁻¹(toUser). Every gesture/hit-test uses this, so the two modes share one path.
+    function toView(clientX: number, clientY: number): { x: number; y: number } {
+      const u = toUser(clientX, clientY);
+      if (axisZoomActive && vb && vb0) return panToView(vb, vb0, u.x, u.y);
+      return u;
     }
 
     // --- highlight / tooltip (Phase 3) ---
@@ -1584,7 +1671,17 @@ HTMLWidgets.widget({
         data?: { x?: number[]; y?: number[]; panel: string };
       } = { x: vb.x, y: vb.y, w: vb.w, h: vb.h, zoomed: vb0 ? isZoomedIn(vb, vb0) : false };
       if (panels.length === 1) {
-        const d = dataRangeOf(panels[0], vb.x, vb.y, vb.x + vb.w, vb.y + vb.h);
+        // Visible data range: over the whole view normally; over the panel's own
+        // (T-inverted) corners under axis_zoom, where only the data region scales.
+        let d;
+        if (axisZoomActive && vb0) {
+          const p = panels[0];
+          const a = panToView(vb, vb0, p.px0, p.py0);
+          const b = panToView(vb, vb0, p.px1, p.py1);
+          d = dataRangeOf(p, a.x, a.y, b.x, b.y);
+        } else {
+          d = dataRangeOf(panels[0], vb.x, vb.y, vb.x + vb.w, vb.y + vb.h);
+        }
         if (d) payload.data = d;
       }
       shinyInput("zoom", payload);
@@ -1616,11 +1713,25 @@ HTMLWidgets.widget({
       receivingView = false;
     }
     function applyViewBox(): void {
-      if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
-      // Keep the hover overlay's coordinate space aligned with the base under pan/zoom.
+      if (axisZoomActive && panGroup && vb && vb0) {
+        // Axis-aware zoom: hold the base frame at vb0 and scale only the data region
+        // by T (so axes/titles/legend stay put), then re-tick for the visible range.
+        const t = viewToPan(vb, vb0);
+        panGroup.setAttribute("transform",
+          "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")");
+        if (svgEl) svgEl.setAttribute("viewBox", fmtViewBox(vb0));
+        retick();
+      } else if (svgEl && vb) {
+        svgEl.setAttribute("viewBox", fmtViewBox(vb));
+      }
+      // Overlays that sit over the panel marks track the view (their device-px
+      // content zooms with the marks); the colorbar overlay tracks the FIXED base
+      // under axis_zoom (the colorbar is furniture outside the panel, so it stays put).
       if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
       if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
-      if (colorbarLayer && vb) colorbarLayer.setAttribute("viewBox", fmtViewBox(vb));
+      if (colorbarLayer && (vb || vb0)) {
+        colorbarLayer.setAttribute("viewBox", fmtViewBox(axisZoomActive && vb0 ? vb0 : vb!));
+      }
       // Redraw the crisp point layer for the new view (no-op unless raster + zoomed in).
       drawPoints();
       updateNav(); // keep the navigator window in sync with the view
@@ -1643,6 +1754,170 @@ HTMLWidgets.widget({
       const py = h * pad;
       vb = { x: rect.x0 - px, y: rect.y0 - py, w: w + 2 * px, h: h + 2 * py };
       applyViewBox();
+    }
+
+    // --- axis-aware zoom (Phase 2, opt-in) ---
+    // A linear (identity/reverse continuous) axis is the tractable, correct case
+    // for the client-side re-ticker: nice round numbers in data space. Log/date/
+    // discrete axes report some other transform/type and fall back to viewBox zoom.
+    function isLinearAxis(ax: AxisScale | undefined): ax is AxisScale {
+      return !!ax && ax.type === "continuous" &&
+        (ax.transform === "identity" || ax.transform === "reverse");
+    }
+    // Decide whether this render can do axis-aware zoom, wire its DOM once, and hide
+    // vellum's static axes/gridlines (which would go stale under a zoom that only
+    // re-scales the data region). Gated to: opt-in on, SVG (not raster), a single
+    // cartesian panel whose x AND y are linear and match a pannable group by name.
+    // Anything else leaves axisZoomActive false and the ordinary viewBox zoom stands.
+    function setupAxisZoom(): void {
+      panGroup = null; outerPanelGroup = null; axisPanel = null; axisZoomActive = false;
+      if (retickLayer) { retickLayer.remove(); retickLayer = null; }
+      retickGrid = null;
+      if (!opts.axisZoom || rasterMode || !svgEl || !vb0 || !stage || panels.length !== 1) return;
+      const p = panels[0];
+      if (!isLinearAxis(p.x) || !isLinearAxis(p.y)) return;
+      const pan = svgEl.querySelector('[data-vellum-pan="' + cssEscape(p.name) + '"]');
+      const outer = svgEl.querySelector('[data-vellum-panel="' + cssEscape(p.name) + '"]');
+      if (!pan || !outer) return; // upstream not pannable (older vellum/vellumplot)
+      panGroup = pan as SVGGElement;
+      outerPanelGroup = outer as SVGGElement;
+      axisPanel = p;
+      axisZoomActive = true;
+      scrapeAxisStyle(p);
+      hideStaticAxes();
+      // Re-ticked gridlines: a group inside the clipped panel, before the pan group,
+      // so they render under the marks and are clipped to the panel (like vellum's).
+      retickGrid = document.createElementNS(SVGNS, "g") as SVGGElement;
+      retickGrid.setAttribute("class", "vellumwidget-retick-grid");
+      outer.insertBefore(retickGrid, pan);
+      // Re-ticked axis labels: an overlay pinned to the fixed base coordinate space.
+      retickLayer = document.createElementNS(SVGNS, "svg") as SVGSVGElement;
+      retickLayer.setAttribute("class", "vellumwidget-retick-layer");
+      retickLayer.setAttribute("aria-hidden", "true");
+      retickLayer.setAttribute("viewBox", fmtViewBox(vb0));
+      stage.appendChild(retickLayer);
+      // Seed the (identity) transform and the initial ticks for the full view, so
+      // the pan group is transform-ready before the first gesture.
+      const t = viewToPan(vb || vb0, vb0);
+      panGroup.setAttribute("transform",
+        "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")");
+      retick();
+    }
+    // Translate component of a node's `transform` (matrix e/f or translate x/y).
+    function transTranslate(node: Element): { tx: number; ty: number } {
+      const t = node.getAttribute("transform") || "";
+      const m = /matrix\(\s*[-\d.eE]+\s+[-\d.eE]+\s+[-\d.eE]+\s+[-\d.eE]+\s+([-\d.eE]+)\s+([-\d.eE]+)\s*\)/.exec(t) ||
+        /translate\(\s*([-\d.eE]+)[ ,]+([-\d.eE]+)\s*\)/.exec(t);
+      return m ? { tx: parseFloat(m[1]), ty: parseFloat(m[2]) } : { tx: 0, ty: 0 };
+    }
+    // Scrape the axis text presentation + the tick-label anchor positions from
+    // vellum's own axis/grid nodes, so the re-tick matches the active theme. Falls
+    // back to sensible defaults (grey text, white gridlines) if a node is absent.
+    function scrapeAxisStyle(p: PanelInfo): void {
+      if (!svgEl) return;
+      const xText = svgEl.querySelector('[data-vellum-panel^="axis-x"] text');
+      if (xText) {
+        axisStyle.textFill = xText.getAttribute("fill") || axisStyle.textFill;
+        axisStyle.fontFamily = xText.getAttribute("font-family") || axisStyle.fontFamily;
+        const fs = parseFloat(xText.getAttribute("font-size") || "");
+        if (fs) axisStyle.fontSize = fs;
+        const y = parseFloat(xText.getAttribute("y") || "");
+        axisStyle.xBaselineY = isFinite(y) ? transTranslate(xText).ty + y : p.py1 + axisStyle.fontSize;
+      } else {
+        axisStyle.xBaselineY = p.py1 + axisStyle.fontSize;
+      }
+      const yText = svgEl.querySelector('[data-vellum-panel^="axis-y"] text');
+      if (yText) {
+        const x = parseFloat(yText.getAttribute("x") || "");
+        axisStyle.yLabelX = isFinite(x) ? transTranslate(yText).tx + x : p.px0 - 6;
+      } else {
+        axisStyle.yLabelX = p.px0 - 6;
+      }
+      const grid = svgEl.querySelector('[role="grid"] path, [role="grid"] line');
+      if (grid) {
+        axisStyle.gridStroke = grid.getAttribute("stroke") || axisStyle.gridStroke;
+        const sw = parseFloat(grid.getAttribute("stroke-width") || "");
+        if (sw) axisStyle.gridWidth = sw;
+      }
+    }
+    // Hide vellum's gridlines (role="grid", inside the pan group -> would stretch
+    // with T) and its axis tick-label groups (axis-x-*/axis-y-*, outside the panel
+    // -> would go stale). Axis TITLES (axis-title-*) are left visible.
+    function hideStaticAxes(): void {
+      if (!svgEl) return;
+      const hide = svgEl.querySelectorAll(
+        '[role="grid"], [data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
+      for (let i = 0; i < hide.length; i++) (hide[i] as SVGElement).style.display = "none";
+    }
+    // A gridline / an axis label, styled to match the scraped theme.
+    function gridLine(x1: number, y1: number, x2: number, y2: number): SVGLineElement {
+      const l = document.createElementNS(SVGNS, "line") as SVGLineElement;
+      l.setAttribute("x1", String(x1)); l.setAttribute("y1", String(y1));
+      l.setAttribute("x2", String(x2)); l.setAttribute("y2", String(y2));
+      l.setAttribute("stroke", axisStyle.gridStroke);
+      l.setAttribute("stroke-width", String(axisStyle.gridWidth));
+      return l;
+    }
+    function axisLabel(text: string, x: number, y: number, anchor: string, baseline: string): SVGTextElement {
+      const t = document.createElementNS(SVGNS, "text") as SVGTextElement;
+      t.setAttribute("x", String(x)); t.setAttribute("y", String(y));
+      t.setAttribute("fill", axisStyle.textFill);
+      t.setAttribute("font-family", axisStyle.fontFamily);
+      t.setAttribute("font-size", String(axisStyle.fontSize));
+      t.setAttribute("text-anchor", anchor);
+      t.setAttribute("dominant-baseline", baseline);
+      t.textContent = text;
+      return t;
+    }
+    // Redraw the re-ticked gridlines + axis labels for the currently visible data
+    // range. Called on every applyViewBox while axis_zoom is active.
+    function retick(): void {
+      if (!axisZoomActive || !axisPanel || !vb || !vb0 || !retickGrid || !retickLayer) return;
+      const p = axisPanel;
+      while (retickGrid.firstChild) retickGrid.removeChild(retickGrid.firstChild);
+      while (retickLayer.firstChild) retickLayer.removeChild(retickLayer.firstChild);
+      const t = viewToPan(vb, vb0);
+      // Visible data range: invert the panel's screen corners through T to the device
+      // px now sitting there, then px -> data via the panel affine.
+      const cTL = panToView(vb, vb0, p.px0, p.py0);
+      const cBR = panToView(vb, vb0, p.px1, p.py1);
+      if (p.x) {
+        const a = pxToDataX(p, cTL.x), b = pxToDataX(p, cBR.x);
+        if (a != null && b != null) {
+          const lo = Math.min(a, b), hi = Math.max(a, b);
+          const ticks = niceTicks(lo, hi, 5);
+          const step = ticks.length > 1 ? ticks[1] - ticks[0] : hi - lo;
+          const nlo = p.x.native_lo, nhi = p.x.native_hi;
+          for (let i = 0; i < ticks.length; i++) {
+            const nx = dataToNative(p.x, ticks[i]);
+            const px = p.px0 + ((nx - nlo) / (nhi - nlo)) * (p.px1 - p.px0);
+            const sx = t.sx * px + t.tx; // screen device-px
+            if (sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
+            retickGrid.appendChild(gridLine(sx, p.py0, sx, p.py1));
+            retickLayer.appendChild(
+              axisLabel(fmtTick(ticks[i], step), sx, axisStyle.xBaselineY, "middle", "text-before-edge"));
+          }
+        }
+      }
+      if (p.y) {
+        const a = pxToDataY(p, cTL.y), b = pxToDataY(p, cBR.y);
+        if (a != null && b != null) {
+          const lo = Math.min(a, b), hi = Math.max(a, b);
+          const ticks = niceTicks(lo, hi, 5);
+          const step = ticks.length > 1 ? ticks[1] - ticks[0] : hi - lo;
+          const nlo = p.y.native_lo, nhi = p.y.native_hi;
+          for (let i = 0; i < ticks.length; i++) {
+            const ny = dataToNative(p.y, ticks[i]);
+            // device y is top-down: native_hi at py0 (top), native_lo at py1 (bottom)
+            const py = p.py0 + ((nhi - ny) / (nhi - nlo)) * (p.py1 - p.py0);
+            const sy = t.sy * py + t.ty;
+            if (sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
+            retickGrid.appendChild(gridLine(p.px0, sy, p.px1, sy));
+            retickLayer.appendChild(
+              axisLabel(fmtTick(ticks[i], step), axisStyle.yLabelX, sy, "end", "central"));
+          }
+        }
+      }
     }
 
     // --- overview navigator (opt-in x-range strip) ---
@@ -2005,7 +2280,7 @@ HTMLWidgets.widget({
       if (hoverRAF) return;
       hoverRAF = requestAnimationFrame(function () {
         hoverRAF = 0;
-        const u = toUser(cx, cy);
+        const u = toView(cx, cy);
         let seed: string | null;
         if (hm === "x") seed = nearestAxisKey("x", u.x);
         else if (hm === "y") seed = nearestAxisKey("y", u.y);
@@ -2026,7 +2301,7 @@ HTMLWidgets.widget({
         const pts = Array.from(pointers.values());
         const d = Math.hypot(pts[0].cx - pts[1].cx, pts[0].cy - pts[1].cy);
         if (d > 0) {
-          const u = toUser((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
+          const u = toView((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
           vb = zoomViewBox(vb, d / pinchDist, u.x, u.y);
           applyViewBox();
           pinchDist = d;
@@ -2053,14 +2328,14 @@ HTMLWidgets.widget({
           Math.abs(ev.clientY - down.cy)
         );
       } else if (dragging === "lasso" && vb) {
-        lassoPts.push(toUser(ev.clientX, ev.clientY));
+        lassoPts.push(toView(ev.clientX, ev.clientY));
         updateLassoPath();
       } else if (dragging === "pan" && vb) {
-        const u = toUser(ev.clientX, ev.clientY);
+        const u = toView(ev.clientX, ev.clientY);
         vb.x -= u.x - down.ux;
         vb.y -= u.y - down.uy;
         applyViewBox();
-        const u2 = toUser(ev.clientX, ev.clientY); // re-anchor: track cursor 1:1
+        const u2 = toView(ev.clientX, ev.clientY); // re-anchor: track cursor 1:1
         down.ux = u2.x;
         down.uy = u2.y;
       }
@@ -2085,7 +2360,7 @@ HTMLWidgets.widget({
         el.classList.remove("vellumwidget-panning");
         return;
       }
-      const u = toUser(ev.clientX, ev.clientY);
+      const u = toView(ev.clientX, ev.clientY);
       down = { cx: ev.clientX, cy: ev.clientY, ux: u.x, uy: u.y };
       dragging = "";
       movedDuringDrag = false;
@@ -2109,8 +2384,8 @@ HTMLWidgets.widget({
         return;
       }
       if (dragging === "brush" && down) {
-        const p1 = toUser(down.cx, down.cy);
-        const p2 = toUser(ev.clientX, ev.clientY);
+        const p1 = toView(down.cx, down.cy);
+        const p2 = toView(ev.clientX, ev.clientY);
         const rect: Bbox = {
           x0: Math.min(p1.x, p2.x), y0: Math.min(p1.y, p2.y),
           x1: Math.max(p1.x, p2.x), y1: Math.max(p1.y, p2.y)
@@ -2159,7 +2434,7 @@ HTMLWidgets.widget({
       // Raster mode has no per-element nodes, so resolve the click to the nearest
       // mark within a small radius (same snap the hover uses).
       if (k == null && rasterMode && opts.nearest !== false && elements.length) {
-        const u = toUser(ev.clientX, ev.clientY);
+        const u = toView(ev.clientX, ev.clientY);
         const rad = vb ? vb.w * 0.02 : 8;
         k = nearestKeyAt(u.x, u.y, rad);
         if (k != null && inert(k)) k = null; // don't click-snap to a hidden/filtered mark
@@ -2191,7 +2466,7 @@ HTMLWidgets.widget({
     function onWheel(ev: WheelEvent): void {
       if (!opts.zoom || !vb) return;
       ev.preventDefault();
-      const u = toUser(ev.clientX, ev.clientY);
+      const u = toView(ev.clientX, ev.clientY);
       const factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
       vb = zoomViewBox(vb, factor, u.x, u.y);
       applyViewBox();
@@ -2787,6 +3062,7 @@ HTMLWidgets.widget({
           buildToolbar();
           buildNavigator();
           buildColorbar();
+          setupAxisZoom(); // opt-in: scale the data region + re-tick (after the nav clone)
           setMode(availableModes()[0] || "brush"); // first enabled mode is the default
           tip.classList.toggle("vellumwidget-tip-sticky", !!opts.tooltipSticky);
           applyStyling();
@@ -2843,7 +3119,26 @@ HTMLWidgets.widget({
         navWindowFrac: function () {
           if (!navWindow) return null;
           return { left: parseFloat(navWindow.style.left) || 0, width: parseFloat(navWindow.style.width) || 0 };
-        }
+        },
+        axisZoomActive: function () { return axisZoomActive; },
+        panTransform: function () { return panGroup ? panGroup.getAttribute("transform") : null; },
+        // Re-ticked axis labels (their text + device-px position), for asserting the
+        // re-tick output without a real layout engine.
+        retickLabels: function () {
+          if (!retickLayer) return [];
+          return Array.prototype.map.call(retickLayer.querySelectorAll("text"), function (t: Element) {
+            return { text: t.textContent, x: parseFloat(t.getAttribute("x") || "NaN"), y: parseFloat(t.getAttribute("y") || "NaN") };
+          });
+        },
+        retickGridCount: function () { return retickGrid ? retickGrid.querySelectorAll("line").length : 0; },
+        staticAxesHidden: function () {
+          if (!svgEl) return null;
+          const nodes = svgEl.querySelectorAll('[role="grid"], [data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
+          if (!nodes.length) return null;
+          return Array.prototype.every.call(nodes, function (n: Element) { return (n as SVGElement).style.display === "none"; });
+        },
+        setView: function (nvb: ViewBox) { vb = { x: nvb.x, y: nvb.y, w: nvb.w, h: nvb.h }; applyViewBox(); },
+        toView: toView
       }
     };
   }
@@ -2903,5 +3198,10 @@ registerProxyHandler();
   nativeToData,
   pxToDataX,
   pxToDataY,
-  normalizePanels
+  normalizePanels,
+  viewToPan,
+  panToView,
+  niceTicks,
+  fmtTick,
+  dataToNative
 };

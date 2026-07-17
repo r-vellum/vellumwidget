@@ -1778,5 +1778,108 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(C.el.querySelectorAll(".vellumwidget-colorfiltered").length === 0, "colorbar: no marks dimmed at the full range");
 }
 
+// ===================== axis-aware zoom (Phase 2, #3) =====================
+// Pure re-tick helpers (nice numbers, formatting, the T / T-inv seam), then the
+// DOM wiring: a pannable linear panel gets a transformed pan group + re-ticked
+// axes; non-linear / raster / multi-panel scenes fall back to viewBox zoom.
+{
+  const T = window.__vellumwidgetTest;
+  // niceTicks: 1/2/5 * 10^k steps covering the range.
+  ok(JSON.stringify(T.niceTicks(0, 100, 5)) === JSON.stringify([0, 20, 40, 60, 80, 100]),
+    "niceTicks: [0,100] -> step 20");
+  ok(JSON.stringify(T.niceTicks(1.31, 5.62, 5)) === JSON.stringify([2, 3, 4, 5]),
+    "niceTicks: expanded mtcars-wt range -> 2,3,4,5 (matches vellum)");
+  ok(T.niceTicks(5, 5, 5).length === 0 && T.niceTicks(NaN, 1, 5).length === 0,
+    "niceTicks: degenerate/empty ranges yield no ticks");
+  // fmtTick: decimals from the step, trailing zeros trimmed.
+  ok(T.fmtTick(2, 1) === "2" && T.fmtTick(2.5, 0.5) === "2.5" && T.fmtTick(0, 20) === "0" && T.fmtTick(0.2, 0.2) === "0.2",
+    "fmtTick: step-appropriate decimals, zeros trimmed");
+  // viewToPan / panToView: T maps vb -> vb0, its inverse recovers the point.
+  const vb0 = { x: 0, y: 0, w: 200, h: 100 };
+  const vb = { x: 50, y: 25, w: 100, h: 50 }; // zoomed 2x, centred
+  const t = T.viewToPan(vb, vb0);
+  ok(Math.abs(t.sx - 2) < 1e-9 && Math.abs(t.sy - 2) < 1e-9, "viewToPan: 2x zoom -> scale 2");
+  ok(Math.abs(t.tx - -100) < 1e-9 && Math.abs(t.ty - -50) < 1e-9, "viewToPan: translate offsets the scaled origin");
+  const back = T.panToView(vb, vb0, t.sx * 130 + t.tx, t.sy * 40 + t.ty);
+  ok(Math.abs(back.x - 130) < 1e-9 && Math.abs(back.y - 40) < 1e-9, "panToView: inverts T (device px under a base point)");
+  ok(T.dataToNative({ transform: "log10" }, 1000) === 3 && T.dataToNative({ transform: "identity" }, 7) === 7,
+    "dataToNative: forward transform (inverse of nativeToData)");
+
+  // A synthetic pannable linear cartesian scene, mirroring vellumplot's SVG shape.
+  const linPanels = {
+    name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+  };
+  const linSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1" clip-path="url(#c0)">' +
+    '<g data-vellum-pan="panel-1-1">' +
+    '<g role="grid"><path d="M0 0 L0 80" stroke="#ffffff" stroke-width="1"/></g>' +
+    '<path data-key="a" d="M100 50h2v2z"/></g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" fill="#333333" font-family="sans-serif" font-size="12">50</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" fill="#333333" font-family="sans-serif" font-size="12">25</text></g>' +
+    '<g data-vellum-panel="axis-title-x"><text>wt</text></g></svg>';
+  function mountAZ(opts, svgStr, panels) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e, 200, 100);
+    i.renderValue({
+      svg: svgStr || linSvg,
+      elements: { key: ["a"], x0: [100], y0: [50], x1: [102], y1: [52] },
+      panels: panels === undefined ? linPanels : panels,
+      options: Object.assign({ hover: true, select: true, zoom: true, selectMode: "multiple" }, opts)
+    });
+    return { el: e, inst: i };
+  }
+
+  // off by default: no transform, static axes visible, viewBox zoom stands.
+  const off = mountAZ({ axisZoom: false });
+  ok(off.inst._test.axisZoomActive() === false, "axis_zoom: inactive by default");
+  ok(off.inst._test.staticAxesHidden() === false, "axis_zoom: vellum's axes/gridlines stay visible when off");
+
+  // on with a linear cartesian pannable panel: active, axes hidden, re-ticked.
+  const on = mountAZ({ axisZoom: true });
+  ok(on.inst._test.axisZoomActive() === true, "axis_zoom: active for a single linear cartesian pannable panel");
+  ok(on.inst._test.staticAxesHidden() === true, "axis_zoom: vellum's static axes + gridlines are hidden");
+  ok(on.inst._test.panTransform() && /^matrix\(/.test(on.inst._test.panTransform()), "axis_zoom: pan group carries a matrix transform");
+  const labels0 = on.inst._test.retickLabels();
+  ok(labels0.length > 0, "axis_zoom: re-ticked axis labels are drawn at the full view");
+  ok(on.inst._test.retickGridCount() > 0, "axis_zoom: re-ticked gridlines are drawn");
+  // the base viewBox is held fixed at vb0 (the scene frame doesn't move)
+  ok(on.el.querySelector("svg").getAttribute("viewBox") === "0 0 200 100", "axis_zoom: base viewBox stays at vb0");
+
+  // zoom in (via the test seam): the pan group scales up and the axes re-tick to
+  // the narrower visible range (a denser/shifted label set).
+  on.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 });
+  const tm = /matrix\(([-\d.eE]+)/.exec(on.inst._test.panTransform());
+  ok(tm && Math.abs(parseFloat(tm[1]) - 2) < 1e-6, "axis_zoom: zooming to a half-size view scales the pan group 2x");
+  ok(on.el.querySelector("svg").getAttribute("viewBox") === "0 0 200 100", "axis_zoom: viewBox still fixed after zoom (only the data region moved)");
+  const labelsZ = on.inst._test.retickLabels().map((l) => l.text);
+  // visible x data now [25,75] (px 50..150 -> data via the panel affine): ticks 30..70
+  ok(labelsZ.indexOf("30") >= 0 && labelsZ.indexOf("70") >= 0 && labelsZ.indexOf("0") < 0,
+    "axis_zoom: re-ticked to the zoomed-in visible data range");
+
+  // reset restores identity transform + the full-range ticks.
+  on.inst._test.setView({ x: 0, y: 0, w: 200, h: 100 });
+  const tmR = /matrix\(([-\d.eE]+)/.exec(on.inst._test.panTransform());
+  ok(tmR && Math.abs(parseFloat(tmR[1]) - 1) < 1e-6, "axis_zoom: reset to full view -> identity scale");
+
+  // fallbacks: a log10 axis, raster mode, and multiple panels all decline axis_zoom.
+  const logPanels = Object.assign({}, linPanels, {
+    x: { type: "log10", transform: "log10", data_lo: 1, data_hi: 1000, native_lo: 0, native_hi: 3 }
+  });
+  ok(mountAZ({ axisZoom: true }, linSvg, logPanels).inst._test.axisZoomActive() === false,
+    "axis_zoom: a log axis falls back to viewBox zoom");
+  ok(mountAZ({ axisZoom: true, raster: true }).inst._test.axisZoomActive() === false,
+    "axis_zoom: raster mode falls back to viewBox zoom");
+  ok(mountAZ({ axisZoom: true }, linSvg, [linPanels, Object.assign({}, linPanels, { name: "panel-1-2" })]).inst._test.axisZoomActive() === false,
+    "axis_zoom: multiple panels fall back to viewBox zoom");
+  // a scene with no pan group (older upstream) also declines.
+  const noPanSvg = linSvg.replace('<g data-vellum-pan="panel-1-1">', "").replace("</g></g>", "</g>");
+  ok(mountAZ({ axisZoom: true }, noPanSvg).inst._test.axisZoomActive() === false,
+    "axis_zoom: no pannable group (older vellum) falls back to viewBox zoom");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);
