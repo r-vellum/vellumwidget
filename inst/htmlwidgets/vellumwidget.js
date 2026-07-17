@@ -880,6 +880,12 @@
       if (members[i].token !== sender) members[i].onSelect(keys);
     }
   }
+  function busPublishView(group, sender, v) {
+    const members = vellumwidgetBus[group] || [];
+    for (let i = 0; i < members.length; i++) {
+      if (members[i].token !== sender && members[i].onView) members[i].onView(v);
+    }
+  }
   function getCrosstalk() {
     return window.crosstalk || null;
   }
@@ -958,6 +964,7 @@
       let lassoEl = null;
       const selfToken = {};
       let group = null;
+      let receivingView = false;
       let joined = false;
       let ctSel = null;
       let ctFilt = null;
@@ -1461,7 +1468,7 @@
       function setupLinking() {
         if (joined) return;
         joined = true;
-        if (group) busJoin(group, { token: selfToken, onSelect: applyLinkedSelection });
+        if (group) busJoin(group, { token: selfToken, onSelect: applyLinkedSelection, onView: applyLinkedView });
         const ct = getCrosstalk();
         if (opts.crosstalk && ct) {
           ctSel = new ct.SelectionHandle(opts.crosstalk);
@@ -1517,6 +1524,29 @@
           if (d) payload.data = d;
         }
         shinyInput("zoom", payload);
+        if (group && vb0 && !receivingView && vb0.w && vb0.h) {
+          busPublishView(group, selfToken, {
+            x: (vb.x - vb0.x) / vb0.w,
+            y: (vb.y - vb0.y) / vb0.h,
+            w: vb.w / vb0.w,
+            h: vb.h / vb0.h
+          });
+        }
+      }
+      function applyLinkedView(v) {
+        if (!vb0) return;
+        const next = {
+          x: vb0.x + v.x * vb0.w,
+          y: vb0.y + v.y * vb0.h,
+          w: v.w * vb0.w,
+          h: v.h * vb0.h
+        };
+        if (!(next.w > 0) || !(next.h > 0)) return;
+        if (vb && Math.abs(next.x - vb.x) < 1e-6 && Math.abs(next.y - vb.y) < 1e-6 && Math.abs(next.w - vb.w) < 1e-6 && Math.abs(next.h - vb.h) < 1e-6) return;
+        receivingView = true;
+        vb = next;
+        applyViewBox();
+        receivingView = false;
       }
       function applyViewBox() {
         if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));

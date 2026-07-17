@@ -1617,5 +1617,41 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(typeof bf.y0d === "number" && bf.panel === "p", "B1: brushDataFields keeps the invertible y axis + panel");
 }
 
+// ===================== linked pan/zoom across a group (#9) =====================
+{
+  // Two grouped widgets of DIFFERENT sizes; zooming one links the other by the
+  // *fraction* of each viewBox (size-independent), not raw device px.
+  function mountVB(vbStr, size, group) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e);
+    i.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + vbStr + '"><path data-key="k" d="M1 1h2v2z"/></svg>',
+      elements: { key: ["k"], x0: [size * 0.4], y0: [size * 0.4], x1: [size * 0.6], y1: [size * 0.6] },
+      options: { hover: true, select: true, zoom: true, brush: true, toolbar: true, selectMode: "multiple", group: group }
+    });
+    return { el: e, inst: i, svg: e.querySelector("svg") };
+  }
+  const A = mountVB("0 0 100 100", 100, "lz");
+  const B = mountVB("0 0 200 200", 200, "lz"); // 2x the size of A
+  const Cungrouped = mountVB("0 0 100 100", 100, null);
+
+  const vb0B = T.parseViewBox(B.svg.getAttribute("viewBox"));
+  // Zoom A to its key (frames the mark's bbox) -> A broadcasts a view fraction.
+  A.inst._call("zoom", ["k"]);
+  const aVB = T.parseViewBox(A.svg.getAttribute("viewBox"));
+  const bVB = T.parseViewBox(B.svg.getAttribute("viewBox"));
+  ok(aVB.w < 100, "linked zoom: source A zoomed in (viewBox shrank)");
+  ok(bVB.w < 200 && bVB.w > 0, "linked zoom: grouped peer B also zoomed");
+  // same *fraction* of each widget's own viewBox (size-independent link)
+  ok(Math.abs(aVB.w / 100 - bVB.w / 200) < 1e-6 && Math.abs(aVB.x / 100 - bVB.x / 200) < 1e-6,
+    "linked zoom: peer tracks the same relative pan/zoom, scaled to its own viewBox");
+  // an ungrouped widget is untouched
+  ok(T.parseViewBox(Cungrouped.svg.getAttribute("viewBox")).w === 100, "linked zoom: an ungrouped widget is unaffected");
+  // reset links too, and does not infinite-loop (a loop would hang the test)
+  A.inst._call("resetZoom");
+  ok(T.parseViewBox(B.svg.getAttribute("viewBox")).w === vb0B.w, "linked zoom: reset on A restores B's full view");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);
