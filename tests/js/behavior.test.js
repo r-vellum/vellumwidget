@@ -1696,5 +1696,46 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(N.inst._test.navWindowFrac().width < 100, "navigator: a main-view zoom narrows the window (two-way sync)");
 }
 
+// ===================== tooltip polish: delay / sticky / follow (#14) =====================
+{
+  function mountTip(opts) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e);
+    i.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="30" viewBox="0 0 60 30"><path data-key="a" d="M10 10h5v5z"/></svg>',
+      elements: [{ key: "a", tooltip: "A", x0: 10, y0: 10, x1: 15, y1: 15 }],
+      options: Object.assign({ tooltip: true, hover: true, select: true, selectMode: "multiple" }, opts)
+    });
+    return { el: e, svg: e.querySelector("svg"), tip: e.querySelector(".vellumwidget-tip") };
+  }
+  function hover(m) { fireOn(m.svg, "pointermove", m.el.querySelector('[data-key="a"]')); }
+
+  // default (no delay): tip shows synchronously on hover
+  const d0 = mountTip({});
+  hover(d0);
+  ok(d0.tip.classList.contains("vellumwidget-show"), "tooltip: shows immediately with no delay (default)");
+
+  // delay: the reveal is deferred (not shown synchronously)
+  const dd = mountTip({ tooltipDelay: 50 });
+  hover(dd);
+  ok(!dd.tip.classList.contains("vellumwidget-show"), "tooltip delay: reveal is deferred, not shown on the same tick");
+
+  // sticky: the tip carries the sticky class, and on hover-out it lingers
+  const ds = mountTip({ tooltipSticky: true });
+  ok(ds.tip.classList.contains("vellumwidget-tip-sticky"), "tooltip sticky: tip opts into pointer events");
+  hover(ds);
+  ok(ds.tip.classList.contains("vellumwidget-show"), "tooltip sticky: shows on hover");
+  fireOn(ds.svg, "pointerleave", ds.svg);
+  ok(ds.tip.classList.contains("vellumwidget-show"), "tooltip sticky: lingers on hover-out (grace to reach it)");
+
+  // non-sticky: hover-out hides immediately
+  const dns = mountTip({});
+  hover(dns);
+  fireOn(dns.svg, "pointerleave", dns.svg);
+  ok(!dns.tip.classList.contains("vellumwidget-show"), "tooltip (non-sticky): hides immediately on hover-out");
+  ok(!dns.tip.classList.contains("vellumwidget-tip-sticky"), "tooltip (non-sticky): no sticky class");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

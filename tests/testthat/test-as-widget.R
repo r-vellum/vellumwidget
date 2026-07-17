@@ -170,6 +170,19 @@ test_that("lasso toggle round-trips into the payload (default on)", {
   expect_false(as_widget(scene, lasso = FALSE)$x$options$lasso)
 })
 
+test_that("tooltip behavior options round-trip", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+  o <- as_widget(scene)$x$options
+  expect_equal(o$tooltipDelay, 0) # defaults
+  expect_true(o$tooltipFollow)
+  expect_false(o$tooltipSticky)
+  o2 <- as_widget(scene, tooltip_delay = 250, tooltip_follow = FALSE, tooltip_sticky = TRUE)$x$options
+  expect_equal(o2$tooltipDelay, 250)
+  expect_false(o2$tooltipFollow)
+  expect_true(o2$tooltipSticky)
+})
+
 test_that("navigator options round-trip (default off)", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
