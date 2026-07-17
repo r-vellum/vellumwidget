@@ -57,6 +57,7 @@ interface Options {
   hover: boolean;
   select: boolean;
   brush: boolean;
+  lasso: boolean; // freehand lasso-select mode (a third toolbar mode alongside brush/pan)
   zoom: boolean;
   toolbar: boolean;
   nearest: boolean;
@@ -214,6 +215,49 @@ function brushKeys(elems: ElemMeta[], brush: Bbox): string[] {
     }
   }
   return out;
+}
+
+// Is (x, y) inside the polygon? Ray-casting (even-odd rule); `poly` is an ordered
+// ring of vertices, the last implicitly joined to the first.
+interface Pt { x: number; y: number; }
+function pointInPolygon(x: number, y: number, poly: Pt[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    if (((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+// Distinct keys of every element whose bbox *centre* falls inside the lasso
+// polygon. Centre-in-polygon (not full-bbox containment) matches how a lasso
+// picks points and keeps a multi-element mark counted once.
+function lassoKeys(elems: ElemMeta[], poly: Pt[]): string[] {
+  const out: string[] = [];
+  const seen: Record<string, boolean> = {};
+  if (poly.length < 3) return out;
+  for (let i = 0; i < elems.length; i++) {
+    const e = elems[i];
+    if (!hasBbox(e) || seen[e.key]) continue;
+    if (pointInPolygon((e.x0 + e.x1) / 2, (e.y0 + e.y1) / 2, poly)) {
+      seen[e.key] = true;
+      out.push(e.key);
+    }
+  }
+  return out;
+}
+
+// Axis-aligned bounds of a polygon (for prefiltering candidates via the index).
+function polyBounds(poly: Pt[]): Bbox {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    if (poly[i].x < x0) x0 = poly[i].x;
+    if (poly[i].y < y0) y0 = poly[i].y;
+    if (poly[i].x > x1) x1 = poly[i].x;
+    if (poly[i].y > y1) y1 = poly[i].y;
+  }
+  return { x0: x0, y0: y0, x1: x1, y1: y1 };
 }
 
 // Key of the element nearest (x, y) within `maxDist`, else null.
@@ -416,6 +460,10 @@ const VELLUMWIDGET_CSS = `
   position: absolute; pointer-events: none; z-index: 15;
   border: 1px solid #2563eb; background: rgba(37,99,235,0.12); display: none;
 }
+.vellumwidget-root.vellumwidget-mode-lasso .vellumwidget-svg-holder svg { cursor: crosshair; }
+.vellumwidget-lasso {
+  fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px; stroke-dasharray: 4 3;
+}
 .vellumwidget-toolbar {
   position: absolute; top: 6px; right: 6px; z-index: 25; display: flex; gap: 2px;
   padding: 3px; border-radius: 6px; background: rgba(255,255,255,0.82);
@@ -602,7 +650,7 @@ HTMLWidgets.widget({
     // reported; only the on-canvas rings are bounded.
     const OVERLAY_MARK_CAP = 2000;
     let opts: Options = {
-      tooltip: true, hover: true, select: true, brush: true, zoom: true,
+      tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true,
       toolbar: true, nearest: true, a11y: true, selectMode: "multiple",
       hoverMode: "closest", crosshair: false
     };
@@ -613,8 +661,10 @@ HTMLWidgets.widget({
     let focusIdx = -1; // index into focusables of the currently-focused mark, or -1
     let vb0: ViewBox | null = null; // original viewBox (for reset)
     let vb: ViewBox | null = null; // current viewBox
-    let mode: "brush" | "pan" = "brush";
+    let mode: "brush" | "pan" | "lasso" = "brush";
     let lastBrush: Bbox | null = null; // last brushed region (user coords)
+    let lassoPts: Pt[] = []; // in-progress lasso path (user/viewBox coords)
+    let lassoEl: SVGPolygonElement | null = null; // the drawn lasso outline (in crosshairLayer)
     // Linking state.
     const selfToken = {}; // identity on the own bus
     let group: string | null = null; // own-bus group
@@ -808,6 +858,28 @@ HTMLWidgets.widget({
         if (!seen[k]) {
           seen[k] = true;
           out.push(k);
+        }
+      }
+      return out;
+    }
+    // Distinct keys whose centre is inside the lasso polygon — index-backed when
+    // available (prefilter by the polygon's bounds, then centre-in-polygon), else
+    // the pure `lassoKeys` scan.
+    function lassoKeysIn(poly: Pt[]): string[] {
+      if (poly.length < 3) return [];
+      if (!spatialIndex) return lassoKeys(elements, poly);
+      const b = polyBounds(poly);
+      const eids = spatialIndex.search(b.x0, b.y0, b.x1, b.y1)
+        .map((id) => indexToElem[id])
+        .sort((a, b) => a - b);
+      const out: string[] = [];
+      const seen: Record<string, boolean> = {};
+      for (let i = 0; i < eids.length; i++) {
+        const e = elements[eids[i]];
+        if (seen[e.key] || !hasBbox(e)) continue;
+        if (pointInPolygon((e.x0 + e.x1) / 2, (e.y0 + e.y1) / 2, poly)) {
+          seen[e.key] = true;
+          out.push(e.key);
         }
       }
       return out;
@@ -1210,6 +1282,17 @@ HTMLWidgets.widget({
     }
 
     // --- viewBox pan/zoom ---
+    // Report the current view to Shiny as `input$<id>_zoom` (a deduped state input).
+    // The value is the current viewBox in the SVG's device-px space — `x`/`y`/`w`/`h`
+    // plus a `zoomed` flag (is the view narrower/shorter than the full extent).
+    // Data-space limits await axis/scale metadata in the scene contract.
+    function reportView(): void {
+      if (!vb) return;
+      shinyInput("zoom", {
+        x: vb.x, y: vb.y, w: vb.w, h: vb.h,
+        zoomed: vb0 ? isZoomedIn(vb, vb0) : false
+      });
+    }
     function applyViewBox(): void {
       if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
       // Keep the hover overlay's coordinate space aligned with the base under pan/zoom.
@@ -1217,6 +1300,10 @@ HTMLWidgets.widget({
       if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
       // Redraw the crisp point layer for the new view (no-op unless raster + zoomed in).
       drawPoints();
+      // Report on settle: a continuous pan/pinch reports once on release (from
+      // onDragUp), not per frame; discrete zooms (wheel, keys, reset, zoom-to) land
+      // here with no drag in progress and report immediately.
+      if (dragging !== "pan" && pinchDist === 0) reportView();
     }
     function resetZoom(): void {
       if (vb0) {
@@ -1246,11 +1333,36 @@ HTMLWidgets.widget({
       brushBox.style.display = "none";
     }
 
+    // --- lasso overlay (freehand select) ---
+    // The lasso outline is drawn in the crosshair overlay's viewBox space (user
+    // coords), so it tracks the marks exactly and needs no screen<->user mapping to
+    // render. Points are appended in user coords as the pointer moves.
+    function lassoPointsAttr(): string {
+      let s = "";
+      for (let i = 0; i < lassoPts.length; i++) s += (i ? " " : "") + lassoPts[i].x + "," + lassoPts[i].y;
+      return s;
+    }
+    function updateLassoPath(): void {
+      if (!crosshairLayer) return;
+      if (!lassoEl) {
+        lassoEl = document.createElementNS(SVGNS, "polygon") as SVGPolygonElement;
+        lassoEl.setAttribute("class", "vellumwidget-lasso");
+        lassoEl.setAttribute("vector-effect", "non-scaling-stroke");
+        crosshairLayer.appendChild(lassoEl);
+      }
+      lassoEl.setAttribute("points", lassoPointsAttr());
+    }
+    function clearLasso(): void {
+      lassoPts = [];
+      if (lassoEl && lassoEl.parentNode) lassoEl.parentNode.removeChild(lassoEl);
+      lassoEl = null;
+    }
+
     // --- pointer interaction (hover + drag: brush or pan; touch pinch-zoom) ---
     // Pointer events unify mouse, touch, and pen, so one code path drives desktop
     // and mobile. Active pointers are tracked so two down at once = pinch-zoom.
     let down: { cx: number; cy: number; ux: number; uy: number } | null = null;
-    let dragging: "" | "brush" | "pan" = "";
+    let dragging: "" | "brush" | "pan" | "lasso" = "";
     let movedDuringDrag = false;
     const pointers = new Map<number, { cx: number; cy: number }>();
     let pinchDist = 0; // > 0 while a two-pointer pinch is in progress
@@ -1341,8 +1453,11 @@ HTMLWidgets.widget({
       if (!down) return;
       if (!dragging) {
         if (Math.abs(ev.clientX - down.cx) + Math.abs(ev.clientY - down.cy) <= DRAG_THRESHOLD) return;
-        dragging = mode === "pan" && opts.zoom ? "pan" : opts.brush ? "brush" : "";
+        dragging = mode === "pan" && opts.zoom ? "pan"
+          : mode === "lasso" && opts.lasso ? "lasso"
+          : opts.brush ? "brush" : "";
         if (dragging === "pan") el.classList.add("vellumwidget-panning");
+        if (dragging === "lasso") lassoPts = [{ x: down.ux, y: down.uy }]; // seed with the press point
         if (dragging === "") return;
         movedDuringDrag = true;
       }
@@ -1354,6 +1469,9 @@ HTMLWidgets.widget({
           Math.abs(ev.clientX - down.cx),
           Math.abs(ev.clientY - down.cy)
         );
+      } else if (dragging === "lasso" && vb) {
+        lassoPts.push(toUser(ev.clientX, ev.clientY));
+        updateLassoPath();
       } else if (dragging === "pan" && vb) {
         const u = toUser(ev.clientX, ev.clientY);
         vb.x -= u.x - down.ux;
@@ -1404,6 +1522,7 @@ HTMLWidgets.widget({
         dragging = "";
         el.classList.remove("vellumwidget-panning");
         hideBrush();
+        reportView(); // pinch settled -> report the final view
         return;
       }
       if (dragging === "brush" && down) {
@@ -1419,7 +1538,22 @@ HTMLWidgets.widget({
         // The brushed region + keys, as a discrete gesture event.
         shinyInput("brush", { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 }, { priority: "event" });
         hideBrush();
+      } else if (dragging === "lasso") {
+        // Close the freehand path and select every mark whose centre is inside it.
+        const poly = lassoPts.slice();
+        const hitKeys = lassoKeysIn(poly);
+        if (poly.length >= 3) {
+          const b = polyBounds(poly);
+          lastBrush = b; // zoom-to-selection frames the lasso's bounds
+          if (opts.select) setSelection(hitKeys);
+          // Report as a brush gesture (keys + the lasso's bounding box), with a
+          // `lasso: true` flag so the server can tell the two apart.
+          shinyInput("brush", { keys: hitKeys, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, lasso: true }, { priority: "event" });
+        }
+        clearLasso();
       }
+      // A pan reports once here (its per-frame applyViewBox calls skipped reporting).
+      if (dragging === "pan") reportView();
       el.classList.remove("vellumwidget-panning");
       down = null;
       dragging = "";
@@ -1539,17 +1673,39 @@ HTMLWidgets.widget({
     }
 
     // --- toolbar ---
-    function setMode(m: "brush" | "pan"): void {
+    // The drag modes enabled for this widget, in cycle order (selection tools
+    // adjacent, then pan). The toolbar's mode button cycles through this list.
+    const MODE_ICON: Record<string, string> = { brush: "▭", lasso: "◌", pan: "✋" };
+    const MODE_LABEL: Record<string, string> = { brush: "brush-select", lasso: "lasso-select", pan: "pan" };
+    function availableModes(): ("brush" | "lasso" | "pan")[] {
+      const m: ("brush" | "lasso" | "pan")[] = [];
+      if (opts.brush) m.push("brush");
+      if (opts.lasso) m.push("lasso");
+      if (opts.zoom) m.push("pan");
+      return m;
+    }
+    function setMode(m: "brush" | "pan" | "lasso"): void {
       mode = m;
       el.classList.toggle("vellumwidget-mode-pan", m === "pan");
+      el.classList.toggle("vellumwidget-mode-lasso", m === "lasso");
+      if (m !== "lasso") clearLasso(); // leaving lasso drops any in-progress outline
       if (toolbarEl) {
         const b = toolbarEl.querySelector('[data-act="mode"]');
         if (b) {
-          b.textContent = m === "pan" ? "✋" : "▭";
-          (b as HTMLElement).title = m === "pan" ? "Pan mode (click to brush-select)" : "Brush-select mode (click to pan)";
-          b.classList.toggle("vellumwidget-active", m === "pan");
+          const modes = availableModes();
+          const next = modes[(modes.indexOf(m) + 1) % modes.length];
+          b.textContent = MODE_ICON[m];
+          (b as HTMLElement).title =
+            MODE_LABEL[m][0].toUpperCase() + MODE_LABEL[m].slice(1) + " mode" +
+            (next && next !== m ? " (click for " + MODE_LABEL[next] + ")" : "");
+          b.classList.toggle("vellumwidget-active", m !== "brush");
         }
       }
+    }
+    function cycleMode(): void {
+      const modes = availableModes();
+      if (modes.length < 2) return;
+      setMode(modes[(modes.indexOf(mode) + 1) % modes.length]);
     }
     // Export filename base (no extension) and PNG resolution scale, both
     // overridable via `as_widget(export = ...)`. The serialized SVG always
@@ -1658,7 +1814,9 @@ HTMLWidgets.widget({
         bar.appendChild(b);
         return b;
       };
-      if (opts.brush && opts.zoom) btn("mode", "▭", "Brush-select mode (click to pan)", () => setMode(mode === "brush" ? "pan" : "brush"));
+      // One mode button cycles the enabled drag modes (brush / lasso / pan);
+      // shown only when at least two are enabled. setMode() fills its icon + title.
+      if (availableModes().length >= 2) btn("mode", MODE_ICON[mode], "Drag mode", cycleMode);
       if (opts.zoom) {
         btn("zoomsel", "⌖", "Zoom to selection", zoomToSelection);
         btn("reset", "⟲", "Reset zoom", resetZoom);
@@ -1917,7 +2075,7 @@ HTMLWidgets.widget({
     return {
       renderValue: function (x: Payload) {
         opts = Object.assign(
-          { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false },
+          { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false },
           x.options || {}
         );
         elements = normalizeElements(x.elements);
@@ -2025,7 +2183,7 @@ HTMLWidgets.widget({
           buildHoverAxis();
           wire(svgEl);
           buildToolbar();
-          setMode("brush");
+          setMode(availableModes()[0] || "brush"); // first enabled mode is the default
           applyStyling();
           applyLegend(); // clears any stale legend-off state from a prior render
           setupA11y();
@@ -2062,7 +2220,10 @@ HTMLWidgets.widget({
         hoverMode: function () { return opts.hoverMode || "closest"; },
         columnKeys: columnKeys,
         nearestAxisKey: nearestAxisKey,
-        legendOff: function () { return Object.keys(legendOff).filter((s) => legendOff[s]); }
+        legendOff: function () { return Object.keys(legendOff).filter((s) => legendOff[s]); },
+        lassoKeysIn: lassoKeysIn,
+        availableModes: availableModes,
+        mode: function () { return mode; }
       }
     };
   }
@@ -2115,5 +2276,8 @@ registerProxyHandler();
   isZoomedIn,
   userToCanvas,
   nearestSortedIdx,
-  columnTolerance
+  columnTolerance,
+  pointInPolygon,
+  lassoKeys,
+  polyBounds
 };

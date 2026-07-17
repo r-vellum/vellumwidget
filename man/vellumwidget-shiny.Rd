@@ -44,8 +44,15 @@ same mark twice.}
 \item{\code{input$plot_hover}}{The hovered key, or \code{NULL} when the pointer leaves a
 mark. Updates as state (re-fires only when the hovered key changes).}
 \item{\code{input$plot_brush}}{A list \code{list(keys=, x0=, y0=, x1=, y1=)} when a
-brush gesture completes: the selected keys and the brushed rectangle in the
-scene's device-pixel (viewBox) coordinates. An event input.}
+brush (or lasso) gesture completes: the selected keys and the region's
+bounding rectangle in the scene's device-pixel (viewBox) coordinates. A
+lasso gesture also carries \code{lasso = TRUE}. An event input.}
+\item{\code{input$plot_zoom}}{A list \code{list(x=, y=, w=, h=, zoomed=)} — the current
+view (the SVG \code{viewBox} in device-pixel coordinates) plus a \code{zoomed} flag
+(is the view narrower/shorter than the full extent). Updates as state when a
+zoom/pan settles (wheel, drag-pan release, pinch, keyboard, reset,
+zoom-to-selection, or a proxy \code{\link[=vw_zoom]{vw_zoom()}}). Data-space limits await
+axis/scale metadata in the scene contract.}
 }
 
 These are emitted only inside a live Shiny session; a static render (knitr,

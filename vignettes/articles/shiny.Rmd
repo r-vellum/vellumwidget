@@ -54,21 +54,24 @@ shinyApp(ui, server)
 ## What the widget reports
 
 The inputs are named `<outputId>_<event>`, so for `vellumwidgetOutput("plot")` they are
-`input$plot_selected`, `input$plot_click`, `input$plot_hover`, and
-`input$plot_brush`. **Every value is expressed in element keys** (the `data_id`
-you set on the mark), so you map back to your data by that key.
+`input$plot_selected`, `input$plot_click`, `input$plot_hover`,
+`input$plot_brush`, and `input$plot_zoom`. **Every selection value is expressed
+in element keys** (the `data_id` you set on the mark), so you map back to your
+data by that key.
 
 | Input | Value | Kind |
 |---|---|---|
 | `input$plot_selected` | character vector of selected keys (`character(0)` if none) | state |
 | `input$plot_click` | `list(key=)` — `key` is `NULL` for an empty-space click | event |
 | `input$plot_hover` | the hovered key, or `NULL` on leave | state |
-| `input$plot_brush` | `list(keys=, x0=, y0=, x1=, y1=)` — keys + brushed rectangle (device px) | event |
+| `input$plot_brush` | `list(keys=, x0=, y0=, x1=, y1=)` — keys + region rectangle (device px); a lasso adds `lasso=TRUE` | event |
+| `input$plot_zoom` | `list(x=, y=, w=, h=, zoomed=)` — the current view (viewBox, device px) + a zoomed flag | state |
 
-**State vs event.** *State* inputs (`_selected`, `_hover`) update only when the
-value changes, so re-selecting the same set does not re-fire; pair them with
-`observe()` / `reactive()`. *Event* inputs (`_click`, `_brush`) fire on every
-occurrence, even a repeat; pair them with `observeEvent()`.
+**State vs event.** *State* inputs (`_selected`, `_hover`, `_zoom`) update only
+when the value changes, so re-selecting the same set (or settling on the same
+view) does not re-fire; pair them with `observe()` / `reactive()`. *Event* inputs
+(`_click`, `_brush`) fire on every occurrence, even a repeat; pair them with
+`observeEvent()`.
 
 ## Reacting to interactions
 

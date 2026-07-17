@@ -77,6 +77,13 @@ test_that("Phase 4 option toggles round-trip into the payload", {
   expect_false(o2$brush || o2$zoom || o2$toolbar || o2$nearest)
 })
 
+test_that("lasso toggle round-trips into the payload (default on)", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+  expect_true(as_widget(scene)$x$options$lasso) # default TRUE
+  expect_false(as_widget(scene, lasso = FALSE)$x$options$lasso)
+})
+
 test_that("hover_mode and crosshair are validated and round-trip into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
