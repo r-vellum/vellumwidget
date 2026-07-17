@@ -390,6 +390,11 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   for (i in seq_len(nrow(p))) {
     sc <- p$meta[[i]]$scales
     if (is.null(sc) || !isTRUE(sc$cartesian)) next
+    # A finite device-px rectangle is required to invert pixels; skip a panel whose
+    # viewport geometry wasn't resolved (px* NA) rather than ship a rect the runtime
+    # would mis-handle as JSON nulls.
+    rect <- c(p$px0[i], p$py0[i], p$px1[i], p$py1[i])
+    if (anyNA(rect) || !all(is.finite(rect)) || p$px1[i] == p$px0[i] || p$py1[i] == p$py0[i]) next
     out[[length(out) + 1L]] <- drop_null(list(
       name = as.character(p$name[i]),
       px0 = as.numeric(p$px0[i]), py0 = as.numeric(p$py0[i]),
@@ -542,8 +547,16 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #' Data-space coordinates (`x0d`/… and `zoom$data`) come from the per-panel scale
 #' descriptors `vellumplot` attaches to the scene; a raw `vellum` scene or a
 #' non-cartesian coordinate system carries none, and only the device-pixel fields
-#' are reported. Date/time axes report the numeric epoch (days for `Date`, seconds
-#' for `POSIXct`), which you map back with `as.Date()` / `.POSIXct()`.
+#' are reported. Some specifics:
+#' * They describe the **visual** axes: `x0d`/`x1d` (and `zoom$data$x`) are the
+#'   *horizontal* axis. Under `coord_flip()` that is the plot's `y` aesthetic.
+#' * **Date/time** axes report the numeric epoch (days for `Date`, seconds for
+#'   `POSIXct`); map back with `as.Date()` / `.POSIXct()`.
+#' * A **discrete** axis reports fractional band positions (category *i* sits at
+#'   `i`), not the level labels.
+#' * Axes built with a custom `scales::transform_*()` object (anything beyond
+#'   identity / log10 / sqrt / reverse) can't be inverted client-side, so that axis
+#'   is omitted from the data-space fields (device-pixel fields still report).
 #'
 #' These are emitted only inside a live Shiny session; a static render (knitr,
 #' pkgdown, `htmltools::save_html()`) produces identical output and no input

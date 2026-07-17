@@ -1562,5 +1562,60 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   window.Shiny = savedShiny; window.HTMLWidgets.shinyMode = savedMode;
 }
 
+// ===================== hardening: non-identity mappings + decline (B1/N1) =====================
+{
+  // A log10 x-axis with 5% expansion + a real (non-identity) y range, exercising
+  // the composed path the earlier identity-only tests missed. Panel px [100,10,500,410].
+  // x: native = log10(data), domain log10([1,1000]) expanded 5% -> [-0.15, 3.15].
+  // y: data [0,50], native == data (identity), expanded to [-2.5, 52.5].
+  const p = {
+    name: "p", px0: 100, py0: 10, px1: 500, py1: 410,
+    x: { type: "continuous", transform: "log10", native_lo: -0.15, native_hi: 3.15 },
+    y: { type: "continuous", transform: "identity", native_lo: -2.5, native_hi: 52.5 }
+  };
+  // px at native 0 (data 1) = 100 + (0 - -0.15)/(3.15 - -0.15)*400
+  const pxAt1 = 100 + (0 - -0.15) / (3.15 - -0.15) * 400;
+  ok(Math.abs(T.pxToDataX(p, pxAt1) - 1) < 1e-9, "pxToDataX(log10): recovers data=1 through log inverse + expansion");
+  const pxAt1000 = 100 + (3 - -0.15) / (3.15 - -0.15) * 400;
+  ok(Math.abs(T.pxToDataX(p, pxAt1000) - 1000) < 1e-6, "pxToDataX(log10): recovers data=1000");
+  // y flip + expansion: native 25 (data 25) sits where?  py where frac gives native 25
+  // frac = (native_hi - 25)/(native_hi - native_lo) = (52.5-25)/55 ; py = py0 + frac*(py1-py0)
+  const fracY = (52.5 - 25) / (52.5 - -2.5);
+  const pyAt25 = 10 + fracY * (410 - 10);
+  ok(Math.abs(T.pxToDataY(p, pyAt25) - 25) < 1e-9, "pxToDataY(identity+expansion): recovers data=25 with the y-flip");
+
+  // reverse axis: decreasing native domain, identity map
+  const pr = { name: "r", px0: 0, py0: 0, px1: 100, py1: 100,
+    x: { transform: "reverse", native_lo: 4.15, native_hi: 0.85 }, y: { transform: "identity", native_lo: 0, native_hi: 10 } };
+  // px 0 -> native_lo 4.15 (the high data end, since reversed); px100 -> 0.85
+  ok(Math.abs(T.pxToDataX(pr, 0) - 4.15) < 1e-9 && Math.abs(T.pxToDataX(pr, 100) - 0.85) < 1e-9,
+    "pxToDataX(reverse): decreasing native domain inverts correctly");
+
+  // B1: a non-invertible custom transform is declined (pxToData -> null)
+  const pbad = { name: "b", px0: 0, py0: 0, px1: 100, py1: 100,
+    x: { type: "continuous", transform: "log-2", native_lo: 0, native_hi: 4 }, y: { transform: "identity", native_lo: 0, native_hi: 1 } };
+  ok(T.pxToDataX(pbad, 50) === null, "B1: an un-invertible transform (log-2) declines x mapping (null, not a wrong value)");
+  ok(T.pxToDataY(pbad, 50) !== null, "B1: the invertible y axis still maps");
+}
+{
+  // instance: brushDataFields omits the declined axis, keeps the invertible one
+  const elB = document.createElement("div");
+  document.body.appendChild(elB);
+  const iB = widgetDef.factory(elB);
+  iB.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><path data-key="a" d="M50 50h4v4z"/></svg>',
+    elements: { key: ["a"], x0: [50], y0: [50], x1: [54], y1: [54] },
+    panels: {
+      name: "p", px0: 0, py0: 0, px1: 200, py1: 200,
+      x: { type: "continuous", transform: "log-2", native_lo: 0, native_hi: 8 },
+      y: { type: "continuous", transform: "identity", native_lo: 0, native_hi: 100 }
+    },
+    options: { hover: true, select: true, brush: true, selectMode: "multiple" }
+  });
+  const bf = iB._test.brushDataFields({ x0: 0, y0: 0, x1: 100, y1: 100 });
+  ok(bf.x0d === undefined && bf.x1d === undefined, "B1: brushDataFields omits the un-invertible x axis");
+  ok(typeof bf.y0d === "number" && bf.panel === "p", "B1: brushDataFields keeps the invertible y axis + panel");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

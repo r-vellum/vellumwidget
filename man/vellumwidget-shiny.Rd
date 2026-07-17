@@ -61,8 +61,18 @@ or a proxy \code{\link[=vw_zoom]{vw_zoom()}}).}
 Data-space coordinates (\code{x0d}/… and \code{zoom$data}) come from the per-panel scale
 descriptors \code{vellumplot} attaches to the scene; a raw \code{vellum} scene or a
 non-cartesian coordinate system carries none, and only the device-pixel fields
-are reported. Date/time axes report the numeric epoch (days for \code{Date}, seconds
-for \code{POSIXct}), which you map back with \code{as.Date()} / \code{.POSIXct()}.
+are reported. Some specifics:
+\itemize{
+\item They describe the \strong{visual} axes: \code{x0d}/\code{x1d} (and \code{zoom$data$x}) are the
+\emph{horizontal} axis. Under \code{coord_flip()} that is the plot's \code{y} aesthetic.
+\item \strong{Date/time} axes report the numeric epoch (days for \code{Date}, seconds for
+\code{POSIXct}); map back with \code{as.Date()} / \code{.POSIXct()}.
+\item A \strong{discrete} axis reports fractional band positions (category \emph{i} sits at
+\code{i}), not the level labels.
+\item Axes built with a custom \verb{scales::transform_*()} object (anything beyond
+identity / log10 / sqrt / reverse) can't be inverted client-side, so that axis
+is omitted from the data-space fields (device-pixel fields still report).
+}
 
 These are emitted only inside a live Shiny session; a static render (knitr,
 pkgdown, \code{htmltools::save_html()}) produces identical output and no input

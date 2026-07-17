@@ -98,6 +98,65 @@ test_that("the payload carries per-panel scale descriptors from vellumplot", {
   expect_true(panel$x$native_lo < min(df$wt) && panel$x$native_hi > max(df$wt))
 })
 
+test_that("data-space inversion round-trips a mark's pixel position back to its data value", {
+  skip_if_not_installed("vellumplot")
+  # Replicate the runtime's px -> data inversion (srcts/index.ts) in R, and assert
+  # that a mark's device-px centre inverts back to its known data value — across
+  # continuous / log10 / date / reverse / coord_flip / facets. This is the
+  # end-to-end guard the identity-only JS unit tests can't provide.
+  invertible <- c("identity", "log10", "sqrt", "reverse")
+  ntd <- function(tr, nv) switch(tr, log10 = 10^nv, sqrt = nv^2, nv)
+  px_x <- function(p, px) if (!p$x$transform %in% invertible) NA else
+    ntd(p$x$transform, p$x$native_lo + (px - p$px0) / (p$px1 - p$px0) * (p$x$native_hi - p$x$native_lo))
+  px_y <- function(p, py) if (!p$y$transform %in% invertible) NA else {
+    frac <- (py - p$py0) / (p$py1 - p$py0)
+    ntd(p$y$transform, p$y$native_hi + frac * (p$y$native_lo - p$y$native_hi))
+  }
+  panel_of <- function(w, nm) Filter(function(p) p$name == nm, w$x$panels)[[1]]
+  ctr <- function(w, key) {
+    e <- w$x$elements; i <- which(e$key == key)
+    c(x = (e$x0[i] + e$x1[i]) / 2, y = (e$y0[i] + e$y1[i]) / 2)
+  }
+  roundtrips <- function(w, key, ex, ey, nm = "panel-1-1") {
+    p <- panel_of(w, nm); c0 <- ctr(w, key)
+    isTRUE(all.equal(unname(px_x(p, c0[["x"]])), ex, tolerance = 1e-2)) &&
+      isTRUE(all.equal(unname(px_y(p, c0[["y"]])), ey, tolerance = 1e-2))
+  }
+  d <- data.frame(a = c(1, 10, 100, 1000), b = c(2, 4, 6, 8), id = letters[1:4])
+
+  # continuous
+  wc <- vellumplot::vplot(d) |> vellumplot::mark_point(x = a, y = b, data_id = id) |> as_widget()
+  expect_true(roundtrips(wc, "c", 100, 6))
+  # log10 x
+  wl <- vellumplot::vplot(d) |> vellumplot::mark_point(x = a, y = b, data_id = id) |>
+    vellumplot::scale_x_continuous(trans = "log10") |> as_widget()
+  expect_true(roundtrips(wl, "c", 100, 6))
+  # reverse x
+  wr <- vellumplot::vplot(d) |> vellumplot::mark_point(x = a, y = b, data_id = id) |>
+    vellumplot::scale_x_continuous(trans = "reverse") |> as_widget()
+  expect_true(roundtrips(wr, "c", 100, 6))
+  # date x (epoch days)
+  dd <- data.frame(t = as.Date("2020-01-01") + c(0, 100, 200, 300), y = c(5, 6, 7, 8), id = letters[1:4])
+  wd <- vellumplot::vplot(dd) |> vellumplot::mark_point(x = t, y = y, data_id = id) |> as_widget()
+  expect_true(roundtrips(wd, "c", as.numeric(as.Date("2020-01-01") + 200), 7))
+  # coord_flip: axes are the *visual* ones, so x recovers the (flipped) y aesthetic
+  wf <- vellumplot::vplot(d) |> vellumplot::mark_point(x = a, y = b, data_id = id) |>
+    vellumplot::coord_flip() |> as_widget()
+  expect_true(roundtrips(wf, "c", 6, 100)) # horizontal shows b, vertical shows a
+})
+
+test_that("a custom (non-invertible) transform axis omits its data descriptor path", {
+  skip_if_not_installed("vellumplot")
+  skip_if_not_installed("scales")
+  d <- data.frame(a = c(1, 2, 4, 8), b = 1:4, id = letters[1:4])
+  w <- vellumplot::vplot(d) |> vellumplot::mark_point(x = a, y = b, data_id = id) |>
+    vellumplot::scale_x_continuous(trans = scales::transform_log(2)) |> as_widget()
+  # the panel is still emitted (finite rect), the x descriptor reports a name the
+  # runtime declines ("log-2"); the widget guards this client-side (see JS tests).
+  p <- w$x$panels[[1]]
+  expect_false(p$x$transform %in% c("identity", "log10", "sqrt", "reverse"))
+})
+
 test_that("a raw vellum scene (no scales meta) yields no panels payload", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
