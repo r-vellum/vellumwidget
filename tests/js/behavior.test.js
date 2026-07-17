@@ -1211,6 +1211,100 @@ function mountShiny(id, calls) {
   ok(elX.querySelector(".vellumwidget-tip").textContent === "A", "closest mode: single-mark tooltip unchanged");
 }
 
+// ===================== legend click-to-hide / -isolate =====================
+{
+  // Three series (s, t, u), each with two member marks, plus one swatch per series.
+  const legendSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40" viewBox="0 0 100 40">' +
+    '<path data-key="s1" d="M1 1h5v5z"/><path data-key="s2" d="M8 1h5v5z"/>' +
+    '<path data-key="t1" d="M20 1h5v5z"/><path data-key="t2" d="M27 1h5v5z"/>' +
+    '<path data-key="u1" d="M40 1h5v5z"/><path data-key="u2" d="M47 1h5v5z"/>' +
+    '<path data-key="legend:color:s" d="M80 1h5v5z"/>' +
+    '<path data-key="legend:color:t" d="M80 12h5v5z"/>' +
+    '<path data-key="legend:color:u" d="M80 23h5v5z"/></svg>';
+  const legendElems = [
+    { key: "s1", legend: ["color:s"], tooltip: "s1", x0: 1, y0: 1, x1: 6, y1: 6 },
+    { key: "s2", legend: ["color:s"], tooltip: "s2", x0: 8, y0: 1, x1: 13, y1: 6 },
+    { key: "t1", legend: ["color:t"], tooltip: "t1", x0: 20, y0: 1, x1: 25, y1: 6 },
+    { key: "t2", legend: ["color:t"], tooltip: "t2", x0: 27, y0: 1, x1: 32, y1: 6 },
+    { key: "u1", legend: ["color:u"], tooltip: "u1", x0: 40, y0: 1, x1: 45, y1: 6 },
+    { key: "u2", legend: ["color:u"], tooltip: "u2", x0: 47, y0: 1, x1: 52, y1: 6 },
+    { key: "legend:color:s", legend_for: "color:s", tooltip: "s", x0: 80, y0: 1, x1: 85, y1: 6 },
+    { key: "legend:color:t", legend_for: "color:t", tooltip: "t", x0: 80, y0: 12, x1: 85, y1: 17 },
+    { key: "legend:color:u", legend_for: "color:u", tooltip: "u", x0: 80, y0: 23, x1: 85, y1: 28 }
+  ];
+  const legOpts = (policy) => ({
+    svg: legendSvg, elements: legendElems,
+    options: {
+      tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true,
+      nearest: false, selectMode: "multiple", legendClick: policy
+    }
+  });
+
+  // --- policy "hide": single click hides the series, does NOT select it ---
+  const elHide = mount(legOpts("hide"));
+  const swatchT = elHide.querySelector('[data-key="legend:color:t"]');
+  fireOn(elHide.querySelector("svg"), "click", swatchT);
+  ok(
+    elHide.querySelector('[data-key="t1"]').classList.contains("vellumwidget-legend-hidden") &&
+      elHide.querySelector('[data-key="t2"]').classList.contains("vellumwidget-legend-hidden"),
+    'legend "hide": clicking a swatch hides its series\' marks'
+  );
+  ok(
+    !elHide.querySelector('[data-key="t1"]').classList.contains("vellumwidget-selected"),
+    'legend "hide": clicking a swatch does not select the series'
+  );
+  ok(swatchT.classList.contains("vellumwidget-legend-off"), 'legend "hide": the toggled-off swatch is dimmed');
+  // hovering the hidden series' (still-indexed) mark shows nothing
+  fireOn(elHide.querySelector("svg"), "pointermove", elHide.querySelector('[data-key="t1"]'));
+  ok(
+    !elHide.querySelector(".vellumwidget-tip").classList.contains("vellumwidget-show"),
+    'legend "hide": a hidden mark is not hovered (no tooltip)'
+  );
+  // click again -> show
+  fireOn(elHide.querySelector("svg"), "click", swatchT);
+  ok(
+    !elHide.querySelector('[data-key="t1"]').classList.contains("vellumwidget-legend-hidden"),
+    'legend "hide": a second click shows the series again'
+  );
+
+  // --- double-click isolates; double-click again restores ---
+  function fireDbl(svg, target) {
+    fireOn(svg, "dblclick", target);
+  }
+  const elIso = mount(legOpts("hide"));
+  fireDbl(elIso.querySelector("svg"), elIso.querySelector('[data-key="legend:color:s"]'));
+  ok(
+    !elIso.querySelector('[data-key="s1"]').classList.contains("vellumwidget-legend-hidden") &&
+      elIso.querySelector('[data-key="t1"]').classList.contains("vellumwidget-legend-hidden") &&
+      elIso.querySelector('[data-key="u1"]').classList.contains("vellumwidget-legend-hidden"),
+    'legend double-click: isolates the clicked series (hides all others)'
+  );
+  fireDbl(elIso.querySelector("svg"), elIso.querySelector('[data-key="legend:color:s"]'));
+  ok(
+    elIso.querySelectorAll(".vellumwidget-legend-hidden").length === 0,
+    'legend double-click: a second double-click restores every series'
+  );
+
+  // --- policy "mute": dims instead of removing ---
+  const elMute = mount(legOpts("mute"));
+  fireOn(elMute.querySelector("svg"), "click", elMute.querySelector('[data-key="legend:color:u"]'));
+  ok(
+    elMute.querySelector('[data-key="u1"]').classList.contains("vellumwidget-legend-muted") &&
+      !elMute.querySelector('[data-key="u1"]').classList.contains("vellumwidget-legend-hidden"),
+    'legend "mute": clicking a swatch mutes (does not remove) the series'
+  );
+
+  // --- default policy "select" is unchanged: click selects, no hide ---
+  const elSel = mount(legOpts("select"));
+  fireOn(elSel.querySelector("svg"), "click", elSel.querySelector('[data-key="legend:color:s"]'));
+  ok(
+    elSel.querySelector('[data-key="s1"]').classList.contains("vellumwidget-selected") &&
+      elSel.querySelectorAll(".vellumwidget-legend-hidden").length === 0,
+    'legend "select" (default): clicking a swatch still selects the series, hides nothing'
+  );
+}
+
 // ===================== pure helpers: nearestSortedIdx + columnTolerance =====================
 ok(T.nearestSortedIdx([0, 10, 20, 30], 12) === 1, "nearestSortedIdx: 12 -> index of 10");
 ok(T.nearestSortedIdx([0, 10, 20, 30], 26) === 3, "nearestSortedIdx: 26 -> index of 30");

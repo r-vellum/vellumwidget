@@ -17,6 +17,7 @@ as_widget(
   nearest = TRUE,
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
+  legend_click = c("select", "hide", "mute"),
   a11y = TRUE,
   alt = NULL,
   hover_color = NULL,
@@ -63,6 +64,16 @@ mark's \code{tooltip} (one row per series) without a value-axis header.}
 a vertical rule at the shared x when \code{hover_mode = "x"}, a horizontal rule
 when \code{"y"}, and a full cross through the mark when \code{"closest"}. Colour is the
 \code{--vellumwidget-crosshair-stroke} CSS variable (a muted grey by default).}
+
+\item{legend_click}{What clicking a discrete-legend swatch does. \code{"select"}
+(default) selects the swatch's whole series (the established behaviour).
+\code{"hide"} makes the legend a visibility toggle — a single click hides/shows
+the series, a double-click isolates it (hides every other series; double-click
+again to restore all) — the reflexive legend interaction in plotly / ECharts /
+Highcharts. \code{"mute"} is the same but dims the series instead of removing it
+(its layout is kept). Hovering a swatch still highlights its series under every
+policy. Applies only where the plot draws an interactive legend (a discrete
+\code{color} / \code{shape} scale in \code{vellumplot}).}
 
 \item{a11y}{Accessibility (default \code{TRUE}). Makes the widget a keyboard- and
 screen-reader-navigable chart: the SVG is labelled as an interactive chart
