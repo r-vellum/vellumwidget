@@ -147,6 +147,7 @@ test_that("data-space inversion round-trips a mark's pixel position back to its 
 
 test_that("a custom (non-invertible) transform axis omits its data descriptor path", {
   skip_if_not_installed("vellumplot")
+  skip_if_not_installed("scales")
   d <- data.frame(a = c(1, 2, 4, 8), b = 1:4, id = letters[1:4])
   w <- vellumplot::vplot(d) |> vellumplot::mark_point(x = a, y = b, data_id = id) |>
     vellumplot::scale_x_continuous(trans = scales::transform_log(2)) |> as_widget()

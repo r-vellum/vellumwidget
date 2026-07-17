@@ -24,6 +24,7 @@ Imports:
     vellum (>= 0.4.0.9000)
 Suggests:
     crosstalk,
+    scales,
     shiny,
     vellumplot,
     testthat (>= 3.0.0)
