@@ -77,11 +77,11 @@ test_that("Phase 4 option toggles round-trip into the payload", {
   expect_false(o2$brush || o2$zoom || o2$toolbar || o2$nearest)
 })
 
-test_that("axis_zoom is opt-in and round-trips into the payload options", {
+test_that("axis_zoom defaults on and round-trips into the payload options", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
-  expect_false(as_widget(scene)$x$options$axisZoom)
-  expect_true(as_widget(scene, axis_zoom = TRUE)$x$options$axisZoom)
+  expect_true(as_widget(scene)$x$options$axisZoom)
+  expect_false(as_widget(scene, axis_zoom = FALSE)$x$options$axisZoom)
 })
 
 test_that("the payload carries per-panel scale descriptors from vellumplot", {
