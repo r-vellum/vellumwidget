@@ -44,6 +44,7 @@ interface Bbox {
 
 interface ElemMeta extends Partial<Bbox> {
   key: string;
+  mark?: string; // mark kind (point/circle/rect/segment/...); drives constant-size glyphs on zoom
   tooltip?: string;
   hover_group?: string;
   hover_color?: string; // per-element hover outline (Option 2; overrides the theme)
@@ -90,6 +91,7 @@ interface Options {
   navigator?: boolean; // show an overview x-range navigator strip below the plot
   navigatorHeight?: number; // strip height in px (default 56)
   axisZoom?: boolean; // axis-aware zoom: scale the data region + re-tick the axes, keeping the frame fixed (linear cartesian panels; SVG only)
+  zoomMarks?: "fixed" | "scale"; // under axis_zoom, keep glyph marks a constant pixel size ("fixed", default) or let them scale ("scale")
   tooltipDelay?: number; // ms to wait before showing the tooltip on hover (default 0)
   tooltipFollow?: boolean; // true (default): tip tracks the cursor; false: anchor above the mark
   tooltipSticky?: boolean; // true: tip accepts pointer events + lingers so links are clickable
@@ -126,6 +128,7 @@ interface StyleOpts {
 // through `asArray`. A legacy per-record array (`ElemMeta[]`) is still accepted.
 interface ColumnElements {
   key: string[] | string;
+  mark?: (string | null)[] | string;
   x0?: (number | null)[] | number;
   y0?: (number | null)[] | number;
   x1?: (number | null)[] | number;
@@ -219,6 +222,7 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
   const y0 = asColumn<number | null>(c.y0);
   const x1 = asColumn<number | null>(c.x1);
   const y1 = asColumn<number | null>(c.y1);
+  const mark = c.mark != null ? asColumn<string | null>(c.mark) : null;
   const tooltip = c.tooltip != null ? asColumn<string | null>(c.tooltip) : null;
   const hoverGroup = c.hover_group != null ? asColumn<string | null>(c.hover_group) : null;
   const hoverColor = c.hover_color != null ? asColumn<string | null>(c.hover_color) : null;
@@ -229,6 +233,7 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
   const out: ElemMeta[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const e: ElemMeta = { key: String(key[i]) };
+    if (mark && mark[i] != null) e.mark = String(mark[i]);
     // Assign bbox only when numeric — a `null` (R `NA`) means "no geometry", which
     // `hasBbox` must continue to reject.
     if (typeof x0[i] === "number") e.x0 = x0[i] as number;
@@ -374,6 +379,12 @@ function columnTolerance(sorted: number[] | Float64Array): number {
 // so we decline data-space mapping for that axis rather than return a native value
 // as if it were data (which would be silently wrong).
 const INVERTIBLE: Record<string, boolean> = { identity: true, log10: true, sqrt: true, reverse: true };
+// Glyph marks whose pixel size is decorative, so under axis-aware zoom they keep a
+// constant size (position re-maps, size does not) — the "real chart" behaviour.
+// Positional marks (rect/segment/line/path/polygon) instead scale with the data;
+// only their stroke width is held constant (non-scaling-stroke). See
+// `_docs/CONSTANT-SIZE-MARKS-DESIGN.md`.
+const GLYPH_MARKS: Record<string, boolean> = { point: true, circle: true, hexagon: true, sector: true };
 function canInvert(ax: AxisScale | undefined): ax is AxisScale {
   return !!ax && INVERTIBLE[ax.transform] === true;
 }
@@ -1269,7 +1280,12 @@ HTMLWidgets.widget({
       canvasEl.style.display = "block";
       const W = canvasEl.width, H = canvasEl.height;
       ctx.clearRect(0, 0, W, H);
-      const rScale = Math.min(W / vb.w, H / vb.h);
+      // "fixed" (default): draw each point at its full-view pixel size (scale from
+      // vb0), so zooming re-maps positions without growing the dots — parity with
+      // the SVG axis_zoom constant-size glyphs. "scale": grow with the view (vb).
+      const rScale = opts.zoomMarks === "scale"
+        ? Math.min(W / vb.w, H / vb.h)
+        : Math.min(W / vb0.w, H / vb0.h);
       const x0 = vb.x, y0 = vb.y, x1 = vb.x + vb.w, y1 = vb.y + vb.h;
       for (let i = 0; i < ptN; i++) {
         const px = ptCx[i], py = ptCy[i];
@@ -1742,6 +1758,7 @@ HTMLWidgets.widget({
         const t = viewToPan(vb, vb0);
         panGroup.setAttribute("transform",
           "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")");
+        setPanScaleVars(t); // keep constant-size glyphs the same pixel size
         if (svgEl) svgEl.setAttribute("viewBox", fmtViewBox(vb0));
         retick();
       } else if (svgEl && vb) {
@@ -1819,12 +1836,49 @@ HTMLWidgets.widget({
       retickLayer.setAttribute("aria-hidden", "true");
       retickLayer.setAttribute("viewBox", fmtViewBox(vb0));
       stage.appendChild(retickLayer);
-      // Seed the (identity) transform and the initial ticks for the full view, so
-      // the pan group is transform-ready before the first gesture.
+      // Seed the (identity) transform + inverse-scale vars and the initial ticks for
+      // the full view, so the pan group is transform-ready before the first gesture.
       const t = viewToPan(vb || vb0, vb0);
       panGroup.setAttribute("transform",
         "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")");
+      setPanScaleVars(t);
+      setupConstantMarks(); // fixed-size glyphs (default) + crisp strokes
       retick();
+    }
+    // The inverse of the pan-group scale, published as CSS custom properties so
+    // constant-size glyphs (which carry `scale(var(--vw-ix),var(--vw-iy))`) cancel
+    // it and keep their pixel size while their position still re-maps with T.
+    function setPanScaleVars(t: PanTransform): void {
+      if (!panGroup) return;
+      panGroup.style.setProperty("--vw-ix", String(t.sx ? 1 / t.sx : 1));
+      panGroup.style.setProperty("--vw-iy", String(t.sy ? 1 / t.sy : 1));
+    }
+    // Once per render (axis_zoom active, SVG): keep glyph marks a constant pixel
+    // size by counter-scaling them about their own centre from the shared vars, and
+    // hold every positional mark's stroke width constant. Skipped for zoom_marks =
+    // "scale" (glyphs then scale with the pan group, the older behaviour).
+    function setupConstantMarks(): void {
+      if (!axisZoomActive || opts.zoomMarks === "scale") return;
+      for (let i = 0; i < elements.length; i++) {
+        const e = elements[i];
+        if (!e.mark) continue;
+        const nodes = nodesByKey[e.key];
+        if (!nodes) continue;
+        const glyph = GLYPH_MARKS[e.mark] === true;
+        for (let j = 0; j < nodes.length; j++) {
+          const node = nodes[j] as SVGElement;
+          if (glyph) {
+            // Counter-scale about the glyph's own bbox centre (transform-box:
+            // fill-box makes transform-origin resolve there), so T re-maps the
+            // position but the shared inverse-scale vars cancel T's size change.
+            node.style.setProperty("transform-box", "fill-box");
+            node.style.setProperty("transform-origin", "center");
+            node.style.setProperty("transform", "scale(var(--vw-ix,1),var(--vw-iy,1))");
+          } else {
+            node.setAttribute("vector-effect", "non-scaling-stroke");
+          }
+        }
+      }
     }
     // Translate component of a node's `transform` (matrix e/f or translate x/y).
     function transTranslate(node: Element): { tx: number; ty: number } {
@@ -3162,6 +3216,10 @@ HTMLWidgets.widget({
         },
         axisZoomActive: function () { return axisZoomActive; },
         panTransform: function () { return panGroup ? panGroup.getAttribute("transform") : null; },
+        panScaleVars: function () {
+          if (!panGroup) return null;
+          return { ix: panGroup.style.getPropertyValue("--vw-ix"), iy: panGroup.style.getPropertyValue("--vw-iy") };
+        },
         // Re-ticked axis labels (their text + device-px position), for asserting the
         // re-tick output without a real layout engine.
         retickLabels: function () {

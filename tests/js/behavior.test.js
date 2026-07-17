@@ -1905,5 +1905,68 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     "nav+axis_zoom: base viewBox stays fixed (frame doesn't move)");
 }
 
+// ===================== constant-size markers on zoom (2B) =====================
+{
+  const T = window.__vellumwidgetTest;
+  // normalizeElements decodes the mark kind (columnar + scalar).
+  ok(T.normalizeElements({ key: ["a", "b"], mark: ["point", "rect"], x0: [1, 2], y0: [1, 2], x1: [2, 3], y1: [2, 3] })[0].mark === "point",
+    "constant-marks: normalizeElements decodes the mark kind");
+  ok(T.normalizeElements({ key: "a", mark: "circle", x0: 1, y0: 1, x1: 2, y1: 2 })[0].mark === "circle",
+    "constant-marks: mark kind survives the single-element (scalar) payload");
+
+  const panel = {
+    name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+  };
+  // A glyph (point) and a positional mark (rect), both keyed, inside the pan group.
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1" clip-path="url(#c0)"><g data-vellum-pan="panel-1-1">' +
+    '<path data-key="p" d="M98 48h4v4z"/><rect data-key="r" x="40" y="20" width="30" height="10"/>' +
+    '</g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">50</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">25</text></g></svg>';
+  function mountCM(zoomMarks) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e, 200, 100);
+    i.renderValue({
+      svg: svg,
+      elements: { key: ["p", "r"], mark: ["point", "rect"], x0: [98, 40], y0: [48, 20], x1: [102, 70], y1: [52, 30] },
+      panels: panel,
+      options: { axisZoom: true, zoomMarks: zoomMarks, hover: true, select: true, zoom: true, selectMode: "multiple" }
+    });
+    return { el: e, inst: i, pt: e.querySelector('[data-key="p"]'), rect: e.querySelector('[data-key="r"]') };
+  }
+
+  // "fixed" (default): the glyph is counter-scaled from the shared vars; the
+  // positional mark keeps a non-scaling stroke; neither the frame nor the data move yet.
+  const fx = mountCM("fixed");
+  ok(fx.inst._test.axisZoomActive() === true, "constant-marks: axis_zoom active for the test scene");
+  ok(/scale\(var\(--vw-ix/.test(fx.pt.style.transform || fx.pt.getAttribute("style") || ""),
+    "constant-marks: a point glyph counter-scales from the shared vars");
+  ok((fx.pt.style.getPropertyValue("transform-box") || "") === "fill-box",
+    "constant-marks: the glyph scales about its own bbox centre (transform-box: fill-box)");
+  ok(fx.rect.getAttribute("vector-effect") === "non-scaling-stroke",
+    "constant-marks: a positional mark (rect) gets a non-scaling stroke, not a counter-scale");
+  ok(!/scale\(var/.test(fx.rect.style.transform || ""),
+    "constant-marks: the positional mark is NOT counter-scaled (its geometry scales with the data)");
+  const v0 = fx.inst._test.panScaleVars();
+  ok(v0 && parseFloat(v0.ix) === 1 && parseFloat(v0.iy) === 1, "constant-marks: inverse-scale vars are 1 at the full view");
+  // zoom in 2x in x: the inverse var tracks 1/sx so the glyph stays its pixel size.
+  fx.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 });
+  const v1 = fx.inst._test.panScaleVars();
+  ok(v1 && Math.abs(parseFloat(v1.ix) - 0.5) < 1e-6 && Math.abs(parseFloat(v1.iy) - 0.5) < 1e-6,
+    "constant-marks: inverse-scale vars track 1/scale on zoom (0.5 at 2x)");
+
+  // "scale": opt out — glyphs are left to scale with the pan group (no counter-scale
+  // style, no shared vars applied to the glyph).
+  const sc = mountCM("scale");
+  ok(!/scale\(var/.test(sc.pt.style.transform || ""), "constant-marks: zoom_marks='scale' leaves glyphs scaling (no counter-scale)");
+  ok(sc.rect.getAttribute("vector-effect") !== "non-scaling-stroke",
+    "constant-marks: zoom_marks='scale' leaves strokes scaling too (older behaviour)");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

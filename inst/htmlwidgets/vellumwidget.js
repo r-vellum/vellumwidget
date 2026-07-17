@@ -532,6 +532,7 @@
     const y0 = asColumn(c.y0);
     const x1 = asColumn(c.x1);
     const y1 = asColumn(c.y1);
+    const mark = c.mark != null ? asColumn(c.mark) : null;
     const tooltip = c.tooltip != null ? asColumn(c.tooltip) : null;
     const hoverGroup = c.hover_group != null ? asColumn(c.hover_group) : null;
     const hoverColor = c.hover_color != null ? asColumn(c.hover_color) : null;
@@ -542,6 +543,7 @@
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       const e = { key: String(key[i]) };
+      if (mark && mark[i] != null) e.mark = String(mark[i]);
       if (typeof x0[i] === "number") e.x0 = x0[i];
       if (typeof y0[i] === "number") e.y0 = y0[i];
       if (typeof x1[i] === "number") e.x1 = x1[i];
@@ -645,6 +647,7 @@
     return isFinite(minGap) ? minGap / 2 : 1;
   }
   var INVERTIBLE = { identity: true, log10: true, sqrt: true, reverse: true };
+  var GLYPH_MARKS = { point: true, circle: true, hexagon: true, sector: true };
   function canInvert(ax) {
     return !!ax && INVERTIBLE[ax.transform] === true;
   }
@@ -1353,7 +1356,7 @@
         canvasEl.style.display = "block";
         const W = canvasEl.width, H = canvasEl.height;
         ctx.clearRect(0, 0, W, H);
-        const rScale = Math.min(W / vb.w, H / vb.h);
+        const rScale = opts.zoomMarks === "scale" ? Math.min(W / vb.w, H / vb.h) : Math.min(W / vb0.w, H / vb0.h);
         const x0 = vb.x, y0 = vb.y, x1 = vb.x + vb.w, y1 = vb.y + vb.h;
         for (let i = 0; i < ptN; i++) {
           const px = ptCx[i], py = ptCy[i];
@@ -1765,6 +1768,7 @@
             "transform",
             "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")"
           );
+          setPanScaleVars(t);
           if (svgEl) svgEl.setAttribute("viewBox", fmtViewBox(vb0));
           retick();
         } else if (svgEl && vb) {
@@ -1832,7 +1836,34 @@
           "transform",
           "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")"
         );
+        setPanScaleVars(t);
+        setupConstantMarks();
         retick();
+      }
+      function setPanScaleVars(t) {
+        if (!panGroup) return;
+        panGroup.style.setProperty("--vw-ix", String(t.sx ? 1 / t.sx : 1));
+        panGroup.style.setProperty("--vw-iy", String(t.sy ? 1 / t.sy : 1));
+      }
+      function setupConstantMarks() {
+        if (!axisZoomActive || opts.zoomMarks === "scale") return;
+        for (let i = 0; i < elements.length; i++) {
+          const e = elements[i];
+          if (!e.mark) continue;
+          const nodes = nodesByKey[e.key];
+          if (!nodes) continue;
+          const glyph = GLYPH_MARKS[e.mark] === true;
+          for (let j = 0; j < nodes.length; j++) {
+            const node = nodes[j];
+            if (glyph) {
+              node.style.setProperty("transform-box", "fill-box");
+              node.style.setProperty("transform-origin", "center");
+              node.style.setProperty("transform", "scale(var(--vw-ix,1),var(--vw-iy,1))");
+            } else {
+              node.setAttribute("vector-effect", "non-scaling-stroke");
+            }
+          }
+        }
       }
       function transTranslate(node) {
         const t = node.getAttribute("transform") || "";
@@ -3030,6 +3061,10 @@
           },
           panTransform: function() {
             return panGroup ? panGroup.getAttribute("transform") : null;
+          },
+          panScaleVars: function() {
+            if (!panGroup) return null;
+            return { ix: panGroup.style.getPropertyValue("--vw-ix"), iy: panGroup.style.getPropertyValue("--vw-iy") };
           },
           // Re-ticked axis labels (their text + device-px position), for asserting the
           // re-tick output without a real layout engine.

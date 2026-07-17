@@ -19,6 +19,7 @@ as_widget(
   navigator = FALSE,
   navigator_height = NULL,
   axis_zoom = TRUE,
+  zoom_marks = c("fixed", "scale"),
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
   legend_click = c("select", "hide", "mute"),
@@ -87,6 +88,15 @@ vellum's pannable-panel contract (\code{vl_viewport(pannable=)}) and the panel s
 metadata vellumplot emits (needs the current \code{vellum}/\code{vellumplot}). When
 combined with \code{navigator = TRUE}, the navigator's x-only zoom is rendered
 through it, so the x-axis re-ticks crisply instead of stretching.}
+
+\item{zoom_marks}{Under axis-aware zoom, whether \strong{glyph} marks (points,
+circles, hexagons, sector wedges) keep a constant pixel size. \code{"fixed"}
+(default): glyphs stay their original size and only their positions re-map, the
+way a charting library zooms — so points stay round (and don't stretch into
+ellipses under the navigator's x-only zoom). \code{"scale"}: glyphs scale with the
+zoom (the older behaviour; useful to read density). Positional marks (bars,
+error bars, lines, areas) always scale with the data either way; only their
+stroke width is held constant. No effect unless \code{axis_zoom} is active.}
 
 \item{hover_mode}{How hover gathers marks into the tooltip. \code{"closest"}
 (default) shows the single nearest mark. \code{"x"} (or \code{"y"}) gives a \emph{unified}
