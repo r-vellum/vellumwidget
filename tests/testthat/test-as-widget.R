@@ -84,6 +84,19 @@ test_that("axis_zoom defaults on and round-trips into the payload options", {
   expect_false(as_widget(scene, axis_zoom = FALSE)$x$options$axisZoom)
 })
 
+test_that("zoom_marks defaults to 'fixed', is validated, and elements carry the mark kind", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, gp = vellum::vl_gpar(fill = "red"),
+                                     key = c("a", "b")))
+  w <- as_widget(scene)
+  expect_equal(w$x$options$zoomMarks, "fixed")
+  expect_equal(as_widget(scene, zoom_marks = "scale")$x$options$zoomMarks, "scale")
+  expect_error(as_widget(scene, zoom_marks = "nope"))
+  # the mark kind rides along per element so the runtime can classify glyphs
+  expect_true("mark" %in% names(w$x$elements))
+  expect_true(all(w$x$elements$mark == "point"))
+})
+
 test_that("the payload carries per-panel scale descriptors from vellumplot", {
   skip_if_not_installed("vellumplot")
   df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, model = rownames(mtcars))

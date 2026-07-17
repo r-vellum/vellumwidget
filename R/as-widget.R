@@ -49,6 +49,16 @@
 #'   metadata vellumplot emits (needs the current `vellum`/`vellumplot`). When
 #'   combined with `navigator = TRUE`, the navigator's x-only zoom is rendered
 #'   through it, so the x-axis re-ticks crisply instead of stretching.
+#' @param zoom_marks Under axis-aware zoom, whether **glyph** marks (points,
+#'   circles, hexagons, sector wedges) keep a constant pixel size. `"fixed"`
+#'   (default): glyphs stay their original size and only their positions re-map, the
+#'   way a charting library zooms — so points stay round (and don't stretch into
+#'   ellipses under the navigator's x-only zoom). `"scale"`: glyphs scale with the
+#'   zoom (the older behaviour; useful to read density). Positional marks (bars,
+#'   error bars, lines, areas) always scale with the data either way; only their
+#'   stroke width is held constant. Applies under axis-aware zoom (SVG) and to the
+#'   crisp point layer in raster mode; no effect on a plain whole-scene viewBox zoom
+#'   (`axis_zoom = FALSE`, SVG).
 #' @param lasso Enable freehand **lasso-select** (default `TRUE`): a third drag
 #'   mode alongside brush and pan, cycled from the toolbar's mode button. Drag a
 #'   loop and every mark whose centre falls inside it is selected. Like the brush,
@@ -162,7 +172,7 @@ as_widget <- function(x, width = NULL, height = NULL,
                       tooltip = TRUE, hover = TRUE, select = TRUE,
                       brush = TRUE, lasso = TRUE, zoom = TRUE, toolbar = TRUE,
                       nearest = TRUE, navigator = FALSE, navigator_height = NULL,
-                      axis_zoom = TRUE,
+                      axis_zoom = TRUE, zoom_marks = c("fixed", "scale"),
                       hover_mode = c("closest", "x", "y"), crosshair = FALSE,
                       legend_click = c("select", "hide", "mute"),
                       a11y = TRUE, alt = NULL,
@@ -177,6 +187,7 @@ as_widget <- function(x, width = NULL, height = NULL,
                       text = c("native", "outline"),
                       elementId = NULL) {
   select_mode <- match.arg(select_mode)
+  zoom_marks <- match.arg(zoom_marks)
   hover_mode <- match.arg(hover_mode)
   legend_click <- match.arg(legend_click)
   mode <- match.arg(mode)
@@ -229,6 +240,7 @@ as_widget <- function(x, width = NULL, height = NULL,
       navigator = isTRUE(navigator),
       navigatorHeight = if (is.null(navigator_height)) NULL else as.numeric(navigator_height),
       axisZoom = isTRUE(axis_zoom),
+      zoomMarks = zoom_marks,
       zoom = isTRUE(zoom),
       toolbar = isTRUE(toolbar),
       nearest = isTRUE(nearest),
@@ -379,6 +391,11 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 
   cols <- list(
     key = as.character(el$key),
+    # The mark kind (point/circle/rect/segment/...), forwarded so the runtime can
+    # keep glyph marks a constant pixel size under axis-aware zoom while positional
+    # marks (bars, segments, lines) scale with the data. Already computed by
+    # `scene_model()`; NULL only if the column is somehow absent.
+    mark = if (!is.null(el$mark)) as.character(el$mark) else NULL,
     x0 = as.numeric(el$x0), y0 = as.numeric(el$y0),
     x1 = as.numeric(el$x1), y1 = as.numeric(el$y1),
     tooltip = meta_col("tooltip"),
