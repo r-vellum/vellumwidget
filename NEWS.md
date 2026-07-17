@@ -1,5 +1,21 @@
 # vellumwidget (development version)
 
+* **Freehand lasso-select.** A third drag mode alongside brush and pan (default
+  on; disable with `as_widget(lasso = FALSE)`). The toolbar's mode button now
+  cycles brush → lasso → pan, and it appears whenever at least two drag modes are
+  enabled. Drag a loop and every mark whose centre falls inside it is selected —
+  hit-tested with a point-in-polygon check over the Flatbush spatial index, so it
+  stays fast on large scenes. It reports through `input$<id>_brush` like the box
+  brush, with a `lasso = TRUE` flag and the loop's bounding box.
+
+* **Widgets report their current view to Shiny (`input$<id>_zoom`).** After a
+  zoom/pan settles — wheel, drag-pan release, pinch, keyboard, reset,
+  zoom-to-selection, or a `vw_zoom()` proxy call — the widget publishes
+  `list(x=, y=, w=, h=, zoomed=)`: the current `viewBox` (device-px) and whether
+  the view is zoomed in. A deduped state input, so a coordinated dashboard can
+  react to what the user is looking at. (Data-space limits await axis/scale
+  metadata in the scene contract.)
+
 * **Legend click-to-hide and double-click-to-isolate.** `as_widget()` gains a
   `legend_click` argument. The default `"select"` is unchanged (clicking a
   discrete-legend swatch selects its series). `"hide"` turns the legend into a

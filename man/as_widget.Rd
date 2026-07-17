@@ -12,6 +12,7 @@ as_widget(
   hover = TRUE,
   select = TRUE,
   brush = TRUE,
+  lasso = TRUE,
   zoom = TRUE,
   toolbar = TRUE,
   nearest = TRUE,
@@ -47,6 +48,13 @@ scene). Passed to \code{\link[htmlwidgets:createWidget]{htmlwidgets::createWidge
 
 \item{brush, zoom, toolbar}{Toggles for rectangular brush-select, wheel/drag
 pan-zoom (via the SVG \code{viewBox}), and the on-hover toolbar (all \code{TRUE}).}
+
+\item{lasso}{Enable freehand \strong{lasso-select} (default \code{TRUE}): a third drag
+mode alongside brush and pan, cycled from the toolbar's mode button. Drag a
+loop and every mark whose centre falls inside it is selected. Like the brush,
+it reports through \verb{input$<id>_brush} (with a \code{lasso = TRUE} flag and the
+loop's bounding box). The mode button appears whenever at least two drag modes
+are enabled.}
 
 \item{nearest}{When \code{TRUE} (default), hover snaps to the nearest mark within a
 small radius when the cursor is not directly over one (helps sparse points).}

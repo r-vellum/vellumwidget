@@ -227,10 +227,14 @@ ok(el3.querySelectorAll(".vellumwidget-toolbar button").length >= 5, "toolbar ha
 // mode toggle -> pan
 const modeBtn = el3.querySelector('.vellumwidget-toolbar [data-act="mode"]');
 ok(!!modeBtn, "mode toggle button present");
+// With brush + lasso + pan all enabled (defaults), the button cycles
+// brush -> lasso -> pan -> brush.
 modeBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-ok(el3.classList.contains("vellumwidget-mode-pan"), "mode toggle switches to pan mode");
+ok(el3.classList.contains("vellumwidget-mode-lasso"), "mode cycle: brush -> lasso");
 modeBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-ok(!el3.classList.contains("vellumwidget-mode-pan"), "mode toggle switches back to brush mode");
+ok(el3.classList.contains("vellumwidget-mode-pan") && !el3.classList.contains("vellumwidget-mode-lasso"), "mode cycle: lasso -> pan");
+modeBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+ok(!el3.classList.contains("vellumwidget-mode-pan") && !el3.classList.contains("vellumwidget-mode-lasso"), "mode cycle: pan -> brush");
 
 // wheel zoom shrinks the viewBox; reset restores it
 const before = svg3.getAttribute("viewBox");
@@ -1312,6 +1316,82 @@ ok(T.nearestSortedIdx([0, 10, 20, 30], -5) === 0, "nearestSortedIdx: below range
 ok(T.nearestSortedIdx([], 1) === -1, "nearestSortedIdx: empty -> -1");
 ok(T.columnTolerance([10, 10, 50, 50]) === 20, "columnTolerance: half the min gap between distinct positions");
 ok(T.columnTolerance([7]) === 1, "columnTolerance: fewer than two distinct positions -> fallback 1");
+
+// ===================== lasso select (#8) =====================
+// pure geometry
+{
+  const sq = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+  ok(T.pointInPolygon(5, 5, sq) === true, "pointInPolygon: interior point is inside");
+  ok(T.pointInPolygon(15, 5, sq) === false, "pointInPolygon: exterior point is outside");
+  const b = T.polyBounds([{ x: 2, y: 3 }, { x: 8, y: 1 }, { x: 5, y: 9 }]);
+  ok(b.x0 === 2 && b.y0 === 1 && b.x1 === 8 && b.y1 === 9, "polyBounds: spans the polygon vertices");
+  const lassoElems = [
+    { key: "a", x0: 4, y0: 4, x1: 6, y1: 6 },   // centre (5,5) inside sq
+    { key: "b", x0: 20, y0: 20, x1: 22, y1: 22 } // centre outside
+  ];
+  ok(
+    JSON.stringify(T.lassoKeys(lassoElems, sq)) === JSON.stringify(["a"]),
+    "lassoKeys: selects only marks whose centre is inside the polygon"
+  );
+  ok(T.lassoKeys(lassoElems, [{ x: 0, y: 0 }, { x: 1, y: 1 }]).length === 0, "lassoKeys: a degenerate (<3 pt) polygon selects nothing");
+}
+// index-backed lassoKeysIn via the instance seam (deterministic user coords)
+{
+  const elL = document.createElement("div");
+  document.body.appendChild(elL);
+  const iL = widgetDef.factory(elL);
+  iL.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 60 60">' +
+      '<path data-key="a" d="M4 4h2v2z"/><path data-key="b" d="M40 40h2v2z"/></svg>',
+    elements: { key: ["a", "b"], x0: [4, 40], y0: [4, 40], x1: [6, 42], y1: [6, 42] },
+    options: { hover: true, select: true, selectMode: "multiple", lasso: true }
+  });
+  const poly = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+  ok(JSON.stringify(iL._test.lassoKeysIn(poly)) === JSON.stringify(["a"]), "lassoKeysIn (index-backed): centre-in-polygon picks 'a', excludes 'b'");
+  ok(JSON.stringify(iL._test.availableModes()) === JSON.stringify(["brush", "lasso", "pan"]), "availableModes: brush + lasso + pan by default");
+}
+// lasso disabled -> not in the mode cycle
+{
+  const elNL = document.createElement("div");
+  document.body.appendChild(elNL);
+  const iNL = widgetDef.factory(elNL);
+  iNL.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60"><path data-key="a" d="M4 4h2v2z"/></svg>',
+    elements: { key: ["a"], x0: [4], y0: [4], x1: [6], y1: [6] },
+    options: { hover: true, select: true, brush: true, zoom: true, toolbar: true, selectMode: "multiple", lasso: false }
+  });
+  ok(iNL._test.availableModes().indexOf("lasso") === -1, "lasso=false: lasso is excluded from the mode cycle");
+}
+
+// ===================== view report -> input$<id>_zoom (#4) =====================
+{
+  const captured = {};
+  const savedShiny = window.Shiny;
+  const savedMode = window.HTMLWidgets.shinyMode;
+  window.HTMLWidgets.shinyMode = true;
+  window.Shiny = { setInputValue: function (id, v) { captured[id] = v; } };
+  const elZ = document.createElement("div");
+  elZ.id = "zt"; // shinyInput keys off el.id
+  document.body.appendChild(elZ);
+  const iZ = widgetDef.factory(elZ);
+  iZ.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><path data-key="a" d="M0 0h10v10z"/></svg>',
+    elements: { key: ["a"], x0: [0], y0: [0], x1: [10], y1: [10] },
+    options: { hover: true, select: true, zoom: true, toolbar: true, selectMode: "multiple" }
+  });
+  const svgZ = elZ.querySelector("svg");
+  const wheelZ = new window.WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true, clientX: 0, clientY: 0 });
+  Object.defineProperty(wheelZ, "target", { value: svgZ });
+  svgZ.dispatchEvent(wheelZ);
+  ok(!!captured["zt_zoom"], "view report: a wheel-zoom emits input$<id>_zoom");
+  ok(captured["zt_zoom"] && captured["zt_zoom"].w < 200 && captured["zt_zoom"].zoomed === true, "view report: reports the zoomed-in viewBox + zoomed flag");
+  // reset restores full view -> zoomed false
+  iZ._call("resetZoom");
+  ok(captured["zt_zoom"] && captured["zt_zoom"].w === 200 && captured["zt_zoom"].zoomed === false, "view report: reset reports the full view (zoomed=false)");
+  // restore globals so later code is unaffected
+  window.Shiny = savedShiny;
+  window.HTMLWidgets.shinyMode = savedMode;
+}
 
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

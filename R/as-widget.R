@@ -29,6 +29,12 @@
 #'   (all `TRUE`).
 #' @param brush,zoom,toolbar Toggles for rectangular brush-select, wheel/drag
 #'   pan-zoom (via the SVG `viewBox`), and the on-hover toolbar (all `TRUE`).
+#' @param lasso Enable freehand **lasso-select** (default `TRUE`): a third drag
+#'   mode alongside brush and pan, cycled from the toolbar's mode button. Drag a
+#'   loop and every mark whose centre falls inside it is selected. Like the brush,
+#'   it reports through `input$<id>_brush` (with a `lasso = TRUE` flag and the
+#'   loop's bounding box). The mode button appears whenever at least two drag modes
+#'   are enabled.
 #' @param nearest When `TRUE` (default), hover snaps to the nearest mark within a
 #'   small radius when the cursor is not directly over one (helps sparse points).
 #' @param hover_mode How hover gathers marks into the tooltip. `"closest"`
@@ -123,7 +129,8 @@
 #' @export
 as_widget <- function(x, width = NULL, height = NULL,
                       tooltip = TRUE, hover = TRUE, select = TRUE,
-                      brush = TRUE, zoom = TRUE, toolbar = TRUE, nearest = TRUE,
+                      brush = TRUE, lasso = TRUE, zoom = TRUE, toolbar = TRUE,
+                      nearest = TRUE,
                       hover_mode = c("closest", "x", "y"), crosshair = FALSE,
                       legend_click = c("select", "hide", "mute"),
                       a11y = TRUE, alt = NULL,
@@ -183,6 +190,7 @@ as_widget <- function(x, width = NULL, height = NULL,
       hover = isTRUE(hover),
       select = isTRUE(select),
       brush = isTRUE(brush),
+      lasso = isTRUE(lasso),
       zoom = isTRUE(zoom),
       toolbar = isTRUE(toolbar),
       nearest = isTRUE(nearest),
@@ -479,8 +487,15 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #'   \item{`input$plot_hover`}{The hovered key, or `NULL` when the pointer leaves a
 #'     mark. Updates as state (re-fires only when the hovered key changes).}
 #'   \item{`input$plot_brush`}{A list `list(keys=, x0=, y0=, x1=, y1=)` when a
-#'     brush gesture completes: the selected keys and the brushed rectangle in the
-#'     scene's device-pixel (viewBox) coordinates. An event input.}
+#'     brush (or lasso) gesture completes: the selected keys and the region's
+#'     bounding rectangle in the scene's device-pixel (viewBox) coordinates. A
+#'     lasso gesture also carries `lasso = TRUE`. An event input.}
+#'   \item{`input$plot_zoom`}{A list `list(x=, y=, w=, h=, zoomed=)` — the current
+#'     view (the SVG `viewBox` in device-pixel coordinates) plus a `zoomed` flag
+#'     (is the view narrower/shorter than the full extent). Updates as state when a
+#'     zoom/pan settles (wheel, drag-pan release, pinch, keyboard, reset,
+#'     zoom-to-selection, or a proxy [vw_zoom()]). Data-space limits await
+#'     axis/scale metadata in the scene contract.}
 #' }
 #'
 #' These are emitted only inside a live Shiny session; a static render (knitr,
