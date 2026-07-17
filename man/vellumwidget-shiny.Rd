@@ -49,6 +49,9 @@ bounding rectangle in the scene's device-pixel (viewBox) coordinates. A
 lasso gesture also carries \code{lasso = TRUE}. When the plot carries a cartesian
 scale (a \code{vellumplot} plot), it \emph{also} carries the region's \strong{data-space}
 bounds \verb{x0d,y0d,x1d,y1d} and the \code{panel} name. An event input.}
+\item{\code{input$plot_colorfilter}}{A length-2 numeric \code{c(lo, hi)} — the value
+range selected on a continuous colorbar (see the interactive colorbar
+filter); \code{NULL} when the full range is shown. State input.}
 \item{\code{input$plot_zoom}}{A list \code{list(x=, y=, w=, h=, zoomed=)} — the current
 view (the SVG \code{viewBox} in device-pixel coordinates) plus a \code{zoomed} flag
 (is the view narrower/shorter than the full extent). For a single-panel

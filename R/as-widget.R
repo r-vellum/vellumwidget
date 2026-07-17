@@ -205,6 +205,7 @@ as_widget <- function(x, width = NULL, height = NULL,
     svg = svg,
     elements = .vellumwidget_elements(model),
     panels = .vellumwidget_panels(model),
+    colorbar = .vellumwidget_colorbar(model),
     options = list(
       raster = use_raster,
       tooltip = isTRUE(tooltip),
@@ -384,8 +385,45 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     if (any(lengths(legend) > 0L)) cols$legend <- legend
   }
 
+  # Continuous colorbar filter value: numeric per element (or the column absent).
+  # Kept numeric (unlike the character meta columns) so the runtime can range-test it.
+  if (any_meta) {
+    present <- FALSE
+    fv <- vapply(meta, function(m) {
+      v <- if (is.null(m)) NULL else m[["filter_value"]]
+      if (is.null(v)) NA_real_ else { present <<- TRUE; as.numeric(v)[[1L]] }
+    }, numeric(1))
+    if (present) cols$filter_value <- fv
+  }
+
   # Drop the omitted (NULL) meta columns; the always-present key/bbox columns stay.
   cols[!vapply(cols, is.null, logical(1))]
+}
+
+# The interactive colorbar descriptor (continuous colour scales): the gradient
+# bar's device-px rectangle plus its value domain/orientation, carried on the
+# (unkeyed) bar element's `colorbar` meta by vellumplot. NULL when the scene has no
+# continuous colorbar. The runtime overlays a value-range filter on this rect and
+# hides marks whose `filter_value` falls outside the dragged range.
+.vellumwidget_colorbar <- function(model) {
+  el <- model$elements
+  if (is.null(el) || !nrow(el) || is.null(el$meta)) {
+    return(NULL)
+  }
+  for (i in seq_len(nrow(el))) {
+    cb <- el$meta[[i]][["colorbar"]]
+    if (is.null(cb)) next
+    rect <- c(el$x0[i], el$y0[i], el$x1[i], el$y1[i])
+    if (anyNA(rect) || !all(is.finite(rect))) next
+    return(drop_null(list(
+      x0 = as.numeric(el$x0[i]), y0 = as.numeric(el$y0[i]),
+      x1 = as.numeric(el$x1[i]), y1 = as.numeric(el$y1[i]),
+      lo = as.numeric(cb$lo), hi = as.numeric(cb$hi),
+      orientation = as.character(cb$orientation),
+      reverse = isTRUE(cb$reverse)
+    )))
+  }
+  NULL
 }
 
 # The per-panel geometry + scale descriptors the runtime needs to map device
@@ -560,6 +598,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #'     lasso gesture also carries `lasso = TRUE`. When the plot carries a cartesian
 #'     scale (a `vellumplot` plot), it *also* carries the region's **data-space**
 #'     bounds `x0d,y0d,x1d,y1d` and the `panel` name. An event input.}
+#'   \item{`input$plot_colorfilter`}{A length-2 numeric `c(lo, hi)` — the value
+#'     range selected on a continuous colorbar (see the interactive colorbar
+#'     filter); `NULL` when the full range is shown. State input.}
 #'   \item{`input$plot_zoom`}{A list `list(x=, y=, w=, h=, zoomed=)` — the current
 #'     view (the SVG `viewBox` in device-pixel coordinates) plus a `zoomed` flag
 #'     (is the view narrower/shorter than the full extent). For a single-panel

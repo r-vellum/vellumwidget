@@ -50,6 +50,20 @@ interface ElemMeta extends Partial<Bbox> {
   selected_color?: string; // per-element selected outline (Option 2)
   legend?: string[] | string; // series this mark belongs to ("<aes>:<value>")
   legend_for?: string; // a legend swatch: the series it highlights/selects
+  filter_value?: number; // value on a continuous colour scale (for the colorbar filter)
+}
+
+// The interactive colorbar descriptor (continuous colour scale): the gradient
+// bar's device-px rectangle + its value domain/orientation (from vellumplot).
+interface ColorbarInfo {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  lo: number;
+  hi: number;
+  orientation: string; // "v" | "h"
+  reverse?: boolean;
 }
 
 interface Options {
@@ -121,6 +135,7 @@ interface ColumnElements {
   selected_color?: (string | null)[] | string;
   legend_for?: (string | null)[] | string;
   legend?: (string[] | string | null)[] | string[] | string;
+  filter_value?: (number | null)[] | number;
 }
 
 // Per-axis scale descriptor (from vellumplot's `scales` panel meta): the data and
@@ -152,6 +167,7 @@ interface Payload {
   svg: string;
   elements: ElemMeta[] | ColumnElements;
   panels?: PanelInfo[] | PanelInfo; // cartesian data panels (htmlwidgets may unbox a length-1 list)
+  colorbar?: ColorbarInfo; // interactive continuous-colour colorbar (optional)
   options: Options;
 }
 
@@ -208,6 +224,7 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
   const selectedColor = c.selected_color != null ? asColumn<string | null>(c.selected_color) : null;
   const legendFor = c.legend_for != null ? asColumn<string | null>(c.legend_for) : null;
   const legend = c.legend != null ? asColumn<string[] | string | null>(c.legend) : null;
+  const filterValue = c.filter_value != null ? asColumn<number | null>(c.filter_value) : null;
   const out: ElemMeta[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const e: ElemMeta = { key: String(key[i]) };
@@ -226,6 +243,7 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
       const v = legend[i];
       if (v != null && !(Array.isArray(v) && v.length === 0)) e.legend = v;
     }
+    if (filterValue && typeof filterValue[i] === "number") e.filter_value = filterValue[i] as number;
     out[i] = e;
   }
   return out;
@@ -479,6 +497,20 @@ const VELLUMWIDGET_CSS = `
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;
 }
+/* Continuous colorbar filter: an overlay on the gradient bar. The dim rects cover
+   the out-of-range ends; the handles are draggable. Out-of-range marks fade. */
+.vellumwidget-colorbar-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 6; overflow: visible;
+}
+.vellumwidget-cb-dim { fill: rgba(255,255,255,0.66); pointer-events: none; }
+@media (prefers-color-scheme: dark) { .vellumwidget-cb-dim { fill: rgba(17,24,39,0.66); } }
+.vellumwidget-cb-handle {
+  fill: #ffffff; stroke: #2563eb; stroke-width: 1.5px; pointer-events: auto;
+}
+.vellumwidget-root.vellumwidget-cb-v .vellumwidget-cb-handle { cursor: ns-resize; }
+.vellumwidget-root.vellumwidget-cb-h .vellumwidget-cb-handle { cursor: ew-resize; }
+[data-key].vellumwidget-colorfiltered { opacity: var(--vellumwidget-colorfilter-opacity, 0.12); }
 /* Crosshair guide rule(s) for unified hover — above the base image / canvas,
    below the highlight rings so a highlighted mark still reads on top. */
 .vellumwidget-crosshair-layer {
@@ -725,6 +757,13 @@ HTMLWidgets.widget({
     // marking the visible x-range. Built once per render when opts.navigator.
     let navEl: HTMLElement | null = null;
     let navWindow: HTMLElement | null = null;
+    // Continuous colorbar filter: the descriptor + its overlay layer, the current
+    // selected value range (null = full), and the set of marks currently filtered
+    // out (dimmed + inert), so hit-testing skips them like any other filter.
+    let colorbar: ColorbarInfo | null = null;
+    let colorbarLayer: SVGSVGElement | null = null;
+    let colorRange: { a: number; b: number } | null = null;
+    let colorHiddenSet: Record<string, boolean> = {};
     let meta: Record<string, ElemMeta> = {};
     let groups: Record<string, string[]> = {};
     let legendIndex: Record<string, string[]> = {}; // series key -> member element keys
@@ -1442,7 +1481,7 @@ HTMLWidgets.widget({
     // hidden datum can be hovered, tooltipped, or (re-)selected. Muted legend marks
     // stay visible and are NOT inert.
     function inert(k: string): boolean {
-      return !!hiddenKeySet[k] || !!filteredKeySet[k];
+      return !!hiddenKeySet[k] || !!filteredKeySet[k] || !!colorHiddenSet[k];
     }
     function dropInert(keys: string[]): string[] {
       return keys.filter((k) => !inert(k));
@@ -1581,6 +1620,7 @@ HTMLWidgets.widget({
       // Keep the hover overlay's coordinate space aligned with the base under pan/zoom.
       if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
       if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
+      if (colorbarLayer && vb) colorbarLayer.setAttribute("viewBox", fmtViewBox(vb));
       // Redraw the crisp point layer for the new view (no-op unless raster + zoomed in).
       drawPoints();
       updateNav(); // keep the navigator window in sync with the view
@@ -1714,6 +1754,154 @@ HTMLWidgets.widget({
       navWindow.addEventListener("pointerdown", start("pan"));
       hL.addEventListener("pointerdown", start("l"));
       hR.addEventListener("pointerdown", start("r"));
+    }
+
+    // --- continuous colorbar filter ---
+    // Device-px position along the bar for a value (in the overlay's viewBox space),
+    // and its inverse. `t` = value fraction (0 at lo, 1 at hi); orientation + reverse
+    // decide which bar end is `lo`. Vertical bars put the high value at the top (y0).
+    function cbPos(v: number): number {
+      const cb = colorbar!;
+      const t = cb.hi === cb.lo ? 0 : (v - cb.lo) / (cb.hi - cb.lo);
+      if (cb.orientation === "h") {
+        const f = cb.reverse ? 1 - t : t;
+        return cb.x0 + f * (cb.x1 - cb.x0);
+      }
+      const f = cb.reverse ? t : 1 - t;
+      return cb.y0 + f * (cb.y1 - cb.y0);
+    }
+    function cbValueAt(pos: number): number {
+      const cb = colorbar!;
+      if (cb.orientation === "h") {
+        let f = cb.x1 === cb.x0 ? 0 : (pos - cb.x0) / (cb.x1 - cb.x0);
+        const t = cb.reverse ? 1 - f : f;
+        return cb.lo + t * (cb.hi - cb.lo);
+      }
+      let f = cb.y1 === cb.y0 ? 0 : (pos - cb.y0) / (cb.y1 - cb.y0);
+      const t = cb.reverse ? f : 1 - f;
+      return cb.lo + t * (cb.hi - cb.lo);
+    }
+    function cbRect(x: number, y: number, w: number, h: number, cls: string): SVGRectElement {
+      const r = document.createElementNS(SVGNS, "rect") as SVGRectElement;
+      r.setAttribute("x", String(x));
+      r.setAttribute("y", String(y));
+      r.setAttribute("width", String(Math.max(0, w)));
+      r.setAttribute("height", String(Math.max(0, h)));
+      r.setAttribute("class", cls);
+      return r;
+    }
+    // Redraw the colorbar overlay for the current `colorRange`: two dim rects over
+    // the out-of-range ends of the bar, and two draggable handles at the range ends.
+    function drawColorbarControl(): void {
+      if (!colorbarLayer) return;
+      while (colorbarLayer.firstChild) colorbarLayer.removeChild(colorbarLayer.firstChild);
+      if (!colorbar || !colorRange) return;
+      const cb = colorbar;
+      const pa = cbPos(colorRange.a);
+      const pb = cbPos(colorRange.b);
+      const lo = Math.min(pa, pb);
+      const hi = Math.max(pa, pb);
+      const mkHandle = (pos: number, which: string): SVGRectElement => {
+        const H = 4; // handle thickness along the bar axis
+        const r = cb.orientation === "h"
+          ? cbRect(pos - H / 2, cb.y0 - 2, H, cb.y1 - cb.y0 + 4, "vellumwidget-cb-handle")
+          : cbRect(cb.x0 - 2, pos - H / 2, cb.x1 - cb.x0 + 4, H, "vellumwidget-cb-handle");
+        r.setAttribute("vector-effect", "non-scaling-stroke");
+        r.setAttribute("data-cb", which);
+        return r;
+      };
+      if (cb.orientation === "h") {
+        colorbarLayer.appendChild(cbRect(cb.x0, cb.y0, lo - cb.x0, cb.y1 - cb.y0, "vellumwidget-cb-dim"));
+        colorbarLayer.appendChild(cbRect(hi, cb.y0, cb.x1 - hi, cb.y1 - cb.y0, "vellumwidget-cb-dim"));
+      } else {
+        colorbarLayer.appendChild(cbRect(cb.x0, cb.y0, cb.x1 - cb.x0, lo - cb.y0, "vellumwidget-cb-dim"));
+        colorbarLayer.appendChild(cbRect(cb.x0, hi, cb.x1 - cb.x0, cb.y1 - hi, "vellumwidget-cb-dim"));
+      }
+      colorbarLayer.appendChild(mkHandle(pa, "a"));
+      colorbarLayer.appendChild(mkHandle(pb, "b"));
+    }
+    // Dim + make inert every mark whose continuous value is outside [a, b]; report
+    // the range to Shiny. A full range clears the filter.
+    function applyColorFilter(): void {
+      clearClass("vellumwidget-colorfiltered");
+      colorHiddenSet = {};
+      if (!colorbar || !colorRange) { shinyInput("colorfilter", null); return; }
+      const a = colorRange.a;
+      const b = colorRange.b;
+      const full = a <= colorbar.lo + 1e-9 && b >= colorbar.hi - 1e-9;
+      if (!full) {
+        const outKeys: string[] = [];
+        for (let i = 0; i < elements.length; i++) {
+          const e = elements[i];
+          if (typeof e.filter_value === "number" && (e.filter_value < a || e.filter_value > b) && !colorHiddenSet[e.key]) {
+            colorHiddenSet[e.key] = true;
+            outKeys.push(e.key);
+          }
+        }
+        addClassForKeys(outKeys, "vellumwidget-colorfiltered");
+      }
+      shinyInput("colorfilter", full ? null : [a, b]);
+    }
+    // Set the selected value range (clamped, ordered) and apply. The runtime entry
+    // point for a handle drag and the test seam.
+    function setColorRange(a: number, b: number): void {
+      if (!colorbar) return;
+      const lo = colorbar.lo, hi = colorbar.hi;
+      a = Math.min(hi, Math.max(lo, a));
+      b = Math.min(hi, Math.max(lo, b));
+      colorRange = { a: Math.min(a, b), b: Math.max(a, b) };
+      drawColorbarControl();
+      applyColorFilter();
+    }
+    function buildColorbar(): void {
+      if (colorbarLayer) { colorbarLayer.remove(); colorbarLayer = null; }
+      colorHiddenSet = {};
+      colorRange = null;
+      el.classList.remove("vellumwidget-cb-v", "vellumwidget-cb-h");
+      // No control in raster mode (no per-element nodes to dim).
+      if (!colorbar || rasterMode || !stage) return;
+      colorbarLayer = document.createElementNS(SVGNS, "svg") as SVGSVGElement;
+      colorbarLayer.setAttribute("class", "vellumwidget-colorbar-layer");
+      colorbarLayer.setAttribute("aria-hidden", "true");
+      if (vb0) colorbarLayer.setAttribute("viewBox", fmtViewBox(vb0));
+      stage.appendChild(colorbarLayer);
+      el.classList.add(colorbar.orientation === "h" ? "vellumwidget-cb-h" : "vellumwidget-cb-v");
+      colorRange = { a: colorbar.lo, b: colorbar.hi };
+      drawColorbarControl();
+      wireColorbar();
+    }
+    // Drag a handle -> update its end of the range; double-click the bar -> reset.
+    function wireColorbar(): void {
+      if (!colorbarLayer) return;
+      let dragWhich: "" | "a" | "b" = "";
+      const onMove = (ev: PointerEvent): void => {
+        if (!dragWhich || !colorbar || !colorRange) return;
+        const u = toUser(ev.clientX, ev.clientY);
+        const v = cbValueAt(colorbar.orientation === "h" ? u.x : u.y);
+        if (dragWhich === "a") setColorRange(v, colorRange.b);
+        else setColorRange(colorRange.a, v);
+      };
+      const onUp = (): void => {
+        dragWhich = "";
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+      };
+      colorbarLayer.addEventListener("pointerdown", function (ev) {
+        const w = (ev.target as Element).getAttribute && (ev.target as Element).getAttribute("data-cb");
+        if (w !== "a" && w !== "b") return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        dragWhich = w;
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+        window.addEventListener("pointercancel", onUp);
+      });
+      colorbarLayer.addEventListener("dblclick", function (ev) {
+        if (!colorbar) return;
+        ev.preventDefault();
+        setColorRange(colorbar.lo, colorbar.hi);
+      });
     }
 
     // --- brush overlay (screen coords for display; user coords for hit-test) ---
@@ -2484,6 +2672,7 @@ HTMLWidgets.widget({
         );
         elements = normalizeElements(x.elements);
         panels = normalizePanels(x.panels);
+        colorbar = x.colorbar || null;
         meta = {};
         groups = {};
         legendIndex = {};
@@ -2597,6 +2786,7 @@ HTMLWidgets.widget({
           wire(svgEl);
           buildToolbar();
           buildNavigator();
+          buildColorbar();
           setMode(availableModes()[0] || "brush"); // first enabled mode is the default
           tip.classList.toggle("vellumwidget-tip-sticky", !!opts.tooltipSticky);
           applyStyling();
@@ -2646,6 +2836,10 @@ HTMLWidgets.widget({
         brushDataFields: brushDataFields,
         hasNavigator: function () { return !!navEl; },
         navToView: navToView,
+        hasColorbar: function () { return !!colorbarLayer; },
+        setColorRange: setColorRange,
+        colorHidden: function () { return Object.keys(colorHiddenSet); },
+        cbHandleCount: function () { return colorbarLayer ? colorbarLayer.querySelectorAll(".vellumwidget-cb-handle").length : 0; },
         navWindowFrac: function () {
           if (!navWindow) return null;
           return { left: parseFloat(navWindow.style.left) || 0, width: parseFloat(navWindow.style.width) || 0 };
