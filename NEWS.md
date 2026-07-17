@@ -1,5 +1,15 @@
 # vellumwidget (development version)
 
+* **Interactive continuous colorbar filter (visualMap).** When a `vellumplot` plot
+  maps a continuous `color` scale, its colorbar becomes a range filter: drag the
+  two handles on the gradient bar to a value range and marks whose colour value
+  falls outside it fade out (and drop out of hover/brush hit-testing); double-click
+  the bar to reset. The selected range is reported to Shiny as
+  `input$<id>_colorfilter = c(lo, hi)` (`NULL` at the full range). Automatic — no
+  argument to set — whenever the plot has a continuous colorbar (needs the current
+  development `vellumplot`; SVG mode). Discrete/binned colour legends keep their
+  existing click-to-hide interaction.
+
 * **Tooltip polish.** `as_widget()` gains `tooltip_delay` (ms to wait before the
   tooltip appears — the highlight is immediate, only the tooltip waits),
   `tooltip_follow` (`TRUE`, the default, tracks the cursor; `FALSE` anchors above

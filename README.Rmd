@@ -33,7 +33,8 @@ per-element `data-key`s, bounding boxes, and a `scene_model()` element table,
 click-select (single/multiple) · drag a rectangle to brush-select or a freehand
 lasso · wheel / pan-drag to pan-zoom · discrete-legend interaction (hover a swatch to highlight
 its series, click to select — or `legend_click = "hide"` to toggle/isolate
-series visibility) · optional overview navigator (`navigator = TRUE`: a
+series visibility) · continuous colorbar filter (drag a value range on the
+colorbar to fade out-of-range marks) · optional overview navigator (`navigator = TRUE`: a
 draggable range strip for long series) · toolbar (mode toggle,
 zoom-to-selection, reset, save SVG/PNG, fullscreen) · linked views across a
 `group` (selection, hover, and pan/zoom). Each is opt-outable via an

@@ -1737,5 +1737,46 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(!dns.tip.classList.contains("vellumwidget-tip-sticky"), "tooltip (non-sticky): no sticky class");
 }
 
+// ===================== continuous colorbar filter (#12) =====================
+{
+  function mountCB(withCb) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e);
+    const payload = {
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="100" viewBox="0 0 120 100">' +
+        '<path data-key="m1" d="M10 10h4v4z"/><path data-key="m2" d="M20 10h4v4z"/>' +
+        '<path data-key="m3" d="M30 10h4v4z"/><path data-key="m4" d="M40 10h4v4z"/></svg>',
+      elements: {
+        key: ["m1", "m2", "m3", "m4"],
+        x0: [10, 20, 30, 40], y0: [10, 10, 10, 10], x1: [14, 24, 34, 44], y1: [14, 14, 14, 14],
+        filter_value: [10, 20, 30, 40]
+      },
+      options: { hover: true, select: true, brush: true, selectMode: "multiple" }
+    };
+    if (withCb) payload.colorbar = { x0: 100, y0: 10, x1: 112, y1: 90, lo: 0, hi: 50, orientation: "v", reverse: false };
+    i.renderValue(payload);
+    return { el: e, inst: i };
+  }
+  // absent without a colorbar payload
+  ok(mountCB(false).inst._test.hasColorbar() === false, "colorbar: no control without a colorbar payload");
+  const C = mountCB(true);
+  ok(C.inst._test.hasColorbar() === true, "colorbar: control built when the payload carries a colorbar");
+  ok(C.inst._test.cbHandleCount() === 2, "colorbar: two draggable handles");
+  // narrow the range to [15,35] -> m1(10) and m4(40) filtered out; m2/m3 kept
+  C.inst._test.setColorRange(15, 35);
+  ok(JSON.stringify(C.inst._test.colorHidden().sort()) === JSON.stringify(["m1", "m4"]),
+    "colorbar: marks outside the value range are filtered out");
+  ok(C.el.querySelector('[data-key="m1"]').classList.contains("vellumwidget-colorfiltered"), "colorbar: out-of-range mark is dimmed");
+  ok(!C.el.querySelector('[data-key="m2"]').classList.contains("vellumwidget-colorfiltered"), "colorbar: in-range mark is not dimmed");
+  // a colour-filtered mark is inert (hover skips it), like any other filter
+  fireOn(C.el.querySelector("svg"), "pointermove", C.el.querySelector('[data-key="m1"]'));
+  ok(!C.el.querySelector(".vellumwidget-tip").classList.contains("vellumwidget-show"), "colorbar: a filtered-out mark is not hovered");
+  // widen back to the full range -> filter cleared
+  C.inst._test.setColorRange(0, 50);
+  ok(C.inst._test.colorHidden().length === 0, "colorbar: restoring the full range clears the filter");
+  ok(C.el.querySelectorAll(".vellumwidget-colorfiltered").length === 0, "colorbar: no marks dimmed at the full range");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

@@ -157,6 +157,33 @@ test_that("a custom (non-invertible) transform axis omits its data descriptor pa
   expect_false(p$x$transform %in% c("identity", "log10", "sqrt", "reverse"))
 })
 
+test_that("a continuous colour plot emits a colorbar descriptor + per-mark filter_value", {
+  skip_if_not_installed("vellumplot")
+  df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, hp = mtcars$hp, m = rownames(mtcars))
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = wt, y = mpg, color = hp, data_id = m) |>
+    as_widget()
+  cb <- w$x$colorbar
+  expect_false(is.null(cb))
+  expect_equal(c(cb$lo, cb$hi), range(df$hp))
+  expect_true(cb$orientation %in% c("v", "h"))
+  expect_true(cb$x1 > cb$x0 && cb$y1 > cb$y0) # a real device-px rect
+  # per-mark value carried for the runtime to range-test
+  expect_true("filter_value" %in% names(w$x$elements))
+  i <- which(w$x$elements$key == "Mazda RX4")
+  expect_equal(w$x$elements$filter_value[i], df$hp[df$m == "Mazda RX4"])
+})
+
+test_that("a plot with no continuous colour scale emits no colorbar", {
+  skip_if_not_installed("vellumplot")
+  df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, m = rownames(mtcars))
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = wt, y = mpg, data_id = m) |>
+    as_widget()
+  expect_null(w$x$colorbar)
+  expect_false("filter_value" %in% names(w$x$elements))
+})
+
 test_that("a raw vellum scene (no scales meta) yields no panels payload", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))

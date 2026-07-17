@@ -538,6 +538,7 @@
     const selectedColor = c.selected_color != null ? asColumn(c.selected_color) : null;
     const legendFor = c.legend_for != null ? asColumn(c.legend_for) : null;
     const legend = c.legend != null ? asColumn(c.legend) : null;
+    const filterValue = c.filter_value != null ? asColumn(c.filter_value) : null;
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       const e = { key: String(key[i]) };
@@ -554,6 +555,7 @@
         const v = legend[i];
         if (v != null && !(Array.isArray(v) && v.length === 0)) e.legend = v;
       }
+      if (filterValue && typeof filterValue[i] === "number") e.filter_value = filterValue[i];
       out[i] = e;
     }
     return out;
@@ -746,6 +748,20 @@
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;
 }
+/* Continuous colorbar filter: an overlay on the gradient bar. The dim rects cover
+   the out-of-range ends; the handles are draggable. Out-of-range marks fade. */
+.vellumwidget-colorbar-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 6; overflow: visible;
+}
+.vellumwidget-cb-dim { fill: rgba(255,255,255,0.66); pointer-events: none; }
+@media (prefers-color-scheme: dark) { .vellumwidget-cb-dim { fill: rgba(17,24,39,0.66); } }
+.vellumwidget-cb-handle {
+  fill: #ffffff; stroke: #2563eb; stroke-width: 1.5px; pointer-events: auto;
+}
+.vellumwidget-root.vellumwidget-cb-v .vellumwidget-cb-handle { cursor: ns-resize; }
+.vellumwidget-root.vellumwidget-cb-h .vellumwidget-cb-handle { cursor: ew-resize; }
+[data-key].vellumwidget-colorfiltered { opacity: var(--vellumwidget-colorfilter-opacity, 0.12); }
 /* Crosshair guide rule(s) for unified hover \u2014 above the base image / canvas,
    below the highlight rings so a highlighted mark still reads on top. */
 .vellumwidget-crosshair-layer {
@@ -932,6 +948,10 @@
       let toolbarEl = null;
       let navEl = null;
       let navWindow = null;
+      let colorbar = null;
+      let colorbarLayer = null;
+      let colorRange = null;
+      let colorHiddenSet = {};
       let meta = {};
       let groups = {};
       let legendIndex = {};
@@ -1529,7 +1549,7 @@
         }
       }
       function inert(k) {
-        return !!hiddenKeySet[k] || !!filteredKeySet[k];
+        return !!hiddenKeySet[k] || !!filteredKeySet[k] || !!colorHiddenSet[k];
       }
       function dropInert(keys) {
         return keys.filter((k) => !inert(k));
@@ -1656,6 +1676,7 @@
         if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
         if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
         if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
+        if (colorbarLayer && vb) colorbarLayer.setAttribute("viewBox", fmtViewBox(vb));
         drawPoints();
         updateNav();
         if (dragging !== "pan" && pinchDist === 0) reportView();
@@ -1776,6 +1797,145 @@
         navWindow.addEventListener("pointerdown", start("pan"));
         hL.addEventListener("pointerdown", start("l"));
         hR.addEventListener("pointerdown", start("r"));
+      }
+      function cbPos(v) {
+        const cb = colorbar;
+        const t = cb.hi === cb.lo ? 0 : (v - cb.lo) / (cb.hi - cb.lo);
+        if (cb.orientation === "h") {
+          const f2 = cb.reverse ? 1 - t : t;
+          return cb.x0 + f2 * (cb.x1 - cb.x0);
+        }
+        const f = cb.reverse ? t : 1 - t;
+        return cb.y0 + f * (cb.y1 - cb.y0);
+      }
+      function cbValueAt(pos) {
+        const cb = colorbar;
+        if (cb.orientation === "h") {
+          let f2 = cb.x1 === cb.x0 ? 0 : (pos - cb.x0) / (cb.x1 - cb.x0);
+          const t2 = cb.reverse ? 1 - f2 : f2;
+          return cb.lo + t2 * (cb.hi - cb.lo);
+        }
+        let f = cb.y1 === cb.y0 ? 0 : (pos - cb.y0) / (cb.y1 - cb.y0);
+        const t = cb.reverse ? f : 1 - f;
+        return cb.lo + t * (cb.hi - cb.lo);
+      }
+      function cbRect(x, y, w, h, cls) {
+        const r = document.createElementNS(SVGNS, "rect");
+        r.setAttribute("x", String(x));
+        r.setAttribute("y", String(y));
+        r.setAttribute("width", String(Math.max(0, w)));
+        r.setAttribute("height", String(Math.max(0, h)));
+        r.setAttribute("class", cls);
+        return r;
+      }
+      function drawColorbarControl() {
+        if (!colorbarLayer) return;
+        while (colorbarLayer.firstChild) colorbarLayer.removeChild(colorbarLayer.firstChild);
+        if (!colorbar || !colorRange) return;
+        const cb = colorbar;
+        const pa = cbPos(colorRange.a);
+        const pb = cbPos(colorRange.b);
+        const lo = Math.min(pa, pb);
+        const hi = Math.max(pa, pb);
+        const mkHandle = (pos, which) => {
+          const H = 4;
+          const r = cb.orientation === "h" ? cbRect(pos - H / 2, cb.y0 - 2, H, cb.y1 - cb.y0 + 4, "vellumwidget-cb-handle") : cbRect(cb.x0 - 2, pos - H / 2, cb.x1 - cb.x0 + 4, H, "vellumwidget-cb-handle");
+          r.setAttribute("vector-effect", "non-scaling-stroke");
+          r.setAttribute("data-cb", which);
+          return r;
+        };
+        if (cb.orientation === "h") {
+          colorbarLayer.appendChild(cbRect(cb.x0, cb.y0, lo - cb.x0, cb.y1 - cb.y0, "vellumwidget-cb-dim"));
+          colorbarLayer.appendChild(cbRect(hi, cb.y0, cb.x1 - hi, cb.y1 - cb.y0, "vellumwidget-cb-dim"));
+        } else {
+          colorbarLayer.appendChild(cbRect(cb.x0, cb.y0, cb.x1 - cb.x0, lo - cb.y0, "vellumwidget-cb-dim"));
+          colorbarLayer.appendChild(cbRect(cb.x0, hi, cb.x1 - cb.x0, cb.y1 - hi, "vellumwidget-cb-dim"));
+        }
+        colorbarLayer.appendChild(mkHandle(pa, "a"));
+        colorbarLayer.appendChild(mkHandle(pb, "b"));
+      }
+      function applyColorFilter() {
+        clearClass("vellumwidget-colorfiltered");
+        colorHiddenSet = {};
+        if (!colorbar || !colorRange) {
+          shinyInput("colorfilter", null);
+          return;
+        }
+        const a = colorRange.a;
+        const b = colorRange.b;
+        const full = a <= colorbar.lo + 1e-9 && b >= colorbar.hi - 1e-9;
+        if (!full) {
+          const outKeys = [];
+          for (let i = 0; i < elements.length; i++) {
+            const e = elements[i];
+            if (typeof e.filter_value === "number" && (e.filter_value < a || e.filter_value > b) && !colorHiddenSet[e.key]) {
+              colorHiddenSet[e.key] = true;
+              outKeys.push(e.key);
+            }
+          }
+          addClassForKeys(outKeys, "vellumwidget-colorfiltered");
+        }
+        shinyInput("colorfilter", full ? null : [a, b]);
+      }
+      function setColorRange(a, b) {
+        if (!colorbar) return;
+        const lo = colorbar.lo, hi = colorbar.hi;
+        a = Math.min(hi, Math.max(lo, a));
+        b = Math.min(hi, Math.max(lo, b));
+        colorRange = { a: Math.min(a, b), b: Math.max(a, b) };
+        drawColorbarControl();
+        applyColorFilter();
+      }
+      function buildColorbar() {
+        if (colorbarLayer) {
+          colorbarLayer.remove();
+          colorbarLayer = null;
+        }
+        colorHiddenSet = {};
+        colorRange = null;
+        el.classList.remove("vellumwidget-cb-v", "vellumwidget-cb-h");
+        if (!colorbar || rasterMode || !stage) return;
+        colorbarLayer = document.createElementNS(SVGNS, "svg");
+        colorbarLayer.setAttribute("class", "vellumwidget-colorbar-layer");
+        colorbarLayer.setAttribute("aria-hidden", "true");
+        if (vb0) colorbarLayer.setAttribute("viewBox", fmtViewBox(vb0));
+        stage.appendChild(colorbarLayer);
+        el.classList.add(colorbar.orientation === "h" ? "vellumwidget-cb-h" : "vellumwidget-cb-v");
+        colorRange = { a: colorbar.lo, b: colorbar.hi };
+        drawColorbarControl();
+        wireColorbar();
+      }
+      function wireColorbar() {
+        if (!colorbarLayer) return;
+        let dragWhich = "";
+        const onMove = (ev) => {
+          if (!dragWhich || !colorbar || !colorRange) return;
+          const u = toUser(ev.clientX, ev.clientY);
+          const v = cbValueAt(colorbar.orientation === "h" ? u.x : u.y);
+          if (dragWhich === "a") setColorRange(v, colorRange.b);
+          else setColorRange(colorRange.a, v);
+        };
+        const onUp = () => {
+          dragWhich = "";
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+          window.removeEventListener("pointercancel", onUp);
+        };
+        colorbarLayer.addEventListener("pointerdown", function(ev) {
+          const w = ev.target.getAttribute && ev.target.getAttribute("data-cb");
+          if (w !== "a" && w !== "b") return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          dragWhich = w;
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp);
+          window.addEventListener("pointercancel", onUp);
+        });
+        colorbarLayer.addEventListener("dblclick", function(ev) {
+          if (!colorbar) return;
+          ev.preventDefault();
+          setColorRange(colorbar.lo, colorbar.hi);
+        });
       }
       function positionBrush(x, y, w, h) {
         brushBox.style.left = x + "px";
@@ -2441,6 +2601,7 @@
           );
           elements = normalizeElements(x.elements);
           panels = normalizePanels(x.panels);
+          colorbar = x.colorbar || null;
           meta = {};
           groups = {};
           legendIndex = {};
@@ -2534,6 +2695,7 @@
             wire(svgEl);
             buildToolbar();
             buildNavigator();
+            buildColorbar();
             setMode(availableModes()[0] || "brush");
             tip.classList.toggle("vellumwidget-tip-sticky", !!opts.tooltipSticky);
             applyStyling();
@@ -2593,6 +2755,16 @@
             return !!navEl;
           },
           navToView,
+          hasColorbar: function() {
+            return !!colorbarLayer;
+          },
+          setColorRange,
+          colorHidden: function() {
+            return Object.keys(colorHiddenSet);
+          },
+          cbHandleCount: function() {
+            return colorbarLayer ? colorbarLayer.querySelectorAll(".vellumwidget-cb-handle").length : 0;
+          },
           navWindowFrac: function() {
             if (!navWindow) return null;
             return { left: parseFloat(navWindow.style.left) || 0, width: parseFloat(navWindow.style.width) || 0 };
