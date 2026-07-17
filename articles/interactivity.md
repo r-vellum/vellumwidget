@@ -200,6 +200,13 @@ axes, several panels, or in raster mode silently fall back to the
 whole-scene zoom, so it is always safe to leave on; pass
 `axis_zoom = FALSE` to force the plain whole-scene zoom.
 
+Glyph marks (points, circles, hexagons) keep a **constant pixel size**
+as you zoom — only their positions re-map, so points stay round and
+never stretch into ellipses. Bars, error bars, and lines still scale
+with the data (their extent *is* data); only their stroke width is held
+constant. Pass `zoom_marks = "scale"` to let points grow with the zoom
+instead (useful to read density in dense scatters).
+
 ### Overview navigator
 
 For long series, `navigator = TRUE` adds a strip below the plot showing

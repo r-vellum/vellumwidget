@@ -97,6 +97,7 @@ focused — see the <code>a11y</code> argument.</p>
 <span>  navigator <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  navigator_height <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  axis_zoom <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  zoom_marks <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"fixed"</span>, <span class="st">"scale"</span><span class="op">)</span>,</span>
 <span>  hover_mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"closest"</span>, <span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>,</span>
 <span>  crosshair <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  legend_click <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"select"</span>, <span class="st">"hide"</span>, <span class="st">"mute"</span><span class="op">)</span>,</span>
@@ -186,6 +187,17 @@ vellum's pannable-panel contract (<code>vl_viewport(pannable=)</code>) and the p
 metadata vellumplot emits (needs the current <code>vellum</code>/<code>vellumplot</code>). When
 combined with <code>navigator = TRUE</code>, the navigator's x-only zoom is rendered
 through it, so the x-axis re-ticks crisply instead of stretching.</p></dd>
+
+
+<dt id="arg-zoom-marks">zoom_marks<a class="anchor" aria-label="anchor" href="#arg-zoom-marks"></a></dt>
+<dd><p>Under axis-aware zoom, whether <strong>glyph</strong> marks (points,
+circles, hexagons, sector wedges) keep a constant pixel size. <code>"fixed"</code>
+(default): glyphs stay their original size and only their positions re-map, the
+way a charting library zooms — so points stay round (and don't stretch into
+ellipses under the navigator's x-only zoom). <code>"scale"</code>: glyphs scale with the
+zoom (the older behaviour; useful to read density). Positional marks (bars,
+error bars, lines, areas) always scale with the data either way; only their
+stroke width is held constant. No effect unless <code>axis_zoom</code> is active.</p></dd>
 
 
 <dt id="arg-hover-mode">hover_mode<a class="anchor" aria-label="anchor" href="#arg-hover-mode"></a></dt>

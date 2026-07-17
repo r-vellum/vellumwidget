@@ -17,6 +17,17 @@
   panel scale metadata `vellumplot` emits (needs the current development
   `vellum`/`vellumplot`).
 
+- **Constant-size markers on zoom (`zoom_marks`, default `"fixed"`).**
+  Under axis-aware zoom, glyph marks (points, circles, hexagons, sector
+  wedges) now keep their original pixel size and only their positions
+  re-map — so points stay round and don’t stretch into ellipses under
+  the navigator’s x-only zoom, the way a charting library zooms.
+  Positional marks (bars, error bars, lines, areas) still scale with the
+  data; their stroke width is held constant. Set `zoom_marks = "scale"`
+  for the old behaviour where glyphs grow with the zoom (useful to read
+  density). Applies to SVG axis-aware zoom and the raster crisp-point
+  layer.
+
 - **Interactive continuous colorbar filter (visualMap).** When a
   `vellumplot` plot maps a continuous `color` scale, its colorbar
   becomes a range filter: drag the two handles on the gradient bar to a

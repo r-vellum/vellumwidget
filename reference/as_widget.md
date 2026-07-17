@@ -33,6 +33,7 @@ as_widget(
   navigator = FALSE,
   navigator_height = NULL,
   axis_zoom = TRUE,
+  zoom_marks = c("fixed", "scale"),
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
   legend_click = c("select", "hide", "mute"),
@@ -126,6 +127,18 @@ as_widget(
   `vellum`/`vellumplot`). When combined with `navigator = TRUE`, the
   navigator's x-only zoom is rendered through it, so the x-axis re-ticks
   crisply instead of stretching.
+
+- zoom_marks:
+
+  Under axis-aware zoom, whether **glyph** marks (points, circles,
+  hexagons, sector wedges) keep a constant pixel size. `"fixed"`
+  (default): glyphs stay their original size and only their positions
+  re-map, the way a charting library zooms — so points stay round (and
+  don't stretch into ellipses under the navigator's x-only zoom).
+  `"scale"`: glyphs scale with the zoom (the older behaviour; useful to
+  read density). Positional marks (bars, error bars, lines, areas)
+  always scale with the data either way; only their stroke width is held
+  constant. No effect unless `axis_zoom` is active.
 
 - hover_mode:
 
