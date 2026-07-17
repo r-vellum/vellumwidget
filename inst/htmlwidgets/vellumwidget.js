@@ -1058,6 +1058,7 @@
       let axisZoomActive = false;
       let retickLayer = null;
       let retickGrid = null;
+      let xZoom = false;
       const axisStyle = {
         // presentation scraped from vellum's own axis/grid nodes so the re-tick matches the theme
         textFill: "#333333",
@@ -1746,7 +1747,18 @@
         applyViewBox();
         receivingView = false;
       }
+      function applyAspect() {
+        const par = xZoom ? "none" : "xMidYMid meet";
+        if (svgEl) svgEl.setAttribute("preserveAspectRatio", par);
+        if (dimLayer) dimLayer.setAttribute("preserveAspectRatio", par);
+        if (crosshairLayer) crosshairLayer.setAttribute("preserveAspectRatio", par);
+        if (colorbarLayer) colorbarLayer.setAttribute("preserveAspectRatio", par);
+      }
       function applyViewBox() {
+        if (xZoom && vb && vb0) {
+          vb.y = vb0.y;
+          vb.h = vb0.h;
+        }
         if (axisZoomActive && panGroup && vb && vb0) {
           const t = viewToPan(vb, vb0);
           panGroup.setAttribute(
@@ -1934,10 +1946,14 @@
         if (!vb0) return;
         wFrac = Math.min(1, Math.max(0.02, wFrac));
         xFrac = Math.min(1 - wFrac, Math.max(0, xFrac));
-        const cy = vb ? vb.y + vb.h / 2 : vb0.y + vb0.h / 2;
         const w = wFrac * vb0.w;
-        const h = wFrac * vb0.h;
-        vb = { x: vb0.x + xFrac * vb0.w, y: cy - h / 2, w, h };
+        if (xZoom) {
+          vb = { x: vb0.x + xFrac * vb0.w, y: vb0.y, w, h: vb0.h };
+        } else {
+          const cy = vb ? vb.y + vb.h / 2 : vb0.y + vb0.h / 2;
+          const h = wFrac * vb0.h;
+          vb = { x: vb0.x + xFrac * vb0.w, y: cy - h / 2, w, h };
+        }
         applyViewBox();
       }
       function updateNav() {
@@ -2934,6 +2950,8 @@
             buildNavigator();
             buildColorbar();
             setupAxisZoom();
+            xZoom = !!opts.navigator && !rasterMode && !axisZoomActive;
+            applyAspect();
             setMode(availableModes()[0] || "brush");
             tip.classList.toggle("vellumwidget-tip-sticky", !!opts.tooltipSticky);
             applyStyling();

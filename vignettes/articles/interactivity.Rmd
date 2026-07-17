@@ -207,6 +207,12 @@ scene in miniature, with a draggable, resizable window marking the visible
 x-range. Drag the window to pan, drag a handle to zoom — it stays in sync with
 the main view (wheel, keyboard, brush, and linked-group changes all move it).
 
+The navigator is an **x-range** tool, so zoom is one-dimensional: the selected
+x-range fills the width while the **full y-range stays on screen** (values never
+scroll off the top or bottom), the way a time-series range selector behaves. The
+view stretches horizontally to do this, so point marks scale anisotropically when
+zoomed — the navigator is aimed at line/area/series charts.
+
 ```{r}
 #| label: navigator
 long <- data.frame(t = 1:200, y = cumsum(rnorm(200)))

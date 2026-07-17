@@ -904,6 +904,11 @@ HTMLWidgets.widget({
     let axisZoomActive = false; // opt-in on + a single linear cartesian pannable panel present
     let retickLayer: SVGSVGElement | null = null; // overlay carrying re-ticked axis labels (fixed at vb0)
     let retickGrid: SVGGElement | null = null; // re-ticked gridlines (inside the clipped panel, below marks)
+    // Range-navigator x-only zoom: with the navigator on, zoom/pan is 1-D along x
+    // (the selected x-range fills the width; the full y-range stays on screen), the
+    // way a time-series range selector behaves. Implemented as a non-uniform
+    // (`preserveAspectRatio="none"`) view with y pinned to the full extent.
+    let xZoom = false;
     const axisStyle = { // presentation scraped from vellum's own axis/grid nodes so the re-tick matches the theme
       textFill: "#333333", fontFamily: "sans-serif", fontSize: 12,
       gridStroke: "#ffffff", gridWidth: 1,
@@ -1712,7 +1717,22 @@ HTMLWidgets.widget({
       applyViewBox(); // reportView() here emits _zoom but skips the bus (guarded)
       receivingView = false;
     }
+    // Set the aspect policy on the base svg + overlays. In x-only (navigator) mode
+    // the view maps non-uniformly (`none`) so a narrow x-range fills the width while
+    // the full-height y-range still fills the height; otherwise the scene keeps its
+    // aspect (`meet`). At the full view the two are visually identical (the viewBox
+    // aspect equals the box aspect); the stretch only appears once x is zoomed.
+    function applyAspect(): void {
+      const par = xZoom ? "none" : "xMidYMid meet";
+      if (svgEl) svgEl.setAttribute("preserveAspectRatio", par);
+      if (dimLayer) dimLayer.setAttribute("preserveAspectRatio", par);
+      if (crosshairLayer) crosshairLayer.setAttribute("preserveAspectRatio", par);
+      if (colorbarLayer) colorbarLayer.setAttribute("preserveAspectRatio", par);
+    }
     function applyViewBox(): void {
+      // x-only range zoom: keep the full y-extent on screen (never crop the y-axis),
+      // so every zoom/pan path (nav, wheel, pinch, keyboard, linked) is 1-D in x.
+      if (xZoom && vb && vb0) { vb.y = vb0.y; vb.h = vb0.h; }
       if (axisZoomActive && panGroup && vb && vb0) {
         // Axis-aware zoom: hold the base frame at vb0 and scale only the data region
         // by T (so axes/titles/legend stay put), then re-tick for the visible range.
@@ -1929,16 +1949,19 @@ HTMLWidgets.widget({
       if (!vb0) return;
       wFrac = Math.min(1, Math.max(0.02, wFrac));
       xFrac = Math.min(1 - wFrac, Math.max(0, xFrac));
-      // Zoom BOTH dimensions by the same fraction so the selected x-range fills the
-      // width. The base svg preserves its aspect ratio (`meet`), so a width-only
-      // viewBox change is fit by height and merely re-centers — it never zooms.
-      // Keeping the viewport aspect (h shrinks with w) makes the marked range
-      // actually fill the frame; the vertical centre of the current view is kept, so
-      // dragging the window pans in x without a vertical jump.
-      const cy = vb ? vb.y + vb.h / 2 : vb0.y + vb0.h / 2;
       const w = wFrac * vb0.w;
-      const h = wFrac * vb0.h;
-      vb = { x: vb0.x + xFrac * vb0.w, y: cy - h / 2, w: w, h: h };
+      if (xZoom) {
+        // x-only (the normal SVG navigator): the selected x-range fills the width and
+        // the full y-range stays on screen (a non-uniform view; see applyAspect).
+        vb = { x: vb0.x + xFrac * vb0.w, y: vb0.y, w: w, h: vb0.h };
+      } else {
+        // Fallback for contexts that keep an aspect-locked view (raster, axis_zoom):
+        // zoom both dimensions by the same fraction, centred vertically, so a
+        // width-only change isn't swallowed by the `meet` fit.
+        const cy = vb ? vb.y + vb.h / 2 : vb0.y + vb0.h / 2;
+        const h = wFrac * vb0.h;
+        vb = { x: vb0.x + xFrac * vb0.w, y: cy - h / 2, w: w, h: h };
+      }
       applyViewBox();
     }
     // Reflect the current view in the window's position/size (x only). Called from
@@ -3072,6 +3095,11 @@ HTMLWidgets.widget({
           buildNavigator();
           buildColorbar();
           setupAxisZoom(); // opt-in: scale the data region + re-tick (after the nav clone)
+          // The range navigator drives an x-only zoom (full y stays on screen); a
+          // non-uniform view is how a narrow x-range fills the width. Not while
+          // axis_zoom owns the zoom model, and SVG-only.
+          xZoom = !!opts.navigator && !rasterMode && !axisZoomActive;
+          applyAspect();
           setMode(availableModes()[0] || "brush"); // first enabled mode is the default
           tip.classList.toggle("vellumwidget-tip-sticky", !!opts.tooltipSticky);
           applyStyling();

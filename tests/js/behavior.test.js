@@ -1680,15 +1680,19 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(N.el.querySelector(".vellumwidget-nav-mini defs") === null, "navigator: mini clone drops <defs> (no duplicate ids)");
   // full view -> window spans the whole strip
   ok(N.inst._test.navWindowFrac().left === 0 && N.inst._test.navWindowFrac().width === 100, "navigator: window spans full strip at the full view");
+  // the navigator drives an x-only zoom: a non-uniform (preserveAspectRatio="none")
+  // view so the marked x-range fills the width while the FULL y-range stays.
+  ok(N.svg.getAttribute("preserveAspectRatio") === "none",
+    "navigator: base svg maps non-uniformly (x-only range zoom)");
   // navToView maps fractions -> viewBox and moves the window
   N.inst._test.navToView(0.25, 0.5);
   const v = T.parseViewBox(N.svg.getAttribute("viewBox"));
   ok(Math.abs(v.x - 25) < 1e-6 && Math.abs(v.w - 50) < 1e-6, "navigator: navToView(0.25,0.5) sets the x-range to [25, +50] of vb0");
-  // it must ZOOM, not just shift: height shrinks in proportion (aspect kept) so the
-  // marked x-range fills the width, centred vertically. (Regression: a width-only
-  // viewBox change is fit by height under `meet` and merely re-centers the plot.)
-  ok(Math.abs(v.h - 20) < 1e-6 && Math.abs(v.y - 10) < 1e-6,
-    "navigator: zoom shrinks height in proportion (vb aspect kept), centred vertically");
+  // x-only: the y-extent is untouched (full range), so no values scroll off screen.
+  // (Regression: a width-only change fit by `meet` merely re-centers; a uniform zoom
+  // would crop y.)
+  ok(Math.abs(v.y - 0) < 1e-6 && Math.abs(v.h - 40) < 1e-6,
+    "navigator: x-only zoom keeps the full y-range (y/h unchanged)");
   const wf = N.inst._test.navWindowFrac();
   ok(Math.abs(wf.left - 25) < 1e-6 && Math.abs(wf.width - 50) < 1e-6, "navigator: window reflects the new view (25%/50%)");
   // clamp: can't push the window off the right edge
