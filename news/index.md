@@ -2,6 +2,22 @@
 
 ## vellumwidget (development version)
 
+- **Brush and view now report data-space coordinates, not just pixels.**
+  When the plot carries a cartesian scale (any `vellumplot` plot),
+  `input$<id>_brush` gains the brushed region’s data-space bounds
+  `x0d,y0d,x1d,y1d` (plus the `panel` name) alongside the existing
+  device-pixel rectangle, and `input$<id>_zoom` gains
+  `data = list(x=, y=, panel=)`, the visible range in data coordinates.
+  This reads the per-panel scale descriptors `vellumplot` now attaches
+  to the scene (requires the current development `vellum` (\>=
+  0.4.0.9000) and `vellumplot`); a raw `vellum` scene or a non-cartesian
+  coordinate system reports device-pixel fields only, as before.
+  Date/time axes report the numeric epoch (days for `Date`, seconds for
+  `POSIXct`), which you map back with
+  [`as.Date()`](https://rdrr.io/r/base/as.Date.html) /
+  [`.POSIXct()`](https://rdrr.io/r/base/base-internal.html). (Groundwork
+  for axis-aware zoom.)
+
 - **Fix: cross-filtered and legend-hidden marks were still
   hit-testable.** A display-tier cross-filter (crosstalk or
   [`vw_filter()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md))

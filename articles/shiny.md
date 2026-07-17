@@ -56,8 +56,15 @@ by that key.
 | `input$plot_selected` | character vector of selected keys (`character(0)` if none) | state |
 | `input$plot_click` | `list(key=)` — `key` is `NULL` for an empty-space click | event |
 | `input$plot_hover` | the hovered key, or `NULL` on leave | state |
-| `input$plot_brush` | `list(keys=, x0=, y0=, x1=, y1=)` — keys + region rectangle (device px); a lasso adds `lasso=TRUE` | event |
-| `input$plot_zoom` | `list(x=, y=, w=, h=, zoomed=)` — the current view (viewBox, device px) + a zoomed flag | state |
+| `input$plot_brush` | `list(keys=, x0=, y0=, x1=, y1=)` — keys + region rectangle (device px); a lasso adds `lasso=TRUE`; a cartesian plot adds data-space bounds `x0d,y0d,x1d,y1d` + `panel` | event |
+| `input$plot_zoom` | `list(x=, y=, w=, h=, zoomed=)` — the current view (viewBox, device px) + a zoomed flag; a single-panel cartesian plot adds `data=list(x=, y=, panel=)` (visible range in data coordinates) | state |
+
+Data-space fields (`x0d`/… and `zoom$data`) appear only when the plot
+carries a cartesian scale (any `vellumplot` plot); a raw `vellum` scene
+reports device-pixel fields only. Date/time axes report the numeric
+epoch (days for `Date`, seconds for `POSIXct`) — map back with
+[`as.Date()`](https://rdrr.io/r/base/as.Date.html) /
+[`.POSIXct()`](https://rdrr.io/r/base/base-internal.html).
 
 **State vs event.** *State* inputs (`_selected`, `_hover`, `_zoom`)
 update only when the value changes, so re-selecting the same set (or

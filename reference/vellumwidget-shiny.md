@@ -66,17 +66,30 @@ id. All values are the element **data keys** (the `data_id` a
   A list `list(keys=, x0=, y0=, x1=, y1=)` when a brush (or lasso)
   gesture completes: the selected keys and the region's bounding
   rectangle in the scene's device-pixel (viewBox) coordinates. A lasso
-  gesture also carries `lasso = TRUE`. An event input.
+  gesture also carries `lasso = TRUE`. When the plot carries a cartesian
+  scale (a `vellumplot` plot), it *also* carries the region's
+  **data-space** bounds `x0d,y0d,x1d,y1d` and the `panel` name. An event
+  input.
 
 - `input$plot_zoom`:
 
   A list `list(x=, y=, w=, h=, zoomed=)` — the current view (the SVG
   `viewBox` in device-pixel coordinates) plus a `zoomed` flag (is the
-  view narrower/shorter than the full extent). Updates as state when a
-  zoom/pan settles (wheel, drag-pan release, pinch, keyboard, reset,
-  zoom-to-selection, or a proxy
+  view narrower/shorter than the full extent). For a single-panel
+  cartesian plot it also carries
+  `data = list(x=c(lo,hi), y=c(lo,hi), panel=)`, the visible range in
+  **data** coordinates. Updates as state when a zoom/pan settles (wheel,
+  drag-pan release, pinch, keyboard, reset, zoom-to-selection, or a
+  proxy
   [`vw_zoom()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md)).
-  Data-space limits await axis/scale metadata in the scene contract.
+
+Data-space coordinates (`x0d`/… and `zoom$data`) come from the per-panel
+scale descriptors `vellumplot` attaches to the scene; a raw `vellum`
+scene or a non-cartesian coordinate system carries none, and only the
+device-pixel fields are reported. Date/time axes report the numeric
+epoch (days for `Date`, seconds for `POSIXct`), which you map back with
+[`as.Date()`](https://rdrr.io/r/base/as.Date.html) /
+[`.POSIXct()`](https://rdrr.io/r/base/base-internal.html).
 
 These are emitted only inside a live Shiny session; a static render
 (knitr, pkgdown,

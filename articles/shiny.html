@@ -175,7 +175,9 @@ an empty-space click</td>
 <td><code>input$plot_brush</code></td>
 <td>
 <code>list(keys=, x0=, y0=, x1=, y1=)</code> — keys + region
-rectangle (device px); a lasso adds <code>lasso=TRUE</code>
+rectangle (device px); a lasso adds <code>lasso=TRUE</code>; a cartesian
+plot adds data-space bounds <code>x0d,y0d,x1d,y1d</code> +
+<code>panel</code>
 </td>
 <td>event</td>
 </tr>
@@ -183,11 +185,19 @@ rectangle (device px); a lasso adds <code>lasso=TRUE</code>
 <td><code>input$plot_zoom</code></td>
 <td>
 <code>list(x=, y=, w=, h=, zoomed=)</code> — the current view
-(viewBox, device px) + a zoomed flag</td>
+(viewBox, device px) + a zoomed flag; a single-panel cartesian plot adds
+<code>data=list(x=, y=, panel=)</code> (visible range in data
+coordinates)</td>
 <td>state</td>
 </tr>
 </tbody>
 </table>
+<p>Data-space fields (<code>x0d</code>/… and <code>zoom$data</code>)
+appear only when the plot carries a cartesian scale (any
+<code>vellumplot</code> plot); a raw <code>vellum</code> scene reports
+device-pixel fields only. Date/time axes report the numeric epoch (days
+for <code>Date</code>, seconds for <code>POSIXct</code>) — map back with
+<code><a href="https://rdrr.io/r/base/as.Date.html" class="external-link">as.Date()</a></code> / <code><a href="https://rdrr.io/r/base/base-internal.html" class="external-link">.POSIXct()</a></code>.</p>
 <p><strong>State vs event.</strong> <em>State</em> inputs
 (<code>_selected</code>, <code>_hover</code>, <code>_zoom</code>) update
 only when the value changes, so re-selecting the same set (or settling

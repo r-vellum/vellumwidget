@@ -224,7 +224,10 @@ vplot(df) |>
 /
 [`renderVellumwidget()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-shiny.md)
 embed a widget in a Shiny app, and the widget reports the user’s
-selection, clicks, hovers, and brush back to the server as reactive
-inputs. See the [Shiny
+selection, clicks, hovers, brush, and current view back to the server as
+reactive inputs. For a `vellumplot` plot the brush and the view also
+report **data-space** coordinates (not just pixels) — e.g.
+`input$plot_brush$x0d`/`x1d` and `input$plot_zoom$data$x` — so the
+server can act on data ranges directly. See the [Shiny
 article](https://r-vellum.github.io/vellumwidget/articles/shiny.md) and
 `?vellumwidget-shiny`.

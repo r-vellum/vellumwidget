@@ -113,18 +113,26 @@ mark. Updates as state (re-fires only when the hovered key changes).</p></dd>
 <dd><p>A list <code>list(keys=, x0=, y0=, x1=, y1=)</code> when a
 brush (or lasso) gesture completes: the selected keys and the region's
 bounding rectangle in the scene's device-pixel (viewBox) coordinates. A
-lasso gesture also carries <code>lasso = TRUE</code>. An event input.</p></dd>
+lasso gesture also carries <code>lasso = TRUE</code>. When the plot carries a cartesian
+scale (a <code>vellumplot</code> plot), it <em>also</em> carries the region's <strong>data-space</strong>
+bounds <code>x0d,y0d,x1d,y1d</code> and the <code>panel</code> name. An event input.</p></dd>
 
 <dt><code>input$plot_zoom</code></dt>
 <dd><p>A list <code>list(x=, y=, w=, h=, zoomed=)</code> — the current
 view (the SVG <code>viewBox</code> in device-pixel coordinates) plus a <code>zoomed</code> flag
-(is the view narrower/shorter than the full extent). Updates as state when a
-zoom/pan settles (wheel, drag-pan release, pinch, keyboard, reset,
-zoom-to-selection, or a proxy <code><a href="vellumwidget-proxy-verbs.html">vw_zoom()</a></code>). Data-space limits await
-axis/scale metadata in the scene contract.</p></dd>
+(is the view narrower/shorter than the full extent). For a single-panel
+cartesian plot it also carries <code>data = list(x=c(lo,hi), y=c(lo,hi), panel=)</code>,
+the visible range in <strong>data</strong> coordinates. Updates as state when a zoom/pan
+settles (wheel, drag-pan release, pinch, keyboard, reset, zoom-to-selection,
+or a proxy <code><a href="vellumwidget-proxy-verbs.html">vw_zoom()</a></code>).</p></dd>
 
 
-</dl><p>These are emitted only inside a live Shiny session; a static render (knitr,
+</dl><p>Data-space coordinates (<code>x0d</code>/… and <code>zoom$data</code>) come from the per-panel scale
+descriptors <code>vellumplot</code> attaches to the scene; a raw <code>vellum</code> scene or a
+non-cartesian coordinate system carries none, and only the device-pixel fields
+are reported. Date/time axes report the numeric epoch (days for <code>Date</code>, seconds
+for <code>POSIXct</code>), which you map back with <code><a href="https://rdrr.io/r/base/as.Date.html" class="external-link">as.Date()</a></code> / <code><a href="https://rdrr.io/r/base/base-internal.html" class="external-link">.POSIXct()</a></code>.</p>
+<p>These are emitted only inside a live Shiny session; a static render (knitr,
 pkgdown, <code><a href="https://rstudio.github.io/htmltools/reference/save_html.html" class="external-link">htmltools::save_html()</a></code>) produces identical output and no input
 traffic. To drive the widget <em>from</em> the server — set the selection, cross-filter
 it, or zoom it without a re-render — use <code><a href="vellumwidget_proxy.html">vellumwidget_proxy()</a></code>.</p>
