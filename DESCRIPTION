@@ -21,7 +21,7 @@ Imports:
     base64enc,
     grDevices,
     htmlwidgets,
-    vellum (>= 0.4.0)
+    vellum (>= 0.4.0.9000)
 Suggests:
     crosstalk,
     shiny,

@@ -1483,5 +1483,84 @@ ok(T.columnTolerance([7]) === 1, "columnTolerance: fewer than two distinct posit
   );
 }
 
+// ===================== data-space mapping (#5 brush, #4 zoom) =====================
+// pure inverters
+ok(T.nativeToData({ transform: "identity" }, 5) === 5, "nativeToData: identity");
+ok(T.nativeToData({ transform: "log10" }, 2) === 100, "nativeToData: log10 -> 10^n");
+ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
+{
+  const p = {
+    name: "panel-1-1", px0: 100, py0: 10, px1: 500, py1: 410,
+    x: { transform: "identity", native_lo: 0, native_hi: 100 },
+    y: { transform: "identity", native_lo: 0, native_hi: 50 }
+  };
+  ok(T.pxToDataX(p, 300) === 50, "pxToDataX: mid px -> mid data");
+  ok(T.pxToDataX(p, 100) === 0 && T.pxToDataX(p, 500) === 100, "pxToDataX: endpoints map to the native domain");
+  // device y is top-down: py0 (top) is the HIGH data value
+  ok(T.pxToDataY(p, 10) === 50 && T.pxToDataY(p, 410) === 0, "pxToDataY: top px -> high data, bottom -> low");
+  ok(T.pxToDataY(p, 210) === 25, "pxToDataY: mid px -> mid data");
+  ok(T.normalizePanels(p).length === 1 && T.normalizePanels(null).length === 0, "normalizePanels: object -> [obj], null -> []");
+}
+{
+  // instance seam: panelAt / dataRangeOf / brushDataFields over a real payload
+  const elD = document.createElement("div");
+  document.body.appendChild(elD);
+  const iD = widgetDef.factory(elD);
+  iD.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="420" viewBox="0 0 600 420"><path data-key="a" d="M300 210h4v4z"/></svg>',
+    elements: { key: ["a"], x0: [300], y0: [210], x1: [304], y1: [214] },
+    panels: {
+      name: "panel-1-1", px0: 100, py0: 10, px1: 500, py1: 410,
+      x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+      y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+    },
+    options: { hover: true, select: true, brush: true, zoom: true, selectMode: "multiple" }
+  });
+  ok(iD._test.panelAt(300, 210) !== null, "panelAt: a point inside the panel resolves");
+  ok(iD._test.panelAt(50, 5) !== null, "panelAt: outside but sole panel -> that panel");
+  const d = iD._test.dataRangeOf(iD._test.panelAt(300, 210), 100, 10, 300, 210);
+  ok(JSON.stringify(d.x) === JSON.stringify([0, 50]), "dataRangeOf: x bounds mapped to data");
+  ok(JSON.stringify(d.y) === JSON.stringify([25, 50]) && d.panel === "panel-1-1", "dataRangeOf: y bounds (top->high) + panel name");
+  const bf = iD._test.brushDataFields({ x0: 100, y0: 10, x1: 300, y1: 210 });
+  ok(bf.x0d === 0 && bf.x1d === 50 && bf.y0d === 25 && bf.y1d === 50 && bf.panel === "panel-1-1",
+    "brushDataFields: data-space bounds for a brushed region");
+  // no panels -> pixel-only (empty data fields)
+  const elN = document.createElement("div");
+  document.body.appendChild(elN);
+  const iN = widgetDef.factory(elN);
+  iN.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30"><path data-key="a" d="M1 1h9v9z"/></svg>',
+    elements: { key: ["a"], x0: [1], y0: [1], x1: [10], y1: [10] },
+    options: { hover: true, select: true, brush: true, selectMode: "multiple" }
+  });
+  ok(Object.keys(iN._test.brushDataFields({ x0: 0, y0: 0, x1: 5, y1: 5 })).length === 0, "no panels: brushDataFields is empty (pixel-only)");
+}
+{
+  // _zoom carries the visible data range (deterministic via resetZoom)
+  const captured = {};
+  const savedShiny = window.Shiny, savedMode = window.HTMLWidgets.shinyMode;
+  window.HTMLWidgets.shinyMode = true;
+  window.Shiny = { setInputValue: function (id, v) { captured[id] = v; } };
+  const elZ = document.createElement("div");
+  elZ.id = "zd";
+  document.body.appendChild(elZ);
+  const iZ = widgetDef.factory(elZ);
+  iZ.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="420" viewBox="0 0 600 420"><path data-key="a" d="M300 210h4v4z"/></svg>',
+    elements: { key: ["a"], x0: [300], y0: [210], x1: [304], y1: [214] },
+    panels: {
+      name: "panel-1-1", px0: 100, py0: 10, px1: 500, py1: 410,
+      x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+      y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+    },
+    options: { hover: true, select: true, zoom: true, selectMode: "multiple" }
+  });
+  iZ._call("resetZoom"); // full view 0..600 x 0..420 -> extrapolated data range
+  const z = captured["zd_zoom"];
+  ok(z && z.data && z.data.panel === "panel-1-1", "_zoom: carries data-space range + panel");
+  ok(z.data.x[0] === -25 && z.data.x[1] === 125, "_zoom: visible x data range (extrapolated past the panel)");
+  window.Shiny = savedShiny; window.HTMLWidgets.shinyMode = savedMode;
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

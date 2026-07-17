@@ -118,9 +118,35 @@ interface ColumnElements {
   legend?: (string[] | string | null)[] | string[] | string;
 }
 
+// Per-axis scale descriptor (from vellumplot's `scales` panel meta): the data and
+// native (transformed, expanded) domains + the transform, enough to invert a
+// device pixel back to a data value. See `.vellumwidget_panels()` on the R side.
+interface AxisScale {
+  type: string; // continuous | log10 | discrete | binned | date | datetime
+  transform: string; // identity | log10 | sqrt | reverse (native -> data)
+  data_lo: number;
+  data_hi: number;
+  native_lo: number;
+  native_hi: number;
+  time_unit?: string; // "day" | "second" for date/datetime axes
+}
+// A cartesian data panel: its device-px rectangle (from vellum's resolved layout)
+// plus each axis's scale descriptor. The px rect + native domain give the affine
+// device px <-> native; the transform closes native <-> data.
+interface PanelInfo {
+  name: string;
+  px0: number;
+  py0: number;
+  px1: number;
+  py1: number;
+  x?: AxisScale;
+  y?: AxisScale;
+}
+
 interface Payload {
   svg: string;
   elements: ElemMeta[] | ColumnElements;
+  panels?: PanelInfo[] | PanelInfo; // cartesian data panels (htmlwidgets may unbox a length-1 list)
   options: Options;
 }
 
@@ -198,6 +224,14 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
     out[i] = e;
   }
   return out;
+}
+
+// The panels payload as an array (htmlwidgets may unbox a length-1 list to a
+// single object). Absent/`null` -> `[]` (a scene with no cartesian scale
+// descriptors — the widget stays pixel-only).
+function normalizePanels(raw: PanelInfo[] | PanelInfo | null | undefined): PanelInfo[] {
+  if (raw == null) return [];
+  return Array.isArray(raw) ? raw : [raw];
 }
 
 // Distinct keys of every element whose bbox intersects the brush rectangle. A key
@@ -307,6 +341,34 @@ function columnTolerance(sorted: number[] | Float64Array): number {
     if (g > 1e-6 && g < minGap) minGap = g;
   }
   return isFinite(minGap) ? minGap / 2 : 1;
+}
+
+// --- data-space mapping (device px -> native -> data, per panel) ---
+// Map a native (transformed) coordinate back to a data value, inverting the axis
+// transform. identity/reverse are already in data space; date/datetime values are
+// the numeric epoch (days/seconds) and pass through unchanged.
+function nativeToData(ax: AxisScale, nv: number): number {
+  switch (ax.transform) {
+    case "log10": return Math.pow(10, nv);
+    case "sqrt": return nv * nv;
+    default: return nv;
+  }
+}
+// Device-px x -> data, via the panel's x affine (px0->native_lo, px1->native_hi).
+function pxToDataX(p: PanelInfo, px: number): number | null {
+  const ax = p.x;
+  if (!ax || p.px1 === p.px0) return null;
+  const nv = ax.native_lo + ((px - p.px0) / (p.px1 - p.px0)) * (ax.native_hi - ax.native_lo);
+  return nativeToData(ax, nv);
+}
+// Device-px y -> data. Device y is top-down, so py0 (top) is the HIGH data value
+// (native_hi) and py1 (bottom) the low.
+function pxToDataY(p: PanelInfo, py: number): number | null {
+  const ax = p.y;
+  if (!ax || p.py1 === p.py0) return null;
+  const frac = (py - p.py0) / (p.py1 - p.py0); // 0 at top, 1 at bottom
+  const nv = ax.native_hi + frac * (ax.native_lo - ax.native_hi);
+  return nativeToData(ax, nv);
 }
 
 // New viewBox after zooming by `factor` about user-space point (cx, cy) — the
@@ -604,6 +666,7 @@ HTMLWidgets.widget({
     let hiddenKeySet: Record<string, boolean> = {}; // member keys currently hidden (legendClick="hide")
     let filteredKeySet: Record<string, boolean> = {}; // keys hidden by a cross-filter (crosstalk / vw_filter)
     let elements: ElemMeta[] = [];
+    let panels: PanelInfo[] = []; // cartesian data panels with scale descriptors (data-space mapping)
     let selected: Record<string, boolean> = {};
     let nodesByKey: Record<string, Element[]> = {}; // key -> SVG nodes (built once per render)
     let hoverRAF = 0; // rAF handle throttling the nearest-mark scan
@@ -1298,17 +1361,63 @@ HTMLWidgets.widget({
       }
     }
 
+    // --- data-space mapping helpers (need the `scales` panel payload) ---
+    // The panel whose device-px rect contains (x, y); else the sole cartesian
+    // panel (the common single-panel case); else null. Data-space mapping is only
+    // offered when unambiguous — with several panels and a point outside them all
+    // we can't say which axes apply.
+    function panelAt(x: number, y: number): PanelInfo | null {
+      for (let i = 0; i < panels.length; i++) {
+        const p = panels[i];
+        if (x >= p.px0 && x <= p.px1 && y >= p.py0 && y <= p.py1) return p;
+      }
+      return panels.length === 1 ? panels[0] : null;
+    }
+    // {x:[lo,hi], y:[lo,hi]} data-space extent of a device-px rectangle in panel
+    // `p` (each axis ordered lo<=hi), or null if the panel lacks that axis.
+    function dataRangeOf(p: PanelInfo, dx0: number, dy0: number, dx1: number, dy1: number):
+      { x?: number[]; y?: number[]; panel: string } | null {
+      const out: { x?: number[]; y?: number[]; panel: string } = { panel: p.name };
+      if (p.x) {
+        const a = pxToDataX(p, dx0), b = pxToDataX(p, dx1);
+        if (a != null && b != null) out.x = [Math.min(a, b), Math.max(a, b)];
+      }
+      if (p.y) {
+        const a = pxToDataY(p, dy0), b = pxToDataY(p, dy1);
+        if (a != null && b != null) out.y = [Math.min(a, b), Math.max(a, b)];
+      }
+      return (out.x || out.y) ? out : null;
+    }
+    // Data-space fields to attach to a `_brush` event for a device-px region:
+    // `panel` + `x0d,x1d,y0d,y1d` (data-space bounds), or `{}` when no panel scale
+    // applies (raw scene, non-cartesian, or an ambiguous multi-panel region).
+    function brushDataFields(bb: Bbox): Record<string, number | string> {
+      const p = panelAt((bb.x0 + bb.x1) / 2, (bb.y0 + bb.y1) / 2);
+      if (!p) return {};
+      const d = dataRangeOf(p, bb.x0, bb.y0, bb.x1, bb.y1);
+      if (!d) return {};
+      const f: Record<string, number | string> = { panel: d.panel };
+      if (d.x) { f.x0d = d.x[0]; f.x1d = d.x[1]; }
+      if (d.y) { f.y0d = d.y[0]; f.y1d = d.y[1]; }
+      return f;
+    }
+
     // --- viewBox pan/zoom ---
-    // Report the current view to Shiny as `input$<id>_zoom` (a deduped state input).
-    // The value is the current viewBox in the SVG's device-px space — `x`/`y`/`w`/`h`
-    // plus a `zoomed` flag (is the view narrower/shorter than the full extent).
-    // Data-space limits await axis/scale metadata in the scene contract.
+    // Report the current view to Shiny as `input$<id>_zoom` (a deduped state input):
+    // the current viewBox in device-px (`x`/`y`/`w`/`h`) + a `zoomed` flag, and —
+    // when the scene carries a single cartesian panel's scale descriptor — the
+    // visible range in `data` coordinates (`data.x`/`data.y`/`data.panel`).
     function reportView(): void {
       if (!vb) return;
-      shinyInput("zoom", {
-        x: vb.x, y: vb.y, w: vb.w, h: vb.h,
-        zoomed: vb0 ? isZoomedIn(vb, vb0) : false
-      });
+      const payload: {
+        x: number; y: number; w: number; h: number; zoomed: boolean;
+        data?: { x?: number[]; y?: number[]; panel: string };
+      } = { x: vb.x, y: vb.y, w: vb.w, h: vb.h, zoomed: vb0 ? isZoomedIn(vb, vb0) : false };
+      if (panels.length === 1) {
+        const d = dataRangeOf(panels[0], vb.x, vb.y, vb.x + vb.w, vb.y + vb.h);
+        if (d) payload.data = d;
+      }
+      shinyInput("zoom", payload);
     }
     function applyViewBox(): void {
       if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
@@ -1552,8 +1661,12 @@ HTMLWidgets.widget({
         lastBrush = rect;
         const hitKeys = dropInert(brushKeysIn(rect)); // never (re-)select hidden/filtered marks
         if (opts.select) setSelection(hitKeys); // also pushes _selected
-        // The brushed region + keys, as a discrete gesture event.
-        shinyInput("brush", { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 }, { priority: "event" });
+        // The brushed region + keys, as a discrete gesture event; data-space bounds
+        // (x0d/x1d/y0d/y1d + panel) added when a panel scale applies.
+        shinyInput("brush", Object.assign(
+          { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 },
+          brushDataFields(rect)
+        ), { priority: "event" });
         hideBrush();
       } else if (dragging === "lasso") {
         // Close the freehand path and select every mark whose centre is inside it.
@@ -1564,8 +1677,12 @@ HTMLWidgets.widget({
           lastBrush = b; // zoom-to-selection frames the lasso's bounds
           if (opts.select) setSelection(hitKeys);
           // Report as a brush gesture (keys + the lasso's bounding box), with a
-          // `lasso: true` flag so the server can tell the two apart.
-          shinyInput("brush", { keys: hitKeys, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, lasso: true }, { priority: "event" });
+          // `lasso: true` flag so the server can tell the two apart, plus data-space
+          // bounds when a panel scale applies.
+          shinyInput("brush", Object.assign(
+            { keys: hitKeys, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, lasso: true },
+            brushDataFields(b)
+          ), { priority: "event" });
         }
         clearLasso();
       }
@@ -2097,6 +2214,7 @@ HTMLWidgets.widget({
           x.options || {}
         );
         elements = normalizeElements(x.elements);
+        panels = normalizePanels(x.panels);
         meta = {};
         groups = {};
         legendIndex = {};
@@ -2244,7 +2362,10 @@ HTMLWidgets.widget({
         availableModes: availableModes,
         mode: function () { return mode; },
         inert: inert,
-        dropInert: dropInert
+        dropInert: dropInert,
+        panelAt: panelAt,
+        dataRangeOf: dataRangeOf,
+        brushDataFields: brushDataFields
       }
     };
   }
@@ -2300,5 +2421,9 @@ registerProxyHandler();
   columnTolerance,
   pointInPolygon,
   lassoKeys,
-  polyBounds
+  polyBounds,
+  nativeToData,
+  pxToDataX,
+  pxToDataY,
+  normalizePanels
 };

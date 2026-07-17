@@ -77,6 +77,33 @@ test_that("Phase 4 option toggles round-trip into the payload", {
   expect_false(o2$brush || o2$zoom || o2$toolbar || o2$nearest)
 })
 
+test_that("the payload carries per-panel scale descriptors from vellumplot", {
+  skip_if_not_installed("vellumplot")
+  df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, model = rownames(mtcars))
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = wt, y = mpg, data_id = model) |>
+    as_widget()
+  p <- w$x$panels
+  expect_true(length(p) >= 1L)
+  panel <- p[[1]]
+  expect_equal(panel$name, "panel-1-1")
+  # a true device-px rectangle
+  expect_true(panel$px1 > panel$px0 && panel$py1 > panel$py0)
+  # per-axis descriptor: continuous identity, data extent = wt/mpg range
+  expect_equal(panel$x$type, "continuous")
+  expect_equal(panel$x$transform, "identity")
+  expect_equal(c(panel$x$data_lo, panel$x$data_hi), range(df$wt))
+  expect_equal(c(panel$y$data_lo, panel$y$data_hi), range(df$mpg))
+  # native domain is the 5%-expanded range (wider than the data)
+  expect_true(panel$x$native_lo < min(df$wt) && panel$x$native_hi > max(df$wt))
+})
+
+test_that("a raw vellum scene (no scales meta) yields no panels payload", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+  expect_null(as_widget(scene)$x$panels)
+})
+
 test_that("lasso toggle round-trips into the payload (default on)", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
