@@ -1,5 +1,14 @@
 # vellumwidget (development version)
 
+* **Fix: cross-filtered and legend-hidden marks were still hit-testable.** A
+  display-tier cross-filter (crosstalk or `vw_filter()`) and a legend
+  `legend_click = "hide"` toggle set the marks to `display:none`, but they stayed
+  in the spatial index — so a nearest-mark hover could still tooltip a hidden
+  datum, and a brush or lasso could re-select filtered-out points (propagating the
+  selection back to linked/crosstalk views). Keyboard traversal already skipped
+  hidden marks; hover, brush, lasso, and raster click-snap now do too, via a single
+  "inert" guard. Muted (not hidden) legend series stay interactive.
+
 * **Freehand lasso-select.** A third drag mode alongside brush and pan (default
   on; disable with `as_widget(lasso = FALSE)`). The toolbar's mode button now
   cycles brush → lasso → pan, and it appears whenever at least two drag modes are

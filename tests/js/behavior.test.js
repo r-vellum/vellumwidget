@@ -559,8 +559,13 @@ ok(!elL.querySelector('[data-key="q1"]').classList.contains("vellumwidget-select
   ok(svgAlt.getAttribute("aria-label") === "My explicit alt.", "alt: explicit alt becomes the aria-label");
   ok(svgAlt.getAttribute("aria-labelledby") === null, "alt: vellum's aria-labelledby is removed so alt wins the accessible name");
 
-  // roving tabindex skips marks hidden by a cross-filter (vellumwidget-filtered)
-  const elF = mount({
+  // roving tabindex skips marks hidden by a cross-filter. Drive the real filter
+  // path (_call("filter", showKeys)) rather than poking the class, so the runtime's
+  // filtered-key state (which the skip now consults) is populated.
+  const elFdiv = document.createElement("div");
+  document.body.appendChild(elFdiv);
+  const instF = widgetDef.factory(elFdiv);
+  instF.renderValue({
     svg:
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 30">' +
       '<path data-key="a" d="M1 1h9v9z"/><path data-key="b" d="M30 1h9v9z"/><path data-key="c" d="M60 1h9v9z"/></svg>',
@@ -571,11 +576,12 @@ ok(!elL.querySelector('[data-key="q1"]').classList.contains("vellumwidget-select
     ],
     options: { tooltip: true, hover: true, select: true, a11y: true, selectMode: "multiple" }
   });
-  const svgF = elF.querySelector("svg");
-  const aN = elF.querySelector('[data-key="a"]');
-  const bN = elF.querySelector('[data-key="b"]');
-  const cN = elF.querySelector('[data-key="c"]');
-  bN.classList.add("vellumwidget-filtered"); // simulate a cross-filter hiding "b"
+  const svgF = elFdiv.querySelector("svg");
+  const aN = elFdiv.querySelector('[data-key="a"]');
+  const bN = elFdiv.querySelector('[data-key="b"]');
+  const cN = elFdiv.querySelector('[data-key="c"]');
+  instF._call("filter", ["a", "c"]); // cross-filter hiding "b"
+  ok(bN.classList.contains("vellumwidget-filtered"), "a11y: filter hides 'b' via the real filter path");
   aN.dispatchEvent(new window.FocusEvent("focus", { bubbles: false })); // cursor on "a"
   svgF.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
   ok(cN.getAttribute("tabindex") === "0" && bN.getAttribute("tabindex") !== "0",
@@ -1391,6 +1397,90 @@ ok(T.columnTolerance([7]) === 1, "columnTolerance: fewer than two distinct posit
   // restore globals so later code is unaffected
   window.Shiny = savedShiny;
   window.HTMLWidgets.shinyMode = savedMode;
+}
+
+// ===================== bugfix: cross-filtered / legend-hidden marks are inert =====================
+// A display-tier filter (crosstalk / vw_filter) or a legend-"hide" toggle sets
+// display:none, but the marks stay in the spatial index. Regression guard: they
+// must be skipped by nearest-hover, brush, lasso and click-snap — not just
+// visually hidden. (Previously a brush would re-select filtered-out points and a
+// nearest-hover could tooltip a hidden one.)
+{
+  const svgF =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
+    '<path data-key="a" d="M1 1h5v5z"/><path data-key="b" d="M20 1h5v5z"/><path data-key="c" d="M40 1h5v5z"/></svg>';
+  const elemsF = [
+    { key: "a", tooltip: "A", x0: 1, y0: 1, x1: 6, y1: 6 },
+    { key: "b", tooltip: "B", x0: 20, y0: 1, x1: 25, y1: 6 },
+    { key: "c", tooltip: "C", x0: 40, y0: 1, x1: 45, y1: 6 }
+  ];
+  const elF = document.createElement("div");
+  document.body.appendChild(elF);
+  const iF = widgetDef.factory(elF);
+  iF.renderValue({
+    svg: svgF, elements: elemsF,
+    options: { tooltip: true, hover: true, select: true, brush: true, nearest: true, selectMode: "multiple" }
+  });
+  const svgFEl = elF.querySelector("svg");
+  const whole = { x0: 0, y0: 0, x1: 90, y1: 30 };
+
+  // Before filtering, a brush over the whole region hits all three.
+  ok(
+    JSON.stringify(iF._test.dropInert(iF._test.brushKeysIn(whole)).sort()) === JSON.stringify(["a", "b", "c"]),
+    "inert: with no filter, all marks are brushable"
+  );
+
+  // Cross-filter to show only "a" (as vw_filter / crosstalk would).
+  iF._call("filter", ["a"]);
+  ok(iF._test.inert("b") && iF._test.inert("c") && !iF._test.inert("a"), "inert: filtered-out marks are inert, shown mark is not");
+  ok(
+    JSON.stringify(iF._test.dropInert(iF._test.brushKeysIn(whole))) === JSON.stringify(["a"]),
+    "inert: brush over everything selects only the un-filtered mark (not the hidden ones)"
+  );
+  ok(
+    JSON.stringify(iF._test.dropInert(iF._test.lassoKeysIn([{ x: 0, y: 0 }, { x: 90, y: 0 }, { x: 90, y: 30 }, { x: 0, y: 30 }]))) === JSON.stringify(["a"]),
+    "inert: lasso over everything selects only the un-filtered mark"
+  );
+  // A nearest-hover that resolves to a filtered mark shows nothing. Fire directly
+  // on b's node (a real pointer can't hit a display:none node, but this exercises
+  // the hoverAt inert guard deterministically without layout).
+  fireOn(svgFEl, "pointermove", elF.querySelector('[data-key="b"]'));
+  ok(!elF.querySelector(".vellumwidget-tip").classList.contains("vellumwidget-show"), "inert: hovering a filtered mark shows no tooltip");
+  // The visible mark still hovers.
+  fireOn(svgFEl, "pointermove", elF.querySelector('[data-key="a"]'));
+  ok(elF.querySelector(".vellumwidget-tip").textContent === "A", "inert: the un-filtered mark still hovers normally");
+
+  // Clearing the filter restores brushability.
+  iF._call("clearFilter");
+  ok(!iF._test.inert("b"), "inert: clearing the filter makes marks interactive again");
+  ok(
+    JSON.stringify(iF._test.dropInert(iF._test.brushKeysIn(whole)).sort()) === JSON.stringify(["a", "b", "c"]),
+    "inert: after clearing the filter, all marks are brushable again"
+  );
+}
+{
+  // Legend "hide" is inert for brush/select too (not just hover).
+  const elLH = document.createElement("div");
+  document.body.appendChild(elLH);
+  const iLH = widgetDef.factory(elLH);
+  iLH.renderValue({
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
+      '<path data-key="p1" d="M1 1h5v5z"/><path data-key="q1" d="M20 1h5v5z"/>' +
+      '<path data-key="legend:color:s" d="M70 1h5v5z"/></svg>',
+    elements: [
+      { key: "p1", legend: ["color:s"], x0: 1, y0: 1, x1: 6, y1: 6 },
+      { key: "q1", legend: ["color:t"], x0: 20, y0: 1, x1: 25, y1: 6 },
+      { key: "legend:color:s", legend_for: "color:s", tooltip: "s", x0: 70, y0: 1, x1: 75, y1: 6 }
+    ],
+    options: { tooltip: true, hover: true, select: true, brush: true, nearest: false, selectMode: "multiple", legendClick: "hide" }
+  });
+  fireOn(elLH.querySelector("svg"), "click", elLH.querySelector('[data-key="legend:color:s"]')); // hide series s
+  ok(iLH._test.inert("p1") && !iLH._test.inert("q1"), "inert: a legend-hidden series' marks are inert; other series is not");
+  ok(
+    JSON.stringify(iLH._test.dropInert(iLH._test.brushKeysIn({ x0: 0, y0: 0, x1: 30, y1: 30 }))) === JSON.stringify(["q1"]),
+    "inert: brushing over a legend-hidden series does not select it"
+  );
 }
 
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
