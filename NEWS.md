@@ -9,8 +9,12 @@
   the current development `vellum` (>= 0.4.0.9000) and `vellumplot`); a raw `vellum` scene
   or a non-cartesian coordinate system reports device-pixel fields only, as before.
   Date/time axes report the numeric epoch (days for `Date`, seconds for `POSIXct`),
-  which you map back with `as.Date()` / `.POSIXct()`. (Groundwork for axis-aware
-  zoom.)
+  which you map back with `as.Date()` / `.POSIXct()`. The fields describe the
+  *visual* axes (under `coord_flip()`, `x0d` is the plot's `y` aesthetic); a
+  discrete axis reports fractional band positions; and an axis built with a custom
+  `scales::transform_*()` object (beyond identity / log10 / sqrt / reverse) is
+  omitted from the data-space fields rather than reported wrong. (Groundwork for
+  axis-aware zoom.)
 
 * **Fix: cross-filtered and legend-hidden marks were still hit-testable.** A
   display-tier cross-filter (crosstalk or `vw_filter()`) and a legend

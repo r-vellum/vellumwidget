@@ -344,20 +344,32 @@ function columnTolerance(sorted: number[] | Float64Array): number {
 }
 
 // --- data-space mapping (device px -> native -> data, per panel) ---
+// Transforms this runtime can invert native -> data. vellumplot's built-in
+// registry is exactly these four; a plot built with a custom `scales::transform_*`
+// object (e.g. log2, pseudo_log) reports some other name, which we CANNOT invert —
+// so we decline data-space mapping for that axis rather than return a native value
+// as if it were data (which would be silently wrong).
+const INVERTIBLE: Record<string, boolean> = { identity: true, log10: true, sqrt: true, reverse: true };
+function canInvert(ax: AxisScale | undefined): ax is AxisScale {
+  return !!ax && INVERTIBLE[ax.transform] === true;
+}
 // Map a native (transformed) coordinate back to a data value, inverting the axis
-// transform. identity/reverse are already in data space; date/datetime values are
-// the numeric epoch (days/seconds) and pass through unchanged.
+// transform. `reverse` maps data identically (the flip lives in a decreasing
+// native domain), and identity / date / datetime pass through (date values are the
+// numeric epoch). Only ever called for an invertible transform (see canInvert).
 function nativeToData(ax: AxisScale, nv: number): number {
   switch (ax.transform) {
     case "log10": return Math.pow(10, nv);
     case "sqrt": return nv * nv;
-    default: return nv;
+    case "reverse": return nv; // identity map; the reversal is the decreasing domain
+    default: return nv; // identity (and date/datetime epochs)
   }
 }
-// Device-px x -> data, via the panel's x affine (px0->native_lo, px1->native_hi).
+// Device-px x -> data, via the panel's x affine (px0->native_lo, px1->native_hi);
+// null when the axis is absent, degenerate, or a transform we can't invert.
 function pxToDataX(p: PanelInfo, px: number): number | null {
   const ax = p.x;
-  if (!ax || p.px1 === p.px0) return null;
+  if (!canInvert(ax) || p.px1 === p.px0) return null;
   const nv = ax.native_lo + ((px - p.px0) / (p.px1 - p.px0)) * (ax.native_hi - ax.native_lo);
   return nativeToData(ax, nv);
 }
@@ -365,7 +377,7 @@ function pxToDataX(p: PanelInfo, px: number): number | null {
 // (native_hi) and py1 (bottom) the low.
 function pxToDataY(p: PanelInfo, py: number): number | null {
   const ax = p.y;
-  if (!ax || p.py1 === p.py0) return null;
+  if (!canInvert(ax) || p.py1 === p.py0) return null;
   const frac = (py - p.py0) / (p.py1 - p.py0); // 0 at top, 1 at bottom
   const nv = ax.native_hi + frac * (ax.native_lo - ax.native_hi);
   return nativeToData(ax, nv);

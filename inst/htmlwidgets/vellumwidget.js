@@ -642,25 +642,32 @@
     }
     return isFinite(minGap) ? minGap / 2 : 1;
   }
+  var INVERTIBLE = { identity: true, log10: true, sqrt: true, reverse: true };
+  function canInvert(ax) {
+    return !!ax && INVERTIBLE[ax.transform] === true;
+  }
   function nativeToData(ax, nv) {
     switch (ax.transform) {
       case "log10":
         return Math.pow(10, nv);
       case "sqrt":
         return nv * nv;
+      case "reverse":
+        return nv;
+      // identity map; the reversal is the decreasing domain
       default:
         return nv;
     }
   }
   function pxToDataX(p, px) {
     const ax = p.x;
-    if (!ax || p.px1 === p.px0) return null;
+    if (!canInvert(ax) || p.px1 === p.px0) return null;
     const nv = ax.native_lo + (px - p.px0) / (p.px1 - p.px0) * (ax.native_hi - ax.native_lo);
     return nativeToData(ax, nv);
   }
   function pxToDataY(p, py) {
     const ax = p.y;
-    if (!ax || p.py1 === p.py0) return null;
+    if (!canInvert(ax) || p.py1 === p.py0) return null;
     const frac = (py - p.py0) / (p.py1 - p.py0);
     const nv = ax.native_hi + frac * (ax.native_lo - ax.native_hi);
     return nativeToData(ax, nv);
