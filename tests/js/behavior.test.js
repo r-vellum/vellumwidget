@@ -996,6 +996,17 @@ function mountShiny(id, calls) {
   fireOn(eBig.querySelector("svg"), "pointerleave", eBig.querySelector("svg"));
   ok(holderBig.style.opacity === "" && dimBig.childNodes.length === 0,
     "large-dim: leaving clears the dim and empties the overlay");
+
+  // Structural guard against the ring-offset bug: the feedback overlay must live
+  // in the shrink-to-fit `.vellumwidget-stage` alongside the holder, NOT directly
+  // in the root. htmlwidgets stamps an explicit (often taller) height on the root;
+  // if the overlay filled the root instead of the svg box, its viewBox would
+  // letterbox and every hover/select ring would draw offset from the real mark.
+  const stageBig = eBig.querySelector(".vellumwidget-stage");
+  ok(!!stageBig, "stage: a shrink-to-fit stage wraps the svg + overlays");
+  ok(stageBig.parentNode === eBig, "stage: the stage is a direct child of the root");
+  ok(holderBig.parentNode === stageBig && dimBig.parentNode === stageBig,
+    "stage: the holder and the feedback overlay share the stage (so the overlay tracks the svg box, not the root)");
 }
 
 // ============ Phase 4: raster mode (base image + index-driven interaction) ============

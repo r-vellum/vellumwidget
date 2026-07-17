@@ -275,6 +275,13 @@ const STYLE_ID = "vellumwidget-style";
 
 const VELLUMWIDGET_CSS = `
 .vellumwidget-root { position: relative; display: inline-block; max-width: 100%; }
+/* The stage shrink-wraps the base svg in BOTH dimensions (inline-block sizes to
+   content), so its box equals the svg's rendered box. The absolute overlays below
+   fill THIS box, not the root's — the root can be taller AND wider than the svg
+   (htmlwidgets stamps an explicit height; a fluid layout can stretch the width),
+   and sizing the overlays to the root would letterbox their viewBox and shift
+   every ring (down if the root is taller, sideways if it is wider). */
+.vellumwidget-root .vellumwidget-stage { position: relative; display: inline-block; }
 .vellumwidget-root .vellumwidget-svg-holder svg { max-width: 100%; height: auto; display: block; }
 .vellumwidget-gesture .vellumwidget-svg-holder svg { touch-action: none; }
 .vellumwidget-root.vellumwidget-mode-pan .vellumwidget-svg-holder svg { cursor: grab; }
@@ -473,6 +480,7 @@ HTMLWidgets.widget({
     brushBox.className = "vellumwidget-brush";
 
     let holder: HTMLElement | null = null;
+    let stage: HTMLElement | null = null; // shrink-wraps the base svg; overlays fill it
     let svgEl: SVGSVGElement | null = null;
     let toolbarEl: HTMLElement | null = null;
     let meta: Record<string, ElemMeta> = {};
@@ -669,7 +677,9 @@ HTMLWidgets.widget({
       canvasEl = document.createElement("canvas");
       canvasEl.className = "vellumwidget-canvas";
       canvasEl.setAttribute("aria-hidden", "true");
-      el.appendChild(canvasEl);
+      // Into the stage (not the root), so `inset:0` matches the svg box; see the
+      // stage note in renderValue.
+      (stage || el).appendChild(canvasEl);
       ctx = typeof canvasEl.getContext === "function" ? canvasEl.getContext("2d") : null;
     }
     function clearPointData(): void {
@@ -1660,16 +1670,26 @@ HTMLWidgets.widget({
         }
 
         if (!holder) {
+          // The stage shrink-wraps the base svg (both dims) so the absolute overlays
+          // (dim layer, crisp-zoom canvas) fill the svg's box rather than the root's
+          // — the root is often taller (htmlwidgets stamps an explicit height) and
+          // can be wider (fluid layout), and sizing the overlays to it letterboxes
+          // their viewBox, shifting every hover/select ring off the mark. brush box +
+          // tip stay on the root (they position from the root rect, whose top-left
+          // coincides with the svg's).
+          stage = document.createElement("div");
+          stage.className = "vellumwidget-stage";
+          el.appendChild(stage);
           holder = document.createElement("div");
           holder.className = "vellumwidget-svg-holder";
-          el.appendChild(holder);
+          stage.appendChild(holder);
           // Overlay for the large-scene hover dim (sibling of the holder, so the
           // holder's dim opacity does not affect it). pointer-events:none, so it
           // never intercepts hit-testing on the base svg.
           dimLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
           dimLayer.setAttribute("class", "vellumwidget-dim-layer");
           dimLayer.setAttribute("aria-hidden", "true");
-          el.appendChild(dimLayer);
+          stage.appendChild(dimLayer);
           el.appendChild(brushBox);
           el.appendChild(tip);
         }
