@@ -179,6 +179,27 @@ the arrow keys pan, `+`/`-` zoom, and `0` resets. The on-hover toolbar adds
 zoom-to-selection, reset, SVG/PNG download, copy-to-clipboard (where supported),
 and fullscreen.
 
+### Axis-aware zoom
+
+By default, zoom scales the *whole scene* like an image — quick and universal,
+but the axis ticks and labels scale (and blur) with everything else. Opt into
+`axis_zoom = TRUE` and zoom instead scales only the plot's data region and
+**re-ticks the axes** for the visible range, holding the frame — axes, titles,
+legend — in place, the way a charting library zooms. Hover, brush, the crosshair,
+and the reported data range all follow the zoomed region.
+
+```{r}
+#| label: axis-zoom
+vplot(df) |>
+  mark_point(x = wt, y = mpg, tooltip = model) |>
+  as_widget(axis_zoom = TRUE)
+```
+
+It is experimental and deliberately narrow: it needs a single **linear**
+cartesian panel (continuous `identity`/`reverse` axes) in SVG mode. Plots with
+log/date/discrete axes, several panels, or in raster mode silently fall back to
+the whole-scene zoom, so turning it on is always safe.
+
 ### Overview navigator
 
 For long series, `navigator = TRUE` adds a strip below the plot showing the whole
