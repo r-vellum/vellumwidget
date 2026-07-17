@@ -2,6 +2,20 @@
 
 ## vellumwidget (development version)
 
+- **Fix: hover/selection feedback rings were drawn offset from the
+  mark.** When the widget container was larger than the plot’s rendered
+  box — which happens routinely, as htmlwidgets stamps an explicit
+  `height` on the container and a fluid layout can stretch its width —
+  the feedback overlay filled the whole container while the base SVG
+  only filled its aspect-locked box. The overlay’s `viewBox` then
+  letterboxed (centred), so every hover/selection ring drew off the real
+  mark: downward when the container was taller (e.g. 68px low for a
+  520px-tall container over a 384px plot) and sideways when it was
+  wider. It looked like the wrong mark was picked. Hit-testing itself
+  was always correct; only the visual feedback was displaced. The svg
+  and its overlays now share a shrink-to-fit stage, so the overlay
+  tracks the svg box exactly at any container size.
+
 ## vellumwidget 0.5.0
 
 - **`text` argument on

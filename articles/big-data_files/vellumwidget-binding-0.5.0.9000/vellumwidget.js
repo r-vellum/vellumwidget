@@ -622,6 +622,13 @@
   var STYLE_ID = "vellumwidget-style";
   var VELLUMWIDGET_CSS = `
 .vellumwidget-root { position: relative; display: inline-block; max-width: 100%; }
+/* The stage shrink-wraps the base svg in BOTH dimensions (inline-block sizes to
+   content), so its box equals the svg's rendered box. The absolute overlays below
+   fill THIS box, not the root's \u2014 the root can be taller AND wider than the svg
+   (htmlwidgets stamps an explicit height; a fluid layout can stretch the width),
+   and sizing the overlays to the root would letterbox their viewBox and shift
+   every ring (down if the root is taller, sideways if it is wider). */
+.vellumwidget-root .vellumwidget-stage { position: relative; display: inline-block; }
 .vellumwidget-root .vellumwidget-svg-holder svg { max-width: 100%; height: auto; display: block; }
 .vellumwidget-gesture .vellumwidget-svg-holder svg { touch-action: none; }
 .vellumwidget-root.vellumwidget-mode-pan .vellumwidget-svg-holder svg { cursor: grab; }
@@ -775,6 +782,7 @@
       const brushBox = document.createElement("div");
       brushBox.className = "vellumwidget-brush";
       let holder = null;
+      let stage = null;
       let svgEl = null;
       let toolbarEl = null;
       let meta = {};
@@ -927,7 +935,7 @@
         canvasEl = document.createElement("canvas");
         canvasEl.className = "vellumwidget-canvas";
         canvasEl.setAttribute("aria-hidden", "true");
-        el.appendChild(canvasEl);
+        (stage || el).appendChild(canvasEl);
         ctx = typeof canvasEl.getContext === "function" ? canvasEl.getContext("2d") : null;
       }
       function clearPointData() {
@@ -1800,13 +1808,16 @@
             }
           }
           if (!holder) {
+            stage = document.createElement("div");
+            stage.className = "vellumwidget-stage";
+            el.appendChild(stage);
             holder = document.createElement("div");
             holder.className = "vellumwidget-svg-holder";
-            el.appendChild(holder);
+            stage.appendChild(holder);
             dimLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg");
             dimLayer.setAttribute("class", "vellumwidget-dim-layer");
             dimLayer.setAttribute("aria-hidden", "true");
-            el.appendChild(dimLayer);
+            stage.appendChild(dimLayer);
             el.appendChild(brushBox);
             el.appendChild(tip);
           }
