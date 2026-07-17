@@ -1934,7 +1934,10 @@
         if (!vb0) return;
         wFrac = Math.min(1, Math.max(0.02, wFrac));
         xFrac = Math.min(1 - wFrac, Math.max(0, xFrac));
-        vb = { x: vb0.x + xFrac * vb0.w, y: vb ? vb.y : vb0.y, w: wFrac * vb0.w, h: vb ? vb.h : vb0.h };
+        const cy = vb ? vb.y + vb.h / 2 : vb0.y + vb0.h / 2;
+        const w = wFrac * vb0.w;
+        const h = wFrac * vb0.h;
+        vb = { x: vb0.x + xFrac * vb0.w, y: cy - h / 2, w, h };
         applyViewBox();
       }
       function updateNav() {

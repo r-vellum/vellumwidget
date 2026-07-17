@@ -1929,7 +1929,16 @@ HTMLWidgets.widget({
       if (!vb0) return;
       wFrac = Math.min(1, Math.max(0.02, wFrac));
       xFrac = Math.min(1 - wFrac, Math.max(0, xFrac));
-      vb = { x: vb0.x + xFrac * vb0.w, y: vb ? vb.y : vb0.y, w: wFrac * vb0.w, h: vb ? vb.h : vb0.h };
+      // Zoom BOTH dimensions by the same fraction so the selected x-range fills the
+      // width. The base svg preserves its aspect ratio (`meet`), so a width-only
+      // viewBox change is fit by height and merely re-centers — it never zooms.
+      // Keeping the viewport aspect (h shrinks with w) makes the marked range
+      // actually fill the frame; the vertical centre of the current view is kept, so
+      // dragging the window pans in x without a vertical jump.
+      const cy = vb ? vb.y + vb.h / 2 : vb0.y + vb0.h / 2;
+      const w = wFrac * vb0.w;
+      const h = wFrac * vb0.h;
+      vb = { x: vb0.x + xFrac * vb0.w, y: cy - h / 2, w: w, h: h };
       applyViewBox();
     }
     // Reflect the current view in the window's position/size (x only). Called from
