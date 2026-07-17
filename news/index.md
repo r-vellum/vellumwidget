@@ -15,8 +15,14 @@
   Date/time axes report the numeric epoch (days for `Date`, seconds for
   `POSIXct`), which you map back with
   [`as.Date()`](https://rdrr.io/r/base/as.Date.html) /
-  [`.POSIXct()`](https://rdrr.io/r/base/base-internal.html). (Groundwork
-  for axis-aware zoom.)
+  [`.POSIXct()`](https://rdrr.io/r/base/base-internal.html). The fields
+  describe the *visual* axes (under
+  [`coord_flip()`](https://r-vellum.github.io/vellumplot/reference/coord_cartesian.html),
+  `x0d` is the plot’s `y` aesthetic); a discrete axis reports fractional
+  band positions; and an axis built with a custom
+  `scales::transform_*()` object (beyond identity / log10 / sqrt /
+  reverse) is omitted from the data-space fields rather than reported
+  wrong. (Groundwork for axis-aware zoom.)
 
 - **Fix: cross-filtered and legend-hidden marks were still
   hit-testable.** A display-tier cross-filter (crosstalk or

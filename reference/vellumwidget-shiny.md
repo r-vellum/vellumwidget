@@ -86,10 +86,25 @@ id. All values are the element **data keys** (the `data_id` a
 Data-space coordinates (`x0d`/… and `zoom$data`) come from the per-panel
 scale descriptors `vellumplot` attaches to the scene; a raw `vellum`
 scene or a non-cartesian coordinate system carries none, and only the
-device-pixel fields are reported. Date/time axes report the numeric
-epoch (days for `Date`, seconds for `POSIXct`), which you map back with
-[`as.Date()`](https://rdrr.io/r/base/as.Date.html) /
-[`.POSIXct()`](https://rdrr.io/r/base/base-internal.html).
+device-pixel fields are reported. Some specifics:
+
+- They describe the **visual** axes: `x0d`/`x1d` (and `zoom$data$x`) are
+  the *horizontal* axis. Under
+  [`coord_flip()`](https://r-vellum.github.io/vellumplot/reference/coord_cartesian.html)
+  that is the plot's `y` aesthetic.
+
+- **Date/time** axes report the numeric epoch (days for `Date`, seconds
+  for `POSIXct`); map back with
+  [`as.Date()`](https://rdrr.io/r/base/as.Date.html) /
+  [`.POSIXct()`](https://rdrr.io/r/base/base-internal.html).
+
+- A **discrete** axis reports fractional band positions (category *i*
+  sits at `i`), not the level labels.
+
+- Axes built with a custom `scales::transform_*()` object (anything
+  beyond identity / log10 / sqrt / reverse) can't be inverted
+  client-side, so that axis is omitted from the data-space fields
+  (device-pixel fields still report).
 
 These are emitted only inside a live Shiny session; a static render
 (knitr, pkgdown,

@@ -61,10 +61,16 @@ by that key.
 
 Data-space fields (`x0d`/… and `zoom$data`) appear only when the plot
 carries a cartesian scale (any `vellumplot` plot); a raw `vellum` scene
-reports device-pixel fields only. Date/time axes report the numeric
-epoch (days for `Date`, seconds for `POSIXct`) — map back with
+reports device-pixel fields only. They describe the **visual** axes —
+`x0d`/`x1d` is the horizontal axis, which under
+[`coord_flip()`](https://r-vellum.github.io/vellumplot/reference/coord_cartesian.html)
+is the plot’s `y` aesthetic. Date/time axes report the numeric epoch
+(days for `Date`, seconds for `POSIXct`) — map back with
 [`as.Date()`](https://rdrr.io/r/base/as.Date.html) /
-[`.POSIXct()`](https://rdrr.io/r/base/base-internal.html).
+[`.POSIXct()`](https://rdrr.io/r/base/base-internal.html). A discrete
+axis reports fractional band positions, and an axis with a custom
+`scales::transform_*()` (beyond identity / log10 / sqrt / reverse) is
+omitted from the data-space fields.
 
 **State vs event.** *State* inputs (`_selected`, `_hover`, `_zoom`)
 update only when the value changes, so re-selecting the same set (or

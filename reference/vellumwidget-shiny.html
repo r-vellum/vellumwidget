@@ -130,9 +130,16 @@ or a proxy <code><a href="vellumwidget-proxy-verbs.html">vw_zoom()</a></code>).<
 </dl><p>Data-space coordinates (<code>x0d</code>/… and <code>zoom$data</code>) come from the per-panel scale
 descriptors <code>vellumplot</code> attaches to the scene; a raw <code>vellum</code> scene or a
 non-cartesian coordinate system carries none, and only the device-pixel fields
-are reported. Date/time axes report the numeric epoch (days for <code>Date</code>, seconds
-for <code>POSIXct</code>), which you map back with <code><a href="https://rdrr.io/r/base/as.Date.html" class="external-link">as.Date()</a></code> / <code><a href="https://rdrr.io/r/base/base-internal.html" class="external-link">.POSIXct()</a></code>.</p>
-<p>These are emitted only inside a live Shiny session; a static render (knitr,
+are reported. Some specifics:</p><ul><li><p>They describe the <strong>visual</strong> axes: <code>x0d</code>/<code>x1d</code> (and <code>zoom$data$x</code>) are the
+<em>horizontal</em> axis. Under <code><a href="https://r-vellum.github.io/vellumplot/reference/coord_cartesian.html" class="external-link">coord_flip()</a></code> that is the plot's <code>y</code> aesthetic.</p></li>
+<li><p><strong>Date/time</strong> axes report the numeric epoch (days for <code>Date</code>, seconds for
+<code>POSIXct</code>); map back with <code><a href="https://rdrr.io/r/base/as.Date.html" class="external-link">as.Date()</a></code> / <code><a href="https://rdrr.io/r/base/base-internal.html" class="external-link">.POSIXct()</a></code>.</p></li>
+<li><p>A <strong>discrete</strong> axis reports fractional band positions (category <em>i</em> sits at
+<code>i</code>), not the level labels.</p></li>
+<li><p>Axes built with a custom <code>scales::transform_*()</code> object (anything beyond
+identity / log10 / sqrt / reverse) can't be inverted client-side, so that axis
+is omitted from the data-space fields (device-pixel fields still report).</p></li>
+</ul><p>These are emitted only inside a live Shiny session; a static render (knitr,
 pkgdown, <code><a href="https://rstudio.github.io/htmltools/reference/save_html.html" class="external-link">htmltools::save_html()</a></code>) produces identical output and no input
 traffic. To drive the widget <em>from</em> the server — set the selection, cross-filter
 it, or zoom it without a re-render — use <code><a href="vellumwidget_proxy.html">vellumwidget_proxy()</a></code>.</p>
