@@ -231,8 +231,11 @@ toolbar's SVG/PNG export. Exports capture the current (zoomed/panned) view.</p><
 <dt id="arg-group">group<a class="anchor" aria-label="anchor" href="#arg-group"></a></dt>
 <dd><p>Optional linking group name. Widgets sharing a <code>group</code> link
 client-side: selecting (or brushing) in one highlights the same data keys in
-the others — no Shiny, no crosstalk. Selection projects by <code>hover_group</code> when
-the marks declare it (select one, select the whole series).</p></dd>
+the others, and panning/zooming one <strong>pans/zooms the others</strong> to the same
+relative view — no Shiny, no crosstalk. Selection projects by <code>hover_group</code>
+when the marks declare it (select one, select the whole series). Linked
+pan/zoom shares the view as a <em>fraction</em> of each widget's own extent, so it
+links correctly even across differently-sized plots (e.g. small multiples).</p></dd>
 
 
 <dt id="arg-crosstalk">crosstalk<a class="anchor" aria-label="anchor" href="#arg-crosstalk"></a></dt>

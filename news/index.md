@@ -2,6 +2,13 @@
 
 ## vellumwidget (development version)
 
+- **Linked pan/zoom across a `group`.** Widgets sharing a `group`
+  already linked selection and hover; now panning or zooming one moves
+  the others to the same view. The view is shared as a *fraction* of
+  each widget’s own extent (over the same client-side bus, no
+  Shiny/crosstalk), so linked plots of different sizes — small multiples
+  — stay aligned. Reset links too.
+
 - **Brush and view now report data-space coordinates, not just pixels.**
   When the plot carries a cartesian scale (any `vellumplot` plot),
   `input$<id>_brush` gains the brushed region’s data-space bounds

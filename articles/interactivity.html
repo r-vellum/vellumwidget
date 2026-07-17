@@ -267,9 +267,13 @@ text, accessible SVG/PDF, and this widget).</p>
 <h2 id="linked-views">Linked views<a class="anchor" aria-label="anchor" href="#linked-views"></a>
 </h2>
 <p>Widgets sharing a <code>group</code> link client-side: selecting or
-brushing in one highlights the same data keys in the others, with no
-Shiny and no crosstalk. Selection projects by <code>hover_group</code>
-when the marks declare it.</p>
+brushing in one highlights the same data keys in the others, and
+<strong>panning or zooming one moves the others to the same relative
+view</strong> — with no Shiny and no crosstalk. Selection projects by
+<code>hover_group</code> when the marks declare it. Linked pan/zoom
+shares the view as a <em>fraction</em> of each widget’s own extent, so
+it stays aligned even when the linked plots are different sizes (small
+multiples). Try zooming one below — the other follows.</p>
 <div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">p</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/vplot.html" class="external-link">vplot</a></span><span class="op">(</span><span class="va">df</span><span class="op">)</span> <span class="op">|&gt;</span> <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/mark_point.html" class="external-link">mark_point</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">wt</span>, y <span class="op">=</span> <span class="va">mpg</span>, data_id <span class="op">=</span> <span class="va">model</span>, hover_group <span class="op">=</span> <span class="va">cyl</span><span class="op">)</span></span>
 <span><span class="fu">htmltools</span><span class="fu">::</span><span class="fu"><a href="https://rstudio.github.io/htmltools/reference/tagList.html" class="external-link">tagList</a></span><span class="op">(</span></span>
