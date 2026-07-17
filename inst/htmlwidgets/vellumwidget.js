@@ -584,6 +584,27 @@
     }
     return best;
   }
+  function nearestSortedIdx(sorted, target) {
+    const n = sorted.length;
+    if (!n) return -1;
+    let lo = 0;
+    let hi = n - 1;
+    while (lo < hi) {
+      const mid = lo + hi >> 1;
+      if (sorted[mid] < target) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0 && Math.abs(sorted[lo - 1] - target) <= Math.abs(sorted[lo] - target)) return lo - 1;
+    return lo;
+  }
+  function columnTolerance(sorted) {
+    let minGap = Infinity;
+    for (let i = 1; i < sorted.length; i++) {
+      const g = sorted[i] - sorted[i - 1];
+      if (g > 1e-6 && g < minGap) minGap = g;
+    }
+    return isFinite(minGap) ? minGap / 2 : 1;
+  }
   function zoomViewBox(vb, factor, cx, cy) {
     const w = vb.w / factor;
     const h = vb.h / factor;
@@ -650,6 +671,19 @@
 .vellumwidget-dim-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;
+}
+/* Crosshair guide rule(s) for unified hover \u2014 above the base image / canvas,
+   below the highlight rings so a highlighted mark still reads on top. */
+.vellumwidget-crosshair-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 4; overflow: visible;
+}
+.vellumwidget-crosshair-line {
+  stroke: var(--vellumwidget-crosshair-stroke, rgba(75,85,99,0.85));
+  stroke-width: 1px; stroke-dasharray: 4 3;
+}
+@media (prefers-color-scheme: dark) {
+  .vellumwidget-crosshair-line { stroke: var(--vellumwidget-crosshair-stroke, rgba(209,213,219,0.85)); }
 }
 /* Raster-mode feedback rings (hover / selection), drawn on the overlay since the
    marks are a base image with no per-element nodes. Colours reuse the same CSS
@@ -797,6 +831,13 @@
       const DIM_OVERLAY_MIN = 2e3;
       let largeDim = false;
       let dimLayer = null;
+      let crosshairLayer = null;
+      let sortedCx = [];
+      let sortedCxKeys = [];
+      let sortedCy = [];
+      let sortedCyKeys = [];
+      let tolX = 1;
+      let tolY = 1;
       let rasterMode = false;
       let selGroup = null;
       let hovGroup = null;
@@ -817,7 +858,9 @@
         toolbar: true,
         nearest: true,
         a11y: true,
-        selectMode: "multiple"
+        selectMode: "multiple",
+        hoverMode: "closest",
+        crosshair: false
       };
       let liveRegion = null;
       let tableEl = null;
@@ -887,6 +930,40 @@
         }
         idx.finish();
         spatialIndex = idx;
+      }
+      function buildHoverAxis() {
+        const cx = [];
+        const cy = [];
+        for (let i = 0; i < elements.length; i++) {
+          const e = elements[i];
+          if (!hasBbox(e)) continue;
+          cx.push({ c: (e.x0 + e.x1) / 2, k: e.key });
+          cy.push({ c: (e.y0 + e.y1) / 2, k: e.key });
+        }
+        cx.sort((a, b) => a.c - b.c);
+        cy.sort((a, b) => a.c - b.c);
+        sortedCx = cx.map((p) => p.c);
+        sortedCxKeys = cx.map((p) => p.k);
+        sortedCy = cy.map((p) => p.c);
+        sortedCyKeys = cy.map((p) => p.k);
+        tolX = columnTolerance(sortedCx);
+        tolY = columnTolerance(sortedCy);
+      }
+      function nearestAxisKey(axis, coord) {
+        const sorted = axis === "x" ? sortedCx : sortedCy;
+        const keys = axis === "x" ? sortedCxKeys : sortedCyKeys;
+        const i = nearestSortedIdx(sorted, coord);
+        return i >= 0 ? keys[i] : null;
+      }
+      function columnKeys(primary, axis) {
+        const m = meta[primary];
+        if (!m || !hasBbox(m)) return [primary];
+        const cx = (m.x0 + m.x1) / 2;
+        const cy = (m.y0 + m.y1) / 2;
+        const SPAN = 1e7;
+        const rect = axis === "x" ? { x0: cx - tolX, x1: cx + tolX, y0: -SPAN, y1: SPAN } : { x0: -SPAN, x1: SPAN, y0: cy - tolY, y1: cy + tolY };
+        const ks = brushKeysIn(rect);
+        return ks.length ? ks : [primary];
       }
       function nearestKeyAt(x, y, maxDist) {
         if (spatialIndex) {
@@ -1061,9 +1138,8 @@
           if (c) hovGroup.appendChild(c);
         }
       }
-      function setHover(k) {
+      function setHoverKeys(keys) {
         if (!opts.hover) return;
-        const keys = linkedKeys(k);
         if (rasterMode) {
           drawHovFeedback(keys);
           return;
@@ -1073,9 +1149,51 @@
         if (largeDim) showHighlightOverlay(keys);
         else el.classList.add("vellumwidget-hovering");
       }
+      function setHover(k) {
+        setHoverKeys(linkedKeys(k));
+      }
+      function crosshairLine(x1, y1, x2, y2) {
+        const l = document.createElementNS(SVGNS, "line");
+        l.setAttribute("x1", String(x1));
+        l.setAttribute("y1", String(y1));
+        l.setAttribute("x2", String(x2));
+        l.setAttribute("y2", String(y2));
+        l.setAttribute("class", "vellumwidget-crosshair-line");
+        l.setAttribute("vector-effect", "non-scaling-stroke");
+        return l;
+      }
+      function clearCrosshair() {
+        if (crosshairLayer) while (crosshairLayer.firstChild) crosshairLayer.removeChild(crosshairLayer.firstChild);
+      }
+      function drawCrosshair(k, hm) {
+        clearCrosshair();
+        if (!crosshairLayer) return;
+        const m = meta[k];
+        if (!m || !hasBbox(m)) return;
+        const view = vb || vb0;
+        if (!view) return;
+        const cx = (m.x0 + m.x1) / 2;
+        const cy = (m.y0 + m.y1) / 2;
+        const x0 = view.x, x1 = view.x + view.w, y0 = view.y, y1 = view.y + view.h;
+        if (hm !== "y") crosshairLayer.appendChild(crosshairLine(cx, y0, cx, y1));
+        if (hm !== "x") crosshairLayer.appendChild(crosshairLine(x0, cy, x1, cy));
+      }
       function showTip(clientX, clientY, k) {
         const m = meta[k];
         tip.innerHTML = sanitizeTip(m && m.tooltip || k);
+        const box = el.getBoundingClientRect();
+        tip.style.transform = "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) + "px) translate(-50%, calc(-100% - 12px))";
+        tip.classList.add("vellumwidget-show");
+      }
+      const TIP_MULTI_CAP = 30;
+      function showTipMulti(clientX, clientY, keys) {
+        const rows = [];
+        for (let i = 0; i < keys.length && rows.length < TIP_MULTI_CAP; i++) {
+          const m = meta[keys[i]];
+          rows.push(sanitizeTip(m && m.tooltip || keys[i]));
+        }
+        if (keys.length > TIP_MULTI_CAP) rows.push("\u2026");
+        tip.innerHTML = rows.join("<br>");
         const box = el.getBoundingClientRect();
         tip.style.transform = "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) + "px) translate(-50%, calc(-100% - 12px))";
         tip.classList.add("vellumwidget-show");
@@ -1088,6 +1206,7 @@
         if (largeDim) hideHighlightOverlay();
         el.classList.remove("vellumwidget-hovering");
         clearClass("vellumwidget-hl");
+        clearCrosshair();
         hideTip();
         shinyInput("hover", null);
       }
@@ -1209,6 +1328,7 @@
       function applyViewBox() {
         if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
         if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
+        if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
         drawPoints();
       }
       function resetZoom() {
@@ -1247,11 +1367,21 @@
           return;
         }
         shinyInput("hover", k);
-        setHover(k);
-        if (opts.tooltip) showTip(clientX, clientY, k);
+        const hm = opts.hoverMode || "closest";
+        if (hm === "x" || hm === "y") {
+          const keys = columnKeys(k, hm);
+          setHoverKeys(keys);
+          if (opts.crosshair) drawCrosshair(k, hm);
+          if (opts.tooltip) showTipMulti(clientX, clientY, keys);
+        } else {
+          setHover(k);
+          if (opts.crosshair) drawCrosshair(k, "closest");
+          if (opts.tooltip) showTip(clientX, clientY, k);
+        }
       }
       function onHoverMove(ev) {
         if (down || pinchDist > 0) return;
+        const hm = opts.hoverMode || "closest";
         const k = keyOf(ev.target);
         if (k != null) {
           if (hoverRAF) {
@@ -1261,7 +1391,7 @@
           hoverAt(k, ev.clientX, ev.clientY);
           return;
         }
-        if (!opts.nearest || !elements.length) {
+        if (!elements.length || hm === "closest" && !opts.nearest) {
           clearHover();
           return;
         }
@@ -1271,8 +1401,11 @@
         hoverRAF = requestAnimationFrame(function() {
           hoverRAF = 0;
           const u = toUser(cx, cy);
-          const rad = vb ? vb.w * 0.02 : 8;
-          hoverAt(nearestKeyAt(u.x, u.y, rad), cx, cy);
+          let seed;
+          if (hm === "x") seed = nearestAxisKey("x", u.x);
+          else if (hm === "y") seed = nearestAxisKey("y", u.y);
+          else seed = nearestKeyAt(u.x, u.y, vb ? vb.w * 0.02 : 8);
+          hoverAt(seed, cx, cy);
         });
       }
       function onDragMove(ev) {
@@ -1785,7 +1918,7 @@
       return {
         renderValue: function(x) {
           opts = Object.assign(
-            { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple" },
+            { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false },
             x.options || {}
           );
           elements = normalizeElements(x.elements);
@@ -1817,6 +1950,10 @@
             dimLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg");
             dimLayer.setAttribute("class", "vellumwidget-dim-layer");
             dimLayer.setAttribute("aria-hidden", "true");
+            crosshairLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            crosshairLayer.setAttribute("class", "vellumwidget-crosshair-layer");
+            crosshairLayer.setAttribute("aria-hidden", "true");
+            stage.appendChild(crosshairLayer);
             stage.appendChild(dimLayer);
             el.appendChild(brushBox);
             el.appendChild(tip);
@@ -1851,6 +1988,8 @@
               dimLayer.appendChild(hovGroup);
             }
             if (dimLayer && vb0) dimLayer.setAttribute("viewBox", fmtViewBox(vb0));
+            if (crosshairLayer && vb0) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb0));
+            clearCrosshair();
             if (rasterMode) {
               ensureCanvas();
               sampleBaseRaster();
@@ -1858,6 +1997,7 @@
               clearPointData();
             }
             buildSpatialIndex();
+            buildHoverAxis();
             wire(svgEl);
             buildToolbar();
             setMode("brush");
@@ -1894,7 +2034,12 @@
           },
           pointCount: function() {
             return ptN;
-          }
+          },
+          hoverMode: function() {
+            return opts.hoverMode || "closest";
+          },
+          columnKeys,
+          nearestAxisKey
         }
       };
     }
@@ -1930,6 +2075,8 @@
     dispatchProxyCall,
     normalizeElements,
     isZoomedIn,
-    userToCanvas
+    userToCanvas,
+    nearestSortedIdx,
+    columnTolerance
   };
 })();

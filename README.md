@@ -18,7 +18,9 @@ adapter of the vellum interactivity stack: `vellum` emits per-element
 `vellumplot` declares what is interactive, and `vellumwidget` hosts it.
 
 **Interactions:** hover (tooltip + highlight, with nearest-mark snapping
-and `hover_group` linking) · click-select (single/multiple) · drag a
+and `hover_group` linking) · shared/unified hover with an optional
+crosshair (`hover_mode = "x"`/`"y"`: one tooltip listing every series at
+the hovered x/y) · click-select (single/multiple) · drag a
 rectangle to brush-select · wheel / pan-drag to pan-zoom ·
 discrete-legend interaction (hover a swatch to highlight its series,
 click to select it) · toolbar (mode toggle, zoom-to-selection, reset,

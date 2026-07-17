@@ -67,6 +67,35 @@ vplot(df) |>
   as_widget(tooltip_style = list(background = "#1d3557", fontsize = "13px"))
 ```
 
+### Shared tooltips and a crosshair
+
+On a single scatter, hovering the nearest point is what you want. On a
+multi-series line or time-series chart you usually want the opposite: *every*
+series' value at the cursor's x, in one box. Set `hover_mode = "x"` for that
+unified hover — every mark sharing the hovered x highlights together and its
+tooltip joins one combined box. `"y"` does the same along y; `"closest"` (the
+default) keeps the single-nearest behaviour. Turn on `crosshair = TRUE` to drop
+a guide rule at the hovered position (vertical in `"x"` mode, horizontal in
+`"y"`, a full cross in `"closest"`).
+
+```{r}
+#| label: unified-hover
+long <- data.frame(
+  t = rep(1:12, 2),
+  y = c(cumsum(rnorm(12, 1)), cumsum(rnorm(12, 0.5))),
+  series = rep(c("A", "B"), each = 12)
+)
+vplot(long) |>
+  mark_line(x = t, y = y, color = series) |>
+  mark_point(x = t, y = y, color = series, tooltip = y, data_id = interaction(series, t)) |>
+  as_widget(hover_mode = "x", crosshair = TRUE)
+```
+
+Unified hover reads the mark positions straight from the element index — no axis
+metadata is needed — so it works on any keyed plot and in raster mode. It snaps
+along its axis, so the shared readout tracks the cursor anywhere in the plot. In
+Shiny, `input$<id>_hover` still reports the single nearest mark.
+
 ## Select and brush
 
 Click a mark to select it (every mark sharing its `data_id` toggles together);

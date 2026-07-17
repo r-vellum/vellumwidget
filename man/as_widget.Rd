@@ -15,6 +15,8 @@ as_widget(
   zoom = TRUE,
   toolbar = TRUE,
   nearest = TRUE,
+  hover_mode = c("closest", "x", "y"),
+  crosshair = FALSE,
   a11y = TRUE,
   alt = NULL,
   hover_color = NULL,
@@ -47,6 +49,20 @@ pan-zoom (via the SVG \code{viewBox}), and the on-hover toolbar (all \code{TRUE}
 
 \item{nearest}{When \code{TRUE} (default), hover snaps to the nearest mark within a
 small radius when the cursor is not directly over one (helps sparse points).}
+
+\item{hover_mode}{How hover gathers marks into the tooltip. \code{"closest"}
+(default) shows the single nearest mark. \code{"x"} (or \code{"y"}) gives a \emph{unified}
+hover: every mark sharing the hovered x (or y) position is highlighted and
+listed together in one box — the shared readout multi-series line and
+time-series charts expect. Unified mode always snaps along its axis, so the
+readout tracks the cursor regardless of \code{nearest}. The mark positions come
+from the element index, so no axis metadata is required; the box lists each
+mark's \code{tooltip} (one row per series) without a value-axis header.}
+
+\item{crosshair}{Draw a guide rule at the hovered position (default \code{FALSE}):
+a vertical rule at the shared x when \code{hover_mode = "x"}, a horizontal rule
+when \code{"y"}, and a full cross through the mark when \code{"closest"}. Colour is the
+\code{--vellumwidget-crosshair-stroke} CSS variable (a muted grey by default).}
 
 \item{a11y}{Accessibility (default \code{TRUE}). Makes the widget a keyboard- and
 screen-reader-navigable chart: the SVG is labelled as an interactive chart
