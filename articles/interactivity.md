@@ -154,6 +154,22 @@ hidden series drops out of hover and tooltip hit-testing. It works from
 the keyboard too (Tab to a swatch, Enter/Space to toggle) and is
 independent of any crosstalk cross-filter.
 
+### Filtering by a continuous colorbar
+
+When a plot maps a **continuous** `color` scale, its colorbar becomes an
+interactive filter: drag the two handles to a value range and marks
+outside it fade out (and stop responding to hover/brush); double-click
+the bar to reset. In Shiny the range arrives as
+`input$<id>_colorfilter`. It’s automatic — no argument — whenever
+there’s a continuous colorbar.
+
+``` r
+
+vplot(df) |>
+  mark_point(x = wt, y = mpg, color = mpg, data_id = model) |>
+  as_widget()
+```
+
 ## Pan, zoom, and the toolbar
 
 Zoom with the mouse wheel, drag to pan (the toolbar’s mode button cycles

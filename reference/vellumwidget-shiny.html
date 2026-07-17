@@ -117,6 +117,11 @@ lasso gesture also carries <code>lasso = TRUE</code>. When the plot carries a ca
 scale (a <code>vellumplot</code> plot), it <em>also</em> carries the region's <strong>data-space</strong>
 bounds <code>x0d,y0d,x1d,y1d</code> and the <code>panel</code> name. An event input.</p></dd>
 
+<dt><code>input$plot_colorfilter</code></dt>
+<dd><p>A length-2 numeric <code>c(lo, hi)</code> — the value
+range selected on a continuous colorbar (see the interactive colorbar
+filter); <code>NULL</code> when the full range is shown. State input.</p></dd>
+
 <dt><code>input$plot_zoom</code></dt>
 <dd><p>A list <code>list(x=, y=, w=, h=, zoomed=)</code> — the current
 view (the SVG <code>viewBox</code> in device-pixel coordinates) plus a <code>zoomed</code> flag

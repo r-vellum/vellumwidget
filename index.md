@@ -17,12 +17,14 @@ the hovered x/y) · click-select (single/multiple) · drag a rectangle to
 brush-select or a freehand lasso · wheel / pan-drag to pan-zoom ·
 discrete-legend interaction (hover a swatch to highlight its series,
 click to select — or `legend_click = "hide"` to toggle/isolate series
-visibility) · optional overview navigator (`navigator = TRUE`: a
-draggable range strip for long series) · toolbar (mode toggle,
-zoom-to-selection, reset, save SVG/PNG, fullscreen) · linked views
-across a `group` (selection, hover, and pan/zoom) · keyboard +
-screen-reader access (Tab in, arrow keys move between marks, Enter/Space
-to select; `a11y`, on by default). Each is opt-outable via an
+visibility) · continuous colorbar filter (drag a value range on the
+colorbar to fade out-of-range marks) · optional overview navigator
+(`navigator = TRUE`: a draggable range strip for long series) · toolbar
+(mode toggle, zoom-to-selection, reset, save SVG/PNG, fullscreen) ·
+linked views across a `group` (selection, hover, and pan/zoom) ·
+keyboard + screen-reader access (Tab in, arrow keys move between marks,
+Enter/Space to select; `a11y`, on by default). Each is opt-outable via
+an
 [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
 argument.
 

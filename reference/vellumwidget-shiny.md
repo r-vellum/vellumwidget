@@ -71,6 +71,12 @@ id. All values are the element **data keys** (the `data_id` a
   **data-space** bounds `x0d,y0d,x1d,y1d` and the `panel` name. An event
   input.
 
+- `input$plot_colorfilter`:
+
+  A length-2 numeric `c(lo, hi)` — the value range selected on a
+  continuous colorbar (see the interactive colorbar filter); `NULL` when
+  the full range is shown. State input.
+
 - `input$plot_zoom`:
 
   A list `list(x=, y=, w=, h=, zoomed=)` — the current view (the SVG
