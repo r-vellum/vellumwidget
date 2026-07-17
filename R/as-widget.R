@@ -29,6 +29,14 @@
 #'   (all `TRUE`).
 #' @param brush,zoom,toolbar Toggles for rectangular brush-select, wheel/drag
 #'   pan-zoom (via the SVG `viewBox`), and the on-hover toolbar (all `TRUE`).
+#' @param navigator Show an overview **range navigator** below the plot (default
+#'   `FALSE`): a full-width strip rendering the whole scene in miniature, with a
+#'   draggable, resizable window marking the visible x-range. Drag the window to
+#'   pan, drag a handle to zoom; it stays two-way in sync with the main view
+#'   (wheel/keyboard/brush and linked-group changes all move it). Useful for long
+#'   series. `navigator_height` sets the strip height in pixels (default `56`).
+#' @param navigator_height Height of the navigator strip in pixels (default `56`);
+#'   ignored unless `navigator = TRUE`.
 #' @param lasso Enable freehand **lasso-select** (default `TRUE`): a third drag
 #'   mode alongside brush and pan, cycled from the toolbar's mode button. Drag a
 #'   loop and every mark whose centre falls inside it is selected. Like the brush,
@@ -133,7 +141,7 @@
 as_widget <- function(x, width = NULL, height = NULL,
                       tooltip = TRUE, hover = TRUE, select = TRUE,
                       brush = TRUE, lasso = TRUE, zoom = TRUE, toolbar = TRUE,
-                      nearest = TRUE,
+                      nearest = TRUE, navigator = FALSE, navigator_height = NULL,
                       hover_mode = c("closest", "x", "y"), crosshair = FALSE,
                       legend_click = c("select", "hide", "mute"),
                       a11y = TRUE, alt = NULL,
@@ -195,6 +203,8 @@ as_widget <- function(x, width = NULL, height = NULL,
       select = isTRUE(select),
       brush = isTRUE(brush),
       lasso = isTRUE(lasso),
+      navigator = isTRUE(navigator),
+      navigatorHeight = if (is.null(navigator_height)) NULL else as.numeric(navigator_height),
       zoom = isTRUE(zoom),
       toolbar = isTRUE(toolbar),
       nearest = isTRUE(nearest),

@@ -1653,5 +1653,48 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(T.parseViewBox(B.svg.getAttribute("viewBox")).w === vb0B.w, "linked zoom: reset on A restores B's full view");
 }
 
+// ===================== overview navigator (#6) =====================
+{
+  function mountNav(opts) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e);
+    i.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40" viewBox="0 0 100 40">' +
+        '<defs><clipPath id="c0"><path d="M0 0h100v40H0z"/></clipPath></defs>' +
+        '<g clip-path="url(#c0)"><path data-key="k" d="M40 15h20v10z"/></g></svg>',
+      elements: { key: ["k"], x0: [40], y0: [15], x1: [60], y1: [25] },
+      options: Object.assign({ hover: true, select: true, zoom: true, brush: true, toolbar: true, selectMode: "multiple" }, opts)
+    });
+    return { el: e, inst: i, svg: e.querySelector("svg") };
+  }
+  // off by default
+  ok(mountNav({}).inst._test.hasNavigator() === false, "navigator: absent by default");
+  // present + structured when enabled
+  const N = mountNav({ navigator: true });
+  ok(N.inst._test.hasNavigator() === true, "navigator: strip built when navigator=true");
+  ok(!!N.el.querySelector(".vellumwidget-nav .vellumwidget-nav-window"), "navigator: has a window element");
+  ok(N.el.querySelectorAll(".vellumwidget-nav-handle").length === 2, "navigator: window has two resize handles");
+  ok(!!N.el.querySelector(".vellumwidget-nav-mini svg"), "navigator: mini-render (svg clone) present");
+  ok(N.el.querySelector(".vellumwidget-nav-mini [data-key]") === null, "navigator: mini clone is inert (no data-key)");
+  ok(N.el.querySelector(".vellumwidget-nav-mini defs") === null, "navigator: mini clone drops <defs> (no duplicate ids)");
+  // full view -> window spans the whole strip
+  ok(N.inst._test.navWindowFrac().left === 0 && N.inst._test.navWindowFrac().width === 100, "navigator: window spans full strip at the full view");
+  // navToView maps fractions -> viewBox and moves the window
+  N.inst._test.navToView(0.25, 0.5);
+  const v = T.parseViewBox(N.svg.getAttribute("viewBox"));
+  ok(Math.abs(v.x - 25) < 1e-6 && Math.abs(v.w - 50) < 1e-6, "navigator: navToView(0.25,0.5) sets the x-range to [25, +50] of vb0");
+  const wf = N.inst._test.navWindowFrac();
+  ok(Math.abs(wf.left - 25) < 1e-6 && Math.abs(wf.width - 50) < 1e-6, "navigator: window reflects the new view (25%/50%)");
+  // clamp: can't push the window off the right edge
+  N.inst._test.navToView(0.9, 0.5);
+  ok(Math.abs(N.inst._test.navWindowFrac().left - 50) < 1e-6, "navigator: left clamped so left+width <= 100%");
+  // two-way sync: zooming the main view via the proxy moves the window
+  N.inst._call("resetZoom");
+  ok(N.inst._test.navWindowFrac().width === 100, "navigator: reset restores the full-width window");
+  N.inst._call("zoom", ["k"]); // frame the mark -> narrower view
+  ok(N.inst._test.navWindowFrac().width < 100, "navigator: a main-view zoom narrows the window (two-way sync)");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

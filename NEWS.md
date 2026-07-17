@@ -1,5 +1,13 @@
 # vellumwidget (development version)
 
+* **Overview navigator (`navigator = TRUE`).** An opt-in strip below the plot that
+  renders the whole scene in miniature with a draggable, resizable window marking
+  the visible x-range: drag the window to pan, drag a handle to zoom. It stays
+  two-way in sync with the main view — wheel/keyboard/brush, the toolbar, and
+  linked-group pan/zoom all move the window, and moving the window drives them.
+  Useful for scrubbing long series. `navigator_height` sets the strip height
+  (default 56px). Client-side; off by default.
+
 * **Linked pan/zoom across a `group`.** Widgets sharing a `group` already linked
   selection and hover; now panning or zooming one moves the others to the same
   view. The view is shared as a *fraction* of each widget's own extent (over the
