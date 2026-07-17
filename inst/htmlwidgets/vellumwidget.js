@@ -558,6 +558,10 @@
     }
     return out;
   }
+  function normalizePanels(raw) {
+    if (raw == null) return [];
+    return Array.isArray(raw) ? raw : [raw];
+  }
   function brushKeys(elems, brush) {
     const out = [];
     const seen = {};
@@ -637,6 +641,29 @@
       if (g > 1e-6 && g < minGap) minGap = g;
     }
     return isFinite(minGap) ? minGap / 2 : 1;
+  }
+  function nativeToData(ax, nv) {
+    switch (ax.transform) {
+      case "log10":
+        return Math.pow(10, nv);
+      case "sqrt":
+        return nv * nv;
+      default:
+        return nv;
+    }
+  }
+  function pxToDataX(p, px) {
+    const ax = p.x;
+    if (!ax || p.px1 === p.px0) return null;
+    const nv = ax.native_lo + (px - p.px0) / (p.px1 - p.px0) * (ax.native_hi - ax.native_lo);
+    return nativeToData(ax, nv);
+  }
+  function pxToDataY(p, py) {
+    const ax = p.y;
+    if (!ax || p.py1 === p.py0) return null;
+    const frac = (py - p.py0) / (p.py1 - p.py0);
+    const nv = ax.native_hi + frac * (ax.native_lo - ax.native_hi);
+    return nativeToData(ax, nv);
   }
   function zoomViewBox(vb, factor, cx, cy) {
     const w = vb.w / factor;
@@ -871,6 +898,7 @@
       let hiddenKeySet = {};
       let filteredKeySet = {};
       let elements = [];
+      let panels = [];
       let selected = {};
       let nodesByKey = {};
       let hoverRAF = 0;
@@ -1439,15 +1467,49 @@
           });
         }
       }
+      function panelAt(x, y) {
+        for (let i = 0; i < panels.length; i++) {
+          const p = panels[i];
+          if (x >= p.px0 && x <= p.px1 && y >= p.py0 && y <= p.py1) return p;
+        }
+        return panels.length === 1 ? panels[0] : null;
+      }
+      function dataRangeOf(p, dx0, dy0, dx1, dy1) {
+        const out = { panel: p.name };
+        if (p.x) {
+          const a = pxToDataX(p, dx0), b = pxToDataX(p, dx1);
+          if (a != null && b != null) out.x = [Math.min(a, b), Math.max(a, b)];
+        }
+        if (p.y) {
+          const a = pxToDataY(p, dy0), b = pxToDataY(p, dy1);
+          if (a != null && b != null) out.y = [Math.min(a, b), Math.max(a, b)];
+        }
+        return out.x || out.y ? out : null;
+      }
+      function brushDataFields(bb) {
+        const p = panelAt((bb.x0 + bb.x1) / 2, (bb.y0 + bb.y1) / 2);
+        if (!p) return {};
+        const d = dataRangeOf(p, bb.x0, bb.y0, bb.x1, bb.y1);
+        if (!d) return {};
+        const f = { panel: d.panel };
+        if (d.x) {
+          f.x0d = d.x[0];
+          f.x1d = d.x[1];
+        }
+        if (d.y) {
+          f.y0d = d.y[0];
+          f.y1d = d.y[1];
+        }
+        return f;
+      }
       function reportView() {
         if (!vb) return;
-        shinyInput("zoom", {
-          x: vb.x,
-          y: vb.y,
-          w: vb.w,
-          h: vb.h,
-          zoomed: vb0 ? isZoomedIn(vb, vb0) : false
-        });
+        const payload = { x: vb.x, y: vb.y, w: vb.w, h: vb.h, zoomed: vb0 ? isZoomedIn(vb, vb0) : false };
+        if (panels.length === 1) {
+          const d = dataRangeOf(panels[0], vb.x, vb.y, vb.x + vb.w, vb.y + vb.h);
+          if (d) payload.data = d;
+        }
+        shinyInput("zoom", payload);
       }
       function applyViewBox() {
         if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
@@ -1657,7 +1719,10 @@
           lastBrush = rect;
           const hitKeys = dropInert(brushKeysIn(rect));
           if (opts.select) setSelection(hitKeys);
-          shinyInput("brush", { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 }, { priority: "event" });
+          shinyInput("brush", Object.assign(
+            { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 },
+            brushDataFields(rect)
+          ), { priority: "event" });
           hideBrush();
         } else if (dragging === "lasso") {
           const poly = lassoPts.slice();
@@ -1666,7 +1731,10 @@
             const b = polyBounds(poly);
             lastBrush = b;
             if (opts.select) setSelection(hitKeys);
-            shinyInput("brush", { keys: hitKeys, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, lasso: true }, { priority: "event" });
+            shinyInput("brush", Object.assign(
+              { keys: hitKeys, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, lasso: true },
+              brushDataFields(b)
+            ), { priority: "event" });
           }
           clearLasso();
         }
@@ -2128,6 +2196,7 @@
             x.options || {}
           );
           elements = normalizeElements(x.elements);
+          panels = normalizePanels(x.panels);
           meta = {};
           groups = {};
           legendIndex = {};
@@ -2261,7 +2330,10 @@
             return mode;
           },
           inert,
-          dropInert
+          dropInert,
+          panelAt,
+          dataRangeOf,
+          brushDataFields
         }
       };
     }
@@ -2302,6 +2374,10 @@
     columnTolerance,
     pointInPolygon,
     lassoKeys,
-    polyBounds
+    polyBounds,
+    nativeToData,
+    pxToDataX,
+    pxToDataY,
+    normalizePanels
   };
 })();

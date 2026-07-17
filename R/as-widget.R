@@ -184,6 +184,7 @@ as_widget <- function(x, width = NULL, height = NULL,
   payload <- list(
     svg = svg,
     elements = .vellumwidget_elements(model),
+    panels = .vellumwidget_panels(model),
     options = list(
       raster = use_raster,
       tooltip = isTRUE(tooltip),
@@ -362,6 +363,43 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   cols[!vapply(cols, is.null, logical(1))]
 }
 
+# The per-panel geometry + scale descriptors the runtime needs to map device
+# pixels back to data values (data-space brush + view reporting). Only cartesian
+# data panels that carry a `scales` meta (from vellumplot) are emitted; a scene
+# with none (raw vellum, or non-cartesian coords) yields NULL and the widget stays
+# pixel-only. Each panel carries its resolved device-px rectangle and, per axis, a
+# compact scale descriptor (type / transform / data + native domains / time unit)
+# --- enough to invert px -> native -> data. `scene_model()$panels` is specified in
+# vellum's "The scene contract" vignette.
+.vellumwidget_panels <- function(model) {
+  p <- model$panels
+  if (is.null(p) || !nrow(p) || is.null(p$meta)) {
+    return(NULL)
+  }
+  axis <- function(a) {
+    if (is.null(a)) return(NULL)
+    drop_null(list(
+      type = as.character(a$type),
+      transform = as.character(a$transform %||% "identity"),
+      data_lo = as.numeric(a$data_lo), data_hi = as.numeric(a$data_hi),
+      native_lo = as.numeric(a$native_lo), native_hi = as.numeric(a$native_hi),
+      time_unit = if (is.null(a$time_unit)) NULL else as.character(a$time_unit)
+    ))
+  }
+  out <- list()
+  for (i in seq_len(nrow(p))) {
+    sc <- p$meta[[i]]$scales
+    if (is.null(sc) || !isTRUE(sc$cartesian)) next
+    out[[length(out) + 1L]] <- drop_null(list(
+      name = as.character(p$name[i]),
+      px0 = as.numeric(p$px0[i]), py0 = as.numeric(p$py0[i]),
+      px1 = as.numeric(p$px1[i]), py1 = as.numeric(p$py1[i]),
+      x = axis(sc$x), y = axis(sc$y)
+    ))
+  }
+  if (!length(out)) NULL else out
+}
+
 # Pixel width/height declared on the emitted <svg> (its intrinsic size), used to
 # size the widget container. Falls back to NULL (let htmlwidgets decide).
 .svg_dims <- function(svg) {
@@ -489,14 +527,23 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #'   \item{`input$plot_brush`}{A list `list(keys=, x0=, y0=, x1=, y1=)` when a
 #'     brush (or lasso) gesture completes: the selected keys and the region's
 #'     bounding rectangle in the scene's device-pixel (viewBox) coordinates. A
-#'     lasso gesture also carries `lasso = TRUE`. An event input.}
+#'     lasso gesture also carries `lasso = TRUE`. When the plot carries a cartesian
+#'     scale (a `vellumplot` plot), it *also* carries the region's **data-space**
+#'     bounds `x0d,y0d,x1d,y1d` and the `panel` name. An event input.}
 #'   \item{`input$plot_zoom`}{A list `list(x=, y=, w=, h=, zoomed=)` — the current
 #'     view (the SVG `viewBox` in device-pixel coordinates) plus a `zoomed` flag
-#'     (is the view narrower/shorter than the full extent). Updates as state when a
-#'     zoom/pan settles (wheel, drag-pan release, pinch, keyboard, reset,
-#'     zoom-to-selection, or a proxy [vw_zoom()]). Data-space limits await
-#'     axis/scale metadata in the scene contract.}
+#'     (is the view narrower/shorter than the full extent). For a single-panel
+#'     cartesian plot it also carries `data = list(x=c(lo,hi), y=c(lo,hi), panel=)`,
+#'     the visible range in **data** coordinates. Updates as state when a zoom/pan
+#'     settles (wheel, drag-pan release, pinch, keyboard, reset, zoom-to-selection,
+#'     or a proxy [vw_zoom()]).}
 #' }
+#'
+#' Data-space coordinates (`x0d`/… and `zoom$data`) come from the per-panel scale
+#' descriptors `vellumplot` attaches to the scene; a raw `vellum` scene or a
+#' non-cartesian coordinate system carries none, and only the device-pixel fields
+#' are reported. Date/time axes report the numeric epoch (days for `Date`, seconds
+#' for `POSIXct`), which you map back with `as.Date()` / `.POSIXct()`.
 #'
 #' These are emitted only inside a live Shiny session; a static render (knitr,
 #' pkgdown, `htmltools::save_html()`) produces identical output and no input
