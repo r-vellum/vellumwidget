@@ -1116,5 +1116,108 @@ function mountShiny(id, calls) {
   ok(iS._test.hasCanvas() === false, "canvas: SVG mode does not create a canvas layer");
 }
 
+// ===================== unified hover (hover_mode "x"/"y") + crosshair =====================
+{
+  // Two series (s, t) at two x positions (10, 50); s marks sit high, t marks low.
+  const svgU =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="50" viewBox="0 0 60 50">' +
+    '<path data-key="s1" d="M8 5h4v4z"/><path data-key="t1" d="M8 40h4v4z"/>' +
+    '<path data-key="s2" d="M48 5h4v4z"/><path data-key="t2" d="M48 40h4v4z"/></svg>';
+  const elemsU = [
+    { key: "s1", tooltip: "s@10", x0: 8, y0: 5, x1: 12, y1: 9 },
+    { key: "t1", tooltip: "t@10", x0: 8, y0: 40, x1: 12, y1: 44 },
+    { key: "s2", tooltip: "s@50", x0: 48, y0: 5, x1: 52, y1: 9 },
+    { key: "t2", tooltip: "t@50", x0: 48, y0: 40, x1: 52, y1: 44 }
+  ];
+  const elU = mount({
+    svg: svgU, elements: elemsU,
+    options: {
+      tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true,
+      nearest: true, selectMode: "multiple", hoverMode: "x", crosshair: true
+    }
+  });
+  const svgUEl = elU.querySelector("svg");
+  const tipU = elU.querySelector(".vellumwidget-tip");
+
+  // hover the top-left mark (x=10 column): both series' marks at x=10 highlight.
+  fireOn(svgUEl, "pointermove", elU.querySelector('[data-key="s1"]'));
+  ok(
+    elU.querySelector('[data-key="s1"]').classList.contains("vellumwidget-hl") &&
+      elU.querySelector('[data-key="t1"]').classList.contains("vellumwidget-hl"),
+    "unified x: the whole x-column (both series at that x) is highlighted"
+  );
+  ok(
+    !elU.querySelector('[data-key="s2"]').classList.contains("vellumwidget-hl") &&
+      !elU.querySelector('[data-key="t2"]').classList.contains("vellumwidget-hl"),
+    "unified x: the neighbouring x-column is not highlighted"
+  );
+  ok(
+    tipU.textContent.indexOf("s@10") !== -1 && tipU.textContent.indexOf("t@10") !== -1,
+    "unified x: the tooltip lists every mark in the column (one combined box)"
+  );
+  const chLayer = elU.querySelector(".vellumwidget-crosshair-layer");
+  ok(!!chLayer, "crosshair: the crosshair overlay layer is present");
+  ok(
+    elU.querySelectorAll(".vellumwidget-crosshair-line").length === 1,
+    "crosshair: unified x draws a single (vertical) guide rule"
+  );
+  // hover off -> crosshair + highlight clear
+  fireOn(svgUEl, "pointerleave", svgUEl);
+  ok(elU.querySelectorAll(".vellumwidget-crosshair-line").length === 0, "crosshair: cleared on hover-out");
+  ok(elU.querySelectorAll(".vellumwidget-hl").length === 0, "unified x: highlight cleared on hover-out");
+}
+{
+  // Exercise the column + nearest-axis helpers directly via the test seam.
+  const elH = document.createElement("div");
+  document.body.appendChild(elH);
+  const iH = widgetDef.factory(elH);
+  iH.renderValue({
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="50" viewBox="0 0 60 50">' +
+      '<path data-key="s1" d="M8 5h4v4z"/><path data-key="t1" d="M8 40h4v4z"/>' +
+      '<path data-key="s2" d="M48 5h4v4z"/><path data-key="t2" d="M48 40h4v4z"/></svg>',
+    elements: {
+      key: ["s1", "t1", "s2", "t2"],
+      x0: [8, 8, 48, 48], y0: [5, 40, 5, 40], x1: [12, 12, 52, 52], y1: [9, 44, 9, 44]
+    },
+    options: { hover: true, select: true, selectMode: "multiple", hoverMode: "x", crosshair: true }
+  });
+  ok(iH._test.hoverMode() === "x", "options: hoverMode round-trips into the runtime");
+  ok(
+    JSON.stringify(iH._test.columnKeys("s1", "x").sort()) === JSON.stringify(["s1", "t1"]),
+    "columnKeys(x): groups the marks sharing an x, excludes the other column"
+  );
+  ok(
+    JSON.stringify(iH._test.columnKeys("s1", "y").sort()) === JSON.stringify(["s1", "s2"]),
+    "columnKeys(y): groups the marks sharing a y"
+  );
+  const nx = iH._test.nearestAxisKey("x", 11);
+  ok(nx === "s1" || nx === "t1", "nearestAxisKey(x): seeds off the nearest x-position");
+  const ny = iH._test.nearestAxisKey("x", 49);
+  ok(ny === "s2" || ny === "t2", "nearestAxisKey(x): far cursor seeds the other column");
+}
+{
+  // closest mode + crosshair -> a full cross (two rules) through the mark.
+  const elX = mount({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="30" viewBox="0 0 60 30"><path data-key="a" d="M10 10h5v5z"/></svg>',
+    elements: [{ key: "a", tooltip: "A", x0: 10, y0: 10, x1: 15, y1: 15 }],
+    options: { tooltip: true, hover: true, select: true, nearest: true, selectMode: "multiple", crosshair: true }
+  });
+  fireOn(elX.querySelector("svg"), "pointermove", elX.querySelector('[data-key="a"]'));
+  ok(
+    elX.querySelectorAll(".vellumwidget-crosshair-line").length === 2,
+    "crosshair: closest mode draws a full cross (vertical + horizontal)"
+  );
+  ok(elX.querySelector(".vellumwidget-tip").textContent === "A", "closest mode: single-mark tooltip unchanged");
+}
+
+// ===================== pure helpers: nearestSortedIdx + columnTolerance =====================
+ok(T.nearestSortedIdx([0, 10, 20, 30], 12) === 1, "nearestSortedIdx: 12 -> index of 10");
+ok(T.nearestSortedIdx([0, 10, 20, 30], 26) === 3, "nearestSortedIdx: 26 -> index of 30");
+ok(T.nearestSortedIdx([0, 10, 20, 30], -5) === 0, "nearestSortedIdx: below range -> first");
+ok(T.nearestSortedIdx([], 1) === -1, "nearestSortedIdx: empty -> -1");
+ok(T.columnTolerance([10, 10, 50, 50]) === 20, "columnTolerance: half the min gap between distinct positions");
+ok(T.columnTolerance([7]) === 1, "columnTolerance: fewer than two distinct positions -> fallback 1");
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

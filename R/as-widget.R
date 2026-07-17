@@ -31,6 +31,18 @@
 #'   pan-zoom (via the SVG `viewBox`), and the on-hover toolbar (all `TRUE`).
 #' @param nearest When `TRUE` (default), hover snaps to the nearest mark within a
 #'   small radius when the cursor is not directly over one (helps sparse points).
+#' @param hover_mode How hover gathers marks into the tooltip. `"closest"`
+#'   (default) shows the single nearest mark. `"x"` (or `"y"`) gives a *unified*
+#'   hover: every mark sharing the hovered x (or y) position is highlighted and
+#'   listed together in one box — the shared readout multi-series line and
+#'   time-series charts expect. Unified mode always snaps along its axis, so the
+#'   readout tracks the cursor regardless of `nearest`. The mark positions come
+#'   from the element index, so no axis metadata is required; the box lists each
+#'   mark's `tooltip` (one row per series) without a value-axis header.
+#' @param crosshair Draw a guide rule at the hovered position (default `FALSE`):
+#'   a vertical rule at the shared x when `hover_mode = "x"`, a horizontal rule
+#'   when `"y"`, and a full cross through the mark when `"closest"`. Colour is the
+#'   `--vellumwidget-crosshair-stroke` CSS variable (a muted grey by default).
 #' @param a11y Accessibility (default `TRUE`). Makes the widget a keyboard- and
 #'   screen-reader-navigable chart: the SVG is labelled as an interactive chart
 #'   (`role="graphics-document"`), each mark is a focusable `graphics-symbol` with
@@ -103,6 +115,7 @@
 as_widget <- function(x, width = NULL, height = NULL,
                       tooltip = TRUE, hover = TRUE, select = TRUE,
                       brush = TRUE, zoom = TRUE, toolbar = TRUE, nearest = TRUE,
+                      hover_mode = c("closest", "x", "y"), crosshair = FALSE,
                       a11y = TRUE, alt = NULL,
                       hover_color = NULL, selected_color = NULL, dim_opacity = NULL,
                       tooltip_style = NULL,
@@ -114,6 +127,7 @@ as_widget <- function(x, width = NULL, height = NULL,
                       text = c("native", "outline"),
                       elementId = NULL) {
   select_mode <- match.arg(select_mode)
+  hover_mode <- match.arg(hover_mode)
   mode <- match.arg(mode)
   text_set <- !missing(text)
   text <- match.arg(text)
@@ -161,6 +175,8 @@ as_widget <- function(x, width = NULL, height = NULL,
       zoom = isTRUE(zoom),
       toolbar = isTRUE(toolbar),
       nearest = isTRUE(nearest),
+      hoverMode = hover_mode,
+      crosshair = isTRUE(crosshair),
       a11y = isTRUE(a11y),
       alt = if (is.null(alt)) NULL else as.character(alt),
       selectMode = select_mode,

@@ -60,6 +60,13 @@ interface Options {
   zoom: boolean;
   toolbar: boolean;
   nearest: boolean;
+  // Hover aggregation. "closest" (default): the single nearest mark. "x"/"y":
+  // a *unified* hover — every mark sharing the hovered x (or y) is highlighted
+  // and its tooltip listed in one combined box, the shared readout line/time-
+  // series charts expect. The mark x/y positions come straight from the element
+  // index, so this needs no axis/scale metadata.
+  hoverMode?: "closest" | "x" | "y";
+  crosshair?: boolean; // draw a guide rule at the hovered position (see hoverMode)
   raster?: boolean; // the marks are a single base image; interaction is index-driven (no per-element DOM nodes)
   a11y: boolean; // screen-reader + keyboard accessibility (focusable marks, live region, data table)
   alt?: string | null; // accessible label for the whole chart (falls back to the SVG's <title>/<desc>)
@@ -220,6 +227,39 @@ function nearestKey(elems: ElemMeta[], x: number, y: number, maxDist: number): s
   return best;
 }
 
+// Index (into a coordinate array sorted ascending) of the value nearest `target`,
+// by binary search — the seed for unified hover when the cursor is not over a mark
+// (nearest on one axis only, so the shared readout appears anywhere along the
+// perpendicular). Returns -1 for an empty array.
+function nearestSortedIdx(sorted: number[] | Float64Array, target: number): number {
+  const n = sorted.length;
+  if (!n) return -1;
+  let lo = 0;
+  let hi = n - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid] < target) lo = mid + 1;
+    else hi = mid;
+  }
+  // `lo` is the first index >= target; compare it with its predecessor.
+  if (lo > 0 && Math.abs(sorted[lo - 1] - target) <= Math.abs(sorted[lo] - target)) return lo - 1;
+  return lo;
+}
+
+// Half the smallest positive gap between distinct sorted coordinates — the
+// tolerance for grouping marks into one x- (or y-) column for unified hover:
+// wide enough to catch a column's marks (which share a position, so gap ~0),
+// narrow enough to exclude the neighbouring column. Falls back to 1 (user unit)
+// when there are fewer than two distinct positions.
+function columnTolerance(sorted: number[] | Float64Array): number {
+  let minGap = Infinity;
+  for (let i = 1; i < sorted.length; i++) {
+    const g = sorted[i] - sorted[i - 1];
+    if (g > 1e-6 && g < minGap) minGap = g;
+  }
+  return isFinite(minGap) ? minGap / 2 : 1;
+}
+
 // New viewBox after zooming by `factor` about user-space point (cx, cy) — the
 // point under the cursor stays put (§6: the JS transforms the SVG viewport).
 function zoomViewBox(vb: ViewBox, factor: number, cx: number, cy: number): ViewBox {
@@ -303,6 +343,19 @@ const VELLUMWIDGET_CSS = `
 .vellumwidget-dim-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;
+}
+/* Crosshair guide rule(s) for unified hover — above the base image / canvas,
+   below the highlight rings so a highlighted mark still reads on top. */
+.vellumwidget-crosshair-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 4; overflow: visible;
+}
+.vellumwidget-crosshair-line {
+  stroke: var(--vellumwidget-crosshair-stroke, rgba(75,85,99,0.85));
+  stroke-width: 1px; stroke-dasharray: 4 3;
+}
+@media (prefers-color-scheme: dark) {
+  .vellumwidget-crosshair-line { stroke: var(--vellumwidget-crosshair-stroke, rgba(209,213,219,0.85)); }
 }
 /* Raster-mode feedback rings (hover / selection), drawn on the overlay since the
    marks are a base image with no per-element nodes. Colours reuse the same CSS
@@ -501,6 +554,16 @@ HTMLWidgets.widget({
     const DIM_OVERLAY_MIN = 2000;
     let largeDim = false; // this render uses the overlay dim path
     let dimLayer: SVGSVGElement | null = null; // overlay carrying the crisp hovered clones
+    // Unified-hover axis index (built once per render): element centres sorted by
+    // x and by y, so the shared readout can seed off the nearest position on one
+    // axis, plus the per-axis column tolerance (see columnTolerance).
+    let crosshairLayer: SVGSVGElement | null = null; // overlay carrying the guide rule(s)
+    let sortedCx: number[] = [];
+    let sortedCxKeys: string[] = [];
+    let sortedCy: number[] = [];
+    let sortedCyKeys: string[] = [];
+    let tolX = 1;
+    let tolY = 1;
     // Raster mode: the marks are a single base <image>, so there are no per-element
     // DOM nodes. Hover/click/brush resolve against the spatial index and draw
     // feedback rings into two overlay groups instead of toggling classes on marks.
@@ -525,7 +588,8 @@ HTMLWidgets.widget({
     const OVERLAY_MARK_CAP = 2000;
     let opts: Options = {
       tooltip: true, hover: true, select: true, brush: true, zoom: true,
-      toolbar: true, nearest: true, a11y: true, selectMode: "multiple"
+      toolbar: true, nearest: true, a11y: true, selectMode: "multiple",
+      hoverMode: "closest", crosshair: false
     };
     // --- accessibility state ---
     let liveRegion: HTMLElement | null = null; // aria-live announcer
@@ -614,6 +678,53 @@ HTMLWidgets.widget({
       }
       idx.finish();
       spatialIndex = idx;
+    }
+    // Build the unified-hover axis index: element centres sorted by x and by y
+    // (each paired with its key), plus the per-axis grouping tolerances. Cheap and
+    // only used when hoverMode is "x"/"y"; harmless to build unconditionally.
+    function buildHoverAxis(): void {
+      const cx: { c: number; k: string }[] = [];
+      const cy: { c: number; k: string }[] = [];
+      for (let i = 0; i < elements.length; i++) {
+        const e = elements[i];
+        if (!hasBbox(e)) continue;
+        cx.push({ c: (e.x0 + e.x1) / 2, k: e.key });
+        cy.push({ c: (e.y0 + e.y1) / 2, k: e.key });
+      }
+      cx.sort((a, b) => a.c - b.c);
+      cy.sort((a, b) => a.c - b.c);
+      sortedCx = cx.map((p) => p.c);
+      sortedCxKeys = cx.map((p) => p.k);
+      sortedCy = cy.map((p) => p.c);
+      sortedCyKeys = cy.map((p) => p.k);
+      tolX = columnTolerance(sortedCx);
+      tolY = columnTolerance(sortedCy);
+    }
+    // Key of the mark nearest the cursor on a single axis (x or y), ignoring the
+    // other — the seed for unified hover in open space, so the shared readout
+    // tracks the cursor along the axis regardless of vertical (or horizontal)
+    // distance. No radius cap: the pointer is already inside the plot.
+    function nearestAxisKey(axis: "x" | "y", coord: number): string | null {
+      const sorted = axis === "x" ? sortedCx : sortedCy;
+      const keys = axis === "x" ? sortedCxKeys : sortedCyKeys;
+      const i = nearestSortedIdx(sorted, coord);
+      return i >= 0 ? keys[i] : null;
+    }
+    // The keys forming mark `primary`'s column: every mark whose centre is within
+    // the axis tolerance of `primary`'s centre on that axis. Reuses the spatial
+    // index via a thin strip query (a huge perpendicular span catches the whole
+    // column), so it is O(k) in the column size. Falls back to just `primary`.
+    function columnKeys(primary: string, axis: "x" | "y"): string[] {
+      const m = meta[primary];
+      if (!m || !hasBbox(m)) return [primary];
+      const cx = (m.x0 + m.x1) / 2;
+      const cy = (m.y0 + m.y1) / 2;
+      const SPAN = 1e7; // effectively the full perpendicular extent
+      const rect: Bbox = axis === "x"
+        ? { x0: cx - tolX, x1: cx + tolX, y0: -SPAN, y1: SPAN }
+        : { x0: -SPAN, x1: SPAN, y0: cy - tolY, y1: cy + tolY };
+      const ks = brushKeysIn(rect);
+      return ks.length ? ks : [primary];
     }
     // Nearest element key within `maxDist` of (x, y) — index-backed when available.
     function nearestKeyAt(x: number, y: number, maxDist: number): string | null {
@@ -819,9 +930,11 @@ HTMLWidgets.widget({
       }
     }
 
-    function setHover(k: string): void {
+    // Highlight an explicit set of keys (the shared path for closest-mark hover,
+    // where keys = the mark's linked group, and unified hover, where keys = the
+    // whole x-/y-column).
+    function setHoverKeys(keys: string[]): void {
       if (!opts.hover) return;
-      const keys = linkedKeys(k);
       // Raster mode: no per-element nodes — draw a hover ring on the overlay.
       if (rasterMode) {
         drawHovFeedback(keys);
@@ -834,9 +947,62 @@ HTMLWidgets.widget({
       if (largeDim) showHighlightOverlay(keys);
       else el.classList.add("vellumwidget-hovering");
     }
+    function setHover(k: string): void {
+      setHoverKeys(linkedKeys(k));
+    }
+    // --- crosshair guide (unified / details-on-demand hover) ---
+    // A guide line in the overlay's viewBox space, spanning the current view.
+    // `non-scaling-stroke` keeps it a crisp 1px under zoom.
+    function crosshairLine(x1: number, y1: number, x2: number, y2: number): SVGLineElement {
+      const l = document.createElementNS(SVGNS, "line") as SVGLineElement;
+      l.setAttribute("x1", String(x1));
+      l.setAttribute("y1", String(y1));
+      l.setAttribute("x2", String(x2));
+      l.setAttribute("y2", String(y2));
+      l.setAttribute("class", "vellumwidget-crosshair-line");
+      l.setAttribute("vector-effect", "non-scaling-stroke");
+      return l;
+    }
+    function clearCrosshair(): void {
+      if (crosshairLayer) while (crosshairLayer.firstChild) crosshairLayer.removeChild(crosshairLayer.firstChild);
+    }
+    // Draw the guide rule(s) through mark `k`'s centre: a vertical rule for "x"
+    // mode, horizontal for "y", and a full cross for "closest". Spans the visible
+    // view (the current viewBox), which the layer's viewBox tracks.
+    function drawCrosshair(k: string, hm: "closest" | "x" | "y"): void {
+      clearCrosshair();
+      if (!crosshairLayer) return;
+      const m = meta[k];
+      if (!m || !hasBbox(m)) return;
+      const view = vb || vb0;
+      if (!view) return;
+      const cx = (m.x0 + m.x1) / 2;
+      const cy = (m.y0 + m.y1) / 2;
+      const x0 = view.x, x1 = view.x + view.w, y0 = view.y, y1 = view.y + view.h;
+      if (hm !== "y") crosshairLayer.appendChild(crosshairLine(cx, y0, cx, y1));
+      if (hm !== "x") crosshairLayer.appendChild(crosshairLine(x0, cy, x1, cy));
+    }
     function showTip(clientX: number, clientY: number, k: string): void {
       const m = meta[k];
       tip.innerHTML = sanitizeTip((m && m.tooltip) || k);
+      const box = el.getBoundingClientRect();
+      tip.style.transform =
+        "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) +
+        "px) translate(-50%, calc(-100% - 12px))";
+      tip.classList.add("vellumwidget-show");
+    }
+    // Unified tooltip: one box listing every mark in the hovered column, one row
+    // per mark (its tooltip, or its key). Positioned like the single tooltip. Rows
+    // are capped so a dense column can't build a runaway box.
+    const TIP_MULTI_CAP = 30;
+    function showTipMulti(clientX: number, clientY: number, keys: string[]): void {
+      const rows: string[] = [];
+      for (let i = 0; i < keys.length && rows.length < TIP_MULTI_CAP; i++) {
+        const m = meta[keys[i]];
+        rows.push(sanitizeTip((m && m.tooltip) || keys[i]));
+      }
+      if (keys.length > TIP_MULTI_CAP) rows.push("…");
+      tip.innerHTML = rows.join("<br>");
       const box = el.getBoundingClientRect();
       tip.style.transform =
         "translate(" + Math.round(clientX - box.left) + "px," + Math.round(clientY - box.top) +
@@ -851,6 +1017,7 @@ HTMLWidgets.widget({
       if (largeDim) hideHighlightOverlay();
       el.classList.remove("vellumwidget-hovering");
       clearClass("vellumwidget-hl");
+      clearCrosshair();
       hideTip();
       shinyInput("hover", null); // hover ended -> input$<id>_hover = NULL (deduped)
     }
@@ -988,6 +1155,7 @@ HTMLWidgets.widget({
       if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
       // Keep the hover overlay's coordinate space aligned with the base under pan/zoom.
       if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
+      if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
       // Redraw the crisp point layer for the new view (no-op unless raster + zoomed in).
       drawPoints();
     }
@@ -1035,12 +1203,24 @@ HTMLWidgets.widget({
         clearHover(); // emits hover = null
         return;
       }
+      // The `hover` input reports the primary (nearest) mark in every mode, so the
+      // Shiny read-back contract is unchanged; unified mode adds the shared box.
       shinyInput("hover", k); // deduped -> re-fires only when the hovered key changes
-      setHover(k);
-      if (opts.tooltip) showTip(clientX, clientY, k);
+      const hm = opts.hoverMode || "closest";
+      if (hm === "x" || hm === "y") {
+        const keys = columnKeys(k, hm);
+        setHoverKeys(keys);
+        if (opts.crosshair) drawCrosshair(k, hm);
+        if (opts.tooltip) showTipMulti(clientX, clientY, keys);
+      } else {
+        setHover(k);
+        if (opts.crosshair) drawCrosshair(k, "closest");
+        if (opts.tooltip) showTip(clientX, clientY, k);
+      }
     }
     function onHoverMove(ev: MouseEvent): void {
       if (down || pinchDist > 0) return;
+      const hm = opts.hoverMode || "closest";
       // Directly over a mark: resolve synchronously (cheap, no scan).
       const k = keyOf(ev.target);
       if (k != null) {
@@ -1051,20 +1231,25 @@ HTMLWidgets.widget({
         hoverAt(k, ev.clientX, ev.clientY);
         return;
       }
-      if (!opts.nearest || !elements.length) {
+      // In open space, the closest-mark path needs `nearest`; unified hover always
+      // seeds off the nearest position on its axis (that snapping is the point).
+      if (!elements.length || (hm === "closest" && !opts.nearest)) {
         clearHover();
         return;
       }
-      // Otherwise the nearest-mark scan is O(n); throttle it to one per frame so
-      // fast pointer moves over a large plot don't run it dozens of times.
+      // The scan is O(n); throttle it to one per frame so fast pointer moves over a
+      // large plot don't run it dozens of times.
       const cx = ev.clientX;
       const cy = ev.clientY;
       if (hoverRAF) return;
       hoverRAF = requestAnimationFrame(function () {
         hoverRAF = 0;
         const u = toUser(cx, cy);
-        const rad = vb ? vb.w * 0.02 : 8; // ~2% of the view width
-        hoverAt(nearestKeyAt(u.x, u.y, rad), cx, cy);
+        let seed: string | null;
+        if (hm === "x") seed = nearestAxisKey("x", u.x);
+        else if (hm === "y") seed = nearestAxisKey("y", u.y);
+        else seed = nearestKeyAt(u.x, u.y, vb ? vb.w * 0.02 : 8); // ~2% of the view width
+        hoverAt(seed, cx, cy);
       });
     }
 
@@ -1646,7 +1831,7 @@ HTMLWidgets.widget({
     return {
       renderValue: function (x: Payload) {
         opts = Object.assign(
-          { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple" },
+          { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false },
           x.options || {}
         );
         elements = normalizeElements(x.elements);
@@ -1689,6 +1874,13 @@ HTMLWidgets.widget({
           dimLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
           dimLayer.setAttribute("class", "vellumwidget-dim-layer");
           dimLayer.setAttribute("aria-hidden", "true");
+          // Crosshair guide layer: own overlay (below the dim/highlight layer), so
+          // the highlight-overlay clear/redraw never disturbs the guide and vice
+          // versa. pointer-events:none, so it never intercepts hit-testing.
+          crosshairLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
+          crosshairLayer.setAttribute("class", "vellumwidget-crosshair-layer");
+          crosshairLayer.setAttribute("aria-hidden", "true");
+          stage.appendChild(crosshairLayer);
           stage.appendChild(dimLayer);
           el.appendChild(brushBox);
           el.appendChild(tip);
@@ -1729,6 +1921,8 @@ HTMLWidgets.widget({
             dimLayer.appendChild(hovGroup);
           }
           if (dimLayer && vb0) dimLayer.setAttribute("viewBox", fmtViewBox(vb0));
+          if (crosshairLayer && vb0) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb0));
+          clearCrosshair(); // drop any guide left by a prior render
           // Crisp-zoom canvas: sample the base raster (raster mode only); otherwise
           // make sure any canvas from a prior render is hidden.
           if (rasterMode) {
@@ -1738,6 +1932,7 @@ HTMLWidgets.widget({
             clearPointData();
           }
           buildSpatialIndex();
+          buildHoverAxis();
           wire(svgEl);
           buildToolbar();
           setMode("brush");
@@ -1772,7 +1967,10 @@ HTMLWidgets.widget({
         largeDim: function () { return largeDim; },
         rasterMode: function () { return rasterMode; },
         hasCanvas: function () { return !!canvasEl; },
-        pointCount: function () { return ptN; }
+        pointCount: function () { return ptN; },
+        hoverMode: function () { return opts.hoverMode || "closest"; },
+        columnKeys: columnKeys,
+        nearestAxisKey: nearestAxisKey
       }
     };
   }
@@ -1823,5 +2021,7 @@ registerProxyHandler();
   dispatchProxyCall,
   normalizeElements,
   isZoomedIn,
-  userToCanvas
+  userToCanvas,
+  nearestSortedIdx,
+  columnTolerance
 };

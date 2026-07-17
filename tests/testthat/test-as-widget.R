@@ -77,6 +77,19 @@ test_that("Phase 4 option toggles round-trip into the payload", {
   expect_false(o2$brush || o2$zoom || o2$toolbar || o2$nearest)
 })
 
+test_that("hover_mode and crosshair are validated and round-trip into the payload", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+  o <- as_widget(scene)$x$options
+  expect_equal(o$hoverMode, "closest") # default
+  expect_false(o$crosshair)
+  o2 <- as_widget(scene, hover_mode = "x", crosshair = TRUE)$x$options
+  expect_equal(o2$hoverMode, "x")
+  expect_true(o2$crosshair)
+  expect_equal(as_widget(scene, hover_mode = "y")$x$options$hoverMode, "y")
+  expect_error(as_widget(scene, hover_mode = "diagonal"))
+})
+
 test_that("a11y is on by default and round-trips (with alt) into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
