@@ -90,6 +90,15 @@ test_that("hover_mode and crosshair are validated and round-trip into the payloa
   expect_error(as_widget(scene, hover_mode = "diagonal"))
 })
 
+test_that("legend_click is validated and round-trips into the payload", {
+  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+  expect_equal(as_widget(scene)$x$options$legendClick, "select") # default
+  expect_equal(as_widget(scene, legend_click = "hide")$x$options$legendClick, "hide")
+  expect_equal(as_widget(scene, legend_click = "mute")$x$options$legendClick, "mute")
+  expect_error(as_widget(scene, legend_click = "vanish"))
+})
+
 test_that("a11y is on by default and round-trips (with alt) into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))

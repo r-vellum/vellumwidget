@@ -67,6 +67,11 @@ interface Options {
   // index, so this needs no axis/scale metadata.
   hoverMode?: "closest" | "x" | "y";
   crosshair?: boolean; // draw a guide rule at the hovered position (see hoverMode)
+  // What a click on a discrete-legend swatch does. "select" (default): select the
+  // swatch's series (unchanged behaviour). "hide": toggle the series' visibility
+  // (single click) / isolate it (double click). "mute": same, but dim rather than
+  // remove. Hover always highlights the series regardless of this policy.
+  legendClick?: "select" | "hide" | "mute";
   raster?: boolean; // the marks are a single base image; interaction is index-driven (no per-element DOM nodes)
   a11y: boolean; // screen-reader + keyboard accessibility (focusable marks, live region, data table)
   alt?: string | null; // accessible label for the whole chart (falls back to the SVG's <title>/<desc>)
@@ -328,6 +333,13 @@ const VELLUMWIDGET_CSS = `
 .vellumwidget-root.vellumwidget-panning .vellumwidget-svg-holder svg { cursor: grabbing; }
 .vellumwidget-root [data-key] { cursor: pointer; }
 [data-key].vellumwidget-filtered { display: none; }
+/* Legend click-to-hide / -mute (independent of the crosstalk cross-filter above,
+   so the two never clobber each other). hidden removes the series' marks; muted
+   keeps them but fades them right back; legend-off dims the toggled-off swatch
+   so the legend shows which series are on. */
+[data-key].vellumwidget-legend-hidden { display: none; }
+[data-key].vellumwidget-legend-muted { opacity: 0.12; }
+[data-key].vellumwidget-legend.vellumwidget-legend-off { opacity: 0.4; }
 .vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
 .vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
 /* Large-scene hover: instead of the CSS rule above restyling every keyed node
@@ -539,6 +551,9 @@ HTMLWidgets.widget({
     let meta: Record<string, ElemMeta> = {};
     let groups: Record<string, string[]> = {};
     let legendIndex: Record<string, string[]> = {}; // series key -> member element keys
+    let legendSwatch: Record<string, string[]> = {}; // series key -> its legend swatch element keys
+    let legendOff: Record<string, boolean> = {}; // series toggled off via a legend-click (hide/mute)
+    let hiddenKeySet: Record<string, boolean> = {}; // member keys currently hidden (legendClick="hide")
     let elements: ElemMeta[] = [];
     let selected: Record<string, boolean> = {};
     let nodesByKey: Record<string, Element[]> = {}; // key -> SVG nodes (built once per render)
@@ -657,6 +672,50 @@ HTMLWidgets.widget({
       if (m && m.legend_for != null) return (legendIndex[m.legend_for] || []).concat([k]);
       const g = m && m.hover_group;
       return g && groups[g] ? groups[g] : [k];
+    }
+    // --- legend click-to-hide / -isolate ---
+    function legendPolicy(): "select" | "hide" | "mute" {
+      return opts.legendClick || "select";
+    }
+    // The series a legend swatch `k` drives, or null if `k` is not a swatch.
+    function swatchSeries(k: string | null): string | null {
+      if (k == null) return null;
+      const m = meta[k];
+      return m && m.legend_for != null ? m.legend_for : null;
+    }
+    // Reflect `legendOff` in the DOM: hide (or mute) each toggled-off series' marks
+    // and dim its swatch. Rebuilds `hiddenKeySet` (the marks the hover path skips so
+    // a hidden point isn't silently hovered). A no-op under the "select" policy.
+    function applyLegend(): void {
+      clearClass("vellumwidget-legend-hidden");
+      clearClass("vellumwidget-legend-muted");
+      clearClass("vellumwidget-legend-off");
+      hiddenKeySet = {};
+      const pol = legendPolicy();
+      if (pol === "select") return;
+      const cls = pol === "mute" ? "vellumwidget-legend-muted" : "vellumwidget-legend-hidden";
+      for (const s in legendOff) {
+        if (!legendOff[s]) continue;
+        const members = legendIndex[s] || [];
+        addClassForKeys(members, cls);
+        if (pol === "hide") for (let i = 0; i < members.length; i++) hiddenKeySet[members[i]] = true;
+        addClassForKeys(legendSwatch[s] || [], "vellumwidget-legend-off");
+      }
+    }
+    // Single click: toggle one series on/off.
+    function legendToggle(series: string): void {
+      legendOff[series] = !legendOff[series];
+      applyLegend();
+    }
+    // Double click: isolate this series (turn every other off); if it is already
+    // the only one on, restore all — the plotly/echarts legend convention.
+    function legendIsolate(series: string): void {
+      const all = Object.keys(legendIndex);
+      const others = all.filter((s) => s !== series);
+      const isolated = !legendOff[series] && others.every((s) => legendOff[s]);
+      legendOff = {};
+      if (!isolated) for (let i = 0; i < others.length; i++) legendOff[others[i]] = true;
+      applyLegend();
     }
     // --- spatial index (nearest / brush) ---
     // Rebuild the Flatbush index from the current elements' bboxes. Only bboxed
@@ -1199,6 +1258,10 @@ HTMLWidgets.widget({
     // Hover is SVG-local (fires only over this widget's svg). While a press is
     // in progress the drag handlers (below) own movement, so hover backs off.
     function hoverAt(k: string | null, clientX: number, clientY: number): void {
+      // A mark hidden by a legend-click can't intercept the pointer, but the
+      // nearest/column scans work off the index, which still holds it — drop it so a
+      // hidden series is never silently hovered.
+      if (k != null && hiddenKeySet[k]) k = null;
       if (k == null) {
         clearHover(); // emits hover = null
         return;
@@ -1208,12 +1271,15 @@ HTMLWidgets.widget({
       shinyInput("hover", k); // deduped -> re-fires only when the hovered key changes
       const hm = opts.hoverMode || "closest";
       if (hm === "x" || hm === "y") {
-        const keys = columnKeys(k, hm);
+        const keys = columnKeys(k, hm).filter((key) => !hiddenKeySet[key]);
+        if (!keys.length) { clearHover(); return; }
         setHoverKeys(keys);
         if (opts.crosshair) drawCrosshair(k, hm);
         if (opts.tooltip) showTipMulti(clientX, clientY, keys);
       } else {
-        setHover(k);
+        const keys = linkedKeys(k).filter((key) => !hiddenKeySet[key]);
+        if (!keys.length) { clearHover(); return; }
+        setHoverKeys(keys);
         if (opts.crosshair) drawCrosshair(k, "closest");
         if (opts.tooltip) showTip(clientX, clientY, k);
       }
@@ -1375,12 +1441,25 @@ HTMLWidgets.widget({
       // A click is a discrete event (fires every time, even on the same mark);
       // `key` is null for an empty-space click.
       shinyInput("click", { key: k }, { priority: "event" });
+      // A legend swatch under the hide/mute policy toggles its series instead of
+      // selecting it. The second click of a double-click (detail >= 2) is left for
+      // onDblClick to turn into an isolate.
+      const series = swatchSeries(k);
+      if (series != null && legendPolicy() !== "select") {
+        if (!(ev.detail && ev.detail >= 2)) legendToggle(series);
+        return;
+      }
       if (k != null) {
         if (opts.select) toggleSelect(k);
       } else {
         clearSelection();
         lastBrush = null;
       }
+    }
+    // Double-click a legend swatch (hide/mute policy) to isolate its series.
+    function onDblClick(ev: MouseEvent): void {
+      const series = swatchSeries(keyOf(ev.target));
+      if (series != null && legendPolicy() !== "select") legendIsolate(series);
     }
 
     function onWheel(ev: WheelEvent): void {
@@ -1420,8 +1499,14 @@ HTMLWidgets.widget({
           return;
         }
         if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
-          if (opts.select) toggleSelect(k);
-          announce(a11yLabel(k) + (selected[k] ? ", selected" : ", not selected"));
+          const series = swatchSeries(k);
+          if (series != null && legendPolicy() !== "select") {
+            legendToggle(series);
+            announce(a11yLabel(k) + (legendOff[series] ? ", hidden" : ", shown"));
+          } else {
+            if (opts.select) toggleSelect(k);
+            announce(a11yLabel(k) + (selected[k] ? ", selected" : ", not selected"));
+          }
           ev.preventDefault();
           return;
         }
@@ -1821,6 +1906,7 @@ HTMLWidgets.widget({
       svg.addEventListener("pointerleave", clearHover);
       svg.addEventListener("pointerdown", onDown);
       svg.addEventListener("click", onClick);
+      svg.addEventListener("dblclick", onDblClick);
       if (opts.zoom) svg.addEventListener("wheel", onWheel, { passive: false });
       // Touch drag/pinch shouldn't scroll the page over an interactive plot.
       if (opts.zoom || opts.brush) el.classList.add("vellumwidget-gesture");
@@ -1838,6 +1924,9 @@ HTMLWidgets.widget({
         meta = {};
         groups = {};
         legendIndex = {};
+        legendSwatch = {};
+        legendOff = {};
+        hiddenKeySet = {};
         selected = {};
         lastBrush = null;
         mode = "brush";
@@ -1852,6 +1941,7 @@ HTMLWidgets.widget({
               (legendIndex[series[s]] = legendIndex[series[s]] || []).push(e.key);
             }
           }
+          if (e.legend_for != null) (legendSwatch[e.legend_for] = legendSwatch[e.legend_for] || []).push(e.key);
         }
 
         if (!holder) {
@@ -1937,6 +2027,7 @@ HTMLWidgets.widget({
           buildToolbar();
           setMode("brush");
           applyStyling();
+          applyLegend(); // clears any stale legend-off state from a prior render
           setupA11y();
           setupLinking();
           // Publish the (empty) initial selection so a (re-)render clears any
@@ -1970,7 +2061,8 @@ HTMLWidgets.widget({
         pointCount: function () { return ptN; },
         hoverMode: function () { return opts.hoverMode || "closest"; },
         columnKeys: columnKeys,
-        nearestAxisKey: nearestAxisKey
+        nearestAxisKey: nearestAxisKey,
+        legendOff: function () { return Object.keys(legendOff).filter((s) => legendOff[s]); }
       }
     };
   }
