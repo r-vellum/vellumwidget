@@ -90,6 +90,7 @@ focused — see the <code>a11y</code> argument.</p>
 <span>  hover <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  select <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  brush <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  lasso <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  zoom <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  toolbar <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  nearest <span class="op">=</span> <span class="cn">TRUE</span>,</span>
@@ -136,6 +137,15 @@ scene). Passed to <code><a href="https://rdrr.io/pkg/htmlwidgets/man/createWidge
 <dt id="arg-brush-zoom-toolbar">brush, zoom, toolbar<a class="anchor" aria-label="anchor" href="#arg-brush-zoom-toolbar"></a></dt>
 <dd><p>Toggles for rectangular brush-select, wheel/drag
 pan-zoom (via the SVG <code>viewBox</code>), and the on-hover toolbar (all <code>TRUE</code>).</p></dd>
+
+
+<dt id="arg-lasso">lasso<a class="anchor" aria-label="anchor" href="#arg-lasso"></a></dt>
+<dd><p>Enable freehand <strong>lasso-select</strong> (default <code>TRUE</code>): a third drag
+mode alongside brush and pan, cycled from the toolbar's mode button. Drag a
+loop and every mark whose centre falls inside it is selected. Like the brush,
+it reports through <code>input$&lt;id&gt;_brush</code> (with a <code>lasso = TRUE</code> flag and the
+loop's bounding box). The mode button appears whenever at least two drag modes
+are enabled.</p></dd>
 
 
 <dt id="arg-nearest">nearest<a class="anchor" aria-label="anchor" href="#arg-nearest"></a></dt>

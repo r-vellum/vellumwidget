@@ -111,8 +111,17 @@ mark. Updates as state (re-fires only when the hovered key changes).</p></dd>
 
 <dt><code>input$plot_brush</code></dt>
 <dd><p>A list <code>list(keys=, x0=, y0=, x1=, y1=)</code> when a
-brush gesture completes: the selected keys and the brushed rectangle in the
-scene's device-pixel (viewBox) coordinates. An event input.</p></dd>
+brush (or lasso) gesture completes: the selected keys and the region's
+bounding rectangle in the scene's device-pixel (viewBox) coordinates. A
+lasso gesture also carries <code>lasso = TRUE</code>. An event input.</p></dd>
+
+<dt><code>input$plot_zoom</code></dt>
+<dd><p>A list <code>list(x=, y=, w=, h=, zoomed=)</code> — the current
+view (the SVG <code>viewBox</code> in device-pixel coordinates) plus a <code>zoomed</code> flag
+(is the view narrower/shorter than the full extent). Updates as state when a
+zoom/pan settles (wheel, drag-pan release, pinch, keyboard, reset,
+zoom-to-selection, or a proxy <code><a href="vellumwidget-proxy-verbs.html">vw_zoom()</a></code>). Data-space limits await
+axis/scale metadata in the scene contract.</p></dd>
 
 
 </dl><p>These are emitted only inside a live Shiny session; a static render (knitr,

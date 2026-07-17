@@ -137,10 +137,10 @@ output from the selection.</p>
 <p>The inputs are named <code>&lt;outputId&gt;_&lt;event&gt;</code>, so
 for <code>vellumwidgetOutput("plot")</code> they are
 <code>input$plot_selected</code>, <code>input$plot_click</code>,
-<code>input$plot_hover</code>, and <code>input$plot_brush</code>.
-<strong>Every value is expressed in element keys</strong> (the
-<code>data_id</code> you set on the mark), so you map back to your data
-by that key.</p>
+<code>input$plot_hover</code>, <code>input$plot_brush</code>, and
+<code>input$plot_zoom</code>. <strong>Every selection value is expressed
+in element keys</strong> (the <code>data_id</code> you set on the mark),
+so you map back to your data by that key.</p>
 <table class="table">
 <colgroup>
 <col width="33%">
@@ -174,15 +174,24 @@ an empty-space click</td>
 <tr class="even">
 <td><code>input$plot_brush</code></td>
 <td>
-<code>list(keys=, x0=, y0=, x1=, y1=)</code> — keys + brushed
-rectangle (device px)</td>
+<code>list(keys=, x0=, y0=, x1=, y1=)</code> — keys + region
+rectangle (device px); a lasso adds <code>lasso=TRUE</code>
+</td>
 <td>event</td>
+</tr>
+<tr class="odd">
+<td><code>input$plot_zoom</code></td>
+<td>
+<code>list(x=, y=, w=, h=, zoomed=)</code> — the current view
+(viewBox, device px) + a zoomed flag</td>
+<td>state</td>
 </tr>
 </tbody>
 </table>
 <p><strong>State vs event.</strong> <em>State</em> inputs
-(<code>_selected</code>, <code>_hover</code>) update only when the value
-changes, so re-selecting the same set does not re-fire; pair them with
+(<code>_selected</code>, <code>_hover</code>, <code>_zoom</code>) update
+only when the value changes, so re-selecting the same set (or settling
+on the same view) does not re-fire; pair them with
 <code><a href="https://rdrr.io/pkg/shiny/man/observe.html" class="external-link">observe()</a></code> / <code><a href="https://rdrr.io/pkg/shiny/man/reactive.html" class="external-link">reactive()</a></code>. <em>Event</em> inputs
 (<code>_click</code>, <code>_brush</code>) fire on every occurrence,
 even a repeat; pair them with <code><a href="https://rdrr.io/pkg/shiny/man/observeEvent.html" class="external-link">observeEvent()</a></code>.</p>

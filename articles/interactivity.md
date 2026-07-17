@@ -91,7 +91,11 @@ single nearest mark.
 
 Click a mark to select it (every mark sharing its `data_id` toggles
 together); drag a rectangle to brush-select. `select_mode = "single"`
-makes a click replace the selection instead of toggling.
+makes a click replace the selection instead of toggling. There is also a
+freehand **lasso** (on by default) — switch to it with the toolbar’s
+mode button (which cycles brush → lasso → pan) and drag a loop; every
+mark whose centre falls inside is selected. Turn it off with
+`lasso = FALSE`.
 
 ``` r
 
@@ -145,11 +149,11 @@ independent of any crosstalk cross-filter.
 
 ## Pan, zoom, and the toolbar
 
-Zoom with the mouse wheel, drag to pan (toggle brush/pan on the
-toolbar). On a touch device, drag pans and a two-finger pinch zooms;
-with the widget focused, the arrow keys pan, `+`/`-` zoom, and `0`
-resets. The on-hover toolbar adds zoom-to-selection, reset, SVG/PNG
-download, copy-to-clipboard (where supported), and fullscreen.
+Zoom with the mouse wheel, drag to pan (the toolbar’s mode button cycles
+brush → lasso → pan). On a touch device, drag pans and a two-finger
+pinch zooms; with the widget focused, the arrow keys pan, `+`/`-` zoom,
+and `0` resets. The on-hover toolbar adds zoom-to-selection, reset,
+SVG/PNG download, copy-to-clipboard (where supported), and fullscreen.
 
 Export captures the *current* view, so a zoomed-in region exports as
 shown. Set the download name and a hi-res PNG scale:

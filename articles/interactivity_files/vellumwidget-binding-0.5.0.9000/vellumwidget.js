@@ -570,6 +570,39 @@
     }
     return out;
   }
+  function pointInPolygon(x, y, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x, yi = poly[i].y;
+      const xj = poly[j].x, yj = poly[j].y;
+      if (yi > y !== yj > y && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  function lassoKeys(elems, poly) {
+    const out = [];
+    const seen = {};
+    if (poly.length < 3) return out;
+    for (let i = 0; i < elems.length; i++) {
+      const e = elems[i];
+      if (!hasBbox(e) || seen[e.key]) continue;
+      if (pointInPolygon((e.x0 + e.x1) / 2, (e.y0 + e.y1) / 2, poly)) {
+        seen[e.key] = true;
+        out.push(e.key);
+      }
+    }
+    return out;
+  }
+  function polyBounds(poly) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < poly.length; i++) {
+      if (poly[i].x < x0) x0 = poly[i].x;
+      if (poly[i].y < y0) y0 = poly[i].y;
+      if (poly[i].x > x1) x1 = poly[i].x;
+      if (poly[i].y > y1) y1 = poly[i].y;
+    }
+    return { x0, y0, x1, y1 };
+  }
   function nearestKey(elems, x, y, maxDist) {
     let best = null;
     let bestD = maxDist;
@@ -739,6 +772,10 @@
   position: absolute; pointer-events: none; z-index: 15;
   border: 1px solid #2563eb; background: rgba(37,99,235,0.12); display: none;
 }
+.vellumwidget-root.vellumwidget-mode-lasso .vellumwidget-svg-holder svg { cursor: crosshair; }
+.vellumwidget-lasso {
+  fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px; stroke-dasharray: 4 3;
+}
 .vellumwidget-toolbar {
   position: absolute; top: 6px; right: 6px; z-index: 25; display: flex; gap: 2px;
   padding: 3px; border-radius: 6px; background: rgba(255,255,255,0.82);
@@ -864,6 +901,7 @@
         hover: true,
         select: true,
         brush: true,
+        lasso: true,
         zoom: true,
         toolbar: true,
         nearest: true,
@@ -880,6 +918,8 @@
       let vb = null;
       let mode = "brush";
       let lastBrush = null;
+      let lassoPts = [];
+      let lassoEl = null;
       const selfToken = {};
       let group = null;
       let joined = false;
@@ -1028,6 +1068,23 @@
           if (!seen[k]) {
             seen[k] = true;
             out.push(k);
+          }
+        }
+        return out;
+      }
+      function lassoKeysIn(poly) {
+        if (poly.length < 3) return [];
+        if (!spatialIndex) return lassoKeys(elements, poly);
+        const b = polyBounds(poly);
+        const eids = spatialIndex.search(b.x0, b.y0, b.x1, b.y1).map((id) => indexToElem[id]).sort((a, b2) => a - b2);
+        const out = [];
+        const seen = {};
+        for (let i = 0; i < eids.length; i++) {
+          const e = elements[eids[i]];
+          if (seen[e.key] || !hasBbox(e)) continue;
+          if (pointInPolygon((e.x0 + e.x1) / 2, (e.y0 + e.y1) / 2, poly)) {
+            seen[e.key] = true;
+            out.push(e.key);
           }
         }
         return out;
@@ -1371,11 +1428,22 @@
           });
         }
       }
+      function reportView() {
+        if (!vb) return;
+        shinyInput("zoom", {
+          x: vb.x,
+          y: vb.y,
+          w: vb.w,
+          h: vb.h,
+          zoomed: vb0 ? isZoomedIn(vb, vb0) : false
+        });
+      }
       function applyViewBox() {
         if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
         if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
         if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
         drawPoints();
+        if (dragging !== "pan" && pinchDist === 0) reportView();
       }
       function resetZoom() {
         if (vb0) {
@@ -1401,6 +1469,26 @@
       }
       function hideBrush() {
         brushBox.style.display = "none";
+      }
+      function lassoPointsAttr() {
+        let s = "";
+        for (let i = 0; i < lassoPts.length; i++) s += (i ? " " : "") + lassoPts[i].x + "," + lassoPts[i].y;
+        return s;
+      }
+      function updateLassoPath() {
+        if (!crosshairLayer) return;
+        if (!lassoEl) {
+          lassoEl = document.createElementNS(SVGNS, "polygon");
+          lassoEl.setAttribute("class", "vellumwidget-lasso");
+          lassoEl.setAttribute("vector-effect", "non-scaling-stroke");
+          crosshairLayer.appendChild(lassoEl);
+        }
+        lassoEl.setAttribute("points", lassoPointsAttr());
+      }
+      function clearLasso() {
+        lassoPts = [];
+        if (lassoEl && lassoEl.parentNode) lassoEl.parentNode.removeChild(lassoEl);
+        lassoEl = null;
       }
       let down = null;
       let dragging = "";
@@ -1482,8 +1570,9 @@
         if (!down) return;
         if (!dragging) {
           if (Math.abs(ev.clientX - down.cx) + Math.abs(ev.clientY - down.cy) <= DRAG_THRESHOLD) return;
-          dragging = mode === "pan" && opts.zoom ? "pan" : opts.brush ? "brush" : "";
+          dragging = mode === "pan" && opts.zoom ? "pan" : mode === "lasso" && opts.lasso ? "lasso" : opts.brush ? "brush" : "";
           if (dragging === "pan") el.classList.add("vellumwidget-panning");
+          if (dragging === "lasso") lassoPts = [{ x: down.ux, y: down.uy }];
           if (dragging === "") return;
           movedDuringDrag = true;
         }
@@ -1495,6 +1584,9 @@
             Math.abs(ev.clientX - down.cx),
             Math.abs(ev.clientY - down.cy)
           );
+        } else if (dragging === "lasso" && vb) {
+          lassoPts.push(toUser(ev.clientX, ev.clientY));
+          updateLassoPath();
         } else if (dragging === "pan" && vb) {
           const u = toUser(ev.clientX, ev.clientY);
           vb.x -= u.x - down.ux;
@@ -1539,6 +1631,7 @@
           dragging = "";
           el.classList.remove("vellumwidget-panning");
           hideBrush();
+          reportView();
           return;
         }
         if (dragging === "brush" && down) {
@@ -1555,7 +1648,18 @@
           if (opts.select) setSelection(hitKeys);
           shinyInput("brush", { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 }, { priority: "event" });
           hideBrush();
+        } else if (dragging === "lasso") {
+          const poly = lassoPts.slice();
+          const hitKeys = lassoKeysIn(poly);
+          if (poly.length >= 3) {
+            const b = polyBounds(poly);
+            lastBrush = b;
+            if (opts.select) setSelection(hitKeys);
+            shinyInput("brush", { keys: hitKeys, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, lasso: true }, { priority: "event" });
+          }
+          clearLasso();
         }
+        if (dragging === "pan") reportView();
         el.classList.remove("vellumwidget-panning");
         down = null;
         dragging = "";
@@ -1672,17 +1776,35 @@
           ev.preventDefault();
         }
       }
+      const MODE_ICON = { brush: "\u25AD", lasso: "\u25CC", pan: "\u270B" };
+      const MODE_LABEL = { brush: "brush-select", lasso: "lasso-select", pan: "pan" };
+      function availableModes() {
+        const m = [];
+        if (opts.brush) m.push("brush");
+        if (opts.lasso) m.push("lasso");
+        if (opts.zoom) m.push("pan");
+        return m;
+      }
       function setMode(m) {
         mode = m;
         el.classList.toggle("vellumwidget-mode-pan", m === "pan");
+        el.classList.toggle("vellumwidget-mode-lasso", m === "lasso");
+        if (m !== "lasso") clearLasso();
         if (toolbarEl) {
           const b = toolbarEl.querySelector('[data-act="mode"]');
           if (b) {
-            b.textContent = m === "pan" ? "\u270B" : "\u25AD";
-            b.title = m === "pan" ? "Pan mode (click to brush-select)" : "Brush-select mode (click to pan)";
-            b.classList.toggle("vellumwidget-active", m === "pan");
+            const modes = availableModes();
+            const next = modes[(modes.indexOf(m) + 1) % modes.length];
+            b.textContent = MODE_ICON[m];
+            b.title = MODE_LABEL[m][0].toUpperCase() + MODE_LABEL[m].slice(1) + " mode" + (next && next !== m ? " (click for " + MODE_LABEL[next] + ")" : "");
+            b.classList.toggle("vellumwidget-active", m !== "brush");
           }
         }
+      }
+      function cycleMode() {
+        const modes = availableModes();
+        if (modes.length < 2) return;
+        setMode(modes[(modes.indexOf(mode) + 1) % modes.length]);
       }
       function exportName() {
         const n = opts.export && opts.export.filename;
@@ -1785,7 +1907,7 @@
           bar.appendChild(b);
           return b;
         };
-        if (opts.brush && opts.zoom) btn("mode", "\u25AD", "Brush-select mode (click to pan)", () => setMode(mode === "brush" ? "pan" : "brush"));
+        if (availableModes().length >= 2) btn("mode", MODE_ICON[mode], "Drag mode", cycleMode);
         if (opts.zoom) {
           btn("zoomsel", "\u2316", "Zoom to selection", zoomToSelection);
           btn("reset", "\u27F2", "Reset zoom", resetZoom);
@@ -1990,7 +2112,7 @@
       return {
         renderValue: function(x) {
           opts = Object.assign(
-            { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false },
+            { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false },
             x.options || {}
           );
           elements = normalizeElements(x.elements);
@@ -2076,7 +2198,7 @@
             buildHoverAxis();
             wire(svgEl);
             buildToolbar();
-            setMode("brush");
+            setMode(availableModes()[0] || "brush");
             applyStyling();
             applyLegend();
             setupA11y();
@@ -2119,6 +2241,11 @@
           nearestAxisKey,
           legendOff: function() {
             return Object.keys(legendOff).filter((s) => legendOff[s]);
+          },
+          lassoKeysIn,
+          availableModes,
+          mode: function() {
+            return mode;
           }
         }
       };
@@ -2157,6 +2284,9 @@
     isZoomedIn,
     userToCanvas,
     nearestSortedIdx,
-    columnTolerance
+    columnTolerance,
+    pointInPolygon,
+    lassoKeys,
+    polyBounds
   };
 })();

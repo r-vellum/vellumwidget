@@ -63,9 +63,20 @@ id. All values are the element **data keys** (the `data_id` a
 
 - `input$plot_brush`:
 
-  A list `list(keys=, x0=, y0=, x1=, y1=)` when a brush gesture
-  completes: the selected keys and the brushed rectangle in the scene's
-  device-pixel (viewBox) coordinates. An event input.
+  A list `list(keys=, x0=, y0=, x1=, y1=)` when a brush (or lasso)
+  gesture completes: the selected keys and the region's bounding
+  rectangle in the scene's device-pixel (viewBox) coordinates. A lasso
+  gesture also carries `lasso = TRUE`. An event input.
+
+- `input$plot_zoom`:
+
+  A list `list(x=, y=, w=, h=, zoomed=)` — the current view (the SVG
+  `viewBox` in device-pixel coordinates) plus a `zoomed` flag (is the
+  view narrower/shorter than the full extent). Updates as state when a
+  zoom/pan settles (wheel, drag-pan release, pinch, keyboard, reset,
+  zoom-to-selection, or a proxy
+  [`vw_zoom()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md)).
+  Data-space limits await axis/scale metadata in the scene contract.
 
 These are emitted only inside a live Shiny session; a static render
 (knitr, pkgdown,

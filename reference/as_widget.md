@@ -26,6 +26,7 @@ as_widget(
   hover = TRUE,
   select = TRUE,
   brush = TRUE,
+  lasso = TRUE,
   zoom = TRUE,
   toolbar = TRUE,
   nearest = TRUE,
@@ -73,6 +74,15 @@ as_widget(
 
   Toggles for rectangular brush-select, wheel/drag pan-zoom (via the SVG
   `viewBox`), and the on-hover toolbar (all `TRUE`).
+
+- lasso:
+
+  Enable freehand **lasso-select** (default `TRUE`): a third drag mode
+  alongside brush and pan, cycled from the toolbar's mode button. Drag a
+  loop and every mark whose centre falls inside it is selected. Like the
+  brush, it reports through `input$<id>_brush` (with a `lasso = TRUE`
+  flag and the loop's bounding box). The mode button appears whenever at
+  least two drag modes are enabled.
 
 - nearest:
 
