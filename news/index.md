@@ -2,6 +2,20 @@
 
 ## vellumwidget (development version)
 
+- **Axis-aware zoom (`axis_zoom = TRUE`, experimental).** Opt in and
+  wheel/drag zoom scales only the plot’s data region and re-ticks the
+  axes for the visible range — holding the frame (axes, titles, legend)
+  in place the way a charting library zooms, rather than the default
+  behaviour of scaling the whole scene like an image. Hit-testing
+  (hover/brush/lasso), the crosshair, and the `input$<id>_zoom` data
+  range all follow the zoomed data region. Requires a single **linear**
+  cartesian panel (continuous `identity`/`reverse` axes) rendered as
+  SVG; plots with log/date/discrete axes, several panels, or in raster
+  mode silently fall back to the ordinary whole-scene zoom. Built on
+  vellum’s pannable-panel contract (`vl_viewport(pannable=)`) and the
+  panel scale metadata `vellumplot` emits (needs the current development
+  `vellum`/`vellumplot`). Off by default.
+
 - **Interactive continuous colorbar filter (visualMap).** When a
   `vellumplot` plot maps a continuous `color` scale, its colorbar
   becomes a range filter: drag the two handles on the gradient bar to a

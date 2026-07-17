@@ -694,6 +694,44 @@
   function userToCanvas(vb, cw, ch, x, y) {
     return { px: (x - vb.x) / vb.w * cw, py: (y - vb.y) / vb.h * ch };
   }
+  function viewToPan(vb, vb0) {
+    const sx = vb.w ? vb0.w / vb.w : 1;
+    const sy = vb.h ? vb0.h / vb.h : 1;
+    return { sx, sy, tx: vb0.x - vb.x * sx, ty: vb0.y - vb.y * sy };
+  }
+  function panToView(vb, vb0, x, y) {
+    const t = viewToPan(vb, vb0);
+    return { x: t.sx ? vb.x + (x - vb0.x) / t.sx : x, y: t.sy ? vb.y + (y - vb0.y) / t.sy : y };
+  }
+  function niceTicks(lo, hi, count) {
+    if (!isFinite(lo) || !isFinite(hi) || hi <= lo || count < 1) return [];
+    const step0 = (hi - lo) / count;
+    const mag = Math.pow(10, Math.floor(Math.log10(step0)));
+    const norm = step0 / mag;
+    const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+    const out = [];
+    for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-9; v += step) {
+      out.push(Math.round(v / step) * step);
+    }
+    return out;
+  }
+  function fmtTick(v, step) {
+    if (v === 0) return "0";
+    const decimals = Math.min(20, Math.max(0, -Math.floor(Math.log10(Math.abs(step)) + 1e-9)));
+    let s = v.toFixed(decimals);
+    if (s.indexOf(".") >= 0) s = s.replace(/\.?0+$/, "");
+    return s;
+  }
+  function dataToNative(ax, d) {
+    switch (ax.transform) {
+      case "log10":
+        return Math.log10(d);
+      case "sqrt":
+        return Math.sqrt(d);
+      default:
+        return d;
+    }
+  }
   function unionBbox(elems, keys) {
     let out = null;
     for (let i = 0; i < elems.length; i++) {
@@ -767,6 +805,12 @@
 .vellumwidget-crosshair-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 4; overflow: visible;
+}
+/* Axis-aware zoom: re-ticked axis LABELS overlay (gridlines are drawn inside the
+   base svg's panel, under the marks). Pinned to the fixed base coordinate space. */
+.vellumwidget-retick-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 3; overflow: visible;
 }
 .vellumwidget-crosshair-line {
   stroke: var(--vellumwidget-crosshair-stroke, rgba(75,85,99,0.85));
@@ -1008,6 +1052,23 @@
       let focusIdx = -1;
       let vb0 = null;
       let vb = null;
+      let panGroup = null;
+      let outerPanelGroup = null;
+      let axisPanel = null;
+      let axisZoomActive = false;
+      let retickLayer = null;
+      let retickGrid = null;
+      const axisStyle = {
+        // presentation scraped from vellum's own axis/grid nodes so the re-tick matches the theme
+        textFill: "#333333",
+        fontFamily: "sans-serif",
+        fontSize: 12,
+        gridStroke: "#ffffff",
+        gridWidth: 1,
+        xBaselineY: 0,
+        yLabelX: 0
+        // device-px placement of the x/y tick labels
+      };
       let mode = "brush";
       let lastBrush = null;
       let lassoPts = [];
@@ -1034,6 +1095,11 @@
         const fx = r.width ? (clientX - r.left) / r.width : 0;
         const fy = r.height ? (clientY - r.top) / r.height : 0;
         return { x: view.x + fx * view.w, y: view.y + fy * view.h };
+      }
+      function toView(clientX, clientY) {
+        const u = toUser(clientX, clientY);
+        if (axisZoomActive && vb && vb0) return panToView(vb, vb0, u.x, u.y);
+        return u;
       }
       function elementsForKey(k) {
         const cached = nodesByKey[k];
@@ -1644,7 +1710,15 @@
         if (!vb) return;
         const payload = { x: vb.x, y: vb.y, w: vb.w, h: vb.h, zoomed: vb0 ? isZoomedIn(vb, vb0) : false };
         if (panels.length === 1) {
-          const d = dataRangeOf(panels[0], vb.x, vb.y, vb.x + vb.w, vb.y + vb.h);
+          let d;
+          if (axisZoomActive && vb0) {
+            const p = panels[0];
+            const a = panToView(vb, vb0, p.px0, p.py0);
+            const b = panToView(vb, vb0, p.px1, p.py1);
+            d = dataRangeOf(p, a.x, a.y, b.x, b.y);
+          } else {
+            d = dataRangeOf(panels[0], vb.x, vb.y, vb.x + vb.w, vb.y + vb.h);
+          }
           if (d) payload.data = d;
         }
         shinyInput("zoom", payload);
@@ -1673,10 +1747,22 @@
         receivingView = false;
       }
       function applyViewBox() {
-        if (svgEl && vb) svgEl.setAttribute("viewBox", fmtViewBox(vb));
+        if (axisZoomActive && panGroup && vb && vb0) {
+          const t = viewToPan(vb, vb0);
+          panGroup.setAttribute(
+            "transform",
+            "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")"
+          );
+          if (svgEl) svgEl.setAttribute("viewBox", fmtViewBox(vb0));
+          retick();
+        } else if (svgEl && vb) {
+          svgEl.setAttribute("viewBox", fmtViewBox(vb));
+        }
         if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
         if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
-        if (colorbarLayer && vb) colorbarLayer.setAttribute("viewBox", fmtViewBox(vb));
+        if (colorbarLayer && (vb || vb0)) {
+          colorbarLayer.setAttribute("viewBox", fmtViewBox(axisZoomActive && vb0 ? vb0 : vb));
+        }
         drawPoints();
         updateNav();
         if (dragging !== "pan" && pinchDist === 0) reportView();
@@ -1695,6 +1781,154 @@
         const py = h * pad;
         vb = { x: rect.x0 - px, y: rect.y0 - py, w: w + 2 * px, h: h + 2 * py };
         applyViewBox();
+      }
+      function isLinearAxis(ax) {
+        return !!ax && ax.type === "continuous" && (ax.transform === "identity" || ax.transform === "reverse");
+      }
+      function setupAxisZoom() {
+        panGroup = null;
+        outerPanelGroup = null;
+        axisPanel = null;
+        axisZoomActive = false;
+        if (retickLayer) {
+          retickLayer.remove();
+          retickLayer = null;
+        }
+        retickGrid = null;
+        if (!opts.axisZoom || rasterMode || !svgEl || !vb0 || !stage || panels.length !== 1) return;
+        const p = panels[0];
+        if (!isLinearAxis(p.x) || !isLinearAxis(p.y)) return;
+        const pan = svgEl.querySelector('[data-vellum-pan="' + cssEscape(p.name) + '"]');
+        const outer = svgEl.querySelector('[data-vellum-panel="' + cssEscape(p.name) + '"]');
+        if (!pan || !outer) return;
+        panGroup = pan;
+        outerPanelGroup = outer;
+        axisPanel = p;
+        axisZoomActive = true;
+        scrapeAxisStyle(p);
+        hideStaticAxes();
+        retickGrid = document.createElementNS(SVGNS, "g");
+        retickGrid.setAttribute("class", "vellumwidget-retick-grid");
+        outer.insertBefore(retickGrid, pan);
+        retickLayer = document.createElementNS(SVGNS, "svg");
+        retickLayer.setAttribute("class", "vellumwidget-retick-layer");
+        retickLayer.setAttribute("aria-hidden", "true");
+        retickLayer.setAttribute("viewBox", fmtViewBox(vb0));
+        stage.appendChild(retickLayer);
+        const t = viewToPan(vb || vb0, vb0);
+        panGroup.setAttribute(
+          "transform",
+          "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")"
+        );
+        retick();
+      }
+      function transTranslate(node) {
+        const t = node.getAttribute("transform") || "";
+        const m = /matrix\(\s*[-\d.eE]+\s+[-\d.eE]+\s+[-\d.eE]+\s+[-\d.eE]+\s+([-\d.eE]+)\s+([-\d.eE]+)\s*\)/.exec(t) || /translate\(\s*([-\d.eE]+)[ ,]+([-\d.eE]+)\s*\)/.exec(t);
+        return m ? { tx: parseFloat(m[1]), ty: parseFloat(m[2]) } : { tx: 0, ty: 0 };
+      }
+      function scrapeAxisStyle(p) {
+        if (!svgEl) return;
+        const xText = svgEl.querySelector('[data-vellum-panel^="axis-x"] text');
+        if (xText) {
+          axisStyle.textFill = xText.getAttribute("fill") || axisStyle.textFill;
+          axisStyle.fontFamily = xText.getAttribute("font-family") || axisStyle.fontFamily;
+          const fs = parseFloat(xText.getAttribute("font-size") || "");
+          if (fs) axisStyle.fontSize = fs;
+          const y = parseFloat(xText.getAttribute("y") || "");
+          axisStyle.xBaselineY = isFinite(y) ? transTranslate(xText).ty + y : p.py1 + axisStyle.fontSize;
+        } else {
+          axisStyle.xBaselineY = p.py1 + axisStyle.fontSize;
+        }
+        const yText = svgEl.querySelector('[data-vellum-panel^="axis-y"] text');
+        if (yText) {
+          const x = parseFloat(yText.getAttribute("x") || "");
+          axisStyle.yLabelX = isFinite(x) ? transTranslate(yText).tx + x : p.px0 - 6;
+        } else {
+          axisStyle.yLabelX = p.px0 - 6;
+        }
+        const grid = svgEl.querySelector('[role="grid"] path, [role="grid"] line');
+        if (grid) {
+          axisStyle.gridStroke = grid.getAttribute("stroke") || axisStyle.gridStroke;
+          const sw = parseFloat(grid.getAttribute("stroke-width") || "");
+          if (sw) axisStyle.gridWidth = sw;
+        }
+      }
+      function hideStaticAxes() {
+        if (!svgEl) return;
+        const hide = svgEl.querySelectorAll(
+          '[role="grid"], [data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]'
+        );
+        for (let i = 0; i < hide.length; i++) hide[i].style.display = "none";
+      }
+      function gridLine(x1, y1, x2, y2) {
+        const l = document.createElementNS(SVGNS, "line");
+        l.setAttribute("x1", String(x1));
+        l.setAttribute("y1", String(y1));
+        l.setAttribute("x2", String(x2));
+        l.setAttribute("y2", String(y2));
+        l.setAttribute("stroke", axisStyle.gridStroke);
+        l.setAttribute("stroke-width", String(axisStyle.gridWidth));
+        return l;
+      }
+      function axisLabel(text, x, y, anchor, baseline) {
+        const t = document.createElementNS(SVGNS, "text");
+        t.setAttribute("x", String(x));
+        t.setAttribute("y", String(y));
+        t.setAttribute("fill", axisStyle.textFill);
+        t.setAttribute("font-family", axisStyle.fontFamily);
+        t.setAttribute("font-size", String(axisStyle.fontSize));
+        t.setAttribute("text-anchor", anchor);
+        t.setAttribute("dominant-baseline", baseline);
+        t.textContent = text;
+        return t;
+      }
+      function retick() {
+        if (!axisZoomActive || !axisPanel || !vb || !vb0 || !retickGrid || !retickLayer) return;
+        const p = axisPanel;
+        while (retickGrid.firstChild) retickGrid.removeChild(retickGrid.firstChild);
+        while (retickLayer.firstChild) retickLayer.removeChild(retickLayer.firstChild);
+        const t = viewToPan(vb, vb0);
+        const cTL = panToView(vb, vb0, p.px0, p.py0);
+        const cBR = panToView(vb, vb0, p.px1, p.py1);
+        if (p.x) {
+          const a = pxToDataX(p, cTL.x), b = pxToDataX(p, cBR.x);
+          if (a != null && b != null) {
+            const lo = Math.min(a, b), hi = Math.max(a, b);
+            const ticks = niceTicks(lo, hi, 5);
+            const step = ticks.length > 1 ? ticks[1] - ticks[0] : hi - lo;
+            const nlo = p.x.native_lo, nhi = p.x.native_hi;
+            for (let i = 0; i < ticks.length; i++) {
+              const nx = dataToNative(p.x, ticks[i]);
+              const px = p.px0 + (nx - nlo) / (nhi - nlo) * (p.px1 - p.px0);
+              const sx = t.sx * px + t.tx;
+              if (sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
+              retickGrid.appendChild(gridLine(sx, p.py0, sx, p.py1));
+              retickLayer.appendChild(
+                axisLabel(fmtTick(ticks[i], step), sx, axisStyle.xBaselineY, "middle", "text-before-edge")
+              );
+            }
+          }
+        }
+        if (p.y) {
+          const a = pxToDataY(p, cTL.y), b = pxToDataY(p, cBR.y);
+          if (a != null && b != null) {
+            const lo = Math.min(a, b), hi = Math.max(a, b);
+            const ticks = niceTicks(lo, hi, 5);
+            const step = ticks.length > 1 ? ticks[1] - ticks[0] : hi - lo;
+            const nlo = p.y.native_lo, nhi = p.y.native_hi;
+            for (let i = 0; i < ticks.length; i++) {
+              const ny = dataToNative(p.y, ticks[i]);
+              const py = p.py0 + (nhi - ny) / (nhi - nlo) * (p.py1 - p.py0);
+              const sy = t.sy * py + t.ty;
+              if (sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
+              retickGrid.appendChild(gridLine(p.px0, sy, p.px1, sy));
+              retickLayer.appendChild(
+                axisLabel(fmtTick(ticks[i], step), axisStyle.yLabelX, sy, "end", "central")
+              );
+            }
+          }
+        }
       }
       function navToView(xFrac, wFrac) {
         if (!vb0) return;
@@ -2021,7 +2255,7 @@
         if (hoverRAF) return;
         hoverRAF = requestAnimationFrame(function() {
           hoverRAF = 0;
-          const u = toUser(cx, cy);
+          const u = toView(cx, cy);
           let seed;
           if (hm === "x") seed = nearestAxisKey("x", u.x);
           else if (hm === "y") seed = nearestAxisKey("y", u.y);
@@ -2037,7 +2271,7 @@
           const pts = Array.from(pointers.values());
           const d = Math.hypot(pts[0].cx - pts[1].cx, pts[0].cy - pts[1].cy);
           if (d > 0) {
-            const u = toUser((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
+            const u = toView((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
             vb = zoomViewBox(vb, d / pinchDist, u.x, u.y);
             applyViewBox();
             pinchDist = d;
@@ -2062,14 +2296,14 @@
             Math.abs(ev.clientY - down.cy)
           );
         } else if (dragging === "lasso" && vb) {
-          lassoPts.push(toUser(ev.clientX, ev.clientY));
+          lassoPts.push(toView(ev.clientX, ev.clientY));
           updateLassoPath();
         } else if (dragging === "pan" && vb) {
-          const u = toUser(ev.clientX, ev.clientY);
+          const u = toView(ev.clientX, ev.clientY);
           vb.x -= u.x - down.ux;
           vb.y -= u.y - down.uy;
           applyViewBox();
-          const u2 = toUser(ev.clientX, ev.clientY);
+          const u2 = toView(ev.clientX, ev.clientY);
           down.ux = u2.x;
           down.uy = u2.y;
         }
@@ -2089,7 +2323,7 @@
           el.classList.remove("vellumwidget-panning");
           return;
         }
-        const u = toUser(ev.clientX, ev.clientY);
+        const u = toView(ev.clientX, ev.clientY);
         down = { cx: ev.clientX, cy: ev.clientY, ux: u.x, uy: u.y };
         dragging = "";
         movedDuringDrag = false;
@@ -2112,8 +2346,8 @@
           return;
         }
         if (dragging === "brush" && down) {
-          const p1 = toUser(down.cx, down.cy);
-          const p2 = toUser(ev.clientX, ev.clientY);
+          const p1 = toView(down.cx, down.cy);
+          const p2 = toView(ev.clientX, ev.clientY);
           const rect = {
             x0: Math.min(p1.x, p2.x),
             y0: Math.min(p1.y, p2.y),
@@ -2154,7 +2388,7 @@
         }
         let k = keyOf(ev.target);
         if (k == null && rasterMode && opts.nearest !== false && elements.length) {
-          const u = toUser(ev.clientX, ev.clientY);
+          const u = toView(ev.clientX, ev.clientY);
           const rad = vb ? vb.w * 0.02 : 8;
           k = nearestKeyAt(u.x, u.y, rad);
           if (k != null && inert(k)) k = null;
@@ -2179,7 +2413,7 @@
       function onWheel(ev) {
         if (!opts.zoom || !vb) return;
         ev.preventDefault();
-        const u = toUser(ev.clientX, ev.clientY);
+        const u = toView(ev.clientX, ev.clientY);
         const factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
         vb = zoomViewBox(vb, factor, u.x, u.y);
         applyViewBox();
@@ -2696,6 +2930,7 @@
             buildToolbar();
             buildNavigator();
             buildColorbar();
+            setupAxisZoom();
             setMode(availableModes()[0] || "brush");
             tip.classList.toggle("vellumwidget-tip-sticky", !!opts.tooltipSticky);
             applyStyling();
@@ -2768,7 +3003,37 @@
           navWindowFrac: function() {
             if (!navWindow) return null;
             return { left: parseFloat(navWindow.style.left) || 0, width: parseFloat(navWindow.style.width) || 0 };
-          }
+          },
+          axisZoomActive: function() {
+            return axisZoomActive;
+          },
+          panTransform: function() {
+            return panGroup ? panGroup.getAttribute("transform") : null;
+          },
+          // Re-ticked axis labels (their text + device-px position), for asserting the
+          // re-tick output without a real layout engine.
+          retickLabels: function() {
+            if (!retickLayer) return [];
+            return Array.prototype.map.call(retickLayer.querySelectorAll("text"), function(t) {
+              return { text: t.textContent, x: parseFloat(t.getAttribute("x") || "NaN"), y: parseFloat(t.getAttribute("y") || "NaN") };
+            });
+          },
+          retickGridCount: function() {
+            return retickGrid ? retickGrid.querySelectorAll("line").length : 0;
+          },
+          staticAxesHidden: function() {
+            if (!svgEl) return null;
+            const nodes = svgEl.querySelectorAll('[role="grid"], [data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
+            if (!nodes.length) return null;
+            return Array.prototype.every.call(nodes, function(n) {
+              return n.style.display === "none";
+            });
+          },
+          setView: function(nvb) {
+            vb = { x: nvb.x, y: nvb.y, w: nvb.w, h: nvb.h };
+            applyViewBox();
+          },
+          toView
         }
       };
     }
@@ -2813,6 +3078,11 @@
     nativeToData,
     pxToDataX,
     pxToDataY,
-    normalizePanels
+    normalizePanels,
+    viewToPan,
+    panToView,
+    niceTicks,
+    fmtTick,
+    dataToNative
   };
 })();

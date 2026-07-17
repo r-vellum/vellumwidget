@@ -32,6 +32,7 @@ as_widget(
   nearest = TRUE,
   navigator = FALSE,
   navigator_height = NULL,
+  axis_zoom = FALSE,
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
   legend_click = c("select", "hide", "mute"),
@@ -108,6 +109,20 @@ as_widget(
 
   Height of the navigator strip in pixels (default `56`); ignored unless
   `navigator = TRUE`.
+
+- axis_zoom:
+
+  **Axis-aware zoom** (default `FALSE`, experimental). When `TRUE`,
+  wheel/drag zoom scales only the plot's data region and re-ticks the
+  axes for the visible range, holding the frame — axes, titles and
+  legend — in place, the way a chart library zooms (rather than the
+  default behaviour of scaling the whole scene like an image). Requires
+  a single **linear** cartesian panel (continuous `identity`/`reverse`
+  axes) rendered as SVG; plots with log/date/discrete axes, several
+  panels, or in raster mode silently fall back to the ordinary
+  whole-scene zoom. Builds on vellum's pannable-panel contract
+  (`vl_viewport(pannable=)`) and the panel scale metadata vellumplot
+  emits.
 
 - hover_mode:
 
