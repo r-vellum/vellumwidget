@@ -2,6 +2,15 @@
 
 ## vellumwidget (development version)
 
+- **Bug fix: legend swatches no longer jump off-screen under axis-aware
+  zoom.** With `axis_zoom`/`zoom_marks = "fixed"` (both default), the
+  constant-size counter- scale was applied to every glyph mark,
+  including discrete legend swatches. Because a swatch is positioned by
+  a `transform` attribute (unlike data points, which carry absolute
+  coordinates), the inline counter-scale overrode that attribute and
+  flung the swatch to a corner. The counter-scale is now restricted to
+  marks inside the pannable data region, so legend swatches stay put.
+
 - **Axis-aware zoom (`axis_zoom`, default `TRUE`).** Wheel/drag zoom
   scales only the plot’s data region and re-ticks the axes for the
   visible range — holding the frame (axes, titles, legend) in place the
