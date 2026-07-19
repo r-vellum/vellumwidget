@@ -6,6 +6,7 @@
 ^tsconfig\.json$
 ^\.github$
 ^_docs$
+^CLAUDE\.md$
 ^README\.Rmd$
 ^_pkgdown\.yml$
 ^vignettes/articles$

@@ -168,6 +168,11 @@
 #'   as_widget()
 #' }
 #' @export
+# NOTE (agents/maintainers): `as_widget()` already carries many behaviour flags.
+# Before adding another interaction argument, consider whether the behaviour
+# belongs in the vellumplot *spec* (declarative interactivity) rather than as one
+# more imperative widget flag. See CLAUDE.md, "Interactivity: prefer the spec over
+# new as_widget() flags". A tripwire test (test-as-widget.R) guards this count.
 as_widget <- function(x, width = NULL, height = NULL,
                       tooltip = TRUE, hover = TRUE, select = TRUE,
                       brush = TRUE, lasso = TRUE, zoom = TRUE, toolbar = TRUE,

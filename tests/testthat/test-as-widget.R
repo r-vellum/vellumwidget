@@ -500,3 +500,14 @@ test_that("as_widget() keys each boxplot box by its category", {
   keys <- w$x$elements$key
   expect_true(all(c("4", "6", "8") %in% keys))
 })
+
+test_that("as_widget() argument count is a tripwire (prefer the spec; see CLAUDE.md)", {
+  # If this FAILED because you added an argument to as_widget(): pause.
+  # as_widget() already carries many behaviour flags. Before adding another,
+  # consider whether the behaviour belongs in the vellumplot *spec* (declarative
+  # interactivity) instead of as one more imperative widget flag -- see CLAUDE.md
+  # ("Interactivity: prefer the spec over new as_widget() flags") and the Phase 6
+  # direction in the vellumplot Tier-2 plan. If it is genuinely a widget-local
+  # affordance, bump the baseline below by one (and note it in the commit).
+  expect_lte(length(formals(as_widget)), 36L)
+})
