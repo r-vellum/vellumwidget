@@ -1858,7 +1858,7 @@ HTMLWidgets.widget({
     // hold every positional mark's stroke width constant. Skipped for zoom_marks =
     // "scale" (glyphs then scale with the pan group, the older behaviour).
     function setupConstantMarks(): void {
-      if (!axisZoomActive || opts.zoomMarks === "scale") return;
+      if (!axisZoomActive || opts.zoomMarks === "scale" || !panGroup) return;
       for (let i = 0; i < elements.length; i++) {
         const e = elements[i];
         if (!e.mark) continue;
@@ -1867,6 +1867,11 @@ HTMLWidgets.widget({
         const glyph = GLYPH_MARKS[e.mark] === true;
         for (let j = 0; j < nodes.length; j++) {
           const node = nodes[j] as SVGElement;
+          // Only marks inside the pan group are scaled by T, so only they need
+          // the counter-scale. Skip glyphs that live outside it (e.g. legend
+          // swatches): those are positioned by a `transform` attribute, and the
+          // inline `transform` below would override it and fling them to a corner.
+          if (!panGroup.contains(node)) continue;
           if (glyph) {
             // Counter-scale about the glyph's own bbox centre (transform-box:
             // fill-box makes transform-origin resolve there), so T re-maps the

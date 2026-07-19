@@ -1920,11 +1920,15 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
   };
   // A glyph (point) and a positional mark (rect), both keyed, inside the pan group.
+  // Plus a legend swatch (also a `point` glyph) OUTSIDE the pan group, positioned by
+  // a `transform` attribute — it must NOT be counter-scaled (that would override the
+  // attribute and fling it to a corner; see the legend-swatch regression below).
   const svg =
     '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
     '<g data-vellum-panel="panel-1-1" clip-path="url(#c0)"><g data-vellum-pan="panel-1-1">' +
     '<path data-key="p" d="M98 48h4v4z"/><rect data-key="r" x="40" y="20" width="30" height="10"/>' +
     '</g></g>' +
+    '<g data-vellum-panel="legend"><path data-key="legend:color:s" d="M2 2h5v5z" transform="matrix(1 0 0 1 185 40)"/></g>' +
     '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">50</text></g>' +
     '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">25</text></g></svg>';
   function mountCM(zoomMarks) {
@@ -1933,11 +1937,18 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     const i = widgetDef.factory(e, 200, 100);
     i.renderValue({
       svg: svg,
-      elements: { key: ["p", "r"], mark: ["point", "rect"], x0: [98, 40], y0: [48, 20], x1: [102, 70], y1: [52, 30] },
+      elements: {
+        key: ["p", "r", "legend:color:s"], mark: ["point", "rect", "point"],
+        x0: [98, 40, 185], y0: [48, 20, 40], x1: [102, 70, 190], y1: [52, 30, 45],
+        legend_for: [null, null, "color:s"]
+      },
       panels: panel,
       options: { axisZoom: true, zoomMarks: zoomMarks, hover: true, select: true, zoom: true, selectMode: "multiple" }
     });
-    return { el: e, inst: i, pt: e.querySelector('[data-key="p"]'), rect: e.querySelector('[data-key="r"]') };
+    return {
+      el: e, inst: i, pt: e.querySelector('[data-key="p"]'), rect: e.querySelector('[data-key="r"]'),
+      swatch: e.querySelector('[data-key="legend:color:s"]')
+    };
   }
 
   // "fixed" (default): the glyph is counter-scaled from the shared vars; the
@@ -1952,6 +1963,13 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     "constant-marks: a positional mark (rect) gets a non-scaling stroke, not a counter-scale");
   ok(!/scale\(var/.test(fx.rect.style.transform || ""),
     "constant-marks: the positional mark is NOT counter-scaled (its geometry scales with the data)");
+  // A legend swatch is a `point` glyph too, but it lives outside the pan group and is
+  // positioned by a `transform` attribute. Counter-scaling it would set an inline
+  // `transform` that overrides that attribute and drop its translate.
+  ok(!/scale\(var/.test(fx.swatch.style.transform || ""),
+    "constant-marks: a legend swatch (glyph outside the pan group) is NOT counter-scaled");
+  ok(fx.swatch.getAttribute("transform") === "matrix(1 0 0 1 185 40)",
+    "constant-marks: the legend swatch keeps its positioning transform attribute");
   const v0 = fx.inst._test.panScaleVars();
   ok(v0 && parseFloat(v0.ix) === 1 && parseFloat(v0.iy) === 1, "constant-marks: inverse-scale vars are 1 at the full view");
   // zoom in 2x in x: the inverse var tracks 1/sx so the glyph stays its pixel size.

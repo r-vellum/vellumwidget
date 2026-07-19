@@ -1846,7 +1846,7 @@
         panGroup.style.setProperty("--vw-iy", String(t.sy ? 1 / t.sy : 1));
       }
       function setupConstantMarks() {
-        if (!axisZoomActive || opts.zoomMarks === "scale") return;
+        if (!axisZoomActive || opts.zoomMarks === "scale" || !panGroup) return;
         for (let i = 0; i < elements.length; i++) {
           const e = elements[i];
           if (!e.mark) continue;
@@ -1855,6 +1855,7 @@
           const glyph = GLYPH_MARKS[e.mark] === true;
           for (let j = 0; j < nodes.length; j++) {
             const node = nodes[j];
+            if (!panGroup.contains(node)) continue;
             if (glyph) {
               node.style.setProperty("transform-box", "fill-box");
               node.style.setProperty("transform-origin", "center");
