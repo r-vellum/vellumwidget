@@ -1,6 +1,6 @@
 # Changelog
 
-## vellumwidget (development version)
+## vellumwidget 0.6.0
 
 - **Bug fix: legend swatches no longer jump off-screen under axis-aware
   zoom.** With `axis_zoom`/`zoom_marks = "fixed"` (both default), the
