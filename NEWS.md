@@ -1,3 +1,5 @@
+# vellumwidget (development version)
+
 # vellumwidget 0.6.0
 
 * **Bug fix: legend swatches no longer jump off-screen under axis-aware zoom.**
