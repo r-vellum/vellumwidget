@@ -50,7 +50,9 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="development version" id="vellumwidget-development-version">vellumwidget (development version)<a class="anchor" aria-label="anchor" href="#vellumwidget-development-version"></a></h2>
-</div>
+<ul><li>
+<strong>Declarative interactivity: conditional encodings.</strong> <code><a href="../reference/as_widget.html">as_widget()</a></code> now reads the interaction model a <code>vellumplot</code> plot declares (<code><a href="https://r-vellum.github.io/vellumplot/reference/select_point.html" class="external-link">select_point()</a></code> / <code><a href="https://r-vellum.github.io/vellumplot/reference/condition.html" class="external-link">condition()</a></code>) off the compiled spec and enacts it on the frozen scene. A hover- or click-driven selection with a <code><a href="https://r-vellum.github.io/vellumplot/reference/condition.html" class="external-link">condition()</a></code> on an aesthetic keeps selection members at their <code>if_true</code> style and applies <code>if_false</code> to non-members (an explicit colour, or the theme dim as a spotlight) — reverting when the selection empties. No new <code><a href="../reference/as_widget.html">as_widget()</a></code> argument: the behaviour travels with the plot. (Filters, cross-view, and scale binds follow.)</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.6.0" id="vellumwidget-060">vellumwidget 0.6.0<a class="anchor" aria-label="anchor" href="#vellumwidget-060"></a></h2>
 <ul><li><p><strong>Bug fix: legend swatches no longer jump off-screen under axis-aware zoom.</strong> With <code>axis_zoom</code>/<code>zoom_marks = "fixed"</code> (both default), the constant-size counter- scale was applied to every glyph mark, including discrete legend swatches. Because a swatch is positioned by a <code>transform</code> attribute (unlike data points, which carry absolute coordinates), the inline counter-scale overrode that attribute and flung the swatch to a corner. The counter-scale is now restricted to marks inside the pannable data region, so legend swatches stay put.</p></li>

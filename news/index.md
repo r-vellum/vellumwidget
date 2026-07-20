@@ -2,6 +2,22 @@
 
 ## vellumwidget (development version)
 
+- **Declarative interactivity: conditional encodings.**
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  now reads the interaction model a `vellumplot` plot declares
+  ([`select_point()`](https://r-vellum.github.io/vellumplot/reference/select_point.html)
+  /
+  [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html))
+  off the compiled spec and enacts it on the frozen scene. A hover- or
+  click-driven selection with a
+  [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+  on an aesthetic keeps selection members at their `if_true` style and
+  applies `if_false` to non-members (an explicit colour, or the theme
+  dim as a spotlight) — reverting when the selection empties. No new
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  argument: the behaviour travels with the plot. (Filters, cross-view,
+  and scale binds follow.)
+
 ## vellumwidget 0.6.0
 
 - **Bug fix: legend swatches no longer jump off-screen under axis-aware
