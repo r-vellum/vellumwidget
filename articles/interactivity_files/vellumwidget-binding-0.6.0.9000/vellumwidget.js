@@ -541,6 +541,8 @@
     const legend = c.legend != null ? asColumn(c.legend) : null;
     const filterValue = c.filter_value != null ? asColumn(c.filter_value) : null;
     const cond = c.cond != null ? asColumn(c.cond) : null;
+    const filt = c.filt != null ? asColumn(c.filt) : null;
+    const join = c.join != null ? asColumn(c.join) : null;
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       const e = { key: String(key[i]) };
@@ -565,6 +567,13 @@
           e.cond = Array.isArray(v) ? v : [String(v)];
         }
       }
+      if (filt) {
+        const v = filt[i];
+        if (v != null && !(Array.isArray(v) && v.length === 0)) {
+          e.filt = Array.isArray(v) ? v : [String(v)];
+        }
+      }
+      if (join && join[i] != null) e.join = String(join[i]);
       out[i] = e;
     }
     return out;
@@ -1010,6 +1019,8 @@
       let colorbarLayer = null;
       let interactions = null;
       let condTagElems = {};
+      let filtSelElems = {};
+      let joinOf = {};
       let lastHoverKeys = [];
       let colorRange = null;
       let colorHiddenSet = {};
@@ -1647,13 +1658,22 @@
       }
       function setupInteractions() {
         condTagElems = {};
+        filtSelElems = {};
+        joinOf = {};
         if (!interactions) return;
         for (let i = 0; i < elements.length; i++) {
-          const tags = elements[i].cond;
-          if (!tags) continue;
-          for (let t = 0; t < tags.length; t++) {
-            (condTagElems[tags[t]] = condTagElems[tags[t]] || []).push(elements[i].key);
+          const e = elements[i];
+          if (e.cond) {
+            for (let t = 0; t < e.cond.length; t++) {
+              (condTagElems[e.cond[t]] = condTagElems[e.cond[t]] || []).push(e.key);
+            }
           }
+          if (e.filt) {
+            for (let t = 0; t < e.filt.length; t++) {
+              (filtSelElems[e.filt[t]] = filtSelElems[e.filt[t]] || []).push(e.key);
+            }
+          }
+          if (e.join != null) joinOf[e.key] = e.join;
         }
       }
       function selectionMembers(sel) {
@@ -1700,22 +1720,43 @@
           }
         }
       }
+      function memberJoins(members) {
+        const js = {};
+        for (const k in members) js[joinOf[k] != null ? joinOf[k] : k] = true;
+        return js;
+      }
       function applyFilters() {
-        if (rasterMode || !interactions || !interactions.filters || !interactions.filters.length) return;
+        const ix = interactions;
+        if (rasterMode || !ix || !ix.filters || !ix.filters.length) return;
+        const filters = ix.filters;
         const selByName = {};
-        (interactions.selections || []).forEach((s) => selByName[s.name] = s);
+        (ix.selections || []).forEach((s) => selByName[s.name] = s);
+        const hide = {};
         let restrict = false;
-        const show = {};
-        for (let i = 0; i < interactions.filters.length; i++) {
-          const sel = selByName[interactions.filters[i].selection];
+        for (let i = 0; i < filters.length; i++) {
+          const selName = filters[i].selection;
+          const sel = selByName[selName];
           const members = sel ? selectionMembers(sel) : {};
-          const has = Object.keys(members).length > 0;
-          const emptyAll = !sel || sel.empty !== false;
-          if (!has && emptyAll) continue;
+          const active = Object.keys(members).length > 0 || sel && sel.empty === false;
+          if (!active) continue;
           restrict = true;
-          for (const k in members) show[k] = true;
+          const keep = memberJoins(members);
+          const targets = filtSelElems[selName] || [];
+          for (let t = 0; t < targets.length; t++) {
+            const k = targets[t];
+            const j = joinOf[k] != null ? joinOf[k] : k;
+            if (!keep[j]) hide[k] = true;
+          }
         }
-        applyFilter(restrict ? Object.keys(show) : null);
+        if (!restrict) {
+          applyFilter(null);
+          return;
+        }
+        const show = [];
+        for (let i = 0; i < elements.length; i++) {
+          if (!hide[elements[i].key]) show.push(elements[i].key);
+        }
+        applyFilter(show);
       }
       function reevaluateInteractions() {
         applyConditions();
@@ -2986,6 +3027,8 @@
           colorbar = x.colorbar || null;
           interactions = x.interactions || null;
           condTagElems = {};
+          filtSelElems = {};
+          joinOf = {};
           lastHoverKeys = [];
           meta = {};
           groups = {};
