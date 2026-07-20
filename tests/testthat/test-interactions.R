@@ -38,6 +38,27 @@ test_that("condition membership tags reach the element metadata", {
   expect_true("cond" %in% names(els))
 })
 
+test_that("a cross-view composition carries join + filt for the target cell", {
+  df <- data.frame(x = 1:4, y = 1:4)
+  sel <- vellumplot::select_interval("br", on = "x")
+  comp <- vellumplot::vconcat(
+    vellumplot::vplot(df) |>
+      vellumplot::mark_point(x = x, y = y) |>
+      vellumplot::add_selection(sel),
+    vellumplot::vplot(df) |>
+      vellumplot::mark_point(x = x, y = y) |>
+      vellumplot::filter_by(sel)
+  )
+  els <- as_widget(comp)$x$elements
+  expect_true("join" %in% names(els))
+  expect_true("filt" %in% names(els))
+  # only the filtering cell (cell B) is tagged; both cells carry a join id
+  expect_equal(sum(lengths(els$filt) > 0), nrow(df))
+  expect_equal(length(els$join), 2L * nrow(df))
+  # keys are unique across cells (no collision in one runtime)
+  expect_equal(length(unique(els$key)), length(els$key))
+})
+
 test_that("a plot with no declared interaction carries no interactions block", {
   df <- data.frame(x = 1:5, y = 1:5)
   w <- as_widget(vellumplot::vplot(df) |> vellumplot::mark_point(x = x, y = y))

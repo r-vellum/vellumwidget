@@ -1,5 +1,12 @@
 # vellumwidget (development version)
 
+* **Declarative interactivity: cross-view filtering.** A selection defined on one
+  cell of a composition and referenced by `filter_by()` on another now
+  cross-filters — brush/select the source cell and the linked cell narrows to the
+  matching rows, matched by a cross-view `join` id. The **source cell stays fully
+  visible**; only the target cell hides (scoped by per-cell-unique keys). All in
+  one widget runtime, no server round-trip.
+
 * **Declarative interactivity: filters.** A `vellumplot` plot that declares
   `filter_by(selection)` now hides everything outside the selection when that
   selection's gesture fires — reusing the cross-filter path. Driven entirely by
