@@ -1700,8 +1700,26 @@
           }
         }
       }
+      function applyFilters() {
+        if (rasterMode || !interactions || !interactions.filters || !interactions.filters.length) return;
+        const selByName = {};
+        (interactions.selections || []).forEach((s) => selByName[s.name] = s);
+        let restrict = false;
+        const show = {};
+        for (let i = 0; i < interactions.filters.length; i++) {
+          const sel = selByName[interactions.filters[i].selection];
+          const members = sel ? selectionMembers(sel) : {};
+          const has = Object.keys(members).length > 0;
+          const emptyAll = !sel || sel.empty !== false;
+          if (!has && emptyAll) continue;
+          restrict = true;
+          for (const k in members) show[k] = true;
+        }
+        applyFilter(restrict ? Object.keys(show) : null);
+      }
       function reevaluateInteractions() {
         applyConditions();
+        applyFilters();
       }
       function proxyCall(method, args) {
         const keys = Array.isArray(args) ? args : args == null ? [] : [String(args)];

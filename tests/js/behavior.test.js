@@ -2066,5 +2066,51 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(d2.classList.contains("vellumwidget-cond-dim"), "condition(no if_false): non-member gets the theme-dim class");
 }
 
+// ===================== declarative interactivity: filter_by =====================
+// A click-driven point selection with a filter_by: clicking an element hides
+// every OTHER element (display:none via the cross-filter class); clicking again
+// empties the selection and (empty=true) shows everything.
+{
+  const elF = document.createElement("div");
+  document.body.appendChild(elF);
+  const svgF =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><g data-vellum-panel="panel-1-1">' +
+    '<path data-key="f1" d="M5 5h4v4h-4z"/>' +
+    '<path data-key="f2" d="M20 5h4v4h-4z"/>' +
+    '<path data-key="f3" d="M35 5h4v4h-4z"/>' +
+    "</g></svg>";
+  const iF = widgetDef.factory(elF, 200, 100);
+  iF.renderValue({
+    svg: svgF,
+    elements: [{ key: "f1" }, { key: "f2" }, { key: "f3" }],
+    interactions: {
+      selections: [{ name: "pick", kind: "point", on: "click", empty: true }],
+      filters: [{ selection: "pick" }]
+    },
+    options: { select: true, hover: true, selectMode: "multiple" }
+  });
+  const svgFE = elF.querySelector("svg");
+  const f1 = elF.querySelector('[data-key="f1"]');
+  const f2 = elF.querySelector('[data-key="f2"]');
+  const f3 = elF.querySelector('[data-key="f3"]');
+  function clickF(target) {
+    const ev = new window.MouseEvent("click", { bubbles: true, clientX: 6, clientY: 6 });
+    Object.defineProperty(ev, "target", { value: target, enumerable: true });
+    svgFE.dispatchEvent(ev);
+  }
+  ok(!f2.classList.contains("vellumwidget-filtered"), "filter_by: empty selection shows everything");
+  clickF(f1);
+  ok(!f1.classList.contains("vellumwidget-filtered"), "filter_by: the selected element stays shown");
+  ok(
+    f2.classList.contains("vellumwidget-filtered") && f3.classList.contains("vellumwidget-filtered"),
+    "filter_by: non-members are hidden"
+  );
+  clickF(f1);
+  ok(
+    !f2.classList.contains("vellumwidget-filtered") && !f3.classList.contains("vellumwidget-filtered"),
+    "filter_by: clearing the selection shows everything again"
+  );
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);
