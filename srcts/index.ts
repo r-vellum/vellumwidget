@@ -1718,11 +1718,34 @@ HTMLWidgets.widget({
         }
       }
     }
+    // Enact declared filters: show only the union of the filter selections'
+    // members (hiding the rest via the existing cross-filter path). A filter whose
+    // selection is empty imposes no restriction when empty !== false (spotlight),
+    // so an untouched plot shows everything. Only runs when the plot declares a
+    // filter, so it never clobbers a crosstalk/legend filter on a plain plot.
+    function applyFilters(): void {
+      if (rasterMode || !interactions || !interactions.filters || !interactions.filters.length) return;
+      const selByName: Record<string, SelDef> = {};
+      (interactions.selections || []).forEach((s) => (selByName[s.name] = s));
+      let restrict = false;
+      const show: Record<string, boolean> = {};
+      for (let i = 0; i < interactions.filters.length; i++) {
+        const sel = selByName[interactions.filters[i].selection];
+        const members = sel ? selectionMembers(sel) : {};
+        const has = Object.keys(members).length > 0;
+        const emptyAll = !sel || sel.empty !== false;
+        if (!has && emptyAll) continue; // this filter shows all -> no restriction
+        restrict = true;
+        for (const k in members) show[k] = true;
+      }
+      applyFilter(restrict ? Object.keys(show) : null);
+    }
     // The single re-evaluation hook: called whenever a selection's member set can
-    // change (hover move/clear, click/select). Conditions today; filters/binds add
-    // their own reactions here in later stages.
+    // change (hover move/clear, click/select/brush). Conditions + filters today;
+    // scale binds add their reaction here in a later stage.
     function reevaluateInteractions(): void {
       applyConditions();
+      applyFilters();
     }
     // --- server -> client proxy (vellumwidget_proxy) ---
     // Route a command from the Shiny server onto this instance, without a
