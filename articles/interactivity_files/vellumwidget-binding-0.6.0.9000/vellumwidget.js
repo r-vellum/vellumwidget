@@ -1127,6 +1127,42 @@
         if (axisZoomActive && vb && vb0) return panToView(vb, vb0, u.x, u.y);
         return u;
       }
+      function calibrateXform() {
+        let xi = null, xj = null;
+        let yi = null, yj = null;
+        for (let i = 0; i < elements.length; i++) {
+          const e = elements[i];
+          if (!hasBbox(e)) continue;
+          const scx = (e.x0 + e.x1) / 2, scy = (e.y0 + e.y1) / 2;
+          if (!xi || scx < (xi.x0 + xi.x1) / 2) xi = e;
+          if (!xj || scx > (xj.x0 + xj.x1) / 2) xj = e;
+          if (!yi || scy < (yi.y0 + yi.y1) / 2) yi = e;
+          if (!yj || scy > (yj.y0 + yj.y1) / 2) yj = e;
+        }
+        if (!xi || !xj || !yi || !yj) return null;
+        const scr = (e) => {
+          const n = elementsForKey(e.key)[0];
+          if (!n) return null;
+          const r = n.getBoundingClientRect();
+          if (!r.width && !r.height) return null;
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        };
+        const xa = scr(xi), xb = scr(xj), ya = scr(yi), yb = scr(yj);
+        if (!xa || !xb || !ya || !yb) return null;
+        const dScx = (xj.x0 + xj.x1) / 2 - (xi.x0 + xi.x1) / 2;
+        const dScrx = xb.x - xa.x;
+        const dScy = (yj.y0 + yj.y1) / 2 - (yi.y0 + yi.y1) / 2;
+        const dScry = yb.y - ya.y;
+        if (Math.abs(dScrx) < 1 || Math.abs(dScry) < 1) return null;
+        const sx = dScx / dScrx, ox = (xi.x0 + xi.x1) / 2 - xa.x * sx;
+        const sy = dScy / dScry, oy = (yi.y0 + yi.y1) / 2 - ya.y * sy;
+        return { sx, ox, sy, oy };
+      }
+      function clientToScene(clientX, clientY) {
+        const f = calibrateXform();
+        if (!f) return toView(clientX, clientY);
+        return { x: f.ox + clientX * f.sx, y: f.oy + clientY * f.sy };
+      }
       function elementsForKey(k) {
         const cached = nodesByKey[k];
         if (cached) return cached;
@@ -1476,12 +1512,20 @@
       }
       function markClient(k) {
         const m = meta[k];
-        if (!m || !hasBbox(m) || !svgEl) return null;
+        if (!m || !hasBbox(m)) return null;
+        const nodes = elementsForKey(k);
+        if (nodes.length) {
+          const r2 = nodes[0].getBoundingClientRect();
+          if (r2.width || r2.height) return { x: r2.left + r2.width / 2, y: r2.top + r2.height / 2 };
+        }
+        const cx = (m.x0 + m.x1) / 2;
+        const cy = (m.y0 + m.y1) / 2;
+        const f = calibrateXform();
+        if (f && f.sx && f.sy) return { x: (cx - f.ox) / f.sx, y: (cy - f.oy) / f.sy };
+        if (!svgEl) return null;
         const r = svgEl.getBoundingClientRect();
         const view = currentViewBox();
         if (!view.w || !view.h || !r.width || !r.height) return null;
-        const cx = (m.x0 + m.x1) / 2;
-        const cy = (m.y0 + m.y1) / 2;
         return {
           x: r.left + (cx - view.x) / view.w * r.width,
           y: r.top + (cy - view.y) / view.h * r.height
@@ -2443,7 +2487,7 @@
         if (hoverRAF) return;
         hoverRAF = requestAnimationFrame(function() {
           hoverRAF = 0;
-          const u = toView(cx, cy);
+          const u = clientToScene(cx, cy);
           let seed;
           if (hm === "x") seed = nearestAxisKey("x", u.x);
           else if (hm === "y") seed = nearestAxisKey("y", u.y);
@@ -2471,7 +2515,7 @@
           if (Math.abs(ev.clientX - down.cx) + Math.abs(ev.clientY - down.cy) <= DRAG_THRESHOLD) return;
           dragging = mode === "pan" && opts.zoom ? "pan" : mode === "lasso" && opts.lasso ? "lasso" : opts.brush ? "brush" : "";
           if (dragging === "pan") el.classList.add("vellumwidget-panning");
-          if (dragging === "lasso") lassoPts = [{ x: down.ux, y: down.uy }];
+          if (dragging === "lasso") lassoPts = [clientToScene(down.cx, down.cy)];
           if (dragging === "") return;
           movedDuringDrag = true;
         }
@@ -2484,7 +2528,7 @@
             Math.abs(ev.clientY - down.cy)
           );
         } else if (dragging === "lasso" && vb) {
-          lassoPts.push(toView(ev.clientX, ev.clientY));
+          lassoPts.push(clientToScene(ev.clientX, ev.clientY));
           updateLassoPath();
         } else if (dragging === "pan" && vb) {
           const u = toView(ev.clientX, ev.clientY);
@@ -2534,8 +2578,8 @@
           return;
         }
         if (dragging === "brush" && down) {
-          const p1 = toView(down.cx, down.cy);
-          const p2 = toView(ev.clientX, ev.clientY);
+          const p1 = clientToScene(down.cx, down.cy);
+          const p2 = clientToScene(ev.clientX, ev.clientY);
           const rect = {
             x0: Math.min(p1.x, p2.x),
             y0: Math.min(p1.y, p2.y),
@@ -2576,7 +2620,7 @@
         }
         let k = keyOf(ev.target);
         if (k == null && rasterMode && opts.nearest !== false && elements.length) {
-          const u = toView(ev.clientX, ev.clientY);
+          const u = clientToScene(ev.clientX, ev.clientY);
           const rad = vb ? vb.w * 0.02 : 8;
           k = nearestKeyAt(u.x, u.y, rad);
           if (k != null && inert(k)) k = null;
