@@ -2,6 +2,14 @@
 
 ## vellumwidget (development version)
 
+- **Bug fix: hover snapped to the wrong mark on a CSS-scaled plot.**
+  When the svg was rendered smaller than its intrinsic size (the
+  widget’s `max-width:100%`), hover highlighted a mark up-and-left of
+  the cursor (click was unaffected). The client→scene mapping trusted
+  `getScreenCTM()`, which can report the width/height-attribute scale
+  rather than the rendered one; it now maps via the element’s actual
+  rendered box and viewBox. Tooltip anchoring uses the same fix.
+
 - **Breaking: interaction is now declared in the plot, not on
   [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md).**
   The interaction-intent arguments have been removed — `hover_color`,
