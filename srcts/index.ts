@@ -53,6 +53,8 @@ interface ElemMeta extends Partial<Bbox> {
   legend_for?: string; // a legend swatch: the series it highlights/selects
   filter_value?: number; // value on a continuous colour scale (for the colorbar filter)
   cond?: string[]; // conditional-encoding tags ("<sel>:<aes>") this element participates in
+  filt?: string[]; // filter selection names whose filter_by() targets this element's view
+  join?: string; // cross-view identity (a composition cell's original id, keys being per-cell unique)
 }
 
 // The interactive colorbar descriptor (continuous colour scale): the gradient
@@ -168,6 +170,8 @@ interface ColumnElements {
   legend?: (string[] | string | null)[] | string[] | string;
   filter_value?: (number | null)[] | number;
   cond?: (string[] | string | null)[] | string[] | string;
+  filt?: (string[] | string | null)[] | string[] | string;
+  join?: (string | null)[] | string;
 }
 
 // Per-axis scale descriptor (from vellumplot's `scales` panel meta): the data and
@@ -260,6 +264,8 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
   const legend = c.legend != null ? asColumn<string[] | string | null>(c.legend) : null;
   const filterValue = c.filter_value != null ? asColumn<number | null>(c.filter_value) : null;
   const cond = c.cond != null ? asColumn<string[] | string | null>(c.cond) : null;
+  const filt = c.filt != null ? asColumn<string[] | string | null>(c.filt) : null;
+  const join = c.join != null ? asColumn<string | null>(c.join) : null;
   const out: ElemMeta[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const e: ElemMeta = { key: String(key[i]) };
@@ -286,6 +292,13 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
         e.cond = Array.isArray(v) ? (v as string[]) : [String(v)];
       }
     }
+    if (filt) {
+      const v = filt[i];
+      if (v != null && !(Array.isArray(v) && v.length === 0)) {
+        e.filt = Array.isArray(v) ? (v as string[]) : [String(v)];
+      }
+    }
+    if (join && join[i] != null) e.join = String(join[i]);
     out[i] = e;
   }
   return out;
@@ -884,6 +897,8 @@ HTMLWidgets.widget({
     // it). Reset per render; empty when the plot declares no interaction.
     let interactions: InteractionSpec | null = null;
     let condTagElems: Record<string, string[]> = {};
+    let filtSelElems: Record<string, string[]> = {}; // filter selection -> keys of its target view
+    let joinOf: Record<string, string> = {}; // key -> cross-view join id (compositions)
     let lastHoverKeys: string[] = [];
     let colorRange: { a: number; b: number } | null = null;
     let colorHiddenSet: Record<string, boolean> = {};
@@ -1654,13 +1669,22 @@ HTMLWidgets.widget({
     // each condition tag ("<sel>:<aes>"). Called once per render.
     function setupInteractions(): void {
       condTagElems = {};
+      filtSelElems = {};
+      joinOf = {};
       if (!interactions) return;
       for (let i = 0; i < elements.length; i++) {
-        const tags = elements[i].cond;
-        if (!tags) continue;
-        for (let t = 0; t < tags.length; t++) {
-          (condTagElems[tags[t]] = condTagElems[tags[t]] || []).push(elements[i].key);
+        const e = elements[i];
+        if (e.cond) {
+          for (let t = 0; t < e.cond.length; t++) {
+            (condTagElems[e.cond[t]] = condTagElems[e.cond[t]] || []).push(e.key);
+          }
         }
+        if (e.filt) {
+          for (let t = 0; t < e.filt.length; t++) {
+            (filtSelElems[e.filt[t]] = filtSelElems[e.filt[t]] || []).push(e.key);
+          }
+        }
+        if (e.join != null) joinOf[e.key] = e.join;
       }
     }
     // The member key set of a selection given the current gesture state. A
@@ -1723,22 +1747,52 @@ HTMLWidgets.widget({
     // selection is empty imposes no restriction when empty !== false (spotlight),
     // so an untouched plot shows everything. Only runs when the plot declares a
     // filter, so it never clobbers a crosstalk/legend filter on a plain plot.
+    // A selection's members as cross-view *join* ids (so a gesture in one cell
+    // maps to matching rows in another). Falls back to the key itself when there
+    // is no join (a single view), preserving single-view filtering.
+    function memberJoins(members: Record<string, boolean>): Record<string, boolean> {
+      const js: Record<string, boolean> = {};
+      for (const k in members) js[joinOf[k] != null ? joinOf[k] : k] = true;
+      return js;
+    }
     function applyFilters(): void {
-      if (rasterMode || !interactions || !interactions.filters || !interactions.filters.length) return;
+      const ix = interactions;
+      if (rasterMode || !ix || !ix.filters || !ix.filters.length) return;
+      const filters = ix.filters;
       const selByName: Record<string, SelDef> = {};
-      (interactions.selections || []).forEach((s) => (selByName[s.name] = s));
+      (ix.selections || []).forEach((s) => (selByName[s.name] = s));
+      // Hide only the *filtered view's* elements (those tagged with the filter's
+      // selection) whose join id is not selected — scoped by the per-cell-unique
+      // key, so the source view stays fully visible. An empty selection with
+      // empty !== false imposes no restriction.
+      const hide: Record<string, boolean> = {};
       let restrict = false;
-      const show: Record<string, boolean> = {};
-      for (let i = 0; i < interactions.filters.length; i++) {
-        const sel = selByName[interactions.filters[i].selection];
+      for (let i = 0; i < filters.length; i++) {
+        const selName = filters[i].selection;
+        const sel = selByName[selName];
         const members = sel ? selectionMembers(sel) : {};
-        const has = Object.keys(members).length > 0;
-        const emptyAll = !sel || sel.empty !== false;
-        if (!has && emptyAll) continue; // this filter shows all -> no restriction
+        const active = Object.keys(members).length > 0 || (sel && sel.empty === false);
+        if (!active) continue;
         restrict = true;
-        for (const k in members) show[k] = true;
+        const keep = memberJoins(members);
+        const targets = filtSelElems[selName] || [];
+        for (let t = 0; t < targets.length; t++) {
+          const k = targets[t];
+          const j = joinOf[k] != null ? joinOf[k] : k;
+          if (!keep[j]) hide[k] = true;
+        }
       }
-      applyFilter(restrict ? Object.keys(show) : null);
+      if (!restrict) {
+        applyFilter(null);
+        return;
+      }
+      // Translate the hide set into the show set applyFilter() expects (keys unique,
+      // so hiding a target-cell key never touches the source cell).
+      const show: string[] = [];
+      for (let i = 0; i < elements.length; i++) {
+        if (!hide[elements[i].key]) show.push(elements[i].key);
+      }
+      applyFilter(show);
     }
     // The single re-evaluation hook: called whenever a selection's member set can
     // change (hover move/clear, click/select/brush). Conditions + filters today;
@@ -3197,6 +3251,8 @@ HTMLWidgets.widget({
         colorbar = x.colorbar || null;
         interactions = x.interactions || null;
         condTagElems = {};
+        filtSelElems = {};
+        joinOf = {};
         lastHoverKeys = [];
         meta = {};
         groups = {};

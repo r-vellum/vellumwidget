@@ -508,6 +508,21 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     if (any(lengths(cond) > 0L)) cols$cond <- cond
   }
 
+  # Filter selection tags (a view filtered by `filter_by()`) -- ragged list-column
+  # like `cond`. The runtime hides a tagged element when its `join` is not in the
+  # filtering selection's members, scoped to this view.
+  if (any_meta) {
+    filt <- lapply(meta, function(m) {
+      v <- if (is.null(m)) NULL else m[["filt"]]
+      if (is.null(v)) character(0) else as.character(v)
+    })
+    if (any(lengths(filt) > 0L)) cols$filt <- filt
+  }
+
+  # Cross-view join id (a composition cell's original id; keys are per-cell unique)
+  # -- an atomic column like `tooltip`. Absent for a single plot.
+  cols$join <- meta_col("join")
+
   # Continuous colorbar filter value: numeric per element (or the column absent).
   # Kept numeric (unlike the character meta columns) so the runtime can range-test it.
   if (any_meta) {

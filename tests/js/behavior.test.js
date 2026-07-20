@@ -2082,7 +2082,11 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   const iF = widgetDef.factory(elF, 200, 100);
   iF.renderValue({
     svg: svgF,
-    elements: [{ key: "f1" }, { key: "f2" }, { key: "f3" }],
+    elements: [
+      { key: "f1", filt: ["pick"] },
+      { key: "f2", filt: ["pick"] },
+      { key: "f3", filt: ["pick"] }
+    ],
     interactions: {
       selections: [{ name: "pick", kind: "point", on: "click", empty: true }],
       filters: [{ selection: "pick" }]
@@ -2110,6 +2114,59 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     !f2.classList.contains("vellumwidget-filtered") && !f3.classList.contains("vellumwidget-filtered"),
     "filter_by: clearing the selection shows everything again"
   );
+}
+
+// ============ declarative interactivity: cross-view filter (Option A) ============
+// Two composition cells with per-cell-unique keys sharing a `join` id. A point
+// selection in cell A, filter_by in cell B. Clicking a point in A hides only cell
+// B's non-matching rows (matched by join) — cell A (the source) stays fully shown.
+{
+  const elX = document.createElement("div");
+  document.body.appendChild(elX);
+  const svgX =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+    '<g data-vellum-panel="panel-a">' +
+    '<path data-key="s1:1" d="M5 5h4v4h-4z"/>' +
+    '<path data-key="s1:2" d="M20 5h4v4h-4z"/>' +
+    '<path data-key="s1:3" d="M35 5h4v4h-4z"/></g>' +
+    '<g data-vellum-panel="panel-b">' +
+    '<path data-key="s2:1" d="M5 50h4v4h-4z"/>' +
+    '<path data-key="s2:2" d="M20 50h4v4h-4z"/>' +
+    '<path data-key="s2:3" d="M35 50h4v4h-4z"/></g></svg>';
+  const iX = widgetDef.factory(elX, 200, 200);
+  iX.renderValue({
+    svg: svgX,
+    elements: [
+      { key: "s1:1", join: "1" }, { key: "s1:2", join: "2" }, { key: "s1:3", join: "3" },
+      { key: "s2:1", join: "1", filt: ["br"] },
+      { key: "s2:2", join: "2", filt: ["br"] },
+      { key: "s2:3", join: "3", filt: ["br"] }
+    ],
+    interactions: {
+      selections: [{ name: "br", kind: "point", on: "click", empty: true }],
+      filters: [{ selection: "br" }]
+    },
+    options: { select: true, hover: true, selectMode: "multiple" }
+  });
+  const svgXE = elX.querySelector("svg");
+  const q = (k) => elX.querySelector('[data-key="' + k + '"]');
+  function clickX(k) {
+    const ev = new window.MouseEvent("click", { bubbles: true, clientX: 6, clientY: 6 });
+    Object.defineProperty(ev, "target", { value: q(k), enumerable: true });
+    svgXE.dispatchEvent(ev);
+  }
+  clickX("s1:2"); // select join "2" in the source cell A
+  ok(!q("s1:1").classList.contains("vellumwidget-filtered") &&
+     !q("s1:3").classList.contains("vellumwidget-filtered"),
+    "cross-view: the source cell stays fully shown");
+  ok(q("s2:1").classList.contains("vellumwidget-filtered") &&
+     q("s2:3").classList.contains("vellumwidget-filtered"),
+    "cross-view: the filtered cell hides rows whose join is not selected");
+  ok(!q("s2:2").classList.contains("vellumwidget-filtered"),
+    "cross-view: the filtered cell keeps the row matching the selection's join");
+  clickX("s1:2"); // clear
+  ok(!q("s2:1").classList.contains("vellumwidget-filtered"),
+    "cross-view: clearing the selection restores the filtered cell");
 }
 
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
