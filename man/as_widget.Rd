@@ -8,26 +8,14 @@ as_widget(
   x,
   width = NULL,
   height = NULL,
-  tooltip = TRUE,
-  hover = TRUE,
-  select = TRUE,
-  brush = TRUE,
-  lasso = TRUE,
-  zoom = TRUE,
   toolbar = TRUE,
-  nearest = TRUE,
   navigator = FALSE,
   navigator_height = NULL,
-  axis_zoom = TRUE,
-  zoom_marks = c("fixed", "scale"),
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
   legend_click = c("select", "hide", "mute"),
   a11y = TRUE,
   alt = NULL,
-  hover_color = NULL,
-  selected_color = NULL,
-  dim_opacity = NULL,
   tooltip_delay = 0,
   tooltip_follow = TRUE,
   tooltip_sticky = FALSE,
@@ -50,21 +38,12 @@ scene --- anything \code{\link[vellum:as_vellum_scene]{vellum::as_vellum_scene()
 \item{width, height}{Widget size (any valid CSS size, or \code{NULL} to size from the
 scene). Passed to \code{\link[htmlwidgets:createWidget]{htmlwidgets::createWidget()}}.}
 
-\item{tooltip, hover, select}{Toggles for the three hover/click interactions
-(all \code{TRUE}).}
-
-\item{brush, zoom, toolbar}{Toggles for rectangular brush-select, wheel/drag
-pan-zoom (via the SVG \code{viewBox}), and the on-hover toolbar (all \code{TRUE}).}
-
-\item{lasso}{Enable freehand \strong{lasso-select} (default \code{TRUE}): a third drag
-mode alongside brush and pan, cycled from the toolbar's mode button. Drag a
-loop and every mark whose centre falls inside it is selected. Like the brush,
-it reports through \verb{input$<id>_brush} (with a \code{lasso = TRUE} flag and the
-loop's bounding box). The mode button appears whenever at least two drag modes
-are enabled.}
-
-\item{nearest}{When \code{TRUE} (default), hover snaps to the nearest mark within a
-small radius when the cursor is not directly over one (helps sparse points).}
+\item{toolbar}{Show the on-hover toolbar (default \code{TRUE}). Hover tooltip,
+highlight, click-select, brush, lasso, pan/zoom, and axis-aware zoom are
+\strong{on by default} (interactive-by-default) and no longer have per-widget
+toggles; per-mark hover/select styling and selection-driven behaviour are
+declared in the plot spec instead (see \code{vellumplot::condition()} /
+\code{vellumplot::select_point()}).}
 
 \item{navigator}{Show an overview \strong{range navigator} below the plot (default
 \code{FALSE}): a full-width strip rendering the whole scene in miniature, with a
@@ -75,28 +54,6 @@ series. \code{navigator_height} sets the strip height in pixels (default \code{5
 
 \item{navigator_height}{Height of the navigator strip in pixels (default \code{56});
 ignored unless \code{navigator = TRUE}.}
-
-\item{axis_zoom}{\strong{Axis-aware zoom} (default \code{TRUE}). Wheel/drag zoom scales
-only the plot's data region and re-ticks the axes for the visible range,
-holding the frame — axes, titles and legend — in place, the way a chart library
-zooms (rather than scaling the whole scene like an image). Applies to a single
-\strong{linear} cartesian panel (continuous \code{identity}/\code{reverse} axes) rendered as
-SVG; plots with log/date/discrete axes, several panels, or in raster mode
-silently fall back to the ordinary whole-scene zoom, so leaving it on is always
-safe. Set \code{FALSE} to force the plain whole-scene viewBox zoom. Builds on
-vellum's pannable-panel contract (\code{vl_viewport(pannable=)}) and the panel scale
-metadata vellumplot emits (needs the current \code{vellum}/\code{vellumplot}). When
-combined with \code{navigator = TRUE}, the navigator's x-only zoom is rendered
-through it, so the x-axis re-ticks crisply instead of stretching.}
-
-\item{zoom_marks}{Under axis-aware zoom, whether \strong{glyph} marks (points,
-circles, hexagons, sector wedges) keep a constant pixel size. \code{"fixed"}
-(default): glyphs stay their original size and only their positions re-map, the
-way a charting library zooms — so points stay round (and don't stretch into
-ellipses under the navigator's x-only zoom). \code{"scale"}: glyphs scale with the
-zoom (the older behaviour; useful to read density). Positional marks (bars,
-error bars, lines, areas) always scale with the data either way; only their
-stroke width is held constant. No effect unless \code{axis_zoom} is active.}
 
 \item{hover_mode}{How hover gathers marks into the tooltip. \code{"closest"}
 (default) shows the single nearest mark. \code{"x"} (or \code{"y"}) gives a \emph{unified}
@@ -134,15 +91,6 @@ restores the previous behaviour (no chart semantics, marks not focusable).}
 the scene's own title/description — which \code{vellumplot} sets automatically from the
 plot title and \code{\link[vellumplot:plot_alt]{vellumplot::plot_alt()}} — so an explicit value is only needed for
 a raw \code{vellum} scene or to override.}
-
-\item{hover_color, selected_color}{Outline colours for hovered / selected
-elements (any R or CSS colour), applied widget-wide. \code{hover_color = NULL}
-(default) keeps the plain dim-others hover; \code{selected_color = NULL} uses the
-built-in default. A per-mark \code{hover_color}/\code{selected_color} declared in
-\code{vellumplot} overrides these for that mark.}
-
-\item{dim_opacity}{Opacity (0–1) of the non-hovered elements while hovering
-(default \code{0.28}); \code{NULL} keeps the default.}
 
 \item{tooltip_delay}{Milliseconds to wait before the tooltip appears on hover
 (default \code{0}, i.e. immediate). The highlight is unaffected — only the tooltip

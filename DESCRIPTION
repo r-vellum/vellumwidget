@@ -26,7 +26,7 @@ Suggests:
     crosstalk,
     scales,
     shiny,
-    vellumplot,
+    vellumplot (>= 0.6.0.9000),
     testthat (>= 3.0.0)
 Remotes:
     r-vellum/vellum,

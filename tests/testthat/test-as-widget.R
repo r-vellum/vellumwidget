@@ -19,16 +19,17 @@ test_that("as_widget() on a vellumplot plot builds a vellumwidget htmlwidget wit
   # tooltip carried per element
   i <- which(keys == "Mazda RX4")
   expect_equal(w$x$elements$tooltip[i], "Mazda RX4")
-  # options round-trip
-  expect_true(w$x$options$tooltip)
+  # options round-trip (hover tooltip is interactive-by-default, not a flag)
   expect_equal(w$x$options$selectMode, "multiple")
 })
 
 test_that("as_widget() works on a raw vellum scene (no vellumplot)", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(
-      c(0.3, 0.7), 0.5,
-      gp = vellum::vl_gpar(fill = "red"), key = c("x", "y")
+      c(0.3, 0.7),
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = c("x", "y")
     ))
   w <- as_widget(scene)
   expect_s3_class(w, "vellumwidget")
@@ -48,16 +49,27 @@ test_that("a plot with no interactivity yields a static widget (no keyed element
 
 test_that("select_mode is validated and passed through", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
-  expect_equal(as_widget(scene, select_mode = "single")$x$options$selectMode, "single")
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
+  expect_equal(
+    as_widget(scene, select_mode = "single")$x$options$selectMode,
+    "single"
+  )
   expect_error(as_widget(scene, select_mode = "nope"))
 })
 
 test_that("elements carry a device-px bbox for brush/nearest hit-testing", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(
-      c(0.25, 0.75), 0.5, size = vellum::vl_unit(4, "mm"),
-      gp = vellum::vl_gpar(fill = "red"), key = c("a", "b")
+      c(0.25, 0.75),
+      0.5,
+      size = vellum::vl_unit(4, "mm"),
+      gp = vellum::vl_gpar(fill = "red"),
+      key = c("a", "b")
     ))
   w <- as_widget(scene)
   el <- w$x$elements
@@ -68,30 +80,32 @@ test_that("elements carry a device-px bbox for brush/nearest hit-testing", {
   expect_true(abs(cx - 50) < 5)
 })
 
-test_that("Phase 4 option toggles round-trip into the payload", {
+test_that("the toolbar toggle round-trips; interaction is on by default (no flags)", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
   o <- as_widget(scene)$x$options
-  expect_true(o$brush && o$zoom && o$toolbar && o$nearest)
-  o2 <- as_widget(scene, brush = FALSE, zoom = FALSE, toolbar = FALSE, nearest = FALSE)$x$options
-  expect_false(o2$brush || o2$zoom || o2$toolbar || o2$nearest)
+  expect_true(o$toolbar)
+  expect_false(as_widget(scene, toolbar = FALSE)$x$options$toolbar)
+  # hover/select/brush/lasso/zoom/axis-zoom are interactive-by-default: the runtime
+  # supplies them, so they are no longer per-widget flags in the payload options.
+  expect_null(o$brush)
+  expect_null(o$axisZoom)
 })
 
-test_that("axis_zoom defaults on and round-trips into the payload options", {
-  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
-  expect_true(as_widget(scene)$x$options$axisZoom)
-  expect_false(as_widget(scene, axis_zoom = FALSE)$x$options$axisZoom)
-})
-
-test_that("zoom_marks defaults to 'fixed', is validated, and elements carry the mark kind", {
+test_that("elements carry the mark kind (for constant-size glyphs under zoom)", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
-    vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, gp = vellum::vl_gpar(fill = "red"),
-                                     key = c("a", "b")))
+    vellum::draw(vellum::points_grob(
+      c(0.25, 0.75),
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = c("a", "b")
+    ))
   w <- as_widget(scene)
-  expect_equal(w$x$options$zoomMarks, "fixed")
-  expect_equal(as_widget(scene, zoom_marks = "scale")$x$options$zoomMarks, "scale")
-  expect_error(as_widget(scene, zoom_marks = "nope"))
   # the mark kind rides along per element so the runtime can classify glyphs
   expect_true("mark" %in% names(w$x$elements))
   expect_true(all(w$x$elements$mark == "point"))
@@ -126,42 +140,71 @@ test_that("data-space inversion round-trips a mark's pixel position back to its 
   # end-to-end guard the identity-only JS unit tests can't provide.
   invertible <- c("identity", "log10", "sqrt", "reverse")
   ntd <- function(tr, nv) switch(tr, log10 = 10^nv, sqrt = nv^2, nv)
-  px_x <- function(p, px) if (!p$x$transform %in% invertible) NA else
-    ntd(p$x$transform, p$x$native_lo + (px - p$px0) / (p$px1 - p$px0) * (p$x$native_hi - p$x$native_lo))
-  px_y <- function(p, py) if (!p$y$transform %in% invertible) NA else {
-    frac <- (py - p$py0) / (p$py1 - p$py0)
-    ntd(p$y$transform, p$y$native_hi + frac * (p$y$native_lo - p$y$native_hi))
+  px_x <- function(p, px) {
+    if (!p$x$transform %in% invertible) {
+      NA
+    } else {
+      ntd(
+        p$x$transform,
+        p$x$native_lo +
+          (px - p$px0) / (p$px1 - p$px0) * (p$x$native_hi - p$x$native_lo)
+      )
+    }
+  }
+  px_y <- function(p, py) {
+    if (!p$y$transform %in% invertible) {
+      NA
+    } else {
+      frac <- (py - p$py0) / (p$py1 - p$py0)
+      ntd(p$y$transform, p$y$native_hi + frac * (p$y$native_lo - p$y$native_hi))
+    }
   }
   panel_of <- function(w, nm) Filter(function(p) p$name == nm, w$x$panels)[[1]]
   ctr <- function(w, key) {
-    e <- w$x$elements; i <- which(e$key == key)
+    e <- w$x$elements
+    i <- which(e$key == key)
     c(x = (e$x0[i] + e$x1[i]) / 2, y = (e$y0[i] + e$y1[i]) / 2)
   }
   roundtrips <- function(w, key, ex, ey, nm = "panel-1-1") {
-    p <- panel_of(w, nm); c0 <- ctr(w, key)
+    p <- panel_of(w, nm)
+    c0 <- ctr(w, key)
     isTRUE(all.equal(unname(px_x(p, c0[["x"]])), ex, tolerance = 1e-2)) &&
       isTRUE(all.equal(unname(px_y(p, c0[["y"]])), ey, tolerance = 1e-2))
   }
   d <- data.frame(a = c(1, 10, 100, 1000), b = c(2, 4, 6, 8), id = letters[1:4])
 
   # continuous
-  wc <- vellumplot::vplot(d) |> vellumplot::mark_point(x = a, y = b, data_id = id) |> as_widget()
+  wc <- vellumplot::vplot(d) |>
+    vellumplot::mark_point(x = a, y = b, data_id = id) |>
+    as_widget()
   expect_true(roundtrips(wc, "c", 100, 6))
   # log10 x
-  wl <- vellumplot::vplot(d) |> vellumplot::mark_point(x = a, y = b, data_id = id) |>
-    vellumplot::scale_x_continuous(trans = "log10") |> as_widget()
+  wl <- vellumplot::vplot(d) |>
+    vellumplot::mark_point(x = a, y = b, data_id = id) |>
+    vellumplot::scale_x_continuous(trans = "log10") |>
+    as_widget()
   expect_true(roundtrips(wl, "c", 100, 6))
   # reverse x
-  wr <- vellumplot::vplot(d) |> vellumplot::mark_point(x = a, y = b, data_id = id) |>
-    vellumplot::scale_x_continuous(trans = "reverse") |> as_widget()
+  wr <- vellumplot::vplot(d) |>
+    vellumplot::mark_point(x = a, y = b, data_id = id) |>
+    vellumplot::scale_x_continuous(trans = "reverse") |>
+    as_widget()
   expect_true(roundtrips(wr, "c", 100, 6))
   # date x (epoch days)
-  dd <- data.frame(t = as.Date("2020-01-01") + c(0, 100, 200, 300), y = c(5, 6, 7, 8), id = letters[1:4])
-  wd <- vellumplot::vplot(dd) |> vellumplot::mark_point(x = t, y = y, data_id = id) |> as_widget()
+  dd <- data.frame(
+    t = as.Date("2020-01-01") + c(0, 100, 200, 300),
+    y = c(5, 6, 7, 8),
+    id = letters[1:4]
+  )
+  wd <- vellumplot::vplot(dd) |>
+    vellumplot::mark_point(x = t, y = y, data_id = id) |>
+    as_widget()
   expect_true(roundtrips(wd, "c", as.numeric(as.Date("2020-01-01") + 200), 7))
   # coord_flip: axes are the *visual* ones, so x recovers the (flipped) y aesthetic
-  wf <- vellumplot::vplot(d) |> vellumplot::mark_point(x = a, y = b, data_id = id) |>
-    vellumplot::coord_flip() |> as_widget()
+  wf <- vellumplot::vplot(d) |>
+    vellumplot::mark_point(x = a, y = b, data_id = id) |>
+    vellumplot::coord_flip() |>
+    as_widget()
   expect_true(roundtrips(wf, "c", 6, 100)) # horizontal shows b, vertical shows a
 })
 
@@ -169,8 +212,10 @@ test_that("a custom (non-invertible) transform axis omits its data descriptor pa
   skip_if_not_installed("vellumplot")
   skip_if_not_installed("scales")
   d <- data.frame(a = c(1, 2, 4, 8), b = 1:4, id = letters[1:4])
-  w <- vellumplot::vplot(d) |> vellumplot::mark_point(x = a, y = b, data_id = id) |>
-    vellumplot::scale_x_continuous(trans = scales::transform_log(2)) |> as_widget()
+  w <- vellumplot::vplot(d) |>
+    vellumplot::mark_point(x = a, y = b, data_id = id) |>
+    vellumplot::scale_x_continuous(trans = scales::transform_log(2)) |>
+    as_widget()
   # the panel is still emitted (finite rect), the x descriptor reports a name the
   # runtime declines ("log-2"); the widget guards this client-side (see JS tests).
   p <- w$x$panels[[1]]
@@ -179,7 +224,12 @@ test_that("a custom (non-invertible) transform axis omits its data descriptor pa
 
 test_that("a continuous colour plot emits a colorbar descriptor + per-mark filter_value", {
   skip_if_not_installed("vellumplot")
-  df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, hp = mtcars$hp, m = rownames(mtcars))
+  df <- data.frame(
+    wt = mtcars$wt,
+    mpg = mtcars$mpg,
+    hp = mtcars$hp,
+    m = rownames(mtcars)
+  )
   w <- vellumplot::vplot(df) |>
     vellumplot::mark_point(x = wt, y = mpg, color = hp, data_id = m) |>
     as_widget()
@@ -206,25 +256,34 @@ test_that("a plot with no continuous colour scale emits no colorbar", {
 
 test_that("a raw vellum scene (no scales meta) yields no panels payload", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
   expect_null(as_widget(scene)$x$panels)
 })
 
-test_that("lasso toggle round-trips into the payload (default on)", {
-  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
-  expect_true(as_widget(scene)$x$options$lasso) # default TRUE
-  expect_false(as_widget(scene, lasso = FALSE)$x$options$lasso)
-})
 
 test_that("tooltip behavior options round-trip", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
   o <- as_widget(scene)$x$options
   expect_equal(o$tooltipDelay, 0) # defaults
   expect_true(o$tooltipFollow)
   expect_false(o$tooltipSticky)
-  o2 <- as_widget(scene, tooltip_delay = 250, tooltip_follow = FALSE, tooltip_sticky = TRUE)$x$options
+  o2 <- as_widget(
+    scene,
+    tooltip_delay = 250,
+    tooltip_follow = FALSE,
+    tooltip_sticky = TRUE
+  )$x$options
   expect_equal(o2$tooltipDelay, 250)
   expect_false(o2$tooltipFollow)
   expect_true(o2$tooltipSticky)
@@ -232,7 +291,12 @@ test_that("tooltip behavior options round-trip", {
 
 test_that("navigator options round-trip (default off)", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
   expect_false(as_widget(scene)$x$options$navigator) # default FALSE
   o <- as_widget(scene, navigator = TRUE, navigator_height = 80)$x$options
   expect_true(o$navigator)
@@ -241,7 +305,12 @@ test_that("navigator options round-trip (default off)", {
 
 test_that("hover_mode and crosshair are validated and round-trip into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
   o <- as_widget(scene)$x$options
   expect_equal(o$hoverMode, "closest") # default
   expect_false(o$crosshair)
@@ -254,16 +323,32 @@ test_that("hover_mode and crosshair are validated and round-trip into the payloa
 
 test_that("legend_click is validated and round-trips into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
   expect_equal(as_widget(scene)$x$options$legendClick, "select") # default
-  expect_equal(as_widget(scene, legend_click = "hide")$x$options$legendClick, "hide")
-  expect_equal(as_widget(scene, legend_click = "mute")$x$options$legendClick, "mute")
+  expect_equal(
+    as_widget(scene, legend_click = "hide")$x$options$legendClick,
+    "hide"
+  )
+  expect_equal(
+    as_widget(scene, legend_click = "mute")$x$options$legendClick,
+    "mute"
+  )
   expect_error(as_widget(scene, legend_click = "vanish"))
 })
 
 test_that("a11y is on by default and round-trips (with alt) into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
   o <- as_widget(scene)$x$options
   expect_true(o$a11y)
   expect_null(o$alt) # defaults to the scene's own title/desc
@@ -275,7 +360,8 @@ test_that("a11y is on by default and round-trips (with alt) into the payload", {
 test_that("hover_group is carried into the element table", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(
-      c(0.3, 0.7), 0.5,
+      c(0.3, 0.7),
+      0.5,
       gp = vellum::vl_gpar(fill = "red"),
       key = c("a", "b"),
       meta = list(list(hover_group = "g"), list(hover_group = "g"))
@@ -284,27 +370,23 @@ test_that("hover_group is carried into the element table", {
   expect_equal(w$x$elements$hover_group, c("g", "g"))
 })
 
-test_that("widget theme args normalise to CSS colours in the payload (Option 1)", {
-  scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
-  s <- as_widget(scene, hover_color = "steelblue", selected_color = "orange",
-                 dim_opacity = 0.1)$x$options$style
-  expect_equal(s$hoverColor, "#4682b4") # R colour name -> hex
-  expect_equal(s$selectedColor, "#ffa500")
-  expect_equal(s$dimOpacity, 0.1)
-  # defaults: NULL (fall back to the built-in CSS)
-  s0 <- as_widget(scene)$x$options$style
-  expect_null(s0$hoverColor)
-  expect_null(s0$selectedColor)
-  expect_null(s0$dimOpacity)
-})
-
 test_that("tooltip_style normalises into the payload tip* CSS vars", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
-  s <- as_widget(scene, tooltip_style = list(
-    background = "steelblue", color = "white", fontsize = "14px", max_width = "260px"
-  ))$x$options$style
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
+  s <- as_widget(
+    scene,
+    tooltip_style = list(
+      background = "steelblue",
+      color = "white",
+      fontsize = "14px",
+      max_width = "260px"
+    )
+  )$x$options$style
   expect_equal(s$tipBg, "#4682b4") # colour name -> hex
   expect_equal(s$tipFg, "#ffffff")
   expect_equal(s$tipFontSize, "14px")
@@ -317,8 +399,17 @@ test_that("tooltip_style normalises into the payload tip* CSS vars", {
 
 test_that("export_filename / export_scale round-trip into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
-  ex <- as_widget(scene, export_filename = "myplot", export_scale = 2)$x$options$export
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
+  ex <- as_widget(
+    scene,
+    export_filename = "myplot",
+    export_scale = 2
+  )$x$options$export
   expect_equal(ex$filename, "myplot")
   expect_equal(ex$scale, 2)
   # unset -> empty (JS falls back to "plot" @ 1x)
@@ -331,8 +422,13 @@ test_that("per-element grammar colours flow into the payload, normalised (Option
   skip_if_not_installed("vellumplot")
   df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg)
   w <- vellumplot::vplot(df) |>
-    vellumplot::mark_point(x = wt, y = mpg, data_id = seq_len(nrow(df)),
-                      hover_color = "red", selected_color = "grey20") |>
+    vellumplot::mark_point(
+      x = wt,
+      y = mpg,
+      data_id = seq_len(nrow(df)),
+      hover_color = "red",
+      selected_color = "grey20"
+    ) |>
     as_widget()
   el <- w$x$elements
   expect_equal(el$hover_color[1], "#ff0000")
@@ -341,7 +437,12 @@ test_that("per-element grammar colours flow into the payload, normalised (Option
 
 test_that("group option round-trips for own-bus linking (Phase 5)", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
   w <- as_widget(scene, group = "mylink")
   expect_equal(w$x$options$group, "mylink")
   expect_null(w$x$options$crosstalk)
@@ -359,12 +460,21 @@ test_that("crosstalk = SharedData wires the group + loads crosstalk deps (Phase 
   # the crosstalk client library is attached as a dependency
   deps <- w$dependencies
   expect_true(length(deps) > 0)
-  expect_true(any(vapply(deps, function(d) grepl("crosstalk", d$name %||% ""), logical(1))))
+  expect_true(any(vapply(
+    deps,
+    function(d) grepl("crosstalk", d$name %||% ""),
+    logical(1)
+  )))
 })
 
 test_that("crosstalk accepts a bare group name; absent by default", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
-    vellum::draw(vellum::points_grob(0.5, 0.5, gp = vellum::vl_gpar(fill = "red"), key = "a"))
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
   expect_equal(as_widget(scene, crosstalk = "g")$x$options$crosstalk, "g")
   w0 <- as_widget(scene)
   expect_null(w0$x$options$crosstalk)
@@ -375,8 +485,10 @@ test_that("crosstalk accepts a bare group name; absent by default", {
 test_that("discrete legend swatches + series membership flow into the payload (Phase 5)", {
   skip_if_not_installed("vellumplot")
   df <- data.frame(
-    wt = mtcars$wt, mpg = mtcars$mpg,
-    model = rownames(mtcars), cyl = factor(mtcars$cyl)
+    wt = mtcars$wt,
+    mpg = mtcars$mpg,
+    model = rownames(mtcars),
+    cyl = factor(mtcars$cyl)
   )
   w <- vellumplot::vplot(df) |>
     vellumplot::mark_point(x = wt, y = mpg, color = cyl, data_id = model) |>
@@ -395,8 +507,11 @@ test_that("discrete legend swatches + series membership flow into the payload (P
 test_that("mode = 'raster' ships a base image with the element index (no per-element SVG)", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(
-      c(0.25, 0.75), 0.5, size = vellum::vl_unit(4, "mm"),
-      gp = vellum::vl_gpar(fill = "red"), key = c("a", "b"),
+      c(0.25, 0.75),
+      0.5,
+      size = vellum::vl_unit(4, "mm"),
+      gp = vellum::vl_gpar(fill = "red"),
+      key = c("a", "b"),
       meta = list(list(tooltip = "Alpha"), list(tooltip = "Beta"))
     ))
   w <- as_widget(scene, mode = "raster")
@@ -421,11 +536,19 @@ test_that("mode = 'auto' switches to raster above raster_threshold, stays SVG be
   # a low threshold flips auto to raster
   expect_true(as_widget(scene, raster_threshold = 1)$x$options$raster)
   # mode = 'svg' overrides the threshold
-  expect_false(as_widget(scene, mode = "svg", raster_threshold = 1)$x$options$raster)
+  expect_false(
+    as_widget(scene, mode = "svg", raster_threshold = 1)$x$options$raster
+  )
 })
 
 test_that("raster shell carries the scene title/description for accessibility", {
-  scene <- vellum::vl_scene(2, 2, dpi = 100, title = "My cloud", desc = "A big scatter.") |>
+  scene <- vellum::vl_scene(
+    2,
+    2,
+    dpi = 100,
+    title = "My cloud",
+    desc = "A big scatter."
+  ) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
   svg <- as_widget(scene, mode = "raster")$x$svg
   expect_match(svg, "<title id=\"vw-t\">My cloud</title>", fixed = TRUE)
@@ -436,7 +559,9 @@ test_that("raster shell carries the scene title/description for accessibility", 
 test_that("text = 'native' (default) emits selectable <text>; 'outline' emits glyph paths", {
   scene <- vellum::vl_scene(3, 2, dpi = 96, bg = "white") |>
     vellum::draw(vellum::text_grob(
-      "Hello widget", x = 0.5, y = 0.5,
+      "Hello widget",
+      x = 0.5,
+      y = 0.5,
       gp = vellum::vl_gpar(fontsize = 20, col = "black")
     ))
   # default is native: selectable text, no glyph outlines
@@ -466,7 +591,9 @@ test_that("text is ignored (with a warning) in raster mode", {
 # unit. Gated on the installed vellumplot actually keying error bars, so this
 # passes regardless of which vellumplot dev version is present.
 .errorbar_keyed <- function() {
-  if (!requireNamespace("vellumplot", quietly = TRUE)) return(FALSE)
+  if (!requireNamespace("vellumplot", quietly = TRUE)) {
+    return(FALSE)
+  }
   df <- data.frame(g = c("a", "b"), lo = c(1, 2), hi = c(3, 4))
   w <- tryCatch(
     vellumplot::vplot(df) |>
@@ -479,10 +606,19 @@ test_that("text is ignored (with a warning) in raster mode", {
 
 test_that("as_widget() keys an error bar's segments to one addressable unit", {
   skip_if_not_installed("vellumplot")
-  skip_if_not(.errorbar_keyed(), "installed vellumplot does not key error bars yet")
+  skip_if_not(
+    .errorbar_keyed(),
+    "installed vellumplot does not key error bars yet"
+  )
   df <- data.frame(g = c("a", "b", "c"), lo = c(1, 2, 3), hi = c(3, 4, 5))
   w <- vellumplot::vplot(df) |>
-    vellumplot::mark_errorbar(x = g, ymin = lo, ymax = hi, data_id = g, tooltip = g) |>
+    vellumplot::mark_errorbar(
+      x = g,
+      ymin = lo,
+      ymax = hi,
+      data_id = g,
+      tooltip = g
+    ) |>
     as_widget()
   keys <- w$x$elements$key
   # each bar contributes several keyed segment rows sharing its datum key
@@ -493,7 +629,10 @@ test_that("as_widget() keys an error bar's segments to one addressable unit", {
 
 test_that("as_widget() keys each boxplot box by its category", {
   skip_if_not_installed("vellumplot")
-  skip_if_not(.errorbar_keyed(), "installed vellumplot does not key stat marks yet")
+  skip_if_not(
+    .errorbar_keyed(),
+    "installed vellumplot does not key stat marks yet"
+  )
   w <- vellumplot::vplot(mtcars) |>
     vellumplot::mark_boxplot(x = factor(cyl), y = mpg, data_id = cyl) |>
     as_widget()
@@ -509,5 +648,7 @@ test_that("as_widget() argument count is a tripwire (prefer the spec; see CLAUDE
   # ("Interactivity: prefer the spec over new as_widget() flags") and the Phase 6
   # direction in the vellumplot Tier-2 plan. If it is genuinely a widget-local
   # affordance, bump the baseline below by one (and note it in the commit).
-  expect_lte(length(formals(as_widget)), 36L)
+  # Interaction-intent flags were removed in favour of declarative interactivity
+  # in the plot spec (select_point/condition/filter_by); the baseline is now 24.
+  expect_lte(length(formals(as_widget)), 24L)
 })
