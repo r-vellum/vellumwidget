@@ -22,26 +22,14 @@ as_widget(
   x,
   width = NULL,
   height = NULL,
-  tooltip = TRUE,
-  hover = TRUE,
-  select = TRUE,
-  brush = TRUE,
-  lasso = TRUE,
-  zoom = TRUE,
   toolbar = TRUE,
-  nearest = TRUE,
   navigator = FALSE,
   navigator_height = NULL,
-  axis_zoom = TRUE,
-  zoom_marks = c("fixed", "scale"),
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
   legend_click = c("select", "hide", "mute"),
   a11y = TRUE,
   alt = NULL,
-  hover_color = NULL,
-  selected_color = NULL,
-  dim_opacity = NULL,
   tooltip_delay = 0,
   tooltip_follow = TRUE,
   tooltip_sticky = FALSE,
@@ -73,28 +61,16 @@ as_widget(
   Passed to
   [`htmlwidgets::createWidget()`](https://rdrr.io/pkg/htmlwidgets/man/createWidget.html).
 
-- tooltip, hover, select:
+- toolbar:
 
-  Toggles for the three hover/click interactions (all `TRUE`).
-
-- brush, zoom, toolbar:
-
-  Toggles for rectangular brush-select, wheel/drag pan-zoom (via the SVG
-  `viewBox`), and the on-hover toolbar (all `TRUE`).
-
-- lasso:
-
-  Enable freehand **lasso-select** (default `TRUE`): a third drag mode
-  alongside brush and pan, cycled from the toolbar's mode button. Drag a
-  loop and every mark whose centre falls inside it is selected. Like the
-  brush, it reports through `input$<id>_brush` (with a `lasso = TRUE`
-  flag and the loop's bounding box). The mode button appears whenever at
-  least two drag modes are enabled.
-
-- nearest:
-
-  When `TRUE` (default), hover snaps to the nearest mark within a small
-  radius when the cursor is not directly over one (helps sparse points).
+  Show the on-hover toolbar (default `TRUE`). Hover tooltip, highlight,
+  click-select, brush, lasso, pan/zoom, and axis-aware zoom are **on by
+  default** (interactive-by-default) and no longer have per-widget
+  toggles; per-mark hover/select styling and selection-driven behaviour
+  are declared in the plot spec instead (see
+  [`vellumplot::condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+  /
+  [`vellumplot::select_point()`](https://r-vellum.github.io/vellumplot/reference/select_point.html)).
 
 - navigator:
 
@@ -110,35 +86,6 @@ as_widget(
 
   Height of the navigator strip in pixels (default `56`); ignored unless
   `navigator = TRUE`.
-
-- axis_zoom:
-
-  **Axis-aware zoom** (default `TRUE`). Wheel/drag zoom scales only the
-  plot's data region and re-ticks the axes for the visible range,
-  holding the frame — axes, titles and legend — in place, the way a
-  chart library zooms (rather than scaling the whole scene like an
-  image). Applies to a single **linear** cartesian panel (continuous
-  `identity`/`reverse` axes) rendered as SVG; plots with
-  log/date/discrete axes, several panels, or in raster mode silently
-  fall back to the ordinary whole-scene zoom, so leaving it on is always
-  safe. Set `FALSE` to force the plain whole-scene viewBox zoom. Builds
-  on vellum's pannable-panel contract (`vl_viewport(pannable=)`) and the
-  panel scale metadata vellumplot emits (needs the current
-  `vellum`/`vellumplot`). When combined with `navigator = TRUE`, the
-  navigator's x-only zoom is rendered through it, so the x-axis re-ticks
-  crisply instead of stretching.
-
-- zoom_marks:
-
-  Under axis-aware zoom, whether **glyph** marks (points, circles,
-  hexagons, sector wedges) keep a constant pixel size. `"fixed"`
-  (default): glyphs stay their original size and only their positions
-  re-map, the way a charting library zooms — so points stay round (and
-  don't stretch into ellipses under the navigator's x-only zoom).
-  `"scale"`: glyphs scale with the zoom (the older behaviour; useful to
-  read density). Positional marks (bars, error bars, lines, areas)
-  always scale with the data either way; only their stroke width is held
-  constant. No effect unless `axis_zoom` is active.
 
 - hover_mode:
 
@@ -192,19 +139,6 @@ as_widget(
   [`vellumplot::plot_alt()`](https://r-vellum.github.io/vellumplot/reference/plot_alt.html)
   — so an explicit value is only needed for a raw `vellum` scene or to
   override.
-
-- hover_color, selected_color:
-
-  Outline colours for hovered / selected elements (any R or CSS colour),
-  applied widget-wide. `hover_color = NULL` (default) keeps the plain
-  dim-others hover; `selected_color = NULL` uses the built-in default. A
-  per-mark `hover_color`/`selected_color` declared in `vellumplot`
-  overrides these for that mark.
-
-- dim_opacity:
-
-  Opacity (0–1) of the non-hovered elements while hovering (default
-  `0.28`); `NULL` keeps the default.
 
 - tooltip_delay:
 

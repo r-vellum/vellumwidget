@@ -2,6 +2,21 @@
 
 ## vellumwidget (development version)
 
+- **Breaking: interaction is now declared in the plot, not on
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md).**
+  The interaction-intent arguments have been removed — `hover_color`,
+  `selected_color`, `dim_opacity` (now
+  [`vellumplot::condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)),
+  and the
+  `hover`/`select`/`brush`/`lasso`/`tooltip`/`nearest`/`zoom`/`axis_zoom`/
+  `zoom_marks` toggles (now **on by default** — interactive-by-default).
+  The signature drops from ~36 to 24 arguments. Per-plot interaction
+  (highlight, filter, cross-filter) travels with the spec via
+  [`vellumplot::select_point()`](https://r-vellum.github.io/vellumplot/reference/select_point.html)/[`select_interval()`](https://r-vellum.github.io/vellumplot/reference/select_point.html)/[`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)/[`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html).
+  Requires `vellumplot (>= 0.6.0.9000)`. (`hover_mode`, `crosshair`,
+  `legend_click`, `select_mode`, and the tooltip-appearance args remain
+  until their spec equivalents land.)
+
 - **Declarative interactivity: cross-view filtering.** A selection
   defined on one cell of a composition and referenced by
   [`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)

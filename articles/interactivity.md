@@ -99,10 +99,10 @@ single nearest mark.
 Click a mark to select it (every mark sharing its `data_id` toggles
 together); drag a rectangle to brush-select. `select_mode = "single"`
 makes a click replace the selection instead of toggling. There is also a
-freehand **lasso** (on by default) — switch to it with the toolbar’s
-mode button (which cycles brush → lasso → pan) and drag a loop; every
-mark whose centre falls inside is selected. Turn it off with
-`lasso = FALSE`.
+freehand **lasso** — switch to it with the toolbar’s mode button (which
+cycles brush → lasso → pan) and drag a loop; every mark whose centre
+falls inside is selected. Hover, click-select, brush, and lasso are all
+on by default.
 
 ``` r
 
@@ -195,17 +195,15 @@ vplot(df) |>
 ```
 
 It applies to a single **linear** cartesian panel (continuous
-`identity`/`reverse` axes) in SVG mode. Plots with log/date/discrete
-axes, several panels, or in raster mode silently fall back to the
-whole-scene zoom, so it is always safe to leave on; pass
-`axis_zoom = FALSE` to force the plain whole-scene zoom.
+`identity`/`reverse` axes) in SVG mode, and is on by default. Plots with
+log/date/discrete axes, several panels, or in raster mode silently fall
+back to the whole-scene zoom, so it is always safe.
 
 Glyph marks (points, circles, hexagons) keep a **constant pixel size**
 as you zoom — only their positions re-map, so points stay round and
 never stretch into ellipses. Bars, error bars, and lines still scale
 with the data (their extent *is* data); only their stroke width is held
-constant. Pass `zoom_marks = "scale"` to let points grow with the zoom
-instead (useful to read density in dense scatters).
+constant.
 
 ### Overview navigator
 
@@ -284,19 +282,64 @@ controls, pass a
 (or a group name) to `crosstalk =` instead — see [Linking views with
 crosstalk](https://r-vellum.github.io/vellumwidget/articles/crosstalk.md).
 
-## Styling
+## Declarative interactivity (in the plot spec)
 
-`hover_color`, `selected_color`, and `dim_opacity` set the widget-wide
-theme; per-mark `hover_color` / `selected_color` declared in
-`vellumplot` override them for that mark. `tooltip_style` themes the
-tooltip box (above).
+The interactions above are the widget’s built-in defaults. For
+interaction that is *part of the plot* — travelling with the spec,
+portable, and composable across views — declare it in `vellumplot`
+itself. A **selection** is a named set of elements defined by a gesture;
+refer to it from
+[`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+(style by membership),
+[`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)
+(show only members), or across views for cross-filtering. No
+[`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+flags are involved.
+
+**Highlight on hover** — colour by group, but dim everything except the
+hovered point’s group:
 
 ``` r
 
+library(vellumplot)
 vplot(df) |>
-  mark_point(x = wt, y = mpg, data_id = model) |>
-  as_widget(hover_color = "seagreen", selected_color = "firebrick", dim_opacity = 0.15)
+  mark_point(x = wt, y = mpg, color = condition("hi", cyl, "grey85")) |>
+  select_point("hi", on = "hover") |>
+  as_widget()
 ```
+
+**Cross-filter** — brush one view, a linked view narrows to those rows
+while the source stays full:
+
+``` r
+
+sel <- select_interval("brush", on = "xy")
+hconcat(
+  vplot(df) |> mark_point(x = wt, y = mpg) |> add_selection(sel),
+  vplot(df) |> mark_point(x = mpg, y = wt) |> filter_by(sel)
+) |>
+  as_widget()
+```
+
+This is the intended long-term home for interaction: it is declared
+once, in the plot, and any capable host enacts it. See the `vellumplot`
+reference for
+[`select_point()`](https://r-vellum.github.io/vellumplot/reference/select_point.html)
+/
+[`select_interval()`](https://r-vellum.github.io/vellumplot/reference/select_point.html)
+/
+[`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+/
+[`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html).
+
+## Styling
+
+`tooltip_style` themes the tooltip box (above). Per-mark hover/selected
+outlines are declared in `vellumplot`
+(`mark_*(hover_color =, selected_color =)`); richer per-element styling
+by selection membership uses
+[`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+(above).
 
 ## Shiny
 

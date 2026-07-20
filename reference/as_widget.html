@@ -86,26 +86,14 @@ focused — see the <code>a11y</code> argument.</p>
 <span>  <span class="va">x</span>,</span>
 <span>  width <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  height <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  tooltip <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  hover <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  select <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  brush <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  lasso <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  zoom <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  toolbar <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  nearest <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  navigator <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  navigator_height <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  axis_zoom <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  zoom_marks <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"fixed"</span>, <span class="st">"scale"</span><span class="op">)</span>,</span>
 <span>  hover_mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"closest"</span>, <span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>,</span>
 <span>  crosshair <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  legend_click <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"select"</span>, <span class="st">"hide"</span>, <span class="st">"mute"</span><span class="op">)</span>,</span>
 <span>  a11y <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  alt <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  hover_color <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  selected_color <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  dim_opacity <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  tooltip_delay <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  tooltip_follow <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  tooltip_sticky <span class="op">=</span> <span class="cn">FALSE</span>,</span>
@@ -136,28 +124,13 @@ scene — anything <code><a href="https://r-vellum.github.io/vellum/reference/as
 scene). Passed to <code><a href="https://rdrr.io/pkg/htmlwidgets/man/createWidget.html" class="external-link">htmlwidgets::createWidget()</a></code>.</p></dd>
 
 
-<dt id="arg-tooltip-hover-select">tooltip, hover, select<a class="anchor" aria-label="anchor" href="#arg-tooltip-hover-select"></a></dt>
-<dd><p>Toggles for the three hover/click interactions
-(all <code>TRUE</code>).</p></dd>
-
-
-<dt id="arg-brush-zoom-toolbar">brush, zoom, toolbar<a class="anchor" aria-label="anchor" href="#arg-brush-zoom-toolbar"></a></dt>
-<dd><p>Toggles for rectangular brush-select, wheel/drag
-pan-zoom (via the SVG <code>viewBox</code>), and the on-hover toolbar (all <code>TRUE</code>).</p></dd>
-
-
-<dt id="arg-lasso">lasso<a class="anchor" aria-label="anchor" href="#arg-lasso"></a></dt>
-<dd><p>Enable freehand <strong>lasso-select</strong> (default <code>TRUE</code>): a third drag
-mode alongside brush and pan, cycled from the toolbar's mode button. Drag a
-loop and every mark whose centre falls inside it is selected. Like the brush,
-it reports through <code>input$&lt;id&gt;_brush</code> (with a <code>lasso = TRUE</code> flag and the
-loop's bounding box). The mode button appears whenever at least two drag modes
-are enabled.</p></dd>
-
-
-<dt id="arg-nearest">nearest<a class="anchor" aria-label="anchor" href="#arg-nearest"></a></dt>
-<dd><p>When <code>TRUE</code> (default), hover snaps to the nearest mark within a
-small radius when the cursor is not directly over one (helps sparse points).</p></dd>
+<dt id="arg-toolbar">toolbar<a class="anchor" aria-label="anchor" href="#arg-toolbar"></a></dt>
+<dd><p>Show the on-hover toolbar (default <code>TRUE</code>). Hover tooltip,
+highlight, click-select, brush, lasso, pan/zoom, and axis-aware zoom are
+<strong>on by default</strong> (interactive-by-default) and no longer have per-widget
+toggles; per-mark hover/select styling and selection-driven behaviour are
+declared in the plot spec instead (see <code><a href="https://r-vellum.github.io/vellumplot/reference/condition.html" class="external-link">vellumplot::condition()</a></code> /
+<code><a href="https://r-vellum.github.io/vellumplot/reference/select_point.html" class="external-link">vellumplot::select_point()</a></code>).</p></dd>
 
 
 <dt id="arg-navigator">navigator<a class="anchor" aria-label="anchor" href="#arg-navigator"></a></dt>
@@ -172,32 +145,6 @@ series. <code>navigator_height</code> sets the strip height in pixels (default <
 <dt id="arg-navigator-height">navigator_height<a class="anchor" aria-label="anchor" href="#arg-navigator-height"></a></dt>
 <dd><p>Height of the navigator strip in pixels (default <code>56</code>);
 ignored unless <code>navigator = TRUE</code>.</p></dd>
-
-
-<dt id="arg-axis-zoom">axis_zoom<a class="anchor" aria-label="anchor" href="#arg-axis-zoom"></a></dt>
-<dd><p><strong>Axis-aware zoom</strong> (default <code>TRUE</code>). Wheel/drag zoom scales
-only the plot's data region and re-ticks the axes for the visible range,
-holding the frame — axes, titles and legend — in place, the way a chart library
-zooms (rather than scaling the whole scene like an image). Applies to a single
-<strong>linear</strong> cartesian panel (continuous <code>identity</code>/<code>reverse</code> axes) rendered as
-SVG; plots with log/date/discrete axes, several panels, or in raster mode
-silently fall back to the ordinary whole-scene zoom, so leaving it on is always
-safe. Set <code>FALSE</code> to force the plain whole-scene viewBox zoom. Builds on
-vellum's pannable-panel contract (<code>vl_viewport(pannable=)</code>) and the panel scale
-metadata vellumplot emits (needs the current <code>vellum</code>/<code>vellumplot</code>). When
-combined with <code>navigator = TRUE</code>, the navigator's x-only zoom is rendered
-through it, so the x-axis re-ticks crisply instead of stretching.</p></dd>
-
-
-<dt id="arg-zoom-marks">zoom_marks<a class="anchor" aria-label="anchor" href="#arg-zoom-marks"></a></dt>
-<dd><p>Under axis-aware zoom, whether <strong>glyph</strong> marks (points,
-circles, hexagons, sector wedges) keep a constant pixel size. <code>"fixed"</code>
-(default): glyphs stay their original size and only their positions re-map, the
-way a charting library zooms — so points stay round (and don't stretch into
-ellipses under the navigator's x-only zoom). <code>"scale"</code>: glyphs scale with the
-zoom (the older behaviour; useful to read density). Positional marks (bars,
-error bars, lines, areas) always scale with the data either way; only their
-stroke width is held constant. No effect unless <code>axis_zoom</code> is active.</p></dd>
 
 
 <dt id="arg-hover-mode">hover_mode<a class="anchor" aria-label="anchor" href="#arg-hover-mode"></a></dt>
@@ -245,19 +192,6 @@ restores the previous behaviour (no chart semantics, marks not focusable).</p></
 the scene's own title/description — which <code>vellumplot</code> sets automatically from the
 plot title and <code><a href="https://r-vellum.github.io/vellumplot/reference/plot_alt.html" class="external-link">vellumplot::plot_alt()</a></code> — so an explicit value is only needed for
 a raw <code>vellum</code> scene or to override.</p></dd>
-
-
-<dt id="arg-hover-color-selected-color">hover_color, selected_color<a class="anchor" aria-label="anchor" href="#arg-hover-color-selected-color"></a></dt>
-<dd><p>Outline colours for hovered / selected
-elements (any R or CSS colour), applied widget-wide. <code>hover_color = NULL</code>
-(default) keeps the plain dim-others hover; <code>selected_color = NULL</code> uses the
-built-in default. A per-mark <code>hover_color</code>/<code>selected_color</code> declared in
-<code>vellumplot</code> overrides these for that mark.</p></dd>
-
-
-<dt id="arg-dim-opacity">dim_opacity<a class="anchor" aria-label="anchor" href="#arg-dim-opacity"></a></dt>
-<dd><p>Opacity (0–1) of the non-hovered elements while hovering
-(default <code>0.28</code>); <code>NULL</code> keeps the default.</p></dd>
 
 
 <dt id="arg-tooltip-delay">tooltip_delay<a class="anchor" aria-label="anchor" href="#arg-tooltip-delay"></a></dt>

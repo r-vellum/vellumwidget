@@ -104,9 +104,11 @@ it falls back to the scaled image alone.
 Raster mode buys scale by giving up the per-element DOM, so the things
 that need per-element nodes do not apply:
 
-- **Per-element grammar colours** (a mark’s own `hover_color` /
-  `selected_color`) have no node to style. The widget-wide `hover_color`
-  / `selected_color` / `dim_opacity` still work.
+- **Per-element grammar styling** (a mark’s own `hover_color` /
+  `selected_color`, or a
+  [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+  in the plot spec) has no node to style, so it does not apply. The
+  built-in hover highlight (dim-the-rest) still works.
 - **Per-mark screen-reader focus** is gone — there are no focusable
   `graphics-symbol` nodes to tab through. The chart keeps its accessible
   name and description (from the scene title/alt text), but not per-mark
