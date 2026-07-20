@@ -25,10 +25,12 @@
 #'   scene --- anything [vellum::as_vellum_scene()] accepts.
 #' @param width,height Widget size (any valid CSS size, or `NULL` to size from the
 #'   scene). Passed to [htmlwidgets::createWidget()].
-#' @param tooltip,hover,select Toggles for the three hover/click interactions
-#'   (all `TRUE`).
-#' @param brush,zoom,toolbar Toggles for rectangular brush-select, wheel/drag
-#'   pan-zoom (via the SVG `viewBox`), and the on-hover toolbar (all `TRUE`).
+#' @param toolbar Show the on-hover toolbar (default `TRUE`). Hover tooltip,
+#'   highlight, click-select, brush, lasso, pan/zoom, and axis-aware zoom are
+#'   **on by default** (interactive-by-default) and no longer have per-widget
+#'   toggles; per-mark hover/select styling and selection-driven behaviour are
+#'   declared in the plot spec instead (see `vellumplot::condition()` /
+#'   `vellumplot::select_point()`).
 #' @param navigator Show an overview **range navigator** below the plot (default
 #'   `FALSE`): a full-width strip rendering the whole scene in miniature, with a
 #'   draggable, resizable window marking the visible x-range. Drag the window to
@@ -37,36 +39,6 @@
 #'   series. `navigator_height` sets the strip height in pixels (default `56`).
 #' @param navigator_height Height of the navigator strip in pixels (default `56`);
 #'   ignored unless `navigator = TRUE`.
-#' @param axis_zoom **Axis-aware zoom** (default `TRUE`). Wheel/drag zoom scales
-#'   only the plot's data region and re-ticks the axes for the visible range,
-#'   holding the frame — axes, titles and legend — in place, the way a chart library
-#'   zooms (rather than scaling the whole scene like an image). Applies to a single
-#'   **linear** cartesian panel (continuous `identity`/`reverse` axes) rendered as
-#'   SVG; plots with log/date/discrete axes, several panels, or in raster mode
-#'   silently fall back to the ordinary whole-scene zoom, so leaving it on is always
-#'   safe. Set `FALSE` to force the plain whole-scene viewBox zoom. Builds on
-#'   vellum's pannable-panel contract (`vl_viewport(pannable=)`) and the panel scale
-#'   metadata vellumplot emits (needs the current `vellum`/`vellumplot`). When
-#'   combined with `navigator = TRUE`, the navigator's x-only zoom is rendered
-#'   through it, so the x-axis re-ticks crisply instead of stretching.
-#' @param zoom_marks Under axis-aware zoom, whether **glyph** marks (points,
-#'   circles, hexagons, sector wedges) keep a constant pixel size. `"fixed"`
-#'   (default): glyphs stay their original size and only their positions re-map, the
-#'   way a charting library zooms — so points stay round (and don't stretch into
-#'   ellipses under the navigator's x-only zoom). `"scale"`: glyphs scale with the
-#'   zoom (the older behaviour; useful to read density). Positional marks (bars,
-#'   error bars, lines, areas) always scale with the data either way; only their
-#'   stroke width is held constant. Applies under axis-aware zoom (SVG) and to the
-#'   crisp point layer in raster mode; no effect on a plain whole-scene viewBox zoom
-#'   (`axis_zoom = FALSE`, SVG).
-#' @param lasso Enable freehand **lasso-select** (default `TRUE`): a third drag
-#'   mode alongside brush and pan, cycled from the toolbar's mode button. Drag a
-#'   loop and every mark whose centre falls inside it is selected. Like the brush,
-#'   it reports through `input$<id>_brush` (with a `lasso = TRUE` flag and the
-#'   loop's bounding box). The mode button appears whenever at least two drag modes
-#'   are enabled.
-#' @param nearest When `TRUE` (default), hover snaps to the nearest mark within a
-#'   small radius when the cursor is not directly over one (helps sparse points).
 #' @param hover_mode How hover gathers marks into the tooltip. `"closest"`
 #'   (default) shows the single nearest mark. `"x"` (or `"y"`) gives a *unified*
 #'   hover: every mark sharing the hovered x (or y) position is highlighted and
@@ -99,13 +71,6 @@
 #'   the scene's own title/description — which `vellumplot` sets automatically from the
 #'   plot title and [vellumplot::plot_alt()] — so an explicit value is only needed for
 #'   a raw `vellum` scene or to override.
-#' @param hover_color,selected_color Outline colours for hovered / selected
-#'   elements (any R or CSS colour), applied widget-wide. `hover_color = NULL`
-#'   (default) keeps the plain dim-others hover; `selected_color = NULL` uses the
-#'   built-in default. A per-mark `hover_color`/`selected_color` declared in
-#'   `vellumplot` overrides these for that mark.
-#' @param dim_opacity Opacity (0–1) of the non-hovered elements while hovering
-#'   (default `0.28`); `NULL` keeps the default.
 #' @param tooltip_delay Milliseconds to wait before the tooltip appears on hover
 #'   (default `0`, i.e. immediate). The highlight is unaffected — only the tooltip
 #'   waits. A short delay (e.g. `250`) calms a dense scatter.
@@ -177,26 +142,14 @@ as_widget <- function(
   x,
   width = NULL,
   height = NULL,
-  tooltip = TRUE,
-  hover = TRUE,
-  select = TRUE,
-  brush = TRUE,
-  lasso = TRUE,
-  zoom = TRUE,
   toolbar = TRUE,
-  nearest = TRUE,
   navigator = FALSE,
   navigator_height = NULL,
-  axis_zoom = TRUE,
-  zoom_marks = c("fixed", "scale"),
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
   legend_click = c("select", "hide", "mute"),
   a11y = TRUE,
   alt = NULL,
-  hover_color = NULL,
-  selected_color = NULL,
-  dim_opacity = NULL,
   tooltip_delay = 0,
   tooltip_follow = TRUE,
   tooltip_sticky = FALSE,
@@ -212,7 +165,6 @@ as_widget <- function(
   elementId = NULL
 ) {
   select_mode <- match.arg(select_mode)
-  zoom_marks <- match.arg(zoom_marks)
   hover_mode <- match.arg(hover_mode)
   legend_click <- match.arg(legend_click)
   mode <- match.arg(mode)
@@ -263,22 +215,17 @@ as_widget <- function(
     interactions = .vellumwidget_interactions(x),
     options = list(
       raster = use_raster,
-      tooltip = isTRUE(tooltip),
-      hover = isTRUE(hover),
-      select = isTRUE(select),
-      brush = isTRUE(brush),
-      lasso = isTRUE(lasso),
+      # Hover tooltip, highlight, click-select, brush, lasso, pan/zoom, and
+      # axis-aware zoom are on by default (interactive-by-default): the runtime
+      # supplies the defaults, so they no longer need per-widget flags. Per-mark
+      # hover/select styling now comes from the plot spec via `condition()`.
       navigator = isTRUE(navigator),
       navigatorHeight = if (is.null(navigator_height)) {
         NULL
       } else {
         as.numeric(navigator_height)
       },
-      axisZoom = isTRUE(axis_zoom),
-      zoomMarks = zoom_marks,
-      zoom = isTRUE(zoom),
       toolbar = isTRUE(toolbar),
-      nearest = isTRUE(nearest),
       hoverMode = hover_mode,
       crosshair = isTRUE(crosshair),
       legendClick = legend_click,
@@ -294,18 +241,7 @@ as_widget <- function(
       selectMode = select_mode,
       group = group,
       crosstalk = ct_group,
-      style = c(
-        list(
-          hoverColor = .css_color(hover_color),
-          selectedColor = .css_color(selected_color),
-          dimOpacity = if (is.null(dim_opacity)) {
-            NULL
-          } else {
-            as.numeric(dim_opacity)
-          }
-        ),
-        .tooltip_style(tooltip_style)
-      ),
+      style = .tooltip_style(tooltip_style),
       export = drop_null(list(
         filename = if (is.null(export_filename)) {
           NULL

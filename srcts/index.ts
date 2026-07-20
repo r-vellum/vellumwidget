@@ -3243,7 +3243,10 @@ HTMLWidgets.widget({
     return {
       renderValue: function (x: Payload) {
         opts = Object.assign(
-          { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false, navigator: false },
+          // Interactive-by-default: hover/select/brush/lasso/zoom and axis-aware
+          // zoom are on unless the payload overrides them. (as_widget() no longer
+          // exposes these as flags; the defaults live here.)
+          { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false, navigator: false, axisZoom: true, zoomMarks: "fixed" },
           x.options || {}
         );
         elements = normalizeElements(x.elements);
