@@ -1986,5 +1986,85 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     "constant-marks: zoom_marks='scale' leaves strokes scaling too (older behaviour)");
 }
 
+// ===================== declarative interactivity: conditions =====================
+// A hover-driven condition on `color` with an explicit if_false: hovering one
+// element keeps it, and recolours every OTHER element carrying the same condition
+// tag to the if_false colour. Hover off reverts. An empty selection (empty=true)
+// leaves the whole plot untouched (spotlight semantics).
+{
+  const elC = document.createElement("div");
+  document.body.appendChild(elC);
+  const svgC =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">' +
+    '<g data-vellum-panel="panel-1-1">' +
+    '<path data-key="p1" fill="#ff0000" d="M5 5h4v4h-4z"/>' +
+    '<path data-key="p2" fill="#00ff00" d="M20 5h4v4h-4z"/>' +
+    '<path data-key="p3" fill="#0000ff" d="M35 5h4v4h-4z"/>' +
+    "</g></svg>";
+  const iC = widgetDef.factory(elC, 200, 100);
+  iC.renderValue({
+    svg: svgC,
+    elements: [
+      { key: "p1", cond: ["hi:color"] },
+      { key: "p2", cond: ["hi:color"] },
+      { key: "p3", cond: ["hi:color"] }
+    ],
+    interactions: {
+      selections: [{ name: "hi", kind: "point", on: "hover", empty: true }],
+      conditions: [{ selection: "hi", aes: "color", if_false: "#cccccc", empty: true }]
+    },
+    options: { hover: true, tooltip: true }
+  });
+  const svgCE = elC.querySelector("svg");
+  const p1 = elC.querySelector('[data-key="p1"]');
+  const p2 = elC.querySelector('[data-key="p2"]');
+  const p3 = elC.querySelector('[data-key="p3"]');
+  // initial (empty selection, empty=true): nothing recoloured
+  ok(!p1.style.fill && !p2.style.fill, "condition: empty selection leaves all elements at their true colour");
+  function fireC(type, target) {
+    const ev = new window.MouseEvent(type, { bubbles: true, clientX: 6, clientY: 6 });
+    Object.defineProperty(ev, "target", { value: target, enumerable: true });
+    svgCE.dispatchEvent(ev);
+  }
+  fireC("pointermove", p1);
+  ok(!p1.style.fill, "condition: hovered (member) element keeps its true colour");
+  ok(p2.style.fill === "rgb(204, 204, 204)" || p2.style.fill === "#cccccc",
+    "condition: non-member recoloured to if_false on hover");
+  ok(p3.style.fill === "rgb(204, 204, 204)" || p3.style.fill === "#cccccc",
+    "condition: every non-member recoloured to if_false");
+  fireC("pointerleave", svgCE);
+  ok(!p2.style.fill && !p3.style.fill, "condition: hover off reverts non-members to their true colour");
+}
+
+// A condition with no if_false dims non-members via the theme-dim class (the
+// default spotlight).
+{
+  const elD = document.createElement("div");
+  document.body.appendChild(elD);
+  const svgD =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><g data-vellum-panel="panel-1-1">' +
+    '<path data-key="d1" fill="#f00" d="M5 5h4v4h-4z"/>' +
+    '<path data-key="d2" fill="#0f0" d="M20 5h4v4h-4z"/>' +
+    "</g></svg>";
+  const iD = widgetDef.factory(elD, 200, 100);
+  iD.renderValue({
+    svg: svgD,
+    elements: [{ key: "d1", cond: ["hi:color"] }, { key: "d2", cond: ["hi:color"] }],
+    interactions: {
+      selections: [{ name: "hi", kind: "point", on: "hover", empty: true }],
+      conditions: [{ selection: "hi", aes: "color", empty: true }]
+    },
+    options: { hover: true }
+  });
+  const svgDE = elD.querySelector("svg");
+  const d1 = elD.querySelector('[data-key="d1"]');
+  const d2 = elD.querySelector('[data-key="d2"]');
+  const evD = new window.MouseEvent("pointermove", { bubbles: true, clientX: 6, clientY: 6 });
+  Object.defineProperty(evD, "target", { value: d1, enumerable: true });
+  svgDE.dispatchEvent(evD);
+  ok(!d1.classList.contains("vellumwidget-cond-dim"), "condition(no if_false): member is not dimmed");
+  ok(d2.classList.contains("vellumwidget-cond-dim"), "condition(no if_false): non-member gets the theme-dim class");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

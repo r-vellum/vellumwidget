@@ -52,6 +52,7 @@ interface ElemMeta extends Partial<Bbox> {
   legend?: string[] | string; // series this mark belongs to ("<aes>:<value>")
   legend_for?: string; // a legend swatch: the series it highlights/selects
   filter_value?: number; // value on a continuous colour scale (for the colorbar filter)
+  cond?: string[]; // conditional-encoding tags ("<sel>:<aes>") this element participates in
 }
 
 // The interactive colorbar descriptor (continuous colour scale): the gradient
@@ -65,6 +66,32 @@ interface ColorbarInfo {
   hi: number;
   orientation: string; // "v" | "h"
   reverse?: boolean;
+}
+
+// Declarative interactivity, read off the compiled plot spec (vellumplot's
+// interaction_model()). Selections are named gestures; conditions style an
+// aesthetic by selection membership; filters/binds are enacted in later stages.
+// The whole block is optional — absent means "no declared interaction".
+interface SelDef {
+  name: string;
+  kind: string; // "point" | "interval"
+  on: string; // "click" | "hover" | "xy" | "x" | "y"
+  region?: string; // "rect" | "lasso"
+  fields?: string[] | string | null;
+  toggle?: boolean;
+  empty?: boolean;
+}
+interface CondDef {
+  selection: string;
+  aes: string; // "color" | "fill" | ...
+  if_false?: string | null; // a constant style for non-members, or null = theme dim
+  empty?: boolean;
+}
+interface InteractionSpec {
+  selections?: SelDef[];
+  conditions?: CondDef[];
+  filters?: { selection: string }[];
+  binds?: { selection: string; aes: string }[];
 }
 
 interface Options {
@@ -140,6 +167,7 @@ interface ColumnElements {
   legend_for?: (string | null)[] | string;
   legend?: (string[] | string | null)[] | string[] | string;
   filter_value?: (number | null)[] | number;
+  cond?: (string[] | string | null)[] | string[] | string;
 }
 
 // Per-axis scale descriptor (from vellumplot's `scales` panel meta): the data and
@@ -172,6 +200,7 @@ interface Payload {
   elements: ElemMeta[] | ColumnElements;
   panels?: PanelInfo[] | PanelInfo; // cartesian data panels (htmlwidgets may unbox a length-1 list)
   colorbar?: ColorbarInfo; // interactive continuous-colour colorbar (optional)
+  interactions?: InteractionSpec; // declarative interactivity (from the plot spec)
   options: Options;
 }
 
@@ -230,6 +259,7 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
   const legendFor = c.legend_for != null ? asColumn<string | null>(c.legend_for) : null;
   const legend = c.legend != null ? asColumn<string[] | string | null>(c.legend) : null;
   const filterValue = c.filter_value != null ? asColumn<number | null>(c.filter_value) : null;
+  const cond = c.cond != null ? asColumn<string[] | string | null>(c.cond) : null;
   const out: ElemMeta[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const e: ElemMeta = { key: String(key[i]) };
@@ -250,6 +280,12 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
       if (v != null && !(Array.isArray(v) && v.length === 0)) e.legend = v;
     }
     if (filterValue && typeof filterValue[i] === "number") e.filter_value = filterValue[i] as number;
+    if (cond) {
+      const v = cond[i];
+      if (v != null && !(Array.isArray(v) && v.length === 0)) {
+        e.cond = Array.isArray(v) ? (v as string[]) : [String(v)];
+      }
+    }
     out[i] = e;
   }
   return out;
@@ -553,6 +589,10 @@ const VELLUMWIDGET_CSS = `
 [data-key].vellumwidget-legend.vellumwidget-legend-off { opacity: 0.4; }
 .vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
 .vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
+/* Conditional encoding (condition()): a non-member of an active selection with no
+   explicit if_false is dimmed to the theme's dim opacity (the spotlight). An
+   explicit if_false colour is applied inline (see applyConditions()). */
+[data-key].vellumwidget-cond-dim { opacity: var(--vellumwidget-dim-opacity, 0.28); }
 /* Large-scene hover: instead of the CSS rule above restyling every keyed node
    (O(n) per hover), the whole plot is dimmed once via the holder's opacity and the
    hovered marks are re-drawn crisp in this overlay (O(hovered)). See setHover(). */
@@ -838,6 +878,13 @@ HTMLWidgets.widget({
     // out (dimmed + inert), so hit-testing skips them like any other filter.
     let colorbar: ColorbarInfo | null = null;
     let colorbarLayer: SVGSVGElement | null = null;
+    // Declarative interactivity (spec-driven): the interaction block + derived
+    // indexes. `condTagElems` maps a "<sel>:<aes>" tag to the keys carrying it;
+    // `lastHoverKeys` is the current hover set (a hover-triggered selection reads
+    // it). Reset per render; empty when the plot declares no interaction.
+    let interactions: InteractionSpec | null = null;
+    let condTagElems: Record<string, string[]> = {};
+    let lastHoverKeys: string[] = [];
     let colorRange: { a: number; b: number } | null = null;
     let colorHiddenSet: Record<string, boolean> = {};
     let meta: Record<string, ElemMeta> = {};
@@ -1350,8 +1397,10 @@ HTMLWidgets.widget({
         drawHovFeedback(keys);
         return;
       }
+      lastHoverKeys = keys;
       clearClass("vellumwidget-hl");
       addClassForKeys(keys, "vellumwidget-hl");
+      reevaluateInteractions(); // hover-triggered conditions react to the new set
       // Large scenes: dim via the holder + clone the hovered marks into the overlay
       // (O(hovered)); otherwise the CSS `.vellumwidget-hovering` rule dims per node.
       if (largeDim) showHighlightOverlay(keys);
@@ -1493,6 +1542,10 @@ HTMLWidgets.widget({
       clearCrosshair();
       scheduleHideTip(); // immediate, unless sticky (then a short grace to reach the tip)
       shinyInput("hover", null); // hover ended -> input$<id>_hover = NULL (deduped)
+      if (lastHoverKeys.length) {
+        lastHoverKeys = [];
+        reevaluateInteractions(); // hover-triggered conditions revert
+      }
     }
 
     // --- Shiny read-back ---
@@ -1520,6 +1573,7 @@ HTMLWidgets.widget({
       }
       clearClass("vellumwidget-selected");
       for (const k in selected) if (selected[k]) addClassForKeys([k], "vellumwidget-selected");
+      reevaluateInteractions(); // click/select-triggered conditions react
     }
     function selectedKeys(): string[] {
       return Object.keys(selected).filter((k) => selected[k]);
@@ -1593,6 +1647,82 @@ HTMLWidgets.widget({
     }
     function dropInert(keys: string[]): string[] {
       return keys.filter((k) => !inert(k));
+    }
+
+    // --- declarative interactivity (spec-driven; DECLARATIVE-INTERACTIVITY) ---
+    // Build the per-render indexes from the interaction block: which keys carry
+    // each condition tag ("<sel>:<aes>"). Called once per render.
+    function setupInteractions(): void {
+      condTagElems = {};
+      if (!interactions) return;
+      for (let i = 0; i < elements.length; i++) {
+        const tags = elements[i].cond;
+        if (!tags) continue;
+        for (let t = 0; t < tags.length; t++) {
+          (condTagElems[tags[t]] = condTagElems[tags[t]] || []).push(elements[i].key);
+        }
+      }
+    }
+    // The member key set of a selection given the current gesture state. A
+    // hover-triggered selection reads the current hover set; a click/point one
+    // reads the persistent selection. (Interval selections are wired in a later
+    // stage.)
+    function selectionMembers(sel: SelDef): Record<string, boolean> {
+      const set: Record<string, boolean> = {};
+      const keys = sel.on === "hover" ? lastHoverKeys : selectedKeys();
+      for (let i = 0; i < keys.length; i++) set[keys[i]] = true;
+      return set;
+    }
+    // Apply an active condition's `if_false` to a non-member node: an explicit
+    // colour recolours the fill/stroke it actually uses (never the fill:none twin
+    // of a point); no colour falls back to the theme-dim class.
+    function styleCondNode(node: Element, color: string | null | undefined): void {
+      if (color == null) {
+        node.classList.add("vellumwidget-cond-dim");
+        return;
+      }
+      const n = node as unknown as { style: CSSStyleDeclaration };
+      const f = node.getAttribute("fill");
+      if (f && f !== "none") n.style.fill = color;
+      const s = node.getAttribute("stroke");
+      if (s && s !== "none") n.style.stroke = color;
+    }
+    function clearCondNode(node: Element): void {
+      node.classList.remove("vellumwidget-cond-dim");
+      const n = node as unknown as { style: CSSStyleDeclaration };
+      if (n.style.fill) n.style.fill = "";
+      if (n.style.stroke) n.style.stroke = "";
+    }
+    // Re-evaluate every conditional encoding against the current selection state:
+    // members keep `if_true` (already drawn), non-members get `if_false`. With an
+    // empty selection and `empty !== false`, the whole plot stays `if_true`
+    // (spotlight semantics — matches the static render). SVG mode only.
+    function applyConditions(): void {
+      if (rasterMode || !interactions || !interactions.conditions) return;
+      const selByName: Record<string, SelDef> = {};
+      (interactions.selections || []).forEach((s) => (selByName[s.name] = s));
+      for (let ci = 0; ci < interactions.conditions.length; ci++) {
+        const c = interactions.conditions[ci];
+        const tag = c.selection + ":" + c.aes;
+        const tagged = condTagElems[tag] || [];
+        const sel = selByName[c.selection];
+        const members = sel ? selectionMembers(sel) : {};
+        const active = Object.keys(members).length > 0 || c.empty === false;
+        for (let i = 0; i < tagged.length; i++) {
+          const nodes = elementsForKey(tagged[i]);
+          const member = !!members[tagged[i]];
+          for (let j = 0; j < nodes.length; j++) {
+            clearCondNode(nodes[j]);
+            if (active && !member) styleCondNode(nodes[j], c.if_false);
+          }
+        }
+      }
+    }
+    // The single re-evaluation hook: called whenever a selection's member set can
+    // change (hover move/clear, click/select). Conditions today; filters/binds add
+    // their own reactions here in later stages.
+    function reevaluateInteractions(): void {
+      applyConditions();
     }
     // --- server -> client proxy (vellumwidget_proxy) ---
     // Route a command from the Shiny server onto this instance, without a
@@ -3042,6 +3172,9 @@ HTMLWidgets.widget({
         elements = normalizeElements(x.elements);
         panels = normalizePanels(x.panels);
         colorbar = x.colorbar || null;
+        interactions = x.interactions || null;
+        condTagElems = {};
+        lastHoverKeys = [];
         meta = {};
         groups = {};
         legendIndex = {};
@@ -3156,6 +3289,7 @@ HTMLWidgets.widget({
           buildToolbar();
           buildNavigator();
           buildColorbar();
+          setupInteractions(); // index the declarative interaction block (conditions/…)
           setupAxisZoom(); // scale the data region + re-tick (after the nav clone)
           // The range navigator drives an x-only zoom (the full y-range stays on
           // screen). Rendered through axis_zoom when it's active (fixed frame, crisp

@@ -540,6 +540,7 @@
     const legendFor = c.legend_for != null ? asColumn(c.legend_for) : null;
     const legend = c.legend != null ? asColumn(c.legend) : null;
     const filterValue = c.filter_value != null ? asColumn(c.filter_value) : null;
+    const cond = c.cond != null ? asColumn(c.cond) : null;
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       const e = { key: String(key[i]) };
@@ -558,6 +559,12 @@
         if (v != null && !(Array.isArray(v) && v.length === 0)) e.legend = v;
       }
       if (filterValue && typeof filterValue[i] === "number") e.filter_value = filterValue[i];
+      if (cond) {
+        const v = cond[i];
+        if (v != null && !(Array.isArray(v) && v.length === 0)) {
+          e.cond = Array.isArray(v) ? v : [String(v)];
+        }
+      }
       out[i] = e;
     }
     return out;
@@ -775,6 +782,10 @@
 [data-key].vellumwidget-legend.vellumwidget-legend-off { opacity: 0.4; }
 .vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
 .vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
+/* Conditional encoding (condition()): a non-member of an active selection with no
+   explicit if_false is dimmed to the theme's dim opacity (the spotlight). An
+   explicit if_false colour is applied inline (see applyConditions()). */
+[data-key].vellumwidget-cond-dim { opacity: var(--vellumwidget-dim-opacity, 0.28); }
 /* Large-scene hover: instead of the CSS rule above restyling every keyed node
    (O(n) per hover), the whole plot is dimmed once via the holder's opacity and the
    hovered marks are re-drawn crisp in this overlay (O(hovered)). See setHover(). */
@@ -997,6 +1008,9 @@
       let navWindow = null;
       let colorbar = null;
       let colorbarLayer = null;
+      let interactions = null;
+      let condTagElems = {};
+      let lastHoverKeys = [];
       let colorRange = null;
       let colorHiddenSet = {};
       let meta = {};
@@ -1410,8 +1424,10 @@
           drawHovFeedback(keys);
           return;
         }
+        lastHoverKeys = keys;
         clearClass("vellumwidget-hl");
         addClassForKeys(keys, "vellumwidget-hl");
+        reevaluateInteractions();
         if (largeDim) showHighlightOverlay(keys);
         else el.classList.add("vellumwidget-hovering");
       }
@@ -1549,6 +1565,10 @@
         clearCrosshair();
         scheduleHideTip();
         shinyInput("hover", null);
+        if (lastHoverKeys.length) {
+          lastHoverKeys = [];
+          reevaluateInteractions();
+        }
       }
       function shinyInput(event, value, opts2) {
         const hw = HTMLWidgets;
@@ -1564,6 +1584,7 @@
         }
         clearClass("vellumwidget-selected");
         for (const k in selected) if (selected[k]) addClassForKeys([k], "vellumwidget-selected");
+        reevaluateInteractions();
       }
       function selectedKeys() {
         return Object.keys(selected).filter((k) => selected[k]);
@@ -1623,6 +1644,64 @@
       }
       function dropInert(keys) {
         return keys.filter((k) => !inert(k));
+      }
+      function setupInteractions() {
+        condTagElems = {};
+        if (!interactions) return;
+        for (let i = 0; i < elements.length; i++) {
+          const tags = elements[i].cond;
+          if (!tags) continue;
+          for (let t = 0; t < tags.length; t++) {
+            (condTagElems[tags[t]] = condTagElems[tags[t]] || []).push(elements[i].key);
+          }
+        }
+      }
+      function selectionMembers(sel) {
+        const set = {};
+        const keys = sel.on === "hover" ? lastHoverKeys : selectedKeys();
+        for (let i = 0; i < keys.length; i++) set[keys[i]] = true;
+        return set;
+      }
+      function styleCondNode(node, color) {
+        if (color == null) {
+          node.classList.add("vellumwidget-cond-dim");
+          return;
+        }
+        const n = node;
+        const f = node.getAttribute("fill");
+        if (f && f !== "none") n.style.fill = color;
+        const s = node.getAttribute("stroke");
+        if (s && s !== "none") n.style.stroke = color;
+      }
+      function clearCondNode(node) {
+        node.classList.remove("vellumwidget-cond-dim");
+        const n = node;
+        if (n.style.fill) n.style.fill = "";
+        if (n.style.stroke) n.style.stroke = "";
+      }
+      function applyConditions() {
+        if (rasterMode || !interactions || !interactions.conditions) return;
+        const selByName = {};
+        (interactions.selections || []).forEach((s) => selByName[s.name] = s);
+        for (let ci = 0; ci < interactions.conditions.length; ci++) {
+          const c = interactions.conditions[ci];
+          const tag = c.selection + ":" + c.aes;
+          const tagged = condTagElems[tag] || [];
+          const sel = selByName[c.selection];
+          const members = sel ? selectionMembers(sel) : {};
+          const active = Object.keys(members).length > 0 || c.empty === false;
+          for (let i = 0; i < tagged.length; i++) {
+            const nodes = elementsForKey(tagged[i]);
+            const member = !!members[tagged[i]];
+            for (let j = 0; j < nodes.length; j++) {
+              clearCondNode(nodes[j]);
+              if (active && !member) styleCondNode(nodes[j], c.if_false);
+            }
+          }
+        }
+      }
+      function reevaluateInteractions() {
+        applyConditions();
       }
       function proxyCall(method, args) {
         const keys = Array.isArray(args) ? args : args == null ? [] : [String(args)];
@@ -2887,6 +2966,9 @@
           elements = normalizeElements(x.elements);
           panels = normalizePanels(x.panels);
           colorbar = x.colorbar || null;
+          interactions = x.interactions || null;
+          condTagElems = {};
+          lastHoverKeys = [];
           meta = {};
           groups = {};
           legendIndex = {};
@@ -2981,6 +3063,7 @@
             buildToolbar();
             buildNavigator();
             buildColorbar();
+            setupInteractions();
             setupAxisZoom();
             xZoom = !!opts.navigator && !rasterMode;
             applyAspect();

@@ -173,24 +173,44 @@
 # belongs in the vellumplot *spec* (declarative interactivity) rather than as one
 # more imperative widget flag. See CLAUDE.md, "Interactivity: prefer the spec over
 # new as_widget() flags". A tripwire test (test-as-widget.R) guards this count.
-as_widget <- function(x, width = NULL, height = NULL,
-                      tooltip = TRUE, hover = TRUE, select = TRUE,
-                      brush = TRUE, lasso = TRUE, zoom = TRUE, toolbar = TRUE,
-                      nearest = TRUE, navigator = FALSE, navigator_height = NULL,
-                      axis_zoom = TRUE, zoom_marks = c("fixed", "scale"),
-                      hover_mode = c("closest", "x", "y"), crosshair = FALSE,
-                      legend_click = c("select", "hide", "mute"),
-                      a11y = TRUE, alt = NULL,
-                      hover_color = NULL, selected_color = NULL, dim_opacity = NULL,
-                      tooltip_delay = 0, tooltip_follow = TRUE, tooltip_sticky = FALSE,
-                      tooltip_style = NULL,
-                      export_filename = NULL, export_scale = NULL,
-                      group = NULL, crosstalk = NULL,
-                      select_mode = c("multiple", "single"),
-                      mode = c("auto", "svg", "raster"),
-                      raster_threshold = 20000L,
-                      text = c("native", "outline"),
-                      elementId = NULL) {
+as_widget <- function(
+  x,
+  width = NULL,
+  height = NULL,
+  tooltip = TRUE,
+  hover = TRUE,
+  select = TRUE,
+  brush = TRUE,
+  lasso = TRUE,
+  zoom = TRUE,
+  toolbar = TRUE,
+  nearest = TRUE,
+  navigator = FALSE,
+  navigator_height = NULL,
+  axis_zoom = TRUE,
+  zoom_marks = c("fixed", "scale"),
+  hover_mode = c("closest", "x", "y"),
+  crosshair = FALSE,
+  legend_click = c("select", "hide", "mute"),
+  a11y = TRUE,
+  alt = NULL,
+  hover_color = NULL,
+  selected_color = NULL,
+  dim_opacity = NULL,
+  tooltip_delay = 0,
+  tooltip_follow = TRUE,
+  tooltip_sticky = FALSE,
+  tooltip_style = NULL,
+  export_filename = NULL,
+  export_scale = NULL,
+  group = NULL,
+  crosstalk = NULL,
+  select_mode = c("multiple", "single"),
+  mode = c("auto", "svg", "raster"),
+  raster_threshold = 20000L,
+  text = c("native", "outline"),
+  elementId = NULL
+) {
   select_mode <- match.arg(select_mode)
   zoom_marks <- match.arg(zoom_marks)
   hover_mode <- match.arg(hover_mode)
@@ -206,8 +226,13 @@ as_widget <- function(x, width = NULL, height = NULL,
   # is too heavy to build, ship, and hover; the raster path draws the scene once as
   # a single embedded image and drives all interaction from the element index
   # (bboxes + keys) client-side instead. `mode` forces either path.
-  n_keyed <- if (is.null(model$elements) || !nrow(model$elements)) 0L else sum(!is.na(model$elements$key))
-  use_raster <- switch(mode,
+  n_keyed <- if (is.null(model$elements) || !nrow(model$elements)) {
+    0L
+  } else {
+    sum(!is.na(model$elements$key))
+  }
+  use_raster <- switch(
+    mode,
     raster = TRUE,
     svg = FALSE,
     auto = n_keyed > raster_threshold
@@ -235,6 +260,7 @@ as_widget <- function(x, width = NULL, height = NULL,
     elements = .vellumwidget_elements(model),
     panels = .vellumwidget_panels(model),
     colorbar = .vellumwidget_colorbar(model),
+    interactions = .vellumwidget_interactions(x),
     options = list(
       raster = use_raster,
       tooltip = isTRUE(tooltip),
@@ -243,7 +269,11 @@ as_widget <- function(x, width = NULL, height = NULL,
       brush = isTRUE(brush),
       lasso = isTRUE(lasso),
       navigator = isTRUE(navigator),
-      navigatorHeight = if (is.null(navigator_height)) NULL else as.numeric(navigator_height),
+      navigatorHeight = if (is.null(navigator_height)) {
+        NULL
+      } else {
+        as.numeric(navigator_height)
+      },
       axisZoom = isTRUE(axis_zoom),
       zoomMarks = zoom_marks,
       zoom = isTRUE(zoom),
@@ -252,7 +282,11 @@ as_widget <- function(x, width = NULL, height = NULL,
       hoverMode = hover_mode,
       crosshair = isTRUE(crosshair),
       legendClick = legend_click,
-      tooltipDelay = if (is.null(tooltip_delay)) 0 else as.numeric(tooltip_delay),
+      tooltipDelay = if (is.null(tooltip_delay)) {
+        0
+      } else {
+        as.numeric(tooltip_delay)
+      },
       tooltipFollow = isTRUE(tooltip_follow),
       tooltipSticky = isTRUE(tooltip_sticky),
       a11y = isTRUE(a11y),
@@ -264,12 +298,20 @@ as_widget <- function(x, width = NULL, height = NULL,
         list(
           hoverColor = .css_color(hover_color),
           selectedColor = .css_color(selected_color),
-          dimOpacity = if (is.null(dim_opacity)) NULL else as.numeric(dim_opacity)
+          dimOpacity = if (is.null(dim_opacity)) {
+            NULL
+          } else {
+            as.numeric(dim_opacity)
+          }
         ),
         .tooltip_style(tooltip_style)
       ),
       export = drop_null(list(
-        filename = if (is.null(export_filename)) NULL else as.character(export_filename),
+        filename = if (is.null(export_filename)) {
+          NULL
+        } else {
+          as.character(export_filename)
+        },
         scale = if (is.null(export_scale)) NULL else as.numeric(export_scale)
       ))
     )
@@ -277,7 +319,9 @@ as_widget <- function(x, width = NULL, height = NULL,
 
   # Load crosstalk's client library only when a SharedData/group is used, so a
   # plain widget carries no crosstalk dependency.
-  deps <- if (!is.null(ct_group) && requireNamespace("crosstalk", quietly = TRUE)) {
+  deps <- if (
+    !is.null(ct_group) && requireNamespace("crosstalk", quietly = TRUE)
+  ) {
     crosstalk::crosstalkLibs()
   } else {
     NULL
@@ -310,18 +354,37 @@ as_widget <- function(x, width = NULL, height = NULL,
     return(list())
   }
   if (!is.list(ts)) {
-    stop("`tooltip_style` must be a named list (background/color/fontsize/max_width).", call. = FALSE)
+    stop(
+      "`tooltip_style` must be a named list (background/color/fontsize/max_width).",
+      call. = FALSE
+    )
   }
   drop_null(list(
     tipBg = .css_color(ts$background),
     tipFg = .css_color(ts$color),
     tipFontSize = if (is.null(ts$fontsize)) NULL else as.character(ts$fontsize),
-    tipMaxWidth = if (is.null(ts$max_width)) NULL else as.character(ts$max_width)
+    tipMaxWidth = if (is.null(ts$max_width)) {
+      NULL
+    } else {
+      as.character(ts$max_width)
+    }
   ))
 }
 
 # Drop NULL entries from a list (so unset style fields don't reach the payload).
 drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
+
+# The declarative-interactivity block a vellumplot spec carries (selections,
+# conditional encodings, filters, scale binds). Read straight off the plot object
+# via vellumplot::interaction_model(); NULL for a raw vellum scene or a plot with
+# no declared interaction (so the payload field is simply absent).
+.vellumwidget_interactions <- function(x) {
+  if (!requireNamespace("vellumplot", quietly = TRUE)) {
+    return(NULL)
+  }
+  im <- getExportedValue("vellumplot", "interaction_model")
+  tryCatch(im(x), error = function(e) NULL)
+}
 
 # Resolve the crosstalk group name from `crosstalk`: a crosstalk::SharedData (use
 # its group), a group-name string, or NULL (no crosstalk).
@@ -335,7 +398,10 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   if (is.character(crosstalk) && length(crosstalk) == 1L) {
     return(crosstalk)
   }
-  stop("`crosstalk` must be a crosstalk::SharedData, a group-name string, or NULL.", call. = FALSE)
+  stop(
+    "`crosstalk` must be a crosstalk::SharedData, a group-name string, or NULL.",
+    call. = FALSE
+  )
 }
 
 # The keyed elements the JS runtime needs: for each drawn, keyed element, its
@@ -369,7 +435,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   el <- el[keep, , drop = FALSE]
   n <- nrow(el)
   meta <- el$meta
-  if (length(meta) < n) meta <- c(meta, vector("list", n - length(meta)))
+  if (length(meta) < n) {
+    meta <- c(meta, vector("list", n - length(meta)))
+  }
   # A keyed-but-plain scene (e.g. a huge scatter with `data_id` only, no tooltips)
   # carries no meta at all -- skip the per-field scans entirely so the big-N build
   # stays proportional to just the geometry columns.
@@ -380,17 +448,23 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   # `m$legend` would wrongly pick up a swatch's `legend_for`). `transform` maps a
   # present value (e.g. a colour name -> CSS hex); absent -> NA.
   meta_col <- function(field, transform = as.character) {
-    if (!any_meta) return(NULL)
+    if (!any_meta) {
+      return(NULL)
+    }
     present <- FALSE
-    out <- vapply(meta, function(m) {
-      v <- if (is.null(m)) NULL else m[[field]]
-      if (is.null(v)) {
-        NA_character_
-      } else {
-        present <<- TRUE
-        as.character(transform(v))[[1L]]
-      }
-    }, character(1))
+    out <- vapply(
+      meta,
+      function(m) {
+        v <- if (is.null(m)) NULL else m[[field]]
+        if (is.null(v)) {
+          NA_character_
+        } else {
+          present <<- TRUE
+          as.character(transform(v))[[1L]]
+        }
+      },
+      character(1)
+    )
     if (present) out else NULL
   }
 
@@ -401,8 +475,10 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     # marks (bars, segments, lines) scale with the data. Already computed by
     # `scene_model()`; NULL only if the column is somehow absent.
     mark = if (!is.null(el$mark)) as.character(el$mark) else NULL,
-    x0 = as.numeric(el$x0), y0 = as.numeric(el$y0),
-    x1 = as.numeric(el$x1), y1 = as.numeric(el$y1),
+    x0 = as.numeric(el$x0),
+    y0 = as.numeric(el$y0),
+    x1 = as.numeric(el$x1),
+    y1 = as.numeric(el$y1),
     tooltip = meta_col("tooltip"),
     hover_group = meta_col("hover_group"),
     # Per-element grammar styling (Option 2), normalised to CSS colours.
@@ -421,14 +497,34 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     if (any(lengths(legend) > 0L)) cols$legend <- legend
   }
 
+  # Conditional-encoding tags ("<sel>:<aes>") this element participates in --
+  # ragged like `legend`, so a list-column. The JS runtime styles non-members of
+  # an active selection by these tags.
+  if (any_meta) {
+    cond <- lapply(meta, function(m) {
+      v <- if (is.null(m)) NULL else m[["cond"]]
+      if (is.null(v)) character(0) else as.character(v)
+    })
+    if (any(lengths(cond) > 0L)) cols$cond <- cond
+  }
+
   # Continuous colorbar filter value: numeric per element (or the column absent).
   # Kept numeric (unlike the character meta columns) so the runtime can range-test it.
   if (any_meta) {
     present <- FALSE
-    fv <- vapply(meta, function(m) {
-      v <- if (is.null(m)) NULL else m[["filter_value"]]
-      if (is.null(v)) NA_real_ else { present <<- TRUE; as.numeric(v)[[1L]] }
-    }, numeric(1))
+    fv <- vapply(
+      meta,
+      function(m) {
+        v <- if (is.null(m)) NULL else m[["filter_value"]]
+        if (is.null(v)) {
+          NA_real_
+        } else {
+          present <<- TRUE
+          as.numeric(v)[[1L]]
+        }
+      },
+      numeric(1)
+    )
     if (present) cols$filter_value <- fv
   }
 
@@ -448,13 +544,20 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   }
   for (i in seq_len(nrow(el))) {
     cb <- el$meta[[i]][["colorbar"]]
-    if (is.null(cb)) next
+    if (is.null(cb)) {
+      next
+    }
     rect <- c(el$x0[i], el$y0[i], el$x1[i], el$y1[i])
-    if (anyNA(rect) || !all(is.finite(rect))) next
+    if (anyNA(rect) || !all(is.finite(rect))) {
+      next
+    }
     return(drop_null(list(
-      x0 = as.numeric(el$x0[i]), y0 = as.numeric(el$y0[i]),
-      x1 = as.numeric(el$x1[i]), y1 = as.numeric(el$y1[i]),
-      lo = as.numeric(cb$lo), hi = as.numeric(cb$hi),
+      x0 = as.numeric(el$x0[i]),
+      y0 = as.numeric(el$y0[i]),
+      x1 = as.numeric(el$x1[i]),
+      y1 = as.numeric(el$y1[i]),
+      lo = as.numeric(cb$lo),
+      hi = as.numeric(cb$hi),
       orientation = as.character(cb$orientation),
       reverse = isTRUE(cb$reverse)
     )))
@@ -476,29 +579,45 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     return(NULL)
   }
   axis <- function(a) {
-    if (is.null(a)) return(NULL)
+    if (is.null(a)) {
+      return(NULL)
+    }
     drop_null(list(
       type = as.character(a$type),
       transform = as.character(a$transform %||% "identity"),
-      data_lo = as.numeric(a$data_lo), data_hi = as.numeric(a$data_hi),
-      native_lo = as.numeric(a$native_lo), native_hi = as.numeric(a$native_hi),
+      data_lo = as.numeric(a$data_lo),
+      data_hi = as.numeric(a$data_hi),
+      native_lo = as.numeric(a$native_lo),
+      native_hi = as.numeric(a$native_hi),
       time_unit = if (is.null(a$time_unit)) NULL else as.character(a$time_unit)
     ))
   }
   out <- list()
   for (i in seq_len(nrow(p))) {
     sc <- p$meta[[i]]$scales
-    if (is.null(sc) || !isTRUE(sc$cartesian)) next
+    if (is.null(sc) || !isTRUE(sc$cartesian)) {
+      next
+    }
     # A finite device-px rectangle is required to invert pixels; skip a panel whose
     # viewport geometry wasn't resolved (px* NA) rather than ship a rect the runtime
     # would mis-handle as JSON nulls.
     rect <- c(p$px0[i], p$py0[i], p$px1[i], p$py1[i])
-    if (anyNA(rect) || !all(is.finite(rect)) || p$px1[i] == p$px0[i] || p$py1[i] == p$py0[i]) next
+    if (
+      anyNA(rect) ||
+        !all(is.finite(rect)) ||
+        p$px1[i] == p$px0[i] ||
+        p$py1[i] == p$py0[i]
+    ) {
+      next
+    }
     out[[length(out) + 1L]] <- drop_null(list(
       name = as.character(p$name[i]),
-      px0 = as.numeric(p$px0[i]), py0 = as.numeric(p$py0[i]),
-      px1 = as.numeric(p$px1[i]), py1 = as.numeric(p$py1[i]),
-      x = axis(sc$x), y = axis(sc$y)
+      px0 = as.numeric(p$px0[i]),
+      py0 = as.numeric(p$py0[i]),
+      px1 = as.numeric(p$px1[i]),
+      py1 = as.numeric(p$py1[i]),
+      x = axis(sc$x),
+      y = axis(sc$y)
     ))
   }
   if (!length(out)) NULL else out
@@ -561,14 +680,24 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   head <- ""
   ids <- character(0)
   if (!is.null(title) && nzchar(title)) {
-    head <- paste0(head, sprintf('<title id="vw-t">%s</title>', .xml_escape(title)))
+    head <- paste0(
+      head,
+      sprintf('<title id="vw-t">%s</title>', .xml_escape(title))
+    )
     ids <- c(ids, "vw-t")
   }
   if (!is.null(desc) && nzchar(desc)) {
-    head <- paste0(head, sprintf('<desc id="vw-d">%s</desc>', .xml_escape(desc)))
+    head <- paste0(
+      head,
+      sprintf('<desc id="vw-d">%s</desc>', .xml_escape(desc))
+    )
     ids <- c(ids, "vw-d")
   }
-  a11y <- if (length(ids)) sprintf(' role="img" aria-labelledby="%s"', paste(ids, collapse = " ")) else ""
+  a11y <- if (length(ids)) {
+    sprintf(' role="img" aria-labelledby="%s"', paste(ids, collapse = " "))
+  } else {
+    ""
+  }
   uri <- paste0("data:image/png;base64,", base64enc::base64encode(tmp))
   svg <- sprintf(
     paste0(
@@ -576,7 +705,15 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
       "%s",
       '<image width="%d" height="%d" preserveAspectRatio="none" href="%s"/></svg>'
     ),
-    d$width, d$height, d$width, d$height, a11y, head, d$width, d$height, uri
+    d$width,
+    d$height,
+    d$width,
+    d$height,
+    a11y,
+    head,
+    d$width,
+    d$height,
+    uri
   )
   list(svg = svg, width = d$width, height = d$height)
 }
@@ -675,7 +812,13 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #' @name vellumwidget-shiny
 #' @export
 vellumwidgetOutput <- function(outputId, width = "100%", height = "400px") {
-  htmlwidgets::shinyWidgetOutput(outputId, "vellumwidget", width, height, package = "vellumwidget")
+  htmlwidgets::shinyWidgetOutput(
+    outputId,
+    "vellumwidget",
+    width,
+    height,
+    package = "vellumwidget"
+  )
 }
 
 #' @rdname vellumwidget-shiny
