@@ -2197,12 +2197,18 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     options: { hover: true, tooltip: true, nearest: true }
   });
   const svgZE = elZ.querySelector("svg");
-  // svg is CSS-rendered at half size (288x192); a "buggy" getScreenCTM reports the
-  // attribute scale (1), while getBoundingClientRect reports the true rendered box.
-  svgZE.getScreenCTM = () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0, inverse: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }) });
-  svgZE.createSVGPoint = () => ({ x: 0, y: 0, matrixTransform(m) { return { x: m.a * this.x + m.e, y: m.d * this.y + m.f }; } });
-  svgZE.getBoundingClientRect = () => ({ left: 0, top: 0, width: 288, height: 192, right: 288, bottom: 192 });
-  // cursor over dot B: viewBox centre (288,192) rendered at 0.5 -> client (144,96)
+  // Simulate a render scaled to 0.5: each mark's DOM node reports its true scaled
+  // screen rect (scene coord * 0.5). A "buggy" svg getScreenCTM / rect that implies
+  // scale 1 would offset hover toward the top-left; the calibrated hit-test (fit
+  // screen<->bbox from the marks themselves) is immune. The dots' bbox centres are
+  // 50, 288, 520 -> screen 25, 144, 260.
+  const rectFor = (cx, cy) => () => ({ left: cx * 0.5 - 2, top: cy * 0.5 - 2, width: 4, height: 4, right: cx * 0.5 + 2, bottom: cy * 0.5 + 2 });
+  elZ.querySelector('[data-key="A"]').getBoundingClientRect = rectFor(50, 50);
+  elZ.querySelector('[data-key="B"]').getBoundingClientRect = rectFor(288, 192);
+  elZ.querySelector('[data-key="C"]').getBoundingClientRect = rectFor(520, 330);
+  // a misleading svg box (implies scale 1) — the calibration must ignore it
+  svgZE.getBoundingClientRect = () => ({ left: 0, top: 0, width: 576, height: 384, right: 576, bottom: 384 });
+  // cursor over dot B: scene centre (288,192) rendered at 0.5 -> client (144,96)
   const evZ = new window.MouseEvent("pointermove", { bubbles: true, clientX: 144, clientY: 96 });
   Object.defineProperty(evZ, "target", { value: svgZE, enumerable: true }); // open space -> nearest scan
   svgZE.dispatchEvent(evZ);

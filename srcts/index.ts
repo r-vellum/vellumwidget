@@ -1034,6 +1034,54 @@ HTMLWidgets.widget({
       return u;
     }
 
+    // Client px -> scene (element-bbox) coords, calibrated from the ACTUAL rendered
+    // position of keyed elements versus their known scene bboxes. This is the
+    // robust hit-test mapping: getScreenCTM() and rect+viewBox math both assume the
+    // viewBox scales uniformly into the element's box, which is NOT how the content
+    // is laid out when the svg carries width/height attributes and is CSS-scaled —
+    // there the content renders ~1:1 and the viewBox math offsets the pointer (the
+    // hover-picked-the-wrong-mark bug). Fitting screen<->bbox from real elements is
+    // exact under any viewBox / width-attr / CSS-scale / zoom combination (the DOM
+    // rects already reflect the current transform, incl. axis_zoom's mark scaling —
+    // so no separate panToView is needed). Per-axis two-point fit over the
+    // most-separated elements; falls back to toView() when it can't calibrate.
+    function calibrateXform(): { sx: number; ox: number; sy: number; oy: number } | null {
+      let xi: ElemMeta | null = null, xj: ElemMeta | null = null;
+      let yi: ElemMeta | null = null, yj: ElemMeta | null = null;
+      for (let i = 0; i < elements.length; i++) {
+        const e = elements[i];
+        if (!hasBbox(e)) continue;
+        const scx = (e.x0! + e.x1!) / 2, scy = (e.y0! + e.y1!) / 2;
+        if (!xi || scx < (xi.x0! + xi.x1!) / 2) xi = e;
+        if (!xj || scx > (xj.x0! + xj.x1!) / 2) xj = e;
+        if (!yi || scy < (yi.y0! + yi.y1!) / 2) yi = e;
+        if (!yj || scy > (yj.y0! + yj.y1!) / 2) yj = e;
+      }
+      if (!xi || !xj || !yi || !yj) return null;
+      const scr = (e: ElemMeta): { x: number; y: number } | null => {
+        const n = elementsForKey(e.key)[0] as Element | undefined;
+        if (!n) return null;
+        const r = n.getBoundingClientRect();
+        if (!r.width && !r.height) return null;
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      };
+      const xa = scr(xi), xb = scr(xj), ya = scr(yi), yb = scr(yj);
+      if (!xa || !xb || !ya || !yb) return null;
+      const dScx = (xj.x0! + xj.x1!) / 2 - (xi.x0! + xi.x1!) / 2;
+      const dScrx = xb.x - xa.x;
+      const dScy = (yj.y0! + yj.y1!) / 2 - (yi.y0! + yi.y1!) / 2;
+      const dScry = yb.y - ya.y;
+      if (Math.abs(dScrx) < 1 || Math.abs(dScry) < 1) return null; // too close to fit
+      const sx = dScx / dScrx, ox = (xi.x0! + xi.x1!) / 2 - xa.x * sx;
+      const sy = dScy / dScry, oy = (yi.y0! + yi.y1!) / 2 - ya.y * sy;
+      return { sx, ox, sy, oy };
+    }
+    function clientToScene(clientX: number, clientY: number): { x: number; y: number } {
+      const f = calibrateXform();
+      if (!f) return toView(clientX, clientY);
+      return { x: f.ox + clientX * f.sx, y: f.oy + clientY * f.sy };
+    }
+
     // --- highlight / tooltip (Phase 3) ---
     // Nodes are cached per render (built in renderValue), so a hover/select that
     // touches many keys is O(keys) map lookups instead of a `querySelectorAll`
@@ -1472,14 +1520,23 @@ HTMLWidgets.widget({
     // The hovered mark's centre in client px (for anchor-to-mark placement), or null.
     function markClient(k: string): { x: number; y: number } | null {
       const m = meta[k];
-      if (!m || !hasBbox(m) || !svgEl) return null;
-      // Rendered box + viewBox (see toUser: robust to CSS scaling; getScreenCTM
-      // would mis-place the anchor on a CSS-scaled svg).
+      if (!m || !hasBbox(m)) return null;
+      // Most robust: the mark's own rendered node gives its client position directly
+      // (no coordinate math). SVG mode always has a node; raster mode has none, so
+      // fall back to the calibrated scene->client inverse, then rect+viewBox.
+      const nodes = elementsForKey(k);
+      if (nodes.length) {
+        const r = (nodes[0] as Element).getBoundingClientRect();
+        if (r.width || r.height) return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }
+      const cx = (m.x0! + m.x1!) / 2;
+      const cy = (m.y0! + m.y1!) / 2;
+      const f = calibrateXform();
+      if (f && f.sx && f.sy) return { x: (cx - f.ox) / f.sx, y: (cy - f.oy) / f.sy };
+      if (!svgEl) return null;
       const r = svgEl.getBoundingClientRect();
       const view = currentViewBox();
       if (!view.w || !view.h || !r.width || !r.height) return null;
-      const cx = (m.x0! + m.x1!) / 2;
-      const cy = (m.y0! + m.y1!) / 2;
       return {
         x: r.left + ((cx - view.x) / view.w) * r.width,
         y: r.top + ((cy - view.y) / view.h) * r.height
@@ -2591,7 +2648,7 @@ HTMLWidgets.widget({
       if (hoverRAF) return;
       hoverRAF = requestAnimationFrame(function () {
         hoverRAF = 0;
-        const u = toView(cx, cy);
+        const u = clientToScene(cx, cy); // calibrated hit-test mapping (robust to CSS scaling)
         let seed: string | null;
         if (hm === "x") seed = nearestAxisKey("x", u.x);
         else if (hm === "y") seed = nearestAxisKey("y", u.y);
@@ -2626,7 +2683,7 @@ HTMLWidgets.widget({
           : mode === "lasso" && opts.lasso ? "lasso"
           : opts.brush ? "brush" : "";
         if (dragging === "pan") el.classList.add("vellumwidget-panning");
-        if (dragging === "lasso") lassoPts = [{ x: down.ux, y: down.uy }]; // seed with the press point
+        if (dragging === "lasso") lassoPts = [clientToScene(down.cx, down.cy)]; // seed with the press point
         if (dragging === "") return;
         movedDuringDrag = true;
       }
@@ -2639,7 +2696,7 @@ HTMLWidgets.widget({
           Math.abs(ev.clientY - down.cy)
         );
       } else if (dragging === "lasso" && vb) {
-        lassoPts.push(toView(ev.clientX, ev.clientY));
+        lassoPts.push(clientToScene(ev.clientX, ev.clientY));
         updateLassoPath();
       } else if (dragging === "pan" && vb) {
         const u = toView(ev.clientX, ev.clientY);
@@ -2695,8 +2752,8 @@ HTMLWidgets.widget({
         return;
       }
       if (dragging === "brush" && down) {
-        const p1 = toView(down.cx, down.cy);
-        const p2 = toView(ev.clientX, ev.clientY);
+        const p1 = clientToScene(down.cx, down.cy);
+        const p2 = clientToScene(ev.clientX, ev.clientY);
         const rect: Bbox = {
           x0: Math.min(p1.x, p2.x), y0: Math.min(p1.y, p2.y),
           x1: Math.max(p1.x, p2.x), y1: Math.max(p1.y, p2.y)
@@ -2745,7 +2802,7 @@ HTMLWidgets.widget({
       // Raster mode has no per-element nodes, so resolve the click to the nearest
       // mark within a small radius (same snap the hover uses).
       if (k == null && rasterMode && opts.nearest !== false && elements.length) {
-        const u = toView(ev.clientX, ev.clientY);
+        const u = clientToScene(ev.clientX, ev.clientY);
         const rad = vb ? vb.w * 0.02 : 8;
         k = nearestKeyAt(u.x, u.y, rad);
         if (k != null && inert(k)) k = null; // don't click-snap to a hidden/filtered mark
