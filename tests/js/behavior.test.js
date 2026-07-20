@@ -2169,5 +2169,47 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     "cross-view: clearing the selection restores the filtered cell");
 }
 
+// ============ hover coordinate mapping under CSS scaling (regression) ============
+// An svg with width/height attributes that is CSS-scaled (the widget's
+// max-width:100%) must still snap hover to the mark under the cursor. Previously
+// toUser() trusted getScreenCTM(), which can report the attribute-based scale
+// rather than the rendered one, under-mapping the pointer toward the top-left
+// (hover highlighted a mark up-and-left of the cursor; click stayed correct
+// because it uses the DOM target). We now map via getBoundingClientRect + viewBox.
+{
+  const elZ = document.createElement("div");
+  document.body.appendChild(elZ);
+  const svgZ =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="576" height="384" viewBox="0 0 576 384">' +
+    '<g data-vellum-panel="p"><g data-vellum-pan="p">' +
+    '<rect data-key="A" x="46" y="46" width="8" height="8"/>' +
+    '<rect data-key="B" x="284" y="188" width="8" height="8"/>' +
+    '<rect data-key="C" x="520" y="330" width="8" height="8"/>' +
+    "</g></g></svg>";
+  const iZ = widgetDef.factory(elZ, 576, 384);
+  iZ.renderValue({
+    svg: svgZ,
+    elements: [
+      { key: "A", x0: 46, y0: 46, x1: 54, y1: 54 },
+      { key: "B", x0: 284, y0: 188, x1: 292, y1: 196 },
+      { key: "C", x0: 520, y0: 330, x1: 528, y1: 338 }
+    ],
+    options: { hover: true, tooltip: true, nearest: true }
+  });
+  const svgZE = elZ.querySelector("svg");
+  // svg is CSS-rendered at half size (288x192); a "buggy" getScreenCTM reports the
+  // attribute scale (1), while getBoundingClientRect reports the true rendered box.
+  svgZE.getScreenCTM = () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0, inverse: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }) });
+  svgZE.createSVGPoint = () => ({ x: 0, y: 0, matrixTransform(m) { return { x: m.a * this.x + m.e, y: m.d * this.y + m.f }; } });
+  svgZE.getBoundingClientRect = () => ({ left: 0, top: 0, width: 288, height: 192, right: 288, bottom: 192 });
+  // cursor over dot B: viewBox centre (288,192) rendered at 0.5 -> client (144,96)
+  const evZ = new window.MouseEvent("pointermove", { bubbles: true, clientX: 144, clientY: 96 });
+  Object.defineProperty(evZ, "target", { value: svgZE, enumerable: true }); // open space -> nearest scan
+  svgZE.dispatchEvent(evZ);
+  const hlZ = Array.from(elZ.querySelectorAll(".vellumwidget-hl")).map((n) => n.getAttribute("data-key"));
+  ok(hlZ.length === 1 && hlZ[0] === "B",
+    "hover on a CSS-scaled svg snaps to the mark under the cursor (not offset top-left)");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

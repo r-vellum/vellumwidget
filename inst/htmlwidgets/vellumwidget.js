@@ -1108,19 +1108,16 @@
       let joined = false;
       let ctSel = null;
       let ctFilt = null;
-      function toUser(clientX, clientY) {
-        if (svgEl && typeof svgEl.getScreenCTM === "function") {
-          const ctm = svgEl.getScreenCTM();
-          if (ctm && typeof svgEl.createSVGPoint === "function") {
-            const p = svgEl.createSVGPoint();
-            p.x = clientX;
-            p.y = clientY;
-            const u = p.matrixTransform(ctm.inverse());
-            return { x: u.x, y: u.y };
-          }
-        }
+      function currentViewBox() {
+        if (vb) return vb;
+        const parsed = svgEl ? parseViewBox(svgEl.getAttribute("viewBox")) : null;
+        if (parsed) return parsed;
         const r = (svgEl || el).getBoundingClientRect();
-        const view = vb || { x: 0, y: 0, w: r.width || 1, h: r.height || 1 };
+        return { x: 0, y: 0, w: r.width || 1, h: r.height || 1 };
+      }
+      function toUser(clientX, clientY) {
+        const r = (svgEl || el).getBoundingClientRect();
+        const view = currentViewBox();
         const fx = r.width ? (clientX - r.left) / r.width : 0;
         const fy = r.height ? (clientY - r.top) / r.height : 0;
         return { x: view.x + fx * view.w, y: view.y + fy * view.h };
@@ -1479,14 +1476,16 @@
       }
       function markClient(k) {
         const m = meta[k];
-        if (!m || !hasBbox(m) || !svgEl || typeof svgEl.getScreenCTM !== "function") return null;
-        const ctm = svgEl.getScreenCTM();
-        if (!ctm || typeof svgEl.createSVGPoint !== "function") return null;
-        const p = svgEl.createSVGPoint();
-        p.x = (m.x0 + m.x1) / 2;
-        p.y = (m.y0 + m.y1) / 2;
-        const s = p.matrixTransform(ctm);
-        return { x: s.x, y: s.y };
+        if (!m || !hasBbox(m) || !svgEl) return null;
+        const r = svgEl.getBoundingClientRect();
+        const view = currentViewBox();
+        if (!view.w || !view.h || !r.width || !r.height) return null;
+        const cx = (m.x0 + m.x1) / 2;
+        const cy = (m.y0 + m.y1) / 2;
+        return {
+          x: r.left + (cx - view.x) / view.w * r.width,
+          y: r.top + (cy - view.y) / view.h * r.height
+        };
       }
       function placeTip(clientX, clientY, anchorKey) {
         const box = el.getBoundingClientRect();
