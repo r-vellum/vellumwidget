@@ -2,6 +2,14 @@
 
 ## vellumwidget (development version)
 
+- **Declarative interactivity: filters.** A `vellumplot` plot that
+  declares `filter_by(selection)` now hides everything outside the
+  selection when that selection’s gesture fires — reusing the
+  cross-filter path. Driven entirely by the plot spec (no
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  argument). Single-view for now; the cross-view form (brush one panel,
+  filter another) follows.
+
 - **Declarative interactivity: conditional encodings.**
   [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
   now reads the interaction model a `vellumplot` plot declares
