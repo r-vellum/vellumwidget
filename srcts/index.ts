@@ -1000,20 +1000,26 @@ HTMLWidgets.widget({
     let ctFilt: CrosstalkHandle | null = null; // crosstalk filter handle
 
     // --- coordinates: client px -> SVG user space (viewBox coords) ---
-    function toUser(clientX: number, clientY: number): { x: number; y: number } {
-      if (svgEl && typeof svgEl.getScreenCTM === "function") {
-        const ctm = svgEl.getScreenCTM();
-        if (ctm && typeof svgEl.createSVGPoint === "function") {
-          const p = svgEl.createSVGPoint();
-          p.x = clientX;
-          p.y = clientY;
-          const u = p.matrixTransform(ctm.inverse());
-          return { x: u.x, y: u.y };
-        }
-      }
-      // fallback: map via the container rect + current viewBox
+    // The live viewBox: the zoom/pan state `vb`, else the svg's viewBox attribute,
+    // else the rendered box (a raw vellum scene may omit a viewBox).
+    function currentViewBox(): ViewBox {
+      if (vb) return vb;
+      const parsed = svgEl ? parseViewBox(svgEl.getAttribute("viewBox")) : null;
+      if (parsed) return parsed;
       const r = (svgEl || el).getBoundingClientRect();
-      const view = vb || { x: 0, y: 0, w: r.width || 1, h: r.height || 1 };
+      return { x: 0, y: 0, w: r.width || 1, h: r.height || 1 };
+    }
+    // Client px -> SVG user (viewBox) space, via the ACTUAL rendered box + the
+    // current viewBox. We deliberately do NOT use getScreenCTM(): for an svg with
+    // width/height attributes that is then CSS-scaled (the widget's
+    // `max-width:100%`), getScreenCTM() can report the attribute-based scale rather
+    // than the rendered one, which under-maps the pointer toward the top-left — so
+    // hover snapped to a mark up-and-left of the cursor while click (which uses the
+    // DOM target) stayed correct. `height:auto` keeps the rendered box at the
+    // viewBox aspect (no letterboxing), so this linear map is exact.
+    function toUser(clientX: number, clientY: number): { x: number; y: number } {
+      const r = (svgEl || el).getBoundingClientRect();
+      const view = currentViewBox();
       const fx = r.width ? (clientX - r.left) / r.width : 0;
       const fy = r.height ? (clientY - r.top) / r.height : 0;
       return { x: view.x + fx * view.w, y: view.y + fy * view.h };
@@ -1466,14 +1472,18 @@ HTMLWidgets.widget({
     // The hovered mark's centre in client px (for anchor-to-mark placement), or null.
     function markClient(k: string): { x: number; y: number } | null {
       const m = meta[k];
-      if (!m || !hasBbox(m) || !svgEl || typeof svgEl.getScreenCTM !== "function") return null;
-      const ctm = svgEl.getScreenCTM();
-      if (!ctm || typeof svgEl.createSVGPoint !== "function") return null;
-      const p = svgEl.createSVGPoint();
-      p.x = (m.x0 + m.x1) / 2;
-      p.y = (m.y0 + m.y1) / 2;
-      const s = p.matrixTransform(ctm);
-      return { x: s.x, y: s.y };
+      if (!m || !hasBbox(m) || !svgEl) return null;
+      // Rendered box + viewBox (see toUser: robust to CSS scaling; getScreenCTM
+      // would mis-place the anchor on a CSS-scaled svg).
+      const r = svgEl.getBoundingClientRect();
+      const view = currentViewBox();
+      if (!view.w || !view.h || !r.width || !r.height) return null;
+      const cx = (m.x0! + m.x1!) / 2;
+      const cy = (m.y0! + m.y1!) / 2;
+      return {
+        x: r.left + ((cx - view.x) / view.w) * r.width,
+        y: r.top + ((cy - view.y) / view.h) * r.height
+      };
     }
     // Position the tip: at the cursor (follow, default) or anchored above the mark
     // (`tooltip_follow = FALSE`). Auto-flips below when there isn't room above, and
