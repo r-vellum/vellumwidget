@@ -2217,5 +2217,89 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     "hover on a CSS-scaled svg snaps to the mark under the cursor (not offset top-left)");
 }
 
+// --- graph neighbour highlighting (select_neighbours preset) ---------------
+// Triangle a-b-c plus a pendant d off c. Edges carry source/target endpoint keys.
+{
+  const gsvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">' +
+    '<g data-vellum-panel="panel-1-1">' +
+    '<path data-key="e1" d="M0 0L10 10"/>' +
+    '<path data-key="e2" d="M10 10L20 0"/>' +
+    '<path data-key="e3" d="M20 0L0 0"/>' +
+    '<path data-key="e4" d="M20 0L30 30"/>' +
+    '<circle data-key="a" cx="0" cy="0" r="3"/>' +
+    '<circle data-key="b" cx="10" cy="10" r="3"/>' +
+    '<circle data-key="c" cx="20" cy="0" r="3"/>' +
+    '<circle data-key="d" cx="30" cy="30" r="3"/>' +
+    "</g></svg>";
+  const edges = [
+    { key: "e1", source: "a", target: "b" },
+    { key: "e2", source: "b", target: "c" },
+    { key: "e3", source: "c", target: "a" },
+    { key: "e4", source: "c", target: "d" }
+  ];
+  const nodes = [{ key: "a" }, { key: "b" }, { key: "c" }, { key: "d" }];
+  const nbrSel = { name: "nbr", kind: "point", on: "hover", expand: { mode: "neighbours", degree: 1, edges: true } };
+
+  const sortJSON = (xs) => JSON.stringify(xs.slice().sort());
+
+  // degree-1 preset
+  const elG = document.createElement("div");
+  document.body.appendChild(elG);
+  const instG = widgetDef.factory(elG, 300, 300);
+  instG.renderValue({
+    svg: gsvg,
+    elements: nodes.concat(edges),
+    interactions: { selections: [nbrSel] },
+    options: { tooltip: true, hover: true, select: true }
+  });
+  const T = instG._test;
+  const adj = T.graphAdjacency();
+  ok(adj.neighbourExpand && adj.neighbourExpand.degree === 1, "select_neighbours enables the neighbourhood projection");
+  ok(adj.edgeEndpoints.e1 && adj.edgeEndpoints.e1[0] === "a" && adj.edgeEndpoints.e1[1] === "b", "edge endpoints reconstructed");
+  ok(sortJSON(adj.incidentEdges.c) === sortJSON(["e2", "e3", "e4"]), "node c's incident edges reconstructed");
+  ok(sortJSON(T.linkedKeys("c")) === sortJSON(["a", "b", "c", "d", "e2", "e3", "e4"]), "hover node -> node + incident edges + neighbour nodes");
+  ok(sortJSON(T.linkedKeys("e1")) === sortJSON(["a", "b", "e1"]), "hover edge -> the edge + its two endpoints");
+  // a hovered node dims the rest and highlights its neighbourhood in the DOM
+  const evc = new window.MouseEvent("pointermove", { bubbles: true, clientX: 20, clientY: 20 });
+  Object.defineProperty(evc, "target", { value: elG.querySelector('[data-key="c"]'), enumerable: true });
+  elG.querySelector("svg").dispatchEvent(evc);
+  const hl = Array.from(elG.querySelectorAll(".vellumwidget-hl")).map((n) => n.getAttribute("data-key")).sort();
+  ok(sortJSON(hl) === sortJSON(["a", "b", "c", "d", "e2", "e3", "e4"]), "DOM highlights the whole neighbourhood on node hover");
+  ok(elG.classList.contains("vellumwidget-hovering"), "root dims non-neighbourhood elements");
+
+  // edges = FALSE excludes incident edges
+  const elN = document.createElement("div");
+  document.body.appendChild(elN);
+  const instN = widgetDef.factory(elN, 300, 300);
+  instN.renderValue({
+    svg: gsvg,
+    elements: nodes.concat(edges),
+    interactions: { selections: [{ name: "nbr", kind: "point", on: "hover", expand: { mode: "neighbours", degree: 1, edges: false } }] },
+    options: { hover: true }
+  });
+  ok(sortJSON(instN._test.linkedKeys("c")) === sortJSON(["a", "b", "c", "d"]), "edges = FALSE highlights only nodes");
+
+  // degree 2 from a reaches d (a-c-d)
+  const elD = document.createElement("div");
+  document.body.appendChild(elD);
+  const instD = widgetDef.factory(elD, 300, 300);
+  instD.renderValue({
+    svg: gsvg,
+    elements: nodes.concat(edges),
+    interactions: { selections: [{ name: "nbr", kind: "point", on: "hover", expand: { mode: "neighbours", degree: 2, edges: false } }] },
+    options: { hover: true }
+  });
+  ok(instD._test.linkedKeys("a").indexOf("d") !== -1, "degree = 2 reaches neighbours-of-neighbours");
+
+  // without the preset, a graph node hover stays single-element
+  const elP = document.createElement("div");
+  document.body.appendChild(elP);
+  const instP = widgetDef.factory(elP, 300, 300);
+  instP.renderValue({ svg: gsvg, elements: nodes.concat(edges), options: { hover: true } });
+  ok(sortJSON(instP._test.linkedKeys("c")) === sortJSON(["c"]), "no select_neighbours -> node hover highlights only itself");
+  ok(instP._test.graphAdjacency().neighbourExpand === null, "no preset -> no neighbourhood projection");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);
