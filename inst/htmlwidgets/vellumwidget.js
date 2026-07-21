@@ -1319,10 +1319,10 @@
       }
       function nearestKeyAt(x, y, maxDist) {
         if (spatialIndex) {
-          const ids = spatialIndex.neighbors(x, y, 1, maxDist);
+          const ids = spatialIndex.neighbors(x, y, 1, maxDist, (id) => elements[indexToElem[id]].source == null);
           return ids.length ? elements[indexToElem[ids[0]]].key : null;
         }
-        return nearestKey(elements, x, y, maxDist);
+        return nearestKey(elements.filter((e) => e.source == null), x, y, maxDist);
       }
       function brushKeysIn(rect) {
         if (!spatialIndex) return brushKeys(elements, rect);
