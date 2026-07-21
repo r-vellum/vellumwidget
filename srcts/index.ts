@@ -55,6 +55,8 @@ interface ElemMeta extends Partial<Bbox> {
   cond?: string[]; // conditional-encoding tags ("<sel>:<aes>") this element participates in
   filt?: string[]; // filter selection names whose filter_by() targets this element's view
   join?: string; // cross-view identity (a composition cell's original id, keys being per-cell unique)
+  source?: string; // graph edge: key of the endpoint node it starts at
+  target?: string; // graph edge: key of the endpoint node it ends at
 }
 
 // The interactive colorbar descriptor (continuous colour scale): the gradient
@@ -82,6 +84,9 @@ interface SelDef {
   fields?: string[] | string | null;
   toggle?: boolean;
   empty?: boolean;
+  // A projection that expands a raw gesture to a related set before applying it.
+  // From select_neighbours(): a graph node gesture -> its neighbourhood.
+  expand?: { mode: string; degree?: number; edges?: boolean } | null;
 }
 interface CondDef {
   selection: string;
@@ -172,6 +177,8 @@ interface ColumnElements {
   cond?: (string[] | string | null)[] | string[] | string;
   filt?: (string[] | string | null)[] | string[] | string;
   join?: (string | null)[] | string;
+  source?: (string | null)[] | string;
+  target?: (string | null)[] | string;
 }
 
 // Per-axis scale descriptor (from vellumplot's `scales` panel meta): the data and
@@ -266,6 +273,8 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
   const cond = c.cond != null ? asColumn<string[] | string | null>(c.cond) : null;
   const filt = c.filt != null ? asColumn<string[] | string | null>(c.filt) : null;
   const join = c.join != null ? asColumn<string | null>(c.join) : null;
+  const source = c.source != null ? asColumn<string | null>(c.source) : null;
+  const target = c.target != null ? asColumn<string | null>(c.target) : null;
   const out: ElemMeta[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const e: ElemMeta = { key: String(key[i]) };
@@ -299,6 +308,8 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
       }
     }
     if (join && join[i] != null) e.join = String(join[i]);
+    if (source && source[i] != null) e.source = String(source[i]);
+    if (target && target[i] != null) e.target = String(target[i]);
     out[i] = e;
   }
   return out;
@@ -904,6 +915,16 @@ HTMLWidgets.widget({
     let colorHiddenSet: Record<string, boolean> = {};
     let meta: Record<string, ElemMeta> = {};
     let groups: Record<string, string[]> = {};
+    // Graph adjacency, reconstructed once per render from edge source/target meta
+    // (empty for a non-graph scene): node -> its incident edge keys, node -> its
+    // neighbour node keys, edge -> its two endpoint node keys. Drives neighbour
+    // highlighting (linkedKeys) without any per-node link list in the payload.
+    let incidentEdges: Record<string, string[]> = {};
+    let neighbourNodes: Record<string, string[]> = {};
+    let edgeEndpoints: Record<string, [string, string]> = {};
+    // The select_neighbours() projection, if declared (else null): a node/edge
+    // gesture expands to its graph neighbourhood.
+    let neighbourExpand: { degree: number; edges: boolean } | null = null;
     let legendIndex: Record<string, string[]> = {}; // series key -> member element keys
     let legendSwatch: Record<string, string[]> = {}; // series key -> its legend swatch element keys
     let legendOff: Record<string, boolean> = {}; // series toggled off via a legend-click (hide/mute)
@@ -1104,12 +1125,54 @@ HTMLWidgets.widget({
       const nodes = holder.querySelectorAll("." + cls);
       for (let i = 0; i < nodes.length; i++) nodes[i].classList.remove(cls);
     }
+    // The graph neighbourhood of node `k` out to `degree` hops: the node, its
+    // neighbour nodes, and (when `edges`) its incident edges, collected by BFS over
+    // the reconstructed adjacency. Used by select_neighbours().
+    function graphNeighbourhood(k: string, degree: number, edges: boolean): string[] {
+      const seen: Record<string, boolean> = { [k]: true };
+      const out: string[] = [k];
+      let frontier = [k];
+      for (let d = 0; d < degree; d++) {
+        const next: string[] = [];
+        for (let i = 0; i < frontier.length; i++) {
+          const u = frontier[i];
+          if (edges) {
+            const inc = incidentEdges[u] || [];
+            for (let j = 0; j < inc.length; j++) {
+              if (!seen[inc[j]]) {
+                seen[inc[j]] = true;
+                out.push(inc[j]);
+              }
+            }
+          }
+          const nb = neighbourNodes[u] || [];
+          for (let j = 0; j < nb.length; j++) {
+            if (!seen[nb[j]]) {
+              seen[nb[j]] = true;
+              out.push(nb[j]);
+              next.push(nb[j]);
+            }
+          }
+        }
+        frontier = next;
+      }
+      return out;
+    }
     // The keys a hover or click on `k` acts on: a legend swatch drives its whole
-    // series (`legend_for` -> the marks whose `legend` contains it); a mark
-    // projects by its `hover_group`; otherwise just itself.
+    // series (`legend_for` -> the marks whose `legend` contains it). Under a
+    // select_neighbours() preset, a graph edge drives its two endpoint nodes and a
+    // graph node drives its neighbourhood. Otherwise a mark projects by its
+    // `hover_group`, else just itself.
     function linkedKeys(k: string): string[] {
       const m = meta[k];
       if (m && m.legend_for != null) return (legendIndex[m.legend_for] || []).concat([k]);
+      if (neighbourExpand) {
+        const ep = edgeEndpoints[k];
+        if (ep) return [k, ep[0], ep[1]]; // an edge -> its endpoints
+        if (incidentEdges[k] || neighbourNodes[k]) {
+          return graphNeighbourhood(k, neighbourExpand.degree, neighbourExpand.edges);
+        }
+      }
       const g = m && m.hover_group;
       return g && groups[g] ? groups[g] : [k];
     }
@@ -1760,7 +1823,29 @@ HTMLWidgets.widget({
     // stage.)
     function selectionMembers(sel: SelDef): Record<string, boolean> {
       const set: Record<string, boolean> = {};
-      const keys = sel.on === "hover" ? lastHoverKeys : selectedKeys();
+      let keys = sel.on === "hover" ? lastHoverKeys : selectedKeys();
+      // A click-driven select_neighbours() expands the raw clicked nodes to their
+      // neighbourhood so a condition/filter reacts to the whole set. Hover keys are
+      // already the linkedKeys() projection, so they are left as-is.
+      if (
+        sel.on !== "hover" &&
+        sel.expand &&
+        sel.expand.mode === "neighbours" &&
+        neighbourExpand
+      ) {
+        const out: string[] = [];
+        const seen: Record<string, boolean> = {};
+        for (let i = 0; i < keys.length; i++) {
+          const proj = linkedKeys(keys[i]);
+          for (let j = 0; j < proj.length; j++) {
+            if (!seen[proj[j]]) {
+              seen[proj[j]] = true;
+              out.push(proj[j]);
+            }
+          }
+        }
+        keys = out;
+      }
       for (let i = 0; i < keys.length; i++) set[keys[i]] = true;
       return set;
     }
@@ -3326,6 +3411,10 @@ HTMLWidgets.widget({
         lastHoverKeys = [];
         meta = {};
         groups = {};
+        incidentEdges = {};
+        neighbourNodes = {};
+        edgeEndpoints = {};
+        neighbourExpand = null;
         legendIndex = {};
         legendSwatch = {};
         legendOff = {};
@@ -3339,6 +3428,15 @@ HTMLWidgets.widget({
           const e = elements[i];
           meta[e.key] = e;
           if (e.hover_group != null) (groups[e.hover_group] = groups[e.hover_group] || []).push(e.key);
+          // Graph adjacency: an edge (source+target present) links its two endpoint
+          // nodes. Build node->edges, node->neighbours, edge->endpoints in one pass.
+          if (e.source != null && e.target != null) {
+            edgeEndpoints[e.key] = [e.source, e.target];
+            (incidentEdges[e.source] = incidentEdges[e.source] || []).push(e.key);
+            (incidentEdges[e.target] = incidentEdges[e.target] || []).push(e.key);
+            (neighbourNodes[e.source] = neighbourNodes[e.source] || []).push(e.target);
+            (neighbourNodes[e.target] = neighbourNodes[e.target] || []).push(e.source);
+          }
           if (e.legend != null) {
             const series = Array.isArray(e.legend) ? e.legend : [e.legend];
             for (let s = 0; s < series.length; s++) {
@@ -3346,6 +3444,19 @@ HTMLWidgets.widget({
             }
           }
           if (e.legend_for != null) (legendSwatch[e.legend_for] = legendSwatch[e.legend_for] || []).push(e.key);
+        }
+        // A declared select_neighbours() selection turns on graph-neighbourhood
+        // projection in linkedKeys / selectionMembers.
+        const sels = (interactions && interactions.selections) || [];
+        for (let i = 0; i < sels.length; i++) {
+          const ex = sels[i].expand;
+          if (ex && ex.mode === "neighbours") {
+            neighbourExpand = {
+              degree: Math.max(1, Math.floor(ex.degree || 1)),
+              edges: ex.edges !== false,
+            };
+            break;
+          }
         }
 
         if (!holder) {
@@ -3524,7 +3635,18 @@ HTMLWidgets.widget({
           return Array.prototype.every.call(nodes, function (n: Element) { return (n as SVGElement).style.display === "none"; });
         },
         setView: function (nvb: ViewBox) { vb = { x: nvb.x, y: nvb.y, w: nvb.w, h: nvb.h }; applyViewBox(); },
-        toView: toView
+        toView: toView,
+        // Graph neighbour highlighting: the projection a hover/click acts on, and
+        // the reconstructed adjacency + the select_neighbours() config.
+        linkedKeys: linkedKeys,
+        graphAdjacency: function () {
+          return {
+            incidentEdges: incidentEdges,
+            neighbourNodes: neighbourNodes,
+            edgeEndpoints: edgeEndpoints,
+            neighbourExpand: neighbourExpand
+          };
+        }
       }
     };
   }

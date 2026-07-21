@@ -16,6 +16,12 @@
 #' plot that declares none renders as a static (but still embeddable) SVG. A
 #' hovered element with a `data_id` but no `tooltip` shows its key.
 #'
+#' Graph (`vgraph()`) plots that declare `vellumplot::select_neighbours()` are
+#' enacted here: hovering a node spotlights its neighbourhood (the node, its
+#' incident edges, and its adjacent nodes) and dims the rest, and hovering an edge
+#' spotlights its two endpoints. The adjacency is reconstructed from the endpoint
+#' identity each edge carries --- no extra configuration.
+#'
 #' The scene metadata `vellumwidget` reads --- the [`vellum::scene_model()`] element
 #' table and the SVG `data-key` / `data-vellum-*` attributes --- is specified in
 #' vellum's "The scene contract" vignette
@@ -421,7 +427,12 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     hover_color = meta_col("hover_color", .css_color),
     selected_color = meta_col("selected_color", .css_color),
     # A legend swatch's series it drives.
-    legend_for = meta_col("legend_for")
+    legend_for = meta_col("legend_for"),
+    # Graph edge endpoints: the two node keys this edge joins, so the runtime can
+    # reconstruct node<->edge adjacency for neighbour highlighting. Absent for
+    # non-edge elements / non-graph plots.
+    source = meta_col("source"),
+    target = meta_col("target")
   )
   # Legend membership is ragged (a mark may belong to several series) -> a
   # list-column; each entry is a character vector, or `character(0)` when absent.

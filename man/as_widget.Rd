@@ -177,6 +177,12 @@ come from the reserved \code{data_id} / \code{tooltip} / \code{hover_group} mark
 plot that declares none renders as a static (but still embeddable) SVG. A
 hovered element with a \code{data_id} but no \code{tooltip} shows its key.
 
+Graph (\code{vgraph()}) plots that declare \code{vellumplot::select_neighbours()} are
+enacted here: hovering a node spotlights its neighbourhood (the node, its
+incident edges, and its adjacent nodes) and dims the rest, and hovering an edge
+spotlights its two endpoints. The adjacency is reconstructed from the endpoint
+identity each edge carries --- no extra configuration.
+
 The scene metadata \code{vellumwidget} reads --- the \code{\link[vellum:scene_model]{vellum::scene_model()}} element
 table and the SVG \code{data-key} / \verb{data-vellum-*} attributes --- is specified in
 vellum's "The scene contract" vignette
