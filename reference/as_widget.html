@@ -292,6 +292,11 @@ base image and this argument is ignored (with a warning if set explicitly).</p><
 come from the reserved <code>data_id</code> / <code>tooltip</code> / <code>hover_group</code> mark arguments; a
 plot that declares none renders as a static (but still embeddable) SVG. A
 hovered element with a <code>data_id</code> but no <code>tooltip</code> shows its key.</p>
+<p>Graph (<code><a href="https://r-vellum.github.io/vellumplot/reference/vgraph.html" class="external-link">vgraph()</a></code>) plots that declare <code><a href="https://r-vellum.github.io/vellumplot/reference/select_neighbours.html" class="external-link">vellumplot::select_neighbours()</a></code> are
+enacted here: hovering a node spotlights its neighbourhood (the node, its
+incident edges, and its adjacent nodes) and dims the rest, and hovering an edge
+spotlights its two endpoints. The adjacency is reconstructed from the endpoint
+identity each edge carries — no extra configuration.</p>
 <p>The scene metadata <code>vellumwidget</code> reads — the <code><a href="https://r-vellum.github.io/vellum/reference/scene_model.html" class="external-link">vellum::scene_model()</a></code> element
 table and the SVG <code>data-key</code> / <code>data-vellum-*</code> attributes — is specified in
 vellum's "The scene contract" vignette

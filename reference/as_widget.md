@@ -248,6 +248,16 @@ Interactivity is driven by the keys/metadata a plot declares. In
 static (but still embeddable) SVG. A hovered element with a `data_id`
 but no `tooltip` shows its key.
 
+Graph
+([`vgraph()`](https://r-vellum.github.io/vellumplot/reference/vgraph.html))
+plots that declare
+[`vellumplot::select_neighbours()`](https://r-vellum.github.io/vellumplot/reference/select_neighbours.html)
+are enacted here: hovering a node spotlights its neighbourhood (the
+node, its incident edges, and its adjacent nodes) and dims the rest, and
+hovering an edge spotlights its two endpoints. The adjacency is
+reconstructed from the endpoint identity each edge carries — no extra
+configuration.
+
 The scene metadata `vellumwidget` reads — the
 [`vellum::scene_model()`](https://r-vellum.github.io/vellum/reference/scene_model.html)
 element table and the SVG `data-key` / `data-vellum-*` attributes — is

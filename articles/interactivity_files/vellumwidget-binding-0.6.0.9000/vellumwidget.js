@@ -543,6 +543,8 @@
     const cond = c.cond != null ? asColumn(c.cond) : null;
     const filt = c.filt != null ? asColumn(c.filt) : null;
     const join = c.join != null ? asColumn(c.join) : null;
+    const source = c.source != null ? asColumn(c.source) : null;
+    const target = c.target != null ? asColumn(c.target) : null;
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       const e = { key: String(key[i]) };
@@ -574,6 +576,8 @@
         }
       }
       if (join && join[i] != null) e.join = String(join[i]);
+      if (source && source[i] != null) e.source = String(source[i]);
+      if (target && target[i] != null) e.target = String(target[i]);
       out[i] = e;
     }
     return out;
@@ -1026,6 +1030,10 @@
       let colorHiddenSet = {};
       let meta = {};
       let groups = {};
+      let incidentEdges = {};
+      let neighbourNodes = {};
+      let edgeEndpoints = {};
+      let neighbourExpand = null;
       let legendIndex = {};
       let legendSwatch = {};
       let legendOff = {};
@@ -1180,9 +1188,46 @@
         const nodes = holder.querySelectorAll("." + cls);
         for (let i = 0; i < nodes.length; i++) nodes[i].classList.remove(cls);
       }
+      function graphNeighbourhood(k, degree, edges) {
+        const seen = { [k]: true };
+        const out = [k];
+        let frontier = [k];
+        for (let d = 0; d < degree; d++) {
+          const next = [];
+          for (let i = 0; i < frontier.length; i++) {
+            const u = frontier[i];
+            if (edges) {
+              const inc = incidentEdges[u] || [];
+              for (let j = 0; j < inc.length; j++) {
+                if (!seen[inc[j]]) {
+                  seen[inc[j]] = true;
+                  out.push(inc[j]);
+                }
+              }
+            }
+            const nb = neighbourNodes[u] || [];
+            for (let j = 0; j < nb.length; j++) {
+              if (!seen[nb[j]]) {
+                seen[nb[j]] = true;
+                out.push(nb[j]);
+                next.push(nb[j]);
+              }
+            }
+          }
+          frontier = next;
+        }
+        return out;
+      }
       function linkedKeys(k) {
         const m = meta[k];
         if (m && m.legend_for != null) return (legendIndex[m.legend_for] || []).concat([k]);
+        if (neighbourExpand) {
+          const ep = edgeEndpoints[k];
+          if (ep) return [k, ep[0], ep[1]];
+          if (incidentEdges[k] || neighbourNodes[k]) {
+            return graphNeighbourhood(k, neighbourExpand.degree, neighbourExpand.edges);
+          }
+        }
         const g = m && m.hover_group;
         return g && groups[g] ? groups[g] : [k];
       }
@@ -1721,7 +1766,21 @@
       }
       function selectionMembers(sel) {
         const set = {};
-        const keys = sel.on === "hover" ? lastHoverKeys : selectedKeys();
+        let keys = sel.on === "hover" ? lastHoverKeys : selectedKeys();
+        if (sel.on !== "hover" && sel.expand && sel.expand.mode === "neighbours" && neighbourExpand) {
+          const out = [];
+          const seen = {};
+          for (let i = 0; i < keys.length; i++) {
+            const proj = linkedKeys(keys[i]);
+            for (let j = 0; j < proj.length; j++) {
+              if (!seen[proj[j]]) {
+                seen[proj[j]] = true;
+                out.push(proj[j]);
+              }
+            }
+          }
+          keys = out;
+        }
         for (let i = 0; i < keys.length; i++) set[keys[i]] = true;
         return set;
       }
@@ -3078,6 +3137,10 @@
           lastHoverKeys = [];
           meta = {};
           groups = {};
+          incidentEdges = {};
+          neighbourNodes = {};
+          edgeEndpoints = {};
+          neighbourExpand = null;
           legendIndex = {};
           legendSwatch = {};
           legendOff = {};
@@ -3091,6 +3154,13 @@
             const e = elements[i];
             meta[e.key] = e;
             if (e.hover_group != null) (groups[e.hover_group] = groups[e.hover_group] || []).push(e.key);
+            if (e.source != null && e.target != null) {
+              edgeEndpoints[e.key] = [e.source, e.target];
+              (incidentEdges[e.source] = incidentEdges[e.source] || []).push(e.key);
+              (incidentEdges[e.target] = incidentEdges[e.target] || []).push(e.key);
+              (neighbourNodes[e.source] = neighbourNodes[e.source] || []).push(e.target);
+              (neighbourNodes[e.target] = neighbourNodes[e.target] || []).push(e.source);
+            }
             if (e.legend != null) {
               const series = Array.isArray(e.legend) ? e.legend : [e.legend];
               for (let s = 0; s < series.length; s++) {
@@ -3098,6 +3168,17 @@
               }
             }
             if (e.legend_for != null) (legendSwatch[e.legend_for] = legendSwatch[e.legend_for] || []).push(e.key);
+          }
+          const sels = interactions && interactions.selections || [];
+          for (let i = 0; i < sels.length; i++) {
+            const ex = sels[i].expand;
+            if (ex && ex.mode === "neighbours") {
+              neighbourExpand = {
+                degree: Math.max(1, Math.floor(ex.degree || 1)),
+                edges: ex.edges !== false
+              };
+              break;
+            }
           }
           if (!holder) {
             stage = document.createElement("div");
@@ -3280,7 +3361,18 @@
             vb = { x: nvb.x, y: nvb.y, w: nvb.w, h: nvb.h };
             applyViewBox();
           },
-          toView
+          toView,
+          // Graph neighbour highlighting: the projection a hover/click acts on, and
+          // the reconstructed adjacency + the select_neighbours() config.
+          linkedKeys,
+          graphAdjacency: function() {
+            return {
+              incidentEdges,
+              neighbourNodes,
+              edgeEndpoints,
+              neighbourExpand
+            };
+          }
         }
       };
     }
