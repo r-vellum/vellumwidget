@@ -1888,6 +1888,14 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   const noPanSvg = linSvg.replace('<g data-vellum-pan="panel-1-1">', "").replace("</g></g>", "</g>");
   ok(mountAZ({ axisZoom: true }, noPanSvg).inst._test.axisZoomActive() === false,
     "axis_zoom: no pannable group (older vellum) falls back to viewBox zoom");
+  // a void panel (a graph's aspect-locked layout / theme_void: no static axes to
+  // re-tick) declines, so plain viewBox zoom stands and no axes are invented.
+  const voidSvg = linSvg.replace(/<g data-vellum-panel="axis-[xy][^"]*">.*?<\/g>/g, "");
+  const voidAZ = mountAZ({ axisZoom: true }, voidSvg);
+  ok(voidAZ.inst._test.axisZoomActive() === false,
+    "axis_zoom: a void panel (no static axes, e.g. a graph) falls back to viewBox zoom");
+  ok(voidAZ.inst._test.retickLabels().length === 0,
+    "axis_zoom: a void panel invents no re-ticked axes");
 
   // navigator + axis_zoom cooperate: the navigator's x-only zoom is rendered THROUGH
   // axis_zoom (fixed frame, re-ticked x-axis) rather than the stretch fallback.
