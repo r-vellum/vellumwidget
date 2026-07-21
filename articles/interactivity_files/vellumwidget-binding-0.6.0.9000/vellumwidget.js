@@ -2054,6 +2054,7 @@
         if (!opts.axisZoom || rasterMode || !svgEl || !vb0 || !stage || panels.length !== 1) return;
         const p = panels[0];
         if (!isLinearAxis(p.x) || !isLinearAxis(p.y)) return;
+        if (!svgEl.querySelector('[data-vellum-panel^="axis-x"] text, [data-vellum-panel^="axis-y"] text')) return;
         const pan = svgEl.querySelector('[data-vellum-pan="' + cssEscape(p.name) + '"]');
         const outer = svgEl.querySelector('[data-vellum-panel="' + cssEscape(p.name) + '"]');
         if (!pan || !outer) return;
