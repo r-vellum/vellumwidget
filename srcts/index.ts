@@ -2175,6 +2175,11 @@ HTMLWidgets.widget({
       if (!opts.axisZoom || rasterMode || !svgEl || !vb0 || !stage || panels.length !== 1) return;
       const p = panels[0];
       if (!isLinearAxis(p.x) || !isLinearAxis(p.y)) return;
+      // A void panel (a graph's aspect-locked layout, or theme_void) has no static
+      // axes in the frozen scene. There is nothing to re-tick, and re-ticking would
+      // invent axes the render never had; the independent-axis pan transform would
+      // also shear an aspect-locked graph. Fall back to plain viewBox zoom.
+      if (!svgEl.querySelector('[data-vellum-panel^="axis-x"] text, [data-vellum-panel^="axis-y"] text')) return;
       const pan = svgEl.querySelector('[data-vellum-pan="' + cssEscape(p.name) + '"]');
       const outer = svgEl.querySelector('[data-vellum-panel="' + cssEscape(p.name) + '"]');
       if (!pan || !outer) return; // upstream not pannable (older vellum/vellumplot)
