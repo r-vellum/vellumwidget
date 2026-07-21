@@ -1290,11 +1290,17 @@ HTMLWidgets.widget({
     }
     // Nearest element key within `maxDist` of (x, y) — index-backed when available.
     function nearestKeyAt(x: number, y: number, maxDist: number): string | null {
+      // Skip graph edges in the open-space nearest snap: an edge's bbox is the
+      // whole diagonal rectangle between its endpoints, so a bbox-distance nearest
+      // would snap to it anywhere inside that rectangle even when the cursor is
+      // nowhere near the line — highlighting edges the user isn't pointing at.
+      // Edges still highlight on a direct hover (the pointer is over the path);
+      // the open-space snap targets nodes. No-op when no element is an edge.
       if (spatialIndex) {
-        const ids = spatialIndex.neighbors(x, y, 1, maxDist);
+        const ids = spatialIndex.neighbors(x, y, 1, maxDist, (id) => elements[indexToElem[id]].source == null);
         return ids.length ? elements[indexToElem[ids[0]]].key : null;
       }
-      return nearestKey(elements, x, y, maxDist);
+      return nearestKey(elements.filter((e) => e.source == null), x, y, maxDist);
     }
     // Distinct keys whose bbox intersects `rect` — index-backed when available.
     // Item ids are mapped back to element order and de-duplicated so a key spanning

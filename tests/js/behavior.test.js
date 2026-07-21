@@ -2309,5 +2309,25 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(instP._test.graphAdjacency().neighbourExpand === null, "no preset -> no neighbourhood projection");
 }
 
+// --- nearest-hover skips graph edges (bbox of a diagonal edge is huge) -------
+{
+  const eG = document.createElement("div");
+  document.body.appendChild(eG);
+  const iG = widgetDef.factory(eG, 200, 200);
+  iG.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g data-vellum-panel="panel-1-1">' +
+      '<circle data-key="n1" cx="1" cy="1" r="1"/><path data-key="ed" d="M0 0L100 100"/></g></svg>',
+    // n1: a small node bbox at the corner; ed: an edge whose bbox spans the whole
+    // 100x100 diagonal. source/target present only on the edge.
+    elements: { key: ["n1", "ed"], x0: [0, 0], y0: [0, 0], x1: [2, 100], y1: [2, 100], source: [null, "n1"], target: [null, "n2"] },
+    options: { hover: true }
+  });
+  const T2 = iG._test;
+  // (90,10) is deep inside the edge's bbox (bbox-distance 0) but far from the node;
+  // the snap must skip the edge and return the node, not the edge.
+  ok(T2.nearestKeyAt(90, 10, 1000) === "n1", "nearest-hover in open space skips the edge (snaps to the node)");
+  ok(T2.nearestKeyAt(1, 1, 1000) === "n1", "nearest-hover still finds a node when near it");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);
