@@ -30,7 +30,9 @@ home:
   description: >
     vellumwidget turns a vellum scene (or a vellumplot plot) into a self-contained,
     client-side interactive HTML widget -- hover, select, brush, pan/zoom, and
-    linked views -- with no Shiny and no server round-trip.
+    linked views -- with no Shiny and no server round-trip. It draws nothing
+    itself: it hosts the scene vellum already rendered, driven by the per-element
+    geometry table that comes with it.
   sidebar:
     structure: [ecosystem, links, license, community, citation, authors, dev]
     components:

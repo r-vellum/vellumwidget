@@ -27,6 +27,14 @@ Interactivity is *declared in the grammar*: a mark's `data_id`, `tooltip`, and
 widget reads. A plot that declares none still renders as a static (but
 embeddable) SVG.
 
+The widget itself draws nothing. `vellum` hands it the rendered SVG plus
+`scene_model()`, one row per drawn element carrying that element's data key and its
+resolved device-pixel box, and everything below is that table plus event handlers.
+Two things follow. What you interact with is the *same* scene as the static figure,
+not a second rendering of your plot. And gestures that need geometry rather than
+styling — brushing a rectangle, zooming to a region, stepping between marks with
+the arrow keys — are table lookups rather than new drawing code.
+
 Everything here scales to a few thousand marks on the per-element SVG path. Past
 that, the widget switches to a raster strategy so a 100k-point scatter stays
 navigable; see [Very large scenes](big-data.html).

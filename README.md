@@ -8,29 +8,40 @@
 [![R-CMD-check](https://github.com/r-vellum/vellumwidget/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/r-vellum/vellumwidget/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
-**vellumwidget** turns a [vellum](https://github.com/r-vellum/vellum) scene
-— or a [vellumplot](https://github.com/r-vellum/vellumplot) plot — into a
-self-contained, client-side interactive HTML widget: **hover tooltips +
-highlighting, click selection, rectangular brush-select, pan/zoom, and a
-toolbar**, with no Shiny and no server round-trip. It is the host
-adapter of the vellum interactivity stack: `vellum` emits per-element
-`data-key`s, bounding boxes, and a `scene_model()` element table,
-`vellumplot` declares what is interactive, and `vellumwidget` hosts it.
+**vellumwidget** turns a [vellum](https://github.com/r-vellum/vellum)
+scene — or a [vellumplot](https://github.com/r-vellum/vellumplot) plot —
+into a self-contained, client-side interactive HTML widget: **hover
+tooltips + highlighting, click selection, rectangular brush-select,
+pan/zoom, and a toolbar**, with no Shiny and no server round-trip.
+
+It adds no drawing code of its own, and that is the point. `vellum`
+emits the SVG together with a `scene_model()` table giving every
+element’s data key and its resolved device-pixel box; `vellumplot`
+declares which marks are interactive; and `vellumwidget` is a thin
+client over those two. So the widget shows *the same scene* as your
+static figure — same layout, same text metrics, same geometry — rather
+than a re-drawing of your plot in another engine, and behaviour that
+needs positions (a rectangular brush, pan/zoom, arrow-key navigation
+between marks) is a table lookup rather than new machinery.
+
+Client-side interactivity from R is not new: `ggiraph` has done it well
+for years. What differs here is where the identity comes from (a
+geometry table rather than tagged elements plus CSS) and that there are
+no `*_interactive()` twins of the marks to remember.
 
 **Interactions:** hover (tooltip + highlight, with nearest-mark snapping
 and `hover_group` linking) · shared/unified hover with an optional
 crosshair (`hover_mode = "x"`/`"y"`: one tooltip listing every series at
-the hovered x/y) · click-select (single/multiple) · drag a
-rectangle to brush-select or a freehand lasso · wheel / pan-drag to
-pan-zoom · discrete-legend interaction (hover a swatch to highlight its
-series, click to select — or `legend_click = "hide"` to toggle/isolate
-series visibility) · continuous colorbar filter (drag a value range on
-the colorbar to fade out-of-range marks) · optional overview navigator
-(`navigator = TRUE`: a draggable range strip for long series) · toolbar (mode toggle,
-zoom-to-selection, reset, save SVG/PNG, fullscreen) · linked views across a
-`group` (selection, hover, and pan/zoom) · keyboard + screen-reader access (Tab in,
-arrow keys move between marks, Enter/Space to select; `a11y`, on by
-default). Each is opt-outable via an `as_widget()` argument.
+the hovered x/y) · click-select (single/multiple) · drag a rectangle to
+brush-select or a freehand lasso · wheel / pan-drag to pan-zoom ·
+discrete-legend interaction (hover a swatch to highlight its series,
+click to select — or `legend_click = "hide"` to toggle/isolate series
+visibility) · continuous colorbar filter (drag a value range on the
+colorbar to fade out-of-range marks) · optional overview navigator
+(`navigator = TRUE`: a draggable range strip for long series) · toolbar
+(mode toggle, zoom-to-selection, reset, save SVG/PNG, fullscreen) ·
+linked views across a `group` (selection, hover, and pan/zoom). Each is
+opt-outable via an `as_widget()` argument.
 
 ## Installation
 
@@ -40,9 +51,10 @@ pak::pak("r-vellum/vellumwidget")
 ```
 
 vellumwidget builds on the [vellum](https://github.com/r-vellum/vellum)
-backend (and works with [vellumplot](https://github.com/r-vellum/vellumplot)
-plots); pak pulls them in automatically. vellum compiles a Rust crate,
-so a Rust toolchain (`cargo`/`rustc`) is needed to build it.
+backend (and works with
+[vellumplot](https://github.com/r-vellum/vellumplot) plots); pak pulls
+them in automatically. vellum compiles a Rust crate, so a Rust toolchain
+(`cargo`/`rustc`) is needed to build it.
 
 ## Usage
 
@@ -59,9 +71,9 @@ vplot(df) |>
 
 `as_widget()` is terminal: it compiles the plot to a vellum scene, emits
 the SVG and the element table, and returns an htmlwidget. It also
-accepts a bare `vellum` scene. Declare interactivity in `vellumplot` with the
-reserved mark arguments `data_id` (the join key), `tooltip`, and
-`hover_group` (links elements for shared highlighting); discrete
+accepts a bare `vellum` scene. Declare interactivity in `vellumplot`
+with the reserved mark arguments `data_id` (the join key), `tooltip`,
+and `hover_group` (links elements for shared highlighting); discrete
 `color`/`shape` legends then become interactive automatically. A plot
 that declares none renders as a static — but still embeddable — SVG.
 
@@ -69,15 +81,15 @@ that declares none renders as a static — but still embeddable — SVG.
 
     vellumwidget ──depends──▶ vellum ◀──depends── vellumplot
 
-`vellumwidget` depends only on `vellum`’s `scene_svg()` / `scene_model()`
-contract, so it wraps *any* vellum scene, whoever produced it. `vellumplot`
-is a Suggests (for the examples/tests).
+`vellumwidget` depends only on `vellum`’s `scene_svg()` /
+`scene_model()` contract, so it wraps *any* vellum scene, whoever
+produced it. `vellumplot` is a Suggests (for the examples/tests).
 
 ## Development
 
 The JS runtime is TypeScript in `srcts/`, bundled by esbuild into the
-committed `inst/htmlwidgets/vellumwidget.js` (so the R package installs with no
-Node):
+committed `inst/htmlwidgets/vellumwidget.js` (so the R package installs
+with no Node):
 
 ``` sh
 npm install            # esbuild + typescript (+ jsdom for tests)
@@ -130,17 +142,17 @@ vplot(df) |>
 Both layers use the same CSS-variable mechanism, so a plot can set a
 theme default *and* override it per element in the same pipe. Anything
 not set falls back to the built-in look. (You can also override the raw
-CSS classes — `.vellumwidget-hl`, `[data-key].vellumwidget-selected`, `.vellumwidget-tip`, …
-— from the host document, but the arguments above are the supported
-API.)
+CSS classes — `.vellumwidget-hl`, `[data-key].vellumwidget-selected`,
+`.vellumwidget-tip`, … — from the host document, but the arguments above
+are the supported API.)
 
 ## Linking views
 
 Selection can be **linked across views** by data key — select or brush
 in one plot and the same data highlight everywhere.
 
-**Own bus (vellumwidget ↔ vellumwidget, no dependency).** Give the widgets a shared
-`group`:
+**Own bus (vellumwidget ↔ vellumwidget, no dependency).** Give the
+widgets a shared `group`:
 
 ``` r
 
@@ -171,11 +183,11 @@ bscols(
 filter_slider("hp", "Horsepower", sd, ~hp)   # crosstalk's filter inputs hide non-matching marks
 ```
 
-vellumwidget uses its own selection engine and layers crosstalk on top as an
-optional bridge (a `SelectionHandle` + `FilterHandle`), so a crosstalk
-filter hides the non-matching marks (display-tier cross-filter) and
-selection round-trips with the other widgets. The crosstalk client
-library is pulled in only when you pass a `SharedData`.
+vellumwidget uses its own selection engine and layers crosstalk on top
+as an optional bridge (a `SelectionHandle` + `FilterHandle`), so a
+crosstalk filter hides the non-matching marks (display-tier
+cross-filter) and selection round-trips with the other widgets. The
+crosstalk client library is pulled in only when you pass a `SharedData`.
 
 ## Legend interaction
 
@@ -195,24 +207,23 @@ vplot(df) |>
 # click it -> the whole series is selected (respecting single/multiple mode).
 ```
 
-`vellumplot` tags each swatch with the series it drives and each mark with
-its series membership; vellumwidget projects a swatch event onto every mark in
-that series, reusing the same highlight/select machinery as
-`hover_group`. Selecting via a swatch also links across views and into
-crosstalk, exactly like selecting a mark.
+`vellumplot` tags each swatch with the series it drives and each mark
+with its series membership; vellumwidget projects a swatch event onto
+every mark in that series, reusing the same highlight/select machinery
+as `hover_group`. Selecting via a swatch also links across views and
+into crosstalk, exactly like selecting a mark.
 
 ## The vellum ecosystem
 
-vellumwidget is the interactivity layer of a small ecosystem of packages that
-share the vellum scene model:
+vellumwidget is the interactivity layer of a small ecosystem of packages
+that share the vellum scene model:
 
-- **[vellum](https://github.com/r-vellum/vellum)** — the parchment:
-  the low-level graphics backend (Rust scene graph, PNG/SVG/PDF
-  renderer).
+- **[vellum](https://github.com/r-vellum/vellum)** — the parchment: the
+  low-level graphics backend (Rust scene graph, PNG/SVG/PDF renderer).
 - **[vellumplot](https://github.com/r-vellum/vellumplot)** — the pen: a
   pipe-first grammar of graphics that compiles a plot spec into a vellum
   scene.
-- **[vellumwidget](https://github.com/r-vellum/vellumwidget)** — the annotation: this
-  package.
-- **[vellumverse](https://github.com/r-vellum/vellumverse)** —
-  installs and loads the whole ecosystem in one step.
+- **[vellumwidget](https://github.com/r-vellum/vellumwidget)** — the
+  annotation: this package.
+- **[vellumverse](https://github.com/r-vellum/vellumverse)** — installs
+  and loads the whole ecosystem in one step.
