@@ -1,4 +1,4 @@
-# vellumwidget (development version)
+# vellumwidget 0.7.0
 
 * **Bug fix: hover snapped to the wrong mark on a scaled plot.** When the svg was
   rendered at a different size than its viewBox implies (the widget's
