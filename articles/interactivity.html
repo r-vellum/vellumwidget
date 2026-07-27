@@ -102,6 +102,15 @@ round-trip are required; every interaction runs in the browser.</p>
 arguments flow through the scene as per-element metadata that the widget
 reads. A plot that declares none still renders as a static (but
 embeddable) SVG.</p>
+<p>The widget itself draws nothing. <code>vellum</code> hands it the
+rendered SVG plus <code>scene_model()</code>, one row per drawn element
+carrying that element’s data key and its resolved device-pixel box, and
+everything below is that table plus event handlers. Two things follow.
+What you interact with is the <em>same</em> scene as the static figure,
+not a second rendering of your plot. And gestures that need geometry
+rather than styling — brushing a rectangle, zooming to a region,
+stepping between marks with the arrow keys — are table lookups rather
+than new drawing code.</p>
 <p>Everything here scales to a few thousand marks on the per-element SVG
 path. Past that, the widget switches to a raster strategy so a
 100k-point scatter stays navigable; see <a href="big-data.html">Very

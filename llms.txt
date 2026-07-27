@@ -4,11 +4,22 @@
 scene — or a [vellumplot](https://github.com/r-vellum/vellumplot) plot —
 into a self-contained, client-side interactive HTML widget: **hover
 tooltips + highlighting, click selection, rectangular brush-select,
-pan/zoom, and a toolbar**, with no Shiny and no server round-trip. It is
-the host adapter of the vellum interactivity stack: `vellum` emits
-per-element `data-key`s, bounding boxes, and a `scene_model()` element
-table, `vellumplot` declares what is interactive, and `vellumwidget`
-hosts it.
+pan/zoom, and a toolbar**, with no Shiny and no server round-trip.
+
+It adds no drawing code of its own, and that is the point. `vellum`
+emits the SVG together with a `scene_model()` table giving every
+element’s data key and its resolved device-pixel box; `vellumplot`
+declares which marks are interactive; and `vellumwidget` is a thin
+client over those two. So the widget shows *the same scene* as your
+static figure — same layout, same text metrics, same geometry — rather
+than a re-drawing of your plot in another engine, and behaviour that
+needs positions (a rectangular brush, pan/zoom, arrow-key navigation
+between marks) is a table lookup rather than new machinery.
+
+Client-side interactivity from R is not new: `ggiraph` has done it well
+for years. What differs here is where the identity comes from (a
+geometry table rather than tagged elements plus CSS) and that there are
+no `*_interactive()` twins of the marks to remember.
 
 **Interactions:** hover (tooltip + highlight, with nearest-mark snapping
 and `hover_group` linking) · shared/unified hover with an optional
@@ -21,10 +32,8 @@ visibility) · continuous colorbar filter (drag a value range on the
 colorbar to fade out-of-range marks) · optional overview navigator
 (`navigator = TRUE`: a draggable range strip for long series) · toolbar
 (mode toggle, zoom-to-selection, reset, save SVG/PNG, fullscreen) ·
-linked views across a `group` (selection, hover, and pan/zoom) ·
-keyboard + screen-reader access (Tab in, arrow keys move between marks,
-Enter/Space to select; `a11y`, on by default). Each is opt-outable via
-an
+linked views across a `group` (selection, hover, and pan/zoom). Each is
+opt-outable via an
 [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
 argument.
 
