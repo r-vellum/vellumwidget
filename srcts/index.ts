@@ -212,7 +212,18 @@ interface Payload {
   panels?: PanelInfo[] | PanelInfo; // cartesian data panels (htmlwidgets may unbox a length-1 list)
   colorbar?: ColorbarInfo; // interactive continuous-colour colorbar (optional)
   interactions?: InteractionSpec; // declarative interactivity (from the plot spec)
+  provenance?: Provenance; // click-to-source rows per element (from inspect_source())
   options: Options;
+}
+
+// Click-to-source payload (from vellumplot::inspect_source()): the source data
+// rows behind each drawn grob, keyed by its `data-vellum-id` (the id the SVG
+// already carries). `values` is present only when inspect_source(values=TRUE).
+interface Provenance {
+  on: string; // "click" | "hover"
+  byId: Record<string, number[]>; // data-vellum-id -> 1-based source row indices
+  fields: string[]; // data column names
+  values?: Record<string, unknown>[]; // full data rows (optional; heavier)
 }
 
 interface ViewBox {
@@ -810,6 +821,16 @@ function keyOf(target: EventTarget | null): string | null {
   return hit ? hit.getAttribute("data-key") : null;
 }
 
+// The stable grob id (`data-vellum-id`) of the drawn element under `target`, or
+// null. This is the provenance join key (matches scene_model()$id); the SVG
+// carries it on each emitted grob.
+function vellumIdOf(target: EventTarget | null): string | null {
+  const el = target as Element | null;
+  if (!el || typeof el.closest !== "function") return null;
+  const hit = el.closest("[data-vellum-id]");
+  return hit ? hit.getAttribute("data-vellum-id") : null;
+}
+
 function download(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -907,6 +928,8 @@ HTMLWidgets.widget({
     // `lastHoverKeys` is the current hover set (a hover-triggered selection reads
     // it). Reset per render; empty when the plot declares no interaction.
     let interactions: InteractionSpec | null = null;
+    // Click-to-source (from inspect_source()): rows per grob id, read on click.
+    let provenance: Provenance | null = null;
     let condTagElems: Record<string, string[]> = {};
     let filtSelElems: Record<string, string[]> = {}; // filter selection -> keys of its target view
     let joinOf: Record<string, string> = {}; // key -> cross-view join id (compositions)
@@ -2889,6 +2912,72 @@ HTMLWidgets.widget({
       dragging = "";
     }
 
+    // Resolve the clicked grob's source rows and announce them: a Shiny input
+    // (`input$<id>_source`) and a bubbling `vellum:source` DOM event any host can
+    // listen for, plus a lightweight popover when values are shipped.
+    function emitSource(target: EventTarget | null): void {
+      if (!provenance) return;
+      const pid = vellumIdOf(target);
+      const rows = pid ? provenance.byId[pid] : undefined;
+      if (!pid || !rows || !rows.length) {
+        hideSourcePopover();
+        return;
+      }
+      shinyInput("source", { id: pid, rows, fields: provenance.fields }, { priority: "event" });
+      const values = provenance.values
+        ? rows.map((r) => provenance!.values![r - 1]).filter(Boolean)
+        : null;
+      el.dispatchEvent(
+        new window.CustomEvent("vellum:source", {
+          detail: { id: pid, rows, fields: provenance.fields, values },
+          bubbles: true,
+        }),
+      );
+      if (values) showSourcePopover(target as Element, values);
+    }
+
+    let sourcePopover: HTMLElement | null = null;
+    function hideSourcePopover(): void {
+      if (sourcePopover) {
+        sourcePopover.remove();
+        sourcePopover = null;
+      }
+    }
+    // A minimal, self-styled popover listing the clicked element's rows. Kept
+    // deliberately plain; a host can suppress it by handling `vellum:source` and
+    // using inspect_source(values = FALSE).
+    function showSourcePopover(node: Element, values: Record<string, unknown>[]): void {
+      hideSourcePopover();
+      const fields = provenance!.fields;
+      const head = "<tr>" + fields.map((f) => "<th>" + stripTags(f) + "</th>").join("") + "</tr>";
+      const body = values
+        .slice(0, 12)
+        .map(
+          (row) =>
+            "<tr>" +
+            fields.map((f) => "<td>" + stripTags(String(row[f] ?? "")) + "</td>").join("") +
+            "</tr>",
+        )
+        .join("");
+      const extra = values.length > 12 ? "<div class='vw-src-more'>+" + (values.length - 12) + " more</div>" : "";
+      const pop = document.createElement("div");
+      pop.className = "vellumwidget-source";
+      pop.setAttribute("role", "dialog");
+      pop.style.cssText =
+        "position:absolute;z-index:20;max-height:220px;overflow:auto;background:var(--vw-bg,#fff);" +
+        "color:var(--vw-fg,#111);border:1px solid rgba(0,0,0,.2);border-radius:6px;padding:6px 8px;" +
+        "font:11px/1.4 system-ui,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.18);max-width:320px;";
+      pop.innerHTML =
+        "<table style='border-collapse:collapse'><thead>" + head + "</thead><tbody>" + body + "</tbody></table>" + extra;
+      // position near the clicked node, clamped to the container.
+      const nb = (node as SVGGraphicsElement).getBoundingClientRect();
+      const cb = el.getBoundingClientRect();
+      pop.style.left = Math.min(nb.left - cb.left + 8, Math.max(0, cb.width - 220)) + "px";
+      pop.style.top = Math.max(0, nb.top - cb.top + 8) + "px";
+      el.appendChild(pop);
+      sourcePopover = pop;
+    }
+
     function onClick(ev: MouseEvent): void {
       if (movedDuringDrag) {
         movedDuringDrag = false;
@@ -2906,6 +2995,11 @@ HTMLWidgets.widget({
       // A click is a discrete event (fires every time, even on the same mark);
       // `key` is null for an empty-space click.
       shinyInput("click", { key: k }, { priority: "event" });
+      // Click-to-source: surface the data rows behind the clicked grob (keyed by
+      // its data-vellum-id, which the SVG already carries). Opt-in via the plot's
+      // inspect_source(); a no-op otherwise and on empty space / in raster mode
+      // (no per-element node to read the id from).
+      if (provenance && provenance.on === "click") emitSource(ev.target);
       // A legend swatch under the hide/mute policy toggles its series instead of
       // selecting it. The second click of a double-click (detail >= 2) is left for
       // onDblClick to turn into an isolate.
@@ -3416,6 +3510,7 @@ HTMLWidgets.widget({
         panels = normalizePanels(x.panels);
         colorbar = x.colorbar || null;
         interactions = x.interactions || null;
+        provenance = x.provenance || null;
         condTagElems = {};
         filtSelElems = {};
         joinOf = {};
