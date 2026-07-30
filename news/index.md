@@ -2,6 +2,18 @@
 
 ## vellumwidget (development version)
 
+- **Click-to-source.** When a plot opts in with
+  [`vellumplot::inspect_source()`](https://r-vellum.github.io/vellumplot/reference/inspect_source.html),
+  clicking a mark surfaces the source data rows behind it: the widget
+  reads the compiled scene’s provenance (keyed by each grob’s
+  `data-vellum-id`), fires a bubbling `vellum:source` DOM event
+  (`detail` = `id`, `rows`, `fields`, and `values` when
+  `inspect_source(values = TRUE)`), sets `input$<id>_source` under
+  Shiny, and shows a small values popover. Opt-in rides the spec, so it
+  adds no
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  argument and no payload weight to a plain widget.
+
 ## vellumwidget 0.7.0
 
 - **Bug fix: hover snapped to the wrong mark on a scaled plot.** When
