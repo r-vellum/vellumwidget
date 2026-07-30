@@ -2683,8 +2683,9 @@
       function emitSource(target) {
         if (!provenance) return;
         const pid = vellumIdOf(target);
-        const rows = pid ? provenance.byId[pid] : void 0;
-        if (!pid || !rows || !rows.length) {
+        const raw = pid ? provenance.byId[pid] : void 0;
+        const rows = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
+        if (!pid || !rows.length) {
           hideSourcePopover();
           return;
         }
