@@ -213,12 +213,14 @@ as_widget <- function(
     dims <- .svg_dims(svg)
   }
 
+  interactions <- .vellumwidget_interactions(x)
+
   payload <- list(
     svg = svg,
     elements = .vellumwidget_elements(model),
     panels = .vellumwidget_panels(model),
     colorbar = .vellumwidget_colorbar(model),
-    interactions = .vellumwidget_interactions(x),
+    interactions = interactions,
     options = list(
       raster = use_raster,
       # Hover tooltip, highlight, click-select, brush, lasso, pan/zoom, and
@@ -258,6 +260,13 @@ as_widget <- function(
       ))
     )
   )
+
+  # Click-to-source (from vellumplot::inspect_source()): attach the per-grob
+  # source-row payload only when the spec opted in, so an ordinary widget carries
+  # no extra weight. Keyed by data-vellum-id, which the SVG already carries.
+  if (!is.null(interactions) && !is.null(interactions$source)) {
+    payload$provenance <- .vellumwidget_provenance(x, interactions$source)
+  }
 
   # Load crosstalk's client library only when a SharedData/group is used, so a
   # plain widget carries no crosstalk dependency.
@@ -326,6 +335,38 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   }
   im <- getExportedValue("vellumplot", "interaction_model")
   tryCatch(im(x), error = function(e) NULL)
+}
+
+# Build the click-to-source payload for the JS runtime: source rows per grob id
+# (`data-vellum-id`), plus the field names and -- when inspect_source(values=)
+# asked -- the data rows themselves. Delegates to vellumplot::provenance_payload()
+# so vellumwidget needs no drawing or data logic of its own. `src` is the
+# interaction model's `source` block (`on`, `values`).
+.vellumwidget_provenance <- function(x, src) {
+  if (!requireNamespace("vellumplot", quietly = TRUE)) {
+    return(NULL)
+  }
+  pp <- getExportedValue("vellumplot", "provenance_payload")
+  pl <- tryCatch(
+    pp(x, values = isTRUE(src$values)),
+    error = function(e) NULL
+  )
+  if (is.null(pl) || !length(pl$elements)) {
+    return(NULL)
+  }
+  by_id <- list()
+  for (e in pl$elements) {
+    by_id[[e$id]] <- as.integer(e$rows)
+  }
+  out <- list(
+    on = src$on %||% "click",
+    byId = by_id,
+    fields = as.character(pl$fields)
+  )
+  if (isTRUE(src$values)) {
+    out$values <- pl$data
+  }
+  out
 }
 
 # Resolve the crosstalk group name from `crosstalk`: a crosstalk::SharedData (use

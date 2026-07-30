@@ -2329,5 +2329,70 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(T2.nearestKeyAt(1, 1, 1000) === "n1", "nearest-hover still finds a node when near it");
 }
 
+// --- click-to-source (inspect_source): click a grob -> Shiny input + DOM event -
+{
+  const eS = document.createElement("div");
+  eS.id = "wid_src";
+  document.body.appendChild(eS);
+  const iS = widgetDef.factory(eS, 200, 100);
+
+  // capture Shiny read-back
+  const shinyCalls = [];
+  HTMLWidgets.shinyMode = true;
+  window.Shiny = { setInputValue: (id, v) => shinyCalls.push({ id: id, v: v }) };
+  // capture the bubbling DOM event
+  let sourceEvent = null;
+  document.addEventListener("vellum:source", (e) => (sourceEvent = e));
+
+  iS.renderValue({
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<g data-vellum-panel="panel-1-1">' +
+      '<path data-key="a" data-vellum-id="layer-1-point-g1" d="M10 10h5v5h-5z"/>' +
+      '<path data-key="b" data-vellum-id="layer-1-point-g2" d="M40 10h5v5h-5z"/>' +
+      "</g></svg>",
+    elements: [{ key: "a" }, { key: "b" }],
+    provenance: {
+      on: "click",
+      byId: { "layer-1-point-g1": [1, 3, 5], "layer-1-point-g2": [2, 4] },
+      fields: ["wt", "mpg"],
+      values: [
+        { wt: 2.1, mpg: 22 }, { wt: 3.4, mpg: 18 }, { wt: 1.9, mpg: 30 },
+        { wt: 3.9, mpg: 15 }, { wt: 2.5, mpg: 24 }
+      ]
+    },
+    options: { select: true, selectMode: "multiple" }
+  });
+
+  const svgS = eS.querySelector("svg");
+  const nodeA = eS.querySelector('[data-key="a"]');
+  const clickS = (target) => {
+    const ev = new window.MouseEvent("click", { bubbles: true, clientX: 12, clientY: 12 });
+    Object.defineProperty(ev, "target", { value: target, enumerable: true });
+    svgS.dispatchEvent(ev);
+  };
+
+  clickS(nodeA);
+  ok(sourceEvent !== null, "clicking a grob fires a vellum:source event");
+  ok(
+    sourceEvent && JSON.stringify(sourceEvent.detail.rows) === JSON.stringify([1, 3, 5]),
+    "the event carries the clicked grob's source rows (via data-vellum-id)"
+  );
+  ok(
+    sourceEvent && sourceEvent.detail.values && sourceEvent.detail.values.length === 3,
+    "values are resolved for the grob's rows when inspect_source(values=TRUE)"
+  );
+  const src = shinyCalls.find((c) => c.id === "wid_src_source");
+  ok(!!src, "Shiny input$<id>_source is set on click");
+  ok(src && JSON.stringify(src.v.rows) === JSON.stringify([1, 3, 5]), "the Shiny input carries the rows");
+  ok(
+    eS.querySelector(".vellumwidget-source") !== null,
+    "a source popover is shown when values are present"
+  );
+
+  HTMLWidgets.shinyMode = false;
+  delete window.Shiny;
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);
