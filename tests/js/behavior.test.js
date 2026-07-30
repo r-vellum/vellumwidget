@@ -2350,11 +2350,14 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
       '<g data-vellum-panel="panel-1-1">' +
       '<path data-key="a" data-vellum-id="layer-1-point-g1" d="M10 10h5v5h-5z"/>' +
       '<path data-key="b" data-vellum-id="layer-1-point-g2" d="M40 10h5v5h-5z"/>' +
+      '<path data-key="c" data-vellum-id="layer-1-point-g3" d="M70 10h5v5h-5z"/>' +
       "</g></svg>",
-    elements: [{ key: "a" }, { key: "b" }],
+    elements: [{ key: "a" }, { key: "b" }, { key: "c" }],
     provenance: {
       on: "click",
-      byId: { "layer-1-point-g1": [1, 3, 5], "layer-1-point-g2": [2, 4] },
+      // g3's rows is a SCALAR, not an array: htmlwidgets auto-unboxes a
+      // single-element group. The runtime must still handle it (regression).
+      byId: { "layer-1-point-g1": [1, 3, 5], "layer-1-point-g2": [2, 4], "layer-1-point-g3": 2 },
       fields: ["wt", "mpg"],
       values: [
         { wt: 2.1, mpg: 22 }, { wt: 3.4, mpg: 18 }, { wt: 1.9, mpg: 30 },
@@ -2388,6 +2391,14 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(
     eS.querySelector(".vellumwidget-source") !== null,
     "a source popover is shown when values are present"
+  );
+
+  // a single-element group serialised as a scalar (auto-unbox) still resolves
+  sourceEvent = null;
+  clickS(eS.querySelector('[data-key="c"]'));
+  ok(
+    sourceEvent && JSON.stringify(sourceEvent.detail.rows) === JSON.stringify([2]),
+    "a scalar (auto-unboxed single-row) group is coerced to a one-element array"
   );
 
   HTMLWidgets.shinyMode = false;
