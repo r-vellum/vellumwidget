@@ -356,12 +356,15 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   }
   by_id <- list()
   for (e in pl$elements) {
-    by_id[[e$id]] <- as.integer(e$rows)
+    # I() so a single-row group serialises as a JSON array ([1]), not a scalar
+    # (htmlwidgets auto-unboxes length-1 vectors, which would break rows.length
+    # in the runtime).
+    by_id[[e$id]] <- I(as.integer(e$rows))
   }
   out <- list(
     on = src$on %||% "click",
     byId = by_id,
-    fields = as.character(pl$fields)
+    fields = I(as.character(pl$fields))
   )
   if (isTRUE(src$values)) {
     out$values <- pl$data

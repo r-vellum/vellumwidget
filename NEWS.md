@@ -1,5 +1,11 @@
 # vellumwidget (development version)
 
+* **Fix: click-to-source did nothing for single-row groups.** A grob backed by
+  one data row had its `rows` auto-unboxed to a scalar in the payload, so the
+  runtime's `rows.length` check skipped it (no event, no popover) — e.g. every
+  single-county region of a choropleth. The payload now forces arrays, and the
+  runtime coerces a scalar defensively.
+
 * **Click-to-source.** When a plot opts in with `vellumplot::inspect_source()`,
   clicking a mark surfaces the source data rows behind it: the widget reads the
   compiled scene's provenance (keyed by each grob's `data-vellum-id`), fires a

@@ -2918,8 +2918,11 @@ HTMLWidgets.widget({
     function emitSource(target: EventTarget | null): void {
       if (!provenance) return;
       const pid = vellumIdOf(target);
-      const rows = pid ? provenance.byId[pid] : undefined;
-      if (!pid || !rows || !rows.length) {
+      const raw = pid ? provenance.byId[pid] : undefined;
+      // Be robust to a single-element group serialising as a scalar rather than a
+      // one-element array (htmlwidgets auto-unboxes length-1 vectors).
+      const rows: number[] = Array.isArray(raw) ? raw : raw == null ? [] : [raw as number];
+      if (!pid || !rows.length) {
         hideSourcePopover();
         return;
       }
