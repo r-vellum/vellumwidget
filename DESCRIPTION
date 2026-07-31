@@ -21,7 +21,7 @@ Imports:
     base64enc,
     grDevices,
     htmlwidgets,
-    vellum (>= 0.5.1)
+    vellum (>= 0.6.0)
 Suggests:
     crosstalk,
     scales,
