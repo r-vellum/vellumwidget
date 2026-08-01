@@ -115,7 +115,7 @@
 #'   raster image above `raster_threshold` keyed elements; `"svg"` always uses the
 #'   per-element SVG; `"raster"` always uses the image. In raster mode the marks are
 #'   drawn once as a base image and all interaction (hover, click, brush, pan/zoom)
-#'   is driven client-side from the element index (bounding boxes + keys), so a very
+#'   is driven client-side from the element index (geometry + boxes + keys), so a very
 #'   large scatter (100k+ points) stays navigable with a tiny DOM and a small
 #'   payload. The trade-offs of raster mode: per-element grammar colours,
 #'   per-mark screen-reader focus, and display-tier cross-filtering do not apply
@@ -226,6 +226,7 @@ as_widget <- function(
   payload <- list(
     svg = svg,
     elements = .vellumwidget_elements(model),
+    geometry = .vellumwidget_geometry(scene),
     panels = .vellumwidget_panels(model),
     colorbar = .vellumwidget_colorbar(model),
     interactions = interactions,
@@ -634,6 +635,77 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     )))
   }
   NULL
+}
+
+# The true geometry of every keyed element, for exact client-side hit-testing.
+#
+# `scene_model()` reports bounding boxes, which are right for a rectangular brush
+# and misleading for anything diagonal or thin: a rising line's box is the whole
+# rectangle its endpoints span, so a box-distance "what is nearest" matches it
+# from anywhere in that rectangle. `vellum::element_geometry()` returns the shape
+# the box was standing in for -- vertices in device px, y down, the same space as
+# the boxes and the SVG -- once, at build time. The runtime keeps the R-tree over
+# boxes to shortlist candidates and then ranks them by true distance.
+#
+# Deliberately NOT `vl_nearest()`: that asks the engine per query, and a browser
+# cannot call R on pointermove. This ships the geometry once instead.
+#
+# Only the kinds whose shape is not their box are shipped. For a `rect`, `text`
+# or `roundrect` the geometry IS the two corners of the bbox, so sending it would
+# be duplicating a column the payload already has; for a `point` the bbox's
+# centre and half-extent give the disc exactly, which is what the runtime
+# reconstructs. That leaves the kinds where the box genuinely lies -- and it
+# keeps the block near-free for the dense scatter, the case where payload size
+# actually bites (150k keyed points would otherwise add ~2 MB of centres the
+# bboxes already imply).
+.GEOMETRY_KINDS <- c("segment", "line", "polygon", "path")
+
+# Wire format, columnar for the same reason `.vellumwidget_elements()` is:
+#   key  -- one per geometry element (NOT unique: a key can own several)
+#   kind -- one per element, which is what says how to measure to it
+#   n    -- vertex count per element; the x/y runs are laid end to end
+#   x, y -- sum(n) coordinates, rounded to 0.01 px (far below a pixel, and it
+#           roughly halves the JSON)
+# NULL when the scene has no such elements, or when the vertex count exceeds
+# `.GEOMETRY_MAX_VERTICES` -- above that the payload cost outweighs the picking
+# accuracy and the runtime falls back to boxes, as it does for an older payload.
+.GEOMETRY_MAX_VERTICES <- 500000L
+
+.vellumwidget_geometry <- function(scene) {
+  g <- vellum::element_geometry(scene)
+  if (is.null(g) || !nrow(g)) {
+    return(NULL)
+  }
+  g <- g[g$kind %in% .GEOMETRY_KINDS, , drop = FALSE]
+  if (!nrow(g)) {
+    return(NULL)
+  }
+  if (nrow(g) > .GEOMETRY_MAX_VERTICES) {
+    message(
+      "scene geometry is ",
+      nrow(g),
+      " vertices (limit ",
+      .GEOMETRY_MAX_VERTICES,
+      "); hit-testing falls back to bounding boxes for this widget."
+    )
+    return(NULL)
+  }
+  # `element_geometry()` is one row per vertex with `vertex` restarting at 1 for
+  # each element, so the starts are exactly where it is 1. A key may own several
+  # elements (the same datum drawn as a fill and a stroke; a series' line and its
+  # end label) -- they stay separate here and the runtime takes the minimum.
+  starts <- which(g$vertex == 1L)
+  if (!length(starts)) {
+    return(NULL)
+  }
+  n <- diff(c(starts, nrow(g) + 1L))
+  list(
+    key = as.character(g$key[starts]),
+    kind = as.character(g$kind[starts]),
+    n = as.integer(n),
+    x = round(as.numeric(g$x), 2),
+    y = round(as.numeric(g$y), 2)
+  )
 }
 
 # The per-panel geometry + scale descriptors the runtime needs to map device

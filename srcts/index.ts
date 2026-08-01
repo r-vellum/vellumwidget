@@ -209,6 +209,7 @@ interface PanelInfo {
 interface Payload {
   svg: string;
   elements: ElemMeta[] | ColumnElements;
+  geometry?: GeometryPayload; // true vertices per keyed element, for exact picking
   panels?: PanelInfo[] | PanelInfo; // cartesian data panels (htmlwidgets may unbox a length-1 list)
   colorbar?: ColorbarInfo; // interactive continuous-colour colorbar (optional)
   interactions?: InteractionSpec; // declarative interactivity (from the plot spec)
@@ -248,6 +249,109 @@ function distToBbox(x: number, y: number, b: Bbox): number {
 
 function hasBbox(e: ElemMeta): e is ElemMeta & Bbox {
   return typeof e.x0 === "number" && typeof e.y0 === "number";
+}
+
+// ---- true-geometry picking -------------------------------------------------
+//
+// A bbox is the right answer for a rectangular brush and the wrong one for
+// picking: a rising line's box is the whole rectangle its endpoints span, so a
+// box-distance "nearest" matches it from anywhere inside that rectangle. The
+// payload's `geometry` block carries each keyed element's real vertices (device
+// px, same space as the boxes), so distances can be measured to the shape.
+
+// The payload's columnar geometry block (see .vellumwidget_geometry() in R).
+interface GeometryPayload {
+  key: string[] | string;
+  kind: string[] | string;
+  n: number[] | number;
+  x: number[] | number;
+  y: number[] | number;
+}
+
+// One geometry element, as a slice of the flat coordinate arrays.
+interface Geom {
+  kind: string;
+  at: number; // index of its first vertex in gx/gy
+  n: number; // vertex count
+}
+
+// Is this mark kind round, so that its bbox describes a disc rather than a box?
+// `scene_model()`'s `mark` vocabulary, tolerating both spellings.
+function isRoundMark(mark: string | undefined): boolean {
+  return mark === "point" || mark === "points" || mark === "circle" || mark === "circles";
+}
+
+// Squared distance from (x, y) to the segment (ax, ay)-(bx, by).
+function distToSegment2(
+  x: number, y: number, ax: number, ay: number, bx: number, by: number
+): number {
+  const vx = bx - ax, vy = by - ay;
+  const len2 = vx * vx + vy * vy;
+  let t = len2 > 0 ? ((x - ax) * vx + (y - ay) * vy) / len2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const dx = x - (ax + t * vx), dy = y - (ay + t * vy);
+  return dx * dx + dy * dy;
+}
+
+// Distance from (x, y) to one geometry element, measured by kind.
+//
+//   point            distance to the centre, minus the mark's radius (taken from
+//                    its bbox, since the geometry carries the centre only) --
+//                    zero anywhere on the glyph
+//   segment / line   perpendicular distance to the nearest edge of the polyline
+//   polygon / path   zero anywhere INSIDE, else distance to the nearest edge, so
+//                    clicking the middle of a choropleth region hits the region
+//   rect/text/       distance to the box the two vertices span (which for a label
+//   roundrect        is a fair description of the target)
+//
+// `path` is treated as one closed ring: `element_geometry()` concatenates a
+// multi-ring path's vertices without ring boundaries, so a path with holes gets
+// the phantom edge joining ring end to ring start. Still far closer than the
+// bbox, and exact for the single-ring case (a plain sf polygon).
+function distToGeom(
+  x: number, y: number, g: Geom, gx: Float64Array, gy: Float64Array, box: Bbox | null
+): number {
+  const at = g.at, n = g.n;
+  if (n <= 0) return Infinity;
+  if (g.kind === "point") {
+    const dx = x - gx[at], dy = y - gy[at];
+    const d = Math.sqrt(dx * dx + dy * dy);
+    // Half the bbox's smaller side is the glyph's radius; without a box, the
+    // centre itself is the best available answer.
+    const r = box ? Math.min(box.x1 - box.x0, box.y1 - box.y0) / 2 : 0;
+    return d > r ? d - r : 0;
+  }
+  if (n === 1) {
+    const dx = x - gx[at], dy = y - gy[at];
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  if (g.kind === "rect" || g.kind === "text" || g.kind === "roundrect") {
+    return distToBbox(x, y, {
+      x0: Math.min(gx[at], gx[at + 1]), x1: Math.max(gx[at], gx[at + 1]),
+      y0: Math.min(gy[at], gy[at + 1]), y1: Math.max(gy[at], gy[at + 1])
+    });
+  }
+  const closed = g.kind === "polygon" || g.kind === "path";
+  if (closed && n >= 3) {
+    // Even-odd crossing test, inlined over the flat arrays.
+    let inside = false;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const xi = gx[at + i], yi = gy[at + i];
+      const xj = gx[at + j], yj = gy[at + j];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    if (inside) return 0;
+  }
+  let best = Infinity;
+  for (let i = 1; i < n; i++) {
+    const d2 = distToSegment2(x, y, gx[at + i - 1], gy[at + i - 1], gx[at + i], gy[at + i]);
+    if (d2 < best) best = d2;
+  }
+  if (closed && n >= 3) {
+    const d2 = distToSegment2(x, y, gx[at + n - 1], gy[at + n - 1], gx[at], gy[at]);
+    if (d2 < best) best = d2;
+  }
+  return Math.sqrt(best);
 }
 
 // Read a payload column as an array: htmlwidgets auto-unboxes a length-1 vector to
@@ -964,6 +1068,16 @@ HTMLWidgets.widget({
     // pure scans when absent (0 bboxed elements).
     let spatialIndex: Flatbush | null = null;
     let indexToElem: number[] = []; // flatbush item id -> index into `elements`
+    // True geometry per key (WI-3), when the payload carries it. The R-tree over
+    // boxes still does the shortlisting -- a bbox distance is never greater than
+    // the true distance, so nothing within range is missed -- and these rank the
+    // shortlist exactly. Empty when the payload has no `geometry` block (an older
+    // payload, or a scene above the vertex limit), in which case picking stays
+    // bbox-only exactly as before.
+    let geomByKey: Record<string, Geom[]> = {};
+    let gx: Float64Array = new Float64Array(0);
+    let gy: Float64Array = new Float64Array(0);
+    let haveGeometry = false;
     // Above this many elements, dim on hover via the holder's opacity + a clone
     // overlay (O(hovered)) rather than the CSS rule that restyles every keyed node.
     const DIM_OVERLAY_MIN = 2000;
@@ -1264,6 +1378,60 @@ HTMLWidgets.widget({
       idx.finish();
       spatialIndex = idx;
     }
+    // Unpack the columnar geometry block into flat coordinate arrays plus, per
+    // key, the slices that belong to it. A key may own several geometry elements
+    // (a datum drawn as a fill and a stroke; a series' line and its end label),
+    // and its distance is the minimum over them.
+    function buildGeometry(g: GeometryPayload | undefined): void {
+      geomByKey = {};
+      gx = new Float64Array(0);
+      gy = new Float64Array(0);
+      haveGeometry = false;
+      if (!g) return;
+      const keys = asColumn<string>(g.key);
+      const kinds = asColumn<string>(g.kind);
+      const ns = asColumn<number>(g.n);
+      const xs = asColumn<number>(g.x);
+      const ys = asColumn<number>(g.y);
+      if (!keys.length || xs.length !== ys.length) return;
+      gx = Float64Array.from(xs);
+      gy = Float64Array.from(ys);
+      let at = 0;
+      for (let i = 0; i < keys.length; i++) {
+        const n = ns[i] | 0;
+        if (n <= 0 || at + n > gx.length) break; // malformed: keep what parsed
+        (geomByKey[keys[i]] || (geomByKey[keys[i]] = [])).push({ kind: kinds[i], at: at, n: n });
+        at += n;
+      }
+      haveGeometry = at > 0;
+    }
+    // Distance from (x, y) to an element's true shape.
+    //
+    // The payload ships vertices only for the kinds whose shape is not their box
+    // (segment/line/polygon/path). For everything else the box is the shape --
+    // exactly so for a rect or a label, and for a round mark the inscribed disc,
+    // which is reconstructed here rather than shipped as a centre per point.
+    function distToElem(x: number, y: number, e: ElemMeta): number {
+      const box = hasBbox(e) ? e : null;
+      const gs = geomByKey[e.key];
+      if (!gs) {
+        if (!box) return Infinity;
+        if (isRoundMark(e.mark)) {
+          const cx = (box.x0 + box.x1) / 2, cy = (box.y0 + box.y1) / 2;
+          const r = Math.min(box.x1 - box.x0, box.y1 - box.y0) / 2;
+          const dx = x - cx, dy = y - cy;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          return d > r ? d - r : 0;
+        }
+        return distToBbox(x, y, box);
+      }
+      let best = Infinity;
+      for (let i = 0; i < gs.length; i++) {
+        const d = distToGeom(x, y, gs[i], gx, gy, box);
+        if (d < best) best = d;
+      }
+      return best;
+    }
     // Build the unified-hover axis index: element centres sorted by x and by y
     // (each paired with its key), plus the per-axis grouping tolerances. Cheap and
     // only used when hoverMode is "x"/"y"; harmless to build unconditionally.
@@ -1311,19 +1479,42 @@ HTMLWidgets.widget({
       const ks = brushKeysIn(rect);
       return ks.length ? ks : [primary];
     }
+    // How many bbox-shortlisted candidates the exact pass ranks. A bbox distance
+    // never exceeds the true distance, so the shortlist cannot miss anything in
+    // range; the cap only bounds the work when many boxes are equally close (a
+    // pile of long lines whose boxes all contain the cursor). Well above the
+    // number of marks that overlap one cursor position in practice.
+    const PICK_CANDIDATES = 256;
     // Nearest element key within `maxDist` of (x, y) — index-backed when available.
+    //
+    // Ranks by distance to the mark's true shape (WI-3), not to its box: an
+    // edge's distance is to the line rather than to the rectangle its endpoints
+    // span, a point inside a filled polygon is at distance zero, and a round mark
+    // is measured to the disc. The R-tree still shortlists, since a box distance
+    // is never greater than the true distance and so cannot hide anything in
+    // range.
     function nearestKeyAt(x: number, y: number, maxDist: number): string | null {
-      // Skip graph edges in the open-space nearest snap: an edge's bbox is the
-      // whole diagonal rectangle between its endpoints, so a bbox-distance nearest
-      // would snap to it anywhere inside that rectangle even when the cursor is
-      // nowhere near the line — highlighting edges the user isn't pointing at.
-      // Edges still highlight on a direct hover (the pointer is over the path);
-      // the open-space snap targets nodes. No-op when no element is an edge.
+      let best: string | null = null;
+      let bestD = maxDist;
+      const rank = (e: ElemMeta) => {
+        // A graph edge is skipped only when nothing better than its box is
+        // available for it — the box being the whole rectangle between its
+        // endpoints is exactly why the exclusion existed. With vertices, the
+        // distance is to the line and the edge competes on its merits.
+        if (e.source != null && !geomByKey[e.key]) return;
+        const d = distToElem(x, y, e);
+        if (d <= bestD) {
+          bestD = d;
+          best = e.key;
+        }
+      };
       if (spatialIndex) {
-        const ids = spatialIndex.neighbors(x, y, 1, maxDist, (id) => elements[indexToElem[id]].source == null);
-        return ids.length ? elements[indexToElem[ids[0]]].key : null;
+        const ids = spatialIndex.neighbors(x, y, PICK_CANDIDATES, maxDist);
+        for (let i = 0; i < ids.length; i++) rank(elements[indexToElem[ids[i]]]);
+      } else {
+        for (let i = 0; i < elements.length; i++) rank(elements[i]);
       }
-      return nearestKey(elements.filter((e) => e.source == null), x, y, maxDist);
+      return best;
     }
     // Distinct keys whose bbox intersects `rect` — index-backed when available.
     // Item ids are mapped back to element order and de-duplicated so a key spanning
@@ -3653,6 +3844,7 @@ HTMLWidgets.widget({
             clearPointData();
           }
           buildSpatialIndex();
+          buildGeometry(x.geometry);
           buildHoverAxis();
           wire(svgEl);
           buildToolbar();
@@ -3696,6 +3888,17 @@ HTMLWidgets.widget({
         nearestKeyAt: nearestKeyAt,
         brushKeysIn: brushKeysIn,
         indexSize: function () { return spatialIndex ? spatialIndex.numItems : 0; },
+        // True-geometry picking (WI-3): whether the payload carried geometry, and
+        // the exact distance to one key, so the suite can assert the ranking that
+        // the bbox distance would get wrong.
+        haveGeometry: function () { return haveGeometry; },
+        geomVertexCount: function () { return gx.length; },
+        distToKey: function (x: number, y: number, key: string) {
+          for (let i = 0; i < elements.length; i++) {
+            if (elements[i].key === key) return distToElem(x, y, elements[i]);
+          }
+          return Infinity;
+        },
         largeDim: function () { return largeDim; },
         rasterMode: function () { return rasterMode; },
         hasCanvas: function () { return !!canvasEl; },
@@ -3796,6 +3999,8 @@ registerProxyHandler();
 (window as unknown as { __vellumwidgetTest?: unknown }).__vellumwidgetTest = {
   rectsIntersect,
   distToBbox,
+  distToSegment2,
+  distToGeom,
   brushKeys,
   nearestKey,
   zoomViewBox,

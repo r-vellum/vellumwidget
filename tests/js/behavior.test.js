@@ -2405,5 +2405,150 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   delete window.Shiny;
 }
 
+// ============ WI-3: exact hit-testing from element_geometry() ===============
+//
+// A bbox is right for a brush and wrong for picking. Each case below is one a
+// bbox cannot get right: a diagonal matched from the far corner of the box its
+// endpoints span, a graph edge (which had to be excluded from the open-space
+// snap entirely because of that), and a click in the middle of a filled polygon.
+
+// --- the pure distance function ---
+ok(T.distToSegment2(0, 0, 0, 0, 10, 0) === 0, "distToSegment2: on the endpoint");
+ok(T.distToSegment2(5, 3, 0, 0, 10, 0) === 9, "distToSegment2: perpendicular from the middle");
+ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end clamps to it");
+
+{
+  // A 100x100 box with a diagonal from its top-left to its bottom-right.
+  const gx = Float64Array.from([0, 100]);
+  const gy = Float64Array.from([0, 100]);
+  const seg = { kind: "segment", at: 0, n: 2 };
+  const box = { x0: 0, y0: 0, x1: 100, y1: 100 };
+  ok(Math.abs(T.distToGeom(50, 50, seg, gx, gy, box)) < 1e-9, "distToGeom: on the diagonal is 0");
+  // The far corner of the bbox: bbox distance 0, true distance 70.7.
+  ok(T.distToBbox(100, 0, box) === 0, "…the bbox says 0 at the opposite corner");
+  ok(
+    Math.abs(T.distToGeom(100, 0, seg, gx, gy, box) - Math.sqrt(2) * 50) < 1e-6,
+    "…the geometry says 70.7 there — the point of the whole feature"
+  );
+
+  // A filled triangle: zero anywhere inside, positive outside.
+  const px = Float64Array.from([0, 100, 50]);
+  const py = Float64Array.from([0, 0, 80]);
+  const tri = { kind: "polygon", at: 0, n: 3 };
+  const tbox = { x0: 0, y0: 0, x1: 100, y1: 80 };
+  ok(T.distToGeom(50, 30, tri, px, py, tbox) === 0, "distToGeom: inside a filled polygon is 0");
+  ok(T.distToGeom(5, 70, tri, px, py, tbox) > 0, "…and positive in the box but outside the shape");
+
+  // A point mark's radius comes from its bbox, since the geometry is a centre.
+  const c = Float64Array.from([50]);
+  const dot = { kind: "point", at: 0, n: 1 };
+  const dbox = { x0: 45, y0: 45, x1: 55, y1: 55 };
+  ok(T.distToGeom(52, 50, dot, c, c, dbox) === 0, "distToGeom: inside the glyph is 0");
+  ok(Math.abs(T.distToGeom(60, 50, dot, c, c, dbox) - 5) < 1e-9, "…measured from the disc, not the centre");
+}
+
+// --- end to end, through a mounted widget ---
+{
+  // Two nodes joined by a diagonal edge, plus a filled region. The edge's bbox is
+  // the whole rectangle between the nodes.
+  const gsvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">' +
+    '<path data-key="n1" d="M18 18h4v4h-4z"/>' +
+    '<path data-key="n2" d="M198 158h4v4h-4z"/>' +
+    '<path data-key="e1" d="M20 20L200 160"/>' +
+    '<path data-key="rg" d="M220 20L290 20L255 90Z"/>' +
+    "</svg>";
+  const payload = {
+    svg: gsvg,
+    elements: [
+      { key: "n1", x0: 14, y0: 14, x1: 26, y1: 26, tooltip: "node 1" },
+      { key: "n2", x0: 194, y0: 154, x1: 206, y1: 166, tooltip: "node 2" },
+      // the edge: bbox spans both endpoints, and it declares its endpoints, which
+      // is what the old code keyed the open-space exclusion off
+      { key: "e1", x0: 20, y0: 20, x1: 200, y1: 160, tooltip: "edge", source: "n1", target: "n2" },
+      { key: "rg", x0: 220, y0: 20, x1: 290, y1: 90, tooltip: "region" }
+    ],
+    geometry: {
+      key: ["n1", "n2", "e1", "rg"],
+      kind: ["point", "point", "segment", "polygon"],
+      n: [1, 1, 2, 3],
+      x: [20, 200, 20, 200, 220, 290, 255],
+      y: [20, 160, 20, 160, 20, 20, 90]
+    },
+    options: { tooltip: true, hover: true, select: true, nearest: true, selectMode: "multiple" }
+  };
+  const eG = document.createElement("div");
+  document.body.appendChild(eG);
+  const instG = widgetDef.factory(eG, 300, 200);
+  instG.renderValue(payload);
+  const tg = instG._test;
+
+  ok(tg.haveGeometry(), "the geometry block is parsed off the payload");
+  ok(tg.geomVertexCount() === 7, "every vertex is unpacked");
+
+  // 1. a graph edge is hoverable, and no longer excluded from the open-space snap
+  ok(tg.nearestKeyAt(110, 90, 8) === "e1", "a cursor on the edge picks the edge");
+  ok(tg.distToKey(110, 90, "e1") < 1, "…at essentially zero distance");
+
+  // 2. a diagonal is not matched from the far corner of its bbox
+  ok(tg.distToBbox === undefined, "(the instance seam exposes distances, not the pure helper)");
+  ok(tg.distToKey(200, 20, "e1") > 100, "the edge is far from the opposite corner of its bbox");
+  ok(tg.nearestKeyAt(200, 20, 20) !== "e1", "…so the opposite corner does not pick the edge");
+  ok(tg.nearestKeyAt(200, 20, 15) === null, "…and with nothing else in range, picks nothing at all");
+
+  // 3. a click inside a filled region selects that region
+  ok(tg.distToKey(255, 40, "rg") === 0, "a point inside the polygon is at distance 0");
+  ok(tg.nearestKeyAt(255, 40, 8) === "rg", "…and picks the region, not its nearest border");
+
+  // the nearest node still wins next to a node, with the edge available
+  ok(tg.nearestKeyAt(22, 22, 10) === "n1", "next to a node, the node wins over the edge it touches");
+}
+
+// --- no geometry in the payload: the old bbox behaviour, unchanged ----------
+{
+  const payload = {
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">' +
+      '<path data-key="e1" d="M20 20L200 160"/></svg>',
+    elements: [
+      { key: "n1", x0: 14, y0: 14, x1: 26, y1: 26 },
+      { key: "e1", x0: 20, y0: 20, x1: 200, y1: 160, source: "n1", target: "n2" }
+    ],
+    options: { tooltip: true, hover: true, nearest: true }
+  };
+  const eB = document.createElement("div");
+  document.body.appendChild(eB);
+  const instB = widgetDef.factory(eB, 300, 200);
+  instB.renderValue(payload);
+  const tb = instB._test;
+  ok(!tb.haveGeometry(), "a payload without geometry reports none");
+  // An edge with no vertices to measure to stays excluded from the open-space
+  // snap -- the workaround is still there for exactly the case it was for.
+  ok(tb.nearestKeyAt(110, 90, 8) === null, "…and an unmeasurable edge stays out of the snap");
+}
+
+// --- round marks are discs, reconstructed from the bbox ---------------------
+// No geometry is shipped for a point (its centre and radius are the bbox's), so
+// this is the path a 150k-point scatter takes: exact disc picking, zero payload.
+{
+  const payload = {
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">' +
+      '<circle data-key="p" cx="100" cy="100" r="10"/></svg>',
+    elements: [{ key: "p", mark: "point", x0: 90, y0: 90, x1: 110, y1: 110 }],
+    options: { tooltip: true, hover: true, nearest: true }
+  };
+  const eR = document.createElement("div");
+  document.body.appendChild(eR);
+  const instR = widgetDef.factory(eR, 200, 200);
+  instR.renderValue(payload);
+  const tr = instR._test;
+  ok(!tr.haveGeometry(), "no geometry is shipped for a round mark");
+  ok(tr.distToKey(100, 100, "p") === 0, "the centre is at distance 0");
+  ok(Math.abs(tr.distToKey(120, 100, "p") - 10) < 1e-9, "…measured to the disc, not the box");
+  // The bbox corner is sqrt(2)*10 = 14.1 from the centre, so 4.1 outside the
+  // disc -- where a box distance would say 0.
+  ok(Math.abs(tr.distToKey(110, 110, "p") - (Math.SQRT2 * 10 - 10)) < 1e-9,
+    "the bbox corner is outside the disc, where a box would say 0");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

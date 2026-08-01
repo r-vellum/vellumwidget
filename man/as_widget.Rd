@@ -138,7 +138,7 @@ per-element SVG for small/moderate plots and switches to a single embedded
 raster image above \code{raster_threshold} keyed elements; \code{"svg"} always uses the
 per-element SVG; \code{"raster"} always uses the image. In raster mode the marks are
 drawn once as a base image and all interaction (hover, click, brush, pan/zoom)
-is driven client-side from the element index (bounding boxes + keys), so a very
+is driven client-side from the element index (geometry + boxes + keys), so a very
 large scatter (100k+ points) stays navigable with a tiny DOM and a small
 payload. The trade-offs of raster mode: per-element grammar colours,
 per-mark screen-reader focus, and display-tier cross-filtering do not apply

@@ -527,6 +527,84 @@ test_that("mode = 'raster' ships a base image with the element index (no per-ele
   expect_true(is.numeric(w$width) && w$width > 0)
 })
 
+# --- WI-3: true geometry in the payload ---------------------------------------
+
+test_that("the payload carries each keyed element's true geometry", {
+  scene <- vellum::vl_scene(3, 2, dpi = 100) |>
+    vellum::draw(vellum::segments_grob(0.1, 0.1, 0.9, 0.9, key = "diag")) |>
+    vellum::draw(vellum::lines_grob(c(.1, .5, .9), c(.2, .8, .2), key = "ln")) |>
+    vellum::draw(vellum::polygon_grob(c(.2, .4, .3), c(.2, .2, .5), key = "pg"))
+  g <- as_widget(scene)$x$geometry
+  expect_setequal(g$key, c("diag", "ln", "pg"))
+  expect_equal(g$kind[match("diag", g$key)], "segment")
+  # Vertex counts, and the flat coordinate runs laid end to end.
+  expect_equal(g$n[match("ln", g$key)], 3L)
+  expect_equal(length(g$x), sum(g$n))
+  expect_equal(length(g$y), sum(g$n))
+})
+
+test_that("the geometry is in the same device-px space as the bboxes", {
+  # An off-origin panel is the case that matters: at the page origin a
+  # viewport-local coordinate and a device one coincide and any mismatch hides.
+  scene <- vellum::vl_scene(4, 3, dpi = 100) |>
+    vellum::push(vellum::vl_viewport(
+      x = 0.7,
+      y = 0.7,
+      width = 0.4,
+      height = 0.4
+    )) |>
+    vellum::draw(vellum::segments_grob(0.1, 0.1, 0.9, 0.9, key = "diag"))
+  w <- as_widget(scene)
+  g <- w$x$geometry
+  el <- w$x$elements
+  i <- match("diag", el$key)
+  # The two endpoints must be the corners of the bbox the element index reports.
+  expect_equal(sort(g$x), sort(c(el$x0[i], el$x1[i])), tolerance = 1e-6)
+  expect_equal(sort(g$y), sort(c(el$y0[i], el$y1[i])), tolerance = 1e-6)
+})
+
+test_that("marks whose bbox already describes them ship no geometry", {
+  # A point's centre and radius are the bbox's centre and half-extent, and a
+  # rect's or a label's geometry *is* its two bbox corners -- shipping either
+  # would duplicate a column the payload already carries. This is what keeps the
+  # block near-free for a dense scatter, where it would otherwise cost the most.
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(
+      c(0.25, 0.75),
+      0.5,
+      size = vellum::vl_unit(4, "mm"),
+      key = c("a", "b")
+    )) |>
+    vellum::draw(vellum::rect_grob(x = .5, width = .2, height = .2, key = "r")) |>
+    vellum::draw(vellum::text_grob("hi", x = .5, y = .9, key = "t"))
+  expect_null(as_widget(scene)$x$geometry)
+})
+
+test_that("only the shape-bearing kinds reach the geometry block", {
+  scene <- vellum::vl_scene(3, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, key = "p")) |>
+    vellum::draw(vellum::lines_grob(c(.1, .5, .9), c(.2, .8, .2), key = "ln"))
+  g <- as_widget(scene)$x$geometry
+  expect_equal(g$key, "ln")
+  expect_equal(g$kind, "line")
+})
+
+test_that("an unkeyed scene carries no geometry", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::lines_grob(c(.1, .9), c(.2, .8)))
+  expect_null(as_widget(scene)$x$geometry)
+})
+
+test_that("geometry is dropped, with a message, above the vertex limit", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::lines_grob(c(.1, .5, .9), c(.2, .8, .2), key = "ln"))
+  # The limit is a payload-size backstop, not a behaviour switch: past it the
+  # runtime falls back to bboxes, and it says so rather than silently shrinking.
+  local_mocked_bindings(.GEOMETRY_MAX_VERTICES = 1L)
+  expect_message(w <- as_widget(scene), "falls back to bounding boxes")
+  expect_null(w$x$geometry)
+})
+
 test_that("the raster base image is encoded in memory (no temp file)", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
