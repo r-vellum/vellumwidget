@@ -1,5 +1,8 @@
 # vellumwidget 0.8.0
 
+Requires **vellum >= 0.6.6**, which fixes the coordinate space
+`element_geometry()` reports in — the exact hit-testing below is built on it.
+
 * **The raster base image is now rendered at 2× for HiDPI screens.** A widget is
   always viewed at screen resolution, and a 1× image stretched by the browser is
   visibly soft on a retina display. `scene_png(scale = 2)` multiplies dpi while
@@ -47,8 +50,7 @@
 
 * **Raster-mode widgets no longer touch disk.** The base image is now encoded
   with `vellum::scene_png()`, which returns the PNG bytes, instead of rendering
-  to a `tempfile()` and reading it back. Widget output is unchanged. Requires
-  vellum >= 0.6.5.
+  to a `tempfile()` and reading it back. Widget output is unchanged.
 
 * **Animated plots as widgets.** `as_widget()` now accepts a keyframe animation
   from `vellumplot::animate()` and embeds it as a self-contained **animated SVG**
