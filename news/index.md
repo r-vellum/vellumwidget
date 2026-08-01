@@ -2,6 +2,13 @@
 
 ## vellumwidget (development version)
 
+- **Raster-mode widgets no longer touch disk.** The base image is now
+  encoded with
+  [`vellum::scene_png()`](https://r-vellum.github.io/vellum/reference/scene_png.html),
+  which returns the PNG bytes, instead of rendering to a
+  [`tempfile()`](https://rdrr.io/r/base/tempfile.html) and reading it
+  back. Widget output is unchanged. Requires vellum \>= 0.6.5.
+
 - **Animated plots as widgets.**
   [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
   now accepts a keyframe animation from
