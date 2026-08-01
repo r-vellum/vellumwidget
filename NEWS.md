@@ -1,5 +1,12 @@
 # vellumwidget (development version)
 
+* **Animated plots as widgets.** `as_widget()` now accepts a keyframe animation
+  from `vellumplot::animate()` and embeds it as a self-contained **animated SVG**
+  — resolution-independent and honouring `prefers-reduced-motion` (both handled
+  inside the SVG by vellum). It plays on its own through the runtime's existing
+  inline-SVG mount; since the marks move every frame there is no per-element
+  interaction index (no hover/brush) and no raster canvas.
+
 * **Fix: click-to-source did nothing for single-row groups.** A grob backed by
   one data row had its `rows` auto-unboxed to a scalar in the payload, so the
   runtime's `rows.length` check skipped it (no event, no popover) — e.g. every
