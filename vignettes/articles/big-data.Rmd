@@ -57,8 +57,8 @@ vplot(big) |>
 That scatter has 30,000 keyed points, so `"auto"` chose the raster path. The
 image is a base64 PNG wrapped in an SVG shell whose `viewBox` is the scene's
 device-pixel space, so pan and zoom reframe the image through the `viewBox` and
-the element bounding boxes line up with it without any rescaling. Hover, click,
-and brush all hit-test against the index of keys and boxes, so they keep working
+the element geometry lines up with it without any rescaling. Hover, click,
+and brush all hit-test against the index of keys and shapes, so they keep working
 even though there is nothing per-point in the DOM.
 
 You can force the strategy instead of letting `"auto"` decide:
@@ -93,6 +93,18 @@ pure wire-format change with no behavioural difference.
 [Flatbush](https://github.com/mourner/flatbush) R-tree rather than scanning every
 element. The nearest-mark scan runs on every pointer move, so replacing an O(n)
 scan with an O(log n) query is the change you feel most on a dense plot.
+
+*Exact picking on top of it.* The R-tree indexes bounding boxes, which are the
+right shape for a rectangular brush and the wrong one for deciding what the
+cursor is pointing at: a rising line's box is the whole rectangle its endpoints
+span. So the R-tree shortlists candidates — a box distance is never greater than
+the distance to the shape inside it, so nothing in range is missed — and those
+candidates are then ranked by distance to the mark's real geometry, which the
+payload carries in device pixels. A round mark is measured to its disc rather
+than the square around it, and that costs nothing extra: the disc is the bounding
+box's centre and half-extent, so no per-point geometry is shipped for a scatter.
+Only the kinds whose shape is not their box (segments, lines, polygons, paths)
+add anything to the payload.
 
 *Cheaper hover dim.* Above a threshold, hovering dims the whole plot once through
 the container's opacity and redraws just the hovered marks crisply in a small
