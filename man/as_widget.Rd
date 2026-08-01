@@ -33,7 +33,9 @@ as_widget(
 }
 \arguments{
 \item{x}{A \code{vellumplot} plot (a \code{PlotSpec} / \code{PlotComposition}) or a \code{vellum}
-scene --- anything \code{\link[vellum:as_vellum_scene]{vellum::as_vellum_scene()}} accepts.}
+scene --- anything \code{\link[vellum:as_vellum_scene]{vellum::as_vellum_scene()}} accepts. Also a keyframe
+animation from \code{vellumplot::animate()}, embedded as a self-contained animated
+SVG that plays on its own (no per-element interaction).}
 
 \item{width, height}{Widget size (any valid CSS size, or \code{NULL} to size from the
 scene). Passed to \code{\link[htmlwidgets:createWidget]{htmlwidgets::createWidget()}}.}

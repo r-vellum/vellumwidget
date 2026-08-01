@@ -28,7 +28,9 @@
 #' (`vignette("scene-contract", package = "vellum")`).
 #'
 #' @param x A `vellumplot` plot (a `PlotSpec` / `PlotComposition`) or a `vellum`
-#'   scene --- anything [vellum::as_vellum_scene()] accepts.
+#'   scene --- anything [vellum::as_vellum_scene()] accepts. Also a keyframe
+#'   animation from `vellumplot::animate()`, embedded as a self-contained animated
+#'   SVG that plays on its own (no per-element interaction).
 #' @param width,height Widget size (any valid CSS size, or `NULL` to size from the
 #'   scene). Passed to [htmlwidgets::createWidget()].
 #' @param toolbar Show the on-hover toolbar (default `TRUE`). Hover tooltip,
@@ -176,6 +178,12 @@ as_widget <- function(
   mode <- match.arg(mode)
   text_set <- !missing(text)
   text <- match.arg(text)
+  # A keyframe animation (from vellumplot::animate()) becomes an embedded animated
+  # SVG that plays on its own -- its marks move every frame, so there is no stable
+  # per-element geometry to hover, and the interactive machinery is skipped.
+  if (.is_animation(x)) {
+    return(.animation_widget(x, width, height, elementId, alt, a11y))
+  }
   scene <- vellum::as_vellum_scene(x)
   model <- vellum::scene_model(scene)
   ct_group <- .crosstalk_group(crosstalk)
@@ -285,6 +293,63 @@ as_widget <- function(
     height = height %||% dims$height,
     package = "vellumwidget",
     dependencies = deps,
+    elementId = elementId,
+    sizingPolicy = htmlwidgets::sizingPolicy(
+      defaultWidth = dims$width,
+      defaultHeight = dims$height,
+      browser.fill = FALSE,
+      viewer.fill = FALSE,
+      knitr.figure = FALSE,
+      padding = 0
+    )
+  )
+}
+
+# Is `x` a vellumplot keyframe animation? Detected by its S7 class name so no
+# hard dependency on vellumplot is needed (the class is not exported anyway).
+.is_animation <- function(x) {
+  inherits(x, "vellumplot::vellum_animation")
+}
+
+# Build a widget that embeds a self-contained animated SVG (from
+# vellumplot::anim_save() to a `.svg`). The SVG carries its own CSS frame
+# animation and prefers-reduced-motion fallback, so it plays natively once the
+# runtime injects it (`holder.innerHTML = x.svg`) -- no interaction index, no
+# raster canvas. Vector-only: an animated SVG is the resolution-independent path.
+.animation_widget <- function(x, width, height, elementId, alt, a11y) {
+  if (!requireNamespace("vellumplot", quietly = TRUE)) {
+    stop(
+      "Rendering an animation as a widget needs the 'vellumplot' package.",
+      call. = FALSE
+    )
+  }
+  f <- tempfile(fileext = ".svg")
+  on.exit(unlink(f), add = TRUE)
+  anim_save <- getExportedValue("vellumplot", "anim_save")
+  anim_save(f, x)
+  svg <- paste(readLines(f, warn = FALSE), collapse = "\n")
+  dims <- .svg_dims(svg)
+
+  payload <- list(
+    svg = svg,
+    elements = list(),
+    panels = list(),
+    colorbar = NULL,
+    options = list(
+      animated = TRUE,
+      raster = FALSE,
+      toolbar = FALSE,
+      a11y = isTRUE(a11y),
+      alt = if (is.null(alt)) NULL else as.character(alt)
+    )
+  )
+
+  htmlwidgets::createWidget(
+    name = "vellumwidget",
+    x = payload,
+    width = width %||% dims$width,
+    height = height %||% dims$height,
+    package = "vellumwidget",
     elementId = elementId,
     sizingPolicy = htmlwidgets::sizingPolicy(
       defaultWidth = dims$width,
