@@ -53,7 +53,10 @@ as_widget(
   A `vellumplot` plot (a `PlotSpec` / `PlotComposition`) or a `vellum`
   scene — anything
   [`vellum::as_vellum_scene()`](https://r-vellum.github.io/vellum/reference/as_vellum_scene.html)
-  accepts.
+  accepts. Also a keyframe animation from
+  [`vellumplot::animate()`](https://r-vellum.github.io/vellumplot/reference/animate.html),
+  embedded as a self-contained animated SVG that plays on its own (no
+  per-element interaction).
 
 - width, height:
 
