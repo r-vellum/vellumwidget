@@ -2,6 +2,28 @@
 
 ## vellumwidget (development version)
 
+- **The raster base image is now rendered at 2× for HiDPI screens.** A
+  widget is always viewed at screen resolution, and a 1× image stretched
+  by the browser is visibly soft on a retina display.
+  `scene_png(scale = 2)` multiplies dpi while holding physical size, so
+  the image carries two pixels per device pixel while the SVG shell
+  stays in device pixels — the space the element bounding boxes and
+  panel rectangles live in, so nothing about hit-testing or pan/zoom
+  changes.
+
+  No new argument: raster mode is chosen precisely when the SVG
+  alternative would be enormous, so the extra bytes are noise against
+  what they replace (at 30,000 keyed points, 446 KB → 877 KB, versus a
+  14.7 MB per-element SVG). The dense end is *cheaper* at 2×, not dearer
+  — a saturated canvas compresses better.
+
+  The shell’s dimensions now come from the scene rather than from the
+  image, via
+  [`vellum::vl_convert()`](https://r-vellum.github.io/vellum/reference/vl_convert.html).
+  Halving a scaled PNG re-rounds and drifted by a pixel on a fractional
+  page size, which would have put a small but systematic offset between
+  the drawn frame and the bounding-box space picking uses.
+
 - **Exact hit-testing: picking now measures to the mark, not to its
   box.** The payload carries each keyed element’s true vertices in
   device pixels

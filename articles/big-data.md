@@ -48,6 +48,14 @@ rescaling. Hover, click, and brush all hit-test against the index of
 keys and shapes, so they keep working even though there is nothing
 per-point in the DOM.
 
+The PNG itself carries two pixels per device pixel. A widget is always
+viewed at screen resolution, frequently on a HiDPI display, where a 1×
+base image is visibly soft — and the extra bytes are noise against what
+the raster path is replacing: at 30,000 keyed points the base image goes
+from 446 KB to 877 KB, where the per-element SVG would have been 14.7
+MB. The dense end of the range is *cheaper* at 2×, not dearer, because a
+saturated canvas compresses better.
+
 You can force the strategy instead of letting `"auto"` decide:
 
 ``` r
