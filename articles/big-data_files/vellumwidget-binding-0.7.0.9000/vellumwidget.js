@@ -517,6 +517,59 @@
   function hasBbox(e) {
     return typeof e.x0 === "number" && typeof e.y0 === "number";
   }
+  function isRoundMark(mark) {
+    return mark === "point" || mark === "points" || mark === "circle" || mark === "circles";
+  }
+  function distToSegment2(x, y, ax, ay, bx, by) {
+    const vx = bx - ax, vy = by - ay;
+    const len2 = vx * vx + vy * vy;
+    let t = len2 > 0 ? ((x - ax) * vx + (y - ay) * vy) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const dx = x - (ax + t * vx), dy = y - (ay + t * vy);
+    return dx * dx + dy * dy;
+  }
+  function distToGeom(x, y, g, gx, gy, box) {
+    const at = g.at, n = g.n;
+    if (n <= 0) return Infinity;
+    if (g.kind === "point") {
+      const dx = x - gx[at], dy = y - gy[at];
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const r = box ? Math.min(box.x1 - box.x0, box.y1 - box.y0) / 2 : 0;
+      return d > r ? d - r : 0;
+    }
+    if (n === 1) {
+      const dx = x - gx[at], dy = y - gy[at];
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    if (g.kind === "rect" || g.kind === "text" || g.kind === "roundrect") {
+      return distToBbox(x, y, {
+        x0: Math.min(gx[at], gx[at + 1]),
+        x1: Math.max(gx[at], gx[at + 1]),
+        y0: Math.min(gy[at], gy[at + 1]),
+        y1: Math.max(gy[at], gy[at + 1])
+      });
+    }
+    const closed = g.kind === "polygon" || g.kind === "path";
+    if (closed && n >= 3) {
+      let inside = false;
+      for (let i = 0, j = n - 1; i < n; j = i++) {
+        const xi = gx[at + i], yi = gy[at + i];
+        const xj = gx[at + j], yj = gy[at + j];
+        if (yi > y !== yj > y && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      if (inside) return 0;
+    }
+    let best = Infinity;
+    for (let i = 1; i < n; i++) {
+      const d2 = distToSegment2(x, y, gx[at + i - 1], gy[at + i - 1], gx[at + i], gy[at + i]);
+      if (d2 < best) best = d2;
+    }
+    if (closed && n >= 3) {
+      const d2 = distToSegment2(x, y, gx[at + n - 1], gy[at + n - 1], gx[at], gy[at]);
+      if (d2 < best) best = d2;
+    }
+    return Math.sqrt(best);
+  }
   function asColumn(v) {
     if (v == null) return [];
     return Array.isArray(v) ? v : [v];
@@ -1053,6 +1106,10 @@
       let hoverRAF = 0;
       let spatialIndex = null;
       let indexToElem = [];
+      let geomByKey = {};
+      let gx = new Float64Array(0);
+      let gy = new Float64Array(0);
+      let haveGeometry = false;
       const DIM_OVERLAY_MIN = 2e3;
       let largeDim = false;
       let dimLayer = null;
@@ -1290,6 +1347,50 @@
         idx.finish();
         spatialIndex = idx;
       }
+      function buildGeometry(g) {
+        geomByKey = {};
+        gx = new Float64Array(0);
+        gy = new Float64Array(0);
+        haveGeometry = false;
+        if (!g) return;
+        const keys = asColumn(g.key);
+        const kinds = asColumn(g.kind);
+        const ns = asColumn(g.n);
+        const xs = asColumn(g.x);
+        const ys = asColumn(g.y);
+        if (!keys.length || xs.length !== ys.length) return;
+        gx = Float64Array.from(xs);
+        gy = Float64Array.from(ys);
+        let at = 0;
+        for (let i = 0; i < keys.length; i++) {
+          const n = ns[i] | 0;
+          if (n <= 0 || at + n > gx.length) break;
+          (geomByKey[keys[i]] || (geomByKey[keys[i]] = [])).push({ kind: kinds[i], at, n });
+          at += n;
+        }
+        haveGeometry = at > 0;
+      }
+      function distToElem(x, y, e) {
+        const box = hasBbox(e) ? e : null;
+        const gs = geomByKey[e.key];
+        if (!gs) {
+          if (!box) return Infinity;
+          if (isRoundMark(e.mark)) {
+            const cx = (box.x0 + box.x1) / 2, cy = (box.y0 + box.y1) / 2;
+            const r = Math.min(box.x1 - box.x0, box.y1 - box.y0) / 2;
+            const dx = x - cx, dy = y - cy;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            return d > r ? d - r : 0;
+          }
+          return distToBbox(x, y, box);
+        }
+        let best = Infinity;
+        for (let i = 0; i < gs.length; i++) {
+          const d = distToGeom(x, y, gs[i], gx, gy, box);
+          if (d < best) best = d;
+        }
+        return best;
+      }
       function buildHoverAxis() {
         const cx = [];
         const cy = [];
@@ -1324,12 +1425,25 @@
         const ks = brushKeysIn(rect);
         return ks.length ? ks : [primary];
       }
+      const PICK_CANDIDATES = 256;
       function nearestKeyAt(x, y, maxDist) {
+        let best = null;
+        let bestD = maxDist;
+        const rank = (e) => {
+          if (e.source != null && !geomByKey[e.key]) return;
+          const d = distToElem(x, y, e);
+          if (d <= bestD) {
+            bestD = d;
+            best = e.key;
+          }
+        };
         if (spatialIndex) {
-          const ids = spatialIndex.neighbors(x, y, 1, maxDist, (id) => elements[indexToElem[id]].source == null);
-          return ids.length ? elements[indexToElem[ids[0]]].key : null;
+          const ids = spatialIndex.neighbors(x, y, PICK_CANDIDATES, maxDist);
+          for (let i = 0; i < ids.length; i++) rank(elements[indexToElem[ids[i]]]);
+        } else {
+          for (let i = 0; i < elements.length; i++) rank(elements[i]);
         }
-        return nearestKey(elements.filter((e) => e.source == null), x, y, maxDist);
+        return best;
       }
       function brushKeysIn(rect) {
         if (!spatialIndex) return brushKeys(elements, rect);
@@ -3305,6 +3419,7 @@
               clearPointData();
             }
             buildSpatialIndex();
+            buildGeometry(x.geometry);
             buildHoverAxis();
             wire(svgEl);
             buildToolbar();
@@ -3338,6 +3453,21 @@
           brushKeysIn,
           indexSize: function() {
             return spatialIndex ? spatialIndex.numItems : 0;
+          },
+          // True-geometry picking (WI-3): whether the payload carried geometry, and
+          // the exact distance to one key, so the suite can assert the ranking that
+          // the bbox distance would get wrong.
+          haveGeometry: function() {
+            return haveGeometry;
+          },
+          geomVertexCount: function() {
+            return gx.length;
+          },
+          distToKey: function(x, y, key) {
+            for (let i = 0; i < elements.length; i++) {
+              if (elements[i].key === key) return distToElem(x, y, elements[i]);
+            }
+            return Infinity;
           },
           largeDim: function() {
             return largeDim;
@@ -3457,6 +3587,8 @@
   window.__vellumwidgetTest = {
     rectsIntersect,
     distToBbox,
+    distToSegment2,
+    distToGeom,
     brushKeys,
     nearestKey,
     zoomViewBox,

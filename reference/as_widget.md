@@ -211,7 +211,7 @@ as_widget(
   always uses the per-element SVG; `"raster"` always uses the image. In
   raster mode the marks are drawn once as a base image and all
   interaction (hover, click, brush, pan/zoom) is driven client-side from
-  the element index (bounding boxes + keys), so a very large scatter
+  the element index (geometry + boxes + keys), so a very large scatter
   (100k+ points) stays navigable with a tiny DOM and a small payload.
   The trade-offs of raster mode: per-element grammar colours, per-mark
   screen-reader focus, and display-tier cross-filtering do not apply
