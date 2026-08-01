@@ -13,7 +13,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.7.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.8.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -49,7 +49,8 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="development version" id="vellumwidget-development-version">vellumwidget (development version)<a class="anchor" aria-label="anchor" href="#vellumwidget-development-version"></a></h2>
+<h2 class="pkg-version" data-toc-text="0.8.0" id="vellumwidget-080">vellumwidget 0.8.0<a class="anchor" aria-label="anchor" href="#vellumwidget-080"></a></h2>
+<p>Requires <strong>vellum &gt;= 0.6.6</strong>, which fixes the coordinate space <code>element_geometry()</code> reports in — the exact hit-testing below is built on it.</p>
 <ul><li>
 <p><strong>The raster base image is now rendered at 2× for HiDPI screens.</strong> A widget is always viewed at screen resolution, and a 1× image stretched by the browser is visibly soft on a retina display. <code>scene_png(scale = 2)</code> multiplies dpi while holding physical size, so the image carries two pixels per device pixel while the SVG shell stays in device pixels — the space the element bounding boxes and panel rectangles live in, so nothing about hit-testing or pan/zoom changes.</p>
 <p>No new argument: raster mode is chosen precisely when the SVG alternative would be enormous, so the extra bytes are noise against what they replace (at 30,000 keyed points, 446 KB → 877 KB, versus a 14.7 MB per-element SVG). The dense end is <em>cheaper</em> at 2×, not dearer — a saturated canvas compresses better.</p>
@@ -68,7 +69,7 @@
 </ul><p>Only the kinds whose shape is not their box (segment, line, polygon, path) are shipped; a point’s disc and a label’s box are reconstructed from the bounding box the payload already carries, so the dense scatter — where payload size actually bites — pays nothing for this. Above 500,000 vertices the block is dropped with a message and picking falls back to boxes.</p>
 <p>Brush and lasso are unchanged: a box is the right answer for a rectangular brush, which is what it was always for.</p>
 </li>
-<li><p><strong>Raster-mode widgets no longer touch disk.</strong> The base image is now encoded with <code><a href="https://r-vellum.github.io/vellum/reference/scene_png.html" class="external-link">vellum::scene_png()</a></code>, which returns the PNG bytes, instead of rendering to a <code><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile()</a></code> and reading it back. Widget output is unchanged. Requires vellum &gt;= 0.6.5.</p></li>
+<li><p><strong>Raster-mode widgets no longer touch disk.</strong> The base image is now encoded with <code><a href="https://r-vellum.github.io/vellum/reference/scene_png.html" class="external-link">vellum::scene_png()</a></code>, which returns the PNG bytes, instead of rendering to a <code><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile()</a></code> and reading it back. Widget output is unchanged.</p></li>
 <li><p><strong>Animated plots as widgets.</strong> <code><a href="../reference/as_widget.html">as_widget()</a></code> now accepts a keyframe animation from <code><a href="https://r-vellum.github.io/vellumplot/reference/animate.html" class="external-link">vellumplot::animate()</a></code> and embeds it as a self-contained <strong>animated SVG</strong> — resolution-independent and honouring <code>prefers-reduced-motion</code> (both handled inside the SVG by vellum). It plays on its own through the runtime’s existing inline-SVG mount; since the marks move every frame there is no per-element interaction index (no hover/brush) and no raster canvas.</p></li>
 <li><p><strong>Fix: click-to-source did nothing for single-row groups.</strong> A grob backed by one data row had its <code>rows</code> auto-unboxed to a scalar in the payload, so the runtime’s <code>rows.length</code> check skipped it (no event, no popover) — e.g. every single-county region of a choropleth. The payload now forces arrays, and the runtime coerces a scalar defensively.</p></li>
 <li><p><strong>Click-to-source.</strong> When a plot opts in with <code><a href="https://r-vellum.github.io/vellumplot/reference/inspect_source.html" class="external-link">vellumplot::inspect_source()</a></code>, clicking a mark surfaces the source data rows behind it: the widget reads the compiled scene’s provenance (keyed by each grob’s <code>data-vellum-id</code>), fires a bubbling <code>vellum:source</code> DOM event (<code>detail</code> = <code>id</code>, <code>rows</code>, <code>fields</code>, and <code>values</code> when <code>inspect_source(values = TRUE)</code>), sets <code>input$&lt;id&gt;_source</code> under Shiny, and shows a small values popover. Opt-in rides the spec, so it adds no <code><a href="../reference/as_widget.html">as_widget()</a></code> argument and no payload weight to a plain widget.</p></li>

@@ -1,6 +1,10 @@
 # Changelog
 
-## vellumwidget (development version)
+## vellumwidget 0.8.0
+
+Requires **vellum \>= 0.6.6**, which fixes the coordinate space
+`element_geometry()` reports in — the exact hit-testing below is built
+on it.
 
 - **The raster base image is now rendered at 2× for HiDPI screens.** A
   widget is always viewed at screen resolution, and a 1× image stretched
@@ -64,7 +68,7 @@
   [`vellum::scene_png()`](https://r-vellum.github.io/vellum/reference/scene_png.html),
   which returns the PNG bytes, instead of rendering to a
   [`tempfile()`](https://rdrr.io/r/base/tempfile.html) and reading it
-  back. Widget output is unchanged. Requires vellum \>= 0.6.5.
+  back. Widget output is unchanged.
 
 - **Animated plots as widgets.**
   [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)

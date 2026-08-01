@@ -43,7 +43,7 @@
 
     <a class="navbar-brand me-2" href="index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.7.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.8.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -89,9 +89,11 @@
 <!-- badges: start -->
 
 <p><strong>vellumwidget</strong> turns a <a href="https://github.com/r-vellum/vellum" class="external-link">vellum</a> scene — or a <a href="https://github.com/r-vellum/vellumplot" class="external-link">vellumplot</a> plot — into a self-contained, client-side interactive HTML widget: <strong>hover tooltips + highlighting, click selection, rectangular brush-select, pan/zoom, and a toolbar</strong>, with no Shiny and no server round-trip.</p>
-<p>It adds no drawing code of its own, and that is the point. <code>vellum</code> emits the SVG together with a <code>scene_model()</code> table giving every element’s data key and its resolved device-pixel box; <code>vellumplot</code> declares which marks are interactive; and <code>vellumwidget</code> is a thin client over those two. So the widget shows <em>the same scene</em> as your static figure — same layout, same text metrics, same geometry — rather than a re-drawing of your plot in another engine, and behaviour that needs positions (a rectangular brush, pan/zoom, arrow-key navigation between marks) is a table lookup rather than new machinery.</p>
+<p>It adds no drawing code of its own, and that is the point. <code>vellum</code> emits the SVG together with a <code>scene_model()</code> table giving every element’s data key and its resolved device-pixel box, and <code>element_geometry()</code> giving the true vertices behind that box; <code>vellumplot</code> declares which marks are interactive; and <code>vellumwidget</code> is a thin client over those two. So the widget shows <em>the same scene</em> as your static figure — same layout, same text metrics, same geometry — rather than a re-drawing of your plot in another engine, and behaviour that needs positions (a rectangular brush, pan/zoom, arrow-key navigation between marks) is a table lookup rather than new machinery.</p>
+<p>Because the geometry is the engine’s own, picking measures to the <em>mark</em>: a cursor on a line picks that line rather than whichever series’ bounding box it happens to fall inside, a click in the middle of a filled region hits the region, and a graph edge is hoverable along its length instead of anywhere in the rectangle its endpoints span.</p>
 <p>Client-side interactivity from R is not new: <code>ggiraph</code> has done it well for years. What differs here is where the identity comes from (a geometry table rather than tagged elements plus CSS) and that there are no <code>*_interactive()</code> twins of the marks to remember.</p>
-<p><strong>Interactions:</strong> hover (tooltip + highlight, with nearest-mark snapping and <code>hover_group</code> linking) · shared/unified hover with an optional crosshair (<code>hover_mode = "x"</code>/<code>"y"</code>: one tooltip listing every series at the hovered x/y) · click-select (single/multiple) · drag a rectangle to brush-select or a freehand lasso · wheel / pan-drag to pan-zoom · discrete-legend interaction (hover a swatch to highlight its series, click to select — or <code>legend_click = "hide"</code> to toggle/isolate series visibility) · continuous colorbar filter (drag a value range on the colorbar to fade out-of-range marks) · optional overview navigator (<code>navigator = TRUE</code>: a draggable range strip for long series) · toolbar (mode toggle, zoom-to-selection, reset, save SVG/PNG, fullscreen) · linked views across a <code>group</code> (selection, hover, and pan/zoom). Each is opt-outable via an <code><a href="reference/as_widget.html">as_widget()</a></code> argument.</p>
+<p><strong>Interactions</strong>, all on by default — hover (tooltip + highlight, with nearest-mark snapping and <code>hover_group</code> linking) · click-select · drag a rectangle to brush-select or a freehand lasso · wheel / pan-drag to pan-zoom, re-ticking the axes rather than stretching them · discrete-legend interaction (hover a swatch to highlight its series, click to select) · continuous colorbar filter (drag a value range to fade out-of-range marks) · linked views across a <code>group</code> (selection, hover, and pan/zoom) · a toolbar (drag mode, zoom-to-selection, reset, save or copy SVG/PNG, fullscreen).</p>
+<p>The <code><a href="reference/as_widget.html">as_widget()</a></code> arguments that remain are appearance and mode, not on/off switches: <code>hover_mode = "x"</code>/<code>"y"</code> for a unified tooltip listing every series at the hovered position, <code>crosshair</code>, <code>legend_click = "hide"</code> to toggle series visibility instead of selecting, <code>select_mode</code>, <code>navigator = TRUE</code> for a draggable range strip under a long series, and the tooltip/export settings. <em>What</em> is interactive, and how it responds, is declared in the plot — see below.</p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
@@ -115,56 +117,59 @@
 <p><code><a href="reference/as_widget.html">as_widget()</a></code> is terminal: it compiles the plot to a vellum scene, emits the SVG and the element table, and returns an htmlwidget. It also accepts a bare <code>vellum</code> scene. Declare interactivity in <code>vellumplot</code> with the reserved mark arguments <code>data_id</code> (the join key), <code>tooltip</code>, and <code>hover_group</code> (links elements for shared highlighting); discrete <code>color</code>/<code>shape</code> legends then become interactive automatically. A plot that declares none renders as a static — but still embeddable — SVG.</p>
 </div>
 <div class="section level2">
-<h2 id="how-it-depends">How it depends<a class="anchor" aria-label="anchor" href="#how-it-depends"></a>
+<h2 id="interaction-declared-in-the-plot">Interaction declared in the plot<a class="anchor" aria-label="anchor" href="#interaction-declared-in-the-plot"></a>
 </h2>
-<div class="sourceCode" id="cb3"><pre class="sourceCode R"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a>vellumwidget ──depends──▶ vellum ◀──depends── vellumplot</span></code></pre></div>
-<p><code>vellumwidget</code> depends only on <code>vellum</code>’s <code>scene_svg()</code> / <code>scene_model()</code> contract, so it wraps <em>any</em> vellum scene, whoever produced it. <code>vellumplot</code> is a Suggests (for the examples/tests).</p>
-</div>
-<div class="section level2">
-<h2 id="development">Development<a class="anchor" aria-label="anchor" href="#development"></a>
-</h2>
-<p>The JS runtime is TypeScript in <code>srcts/</code>, bundled by esbuild into the committed <code>inst/htmlwidgets/vellumwidget.js</code> (so the R package installs with no Node):</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="ex">npm</span> install            <span class="co"># esbuild + typescript (+ jsdom for tests)</span></span>
-<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a><span class="ex">npm</span> run build          <span class="co"># srcts/index.ts -&gt; inst/htmlwidgets/vellumwidget.js</span></span>
-<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a><span class="ex">node</span> tests/js/behavior.test.js   <span class="co"># headless DOM behaviour suite</span></span></code></pre></div>
-</div>
-<div class="section level2">
-<h2 id="styling-the-interactions">Styling the interactions<a class="anchor" aria-label="anchor" href="#styling-the-interactions"></a>
-</h2>
-<p>Hover/selection appearance is customisable at two levels that compose — a widget-wide <strong>theme</strong> and per-element <strong>grammar</strong> colours. Both accept any R or CSS colour; per-element colours win over the theme, which wins over the built-in defaults.</p>
-<p><strong>1. Widget theme</strong> — <code><a href="reference/as_widget.html">as_widget()</a></code> arguments set the look for the whole plot:</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<p>Beyond the built-in defaults, interaction that is <em>part of the plot</em> is declared in <code>vellumplot</code> and travels with the spec — portable, composable across views, and surviving a save/print/round-trip. A <strong>selection</strong> is a named set of elements defined by a gesture; <code><a href="https://r-vellum.github.io/vellumplot/reference/condition.html" class="external-link">condition()</a></code> styles by membership and <code><a href="https://r-vellum.github.io/vellumplot/reference/filter_by.html" class="external-link">filter_by()</a></code> shows only members. No <code><a href="reference/as_widget.html">as_widget()</a></code> arguments are involved.</p>
+<p><strong>Highlight on hover</strong> — colour by group, dimming everything but the hovered point’s group:</p>
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-vellum.github.io/vellumplot/" class="external-link">vellumplot</a></span><span class="op">)</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-vellum.github.io/vellumwidget/">vellumwidget</a></span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">df</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>wt <span class="op">=</span> <span class="va">mtcars</span><span class="op">$</span><span class="va">wt</span>, mpg <span class="op">=</span> <span class="va">mtcars</span><span class="op">$</span><span class="va">mpg</span>, model <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/colnames.html" class="external-link">rownames</a></span><span class="op">(</span><span class="va">mtcars</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="va">df</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
+<span>  wt <span class="op">=</span> <span class="va">mtcars</span><span class="op">$</span><span class="va">wt</span>, mpg <span class="op">=</span> <span class="va">mtcars</span><span class="op">$</span><span class="va">mpg</span>,</span>
+<span>  model <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/colnames.html" class="external-link">rownames</a></span><span class="op">(</span><span class="va">mtcars</span><span class="op">)</span>, cyl <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/factor.html" class="external-link">factor</a></span><span class="op">(</span><span class="va">mtcars</span><span class="op">$</span><span class="va">cyl</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/vplot.html" class="external-link">vplot</a></span><span class="op">(</span><span class="va">df</span><span class="op">)</span> <span class="op">|&gt;</span></span>
-<span>  <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/mark_point.html" class="external-link">mark_point</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">wt</span>, y <span class="op">=</span> <span class="va">mpg</span>, tooltip <span class="op">=</span> <span class="va">model</span>, data_id <span class="op">=</span> <span class="va">model</span><span class="op">)</span> <span class="op">|&gt;</span></span>
-<span>  <span class="fu"><a href="reference/as_widget.html">as_widget</a></span><span class="op">(</span></span>
-<span>    hover_color    <span class="op">=</span> <span class="st">"steelblue"</span>,  <span class="co"># outline on hover (default: none, just dim-others)</span></span>
-<span>    selected_color <span class="op">=</span> <span class="st">"orange"</span>,     <span class="co"># outline on click-select</span></span>
-<span>    dim_opacity    <span class="op">=</span> <span class="fl">0.15</span>          <span class="co"># how much the non-hovered marks fade (default 0.28)</span></span>
-<span>  <span class="op">)</span></span></code></pre></div>
-<p><strong>2. Per-element (data-driven) grammar</strong> — declare <code>hover_color</code> / <code>selected_color</code> on the mark, just like <code>tooltip</code>/<code>data_id</code>. They can be constants or mapped from a column, so different marks highlight differently:</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">df</span><span class="op">$</span><span class="va">cyl</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/factor.html" class="external-link">factor</a></span><span class="op">(</span><span class="va">mtcars</span><span class="op">$</span><span class="va">cyl</span><span class="op">)</span></span>
+<span>  <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/mark_point.html" class="external-link">mark_point</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">wt</span>, y <span class="op">=</span> <span class="va">mpg</span>, color <span class="op">=</span> <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/condition.html" class="external-link">condition</a></span><span class="op">(</span><span class="st">"hi"</span>, <span class="va">cyl</span>, <span class="st">"grey85"</span><span class="op">)</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/select_point.html" class="external-link">select_point</a></span><span class="op">(</span><span class="st">"hi"</span>, on <span class="op">=</span> <span class="st">"hover"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="reference/as_widget.html">as_widget</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div>
+<p><strong>Cross-filter</strong> — brush one view and a linked view narrows to those rows, while the source stays fully visible:</p>
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">sel</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/select_point.html" class="external-link">select_interval</a></span><span class="op">(</span><span class="st">"brush"</span>, on <span class="op">=</span> <span class="st">"xy"</span><span class="op">)</span></span>
 <span></span>
-<span><span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/vplot.html" class="external-link">vplot</a></span><span class="op">(</span><span class="va">df</span><span class="op">)</span> <span class="op">|&gt;</span></span>
-<span>  <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/mark_point.html" class="external-link">mark_point</a></span><span class="op">(</span></span>
-<span>    x <span class="op">=</span> <span class="va">wt</span>, y <span class="op">=</span> <span class="va">mpg</span>, data_id <span class="op">=</span> <span class="va">model</span>,</span>
-<span>    hover_color    <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/ifelse.html" class="external-link">ifelse</a></span><span class="op">(</span><span class="va">mtcars</span><span class="op">$</span><span class="va">cyl</span> <span class="op">==</span> <span class="fl">8</span>, <span class="st">"firebrick"</span>, <span class="st">"steelblue"</span><span class="op">)</span>,</span>
-<span>    selected_color <span class="op">=</span> <span class="st">"black"</span></span>
-<span>  <span class="op">)</span> <span class="op">|&gt;</span></span>
-<span>  <span class="fu"><a href="reference/as_widget.html">as_widget</a></span><span class="op">(</span><span class="op">)</span>          <span class="co"># a per-element colour overrides any widget theme</span></span></code></pre></div>
-<p>Both layers use the same CSS-variable mechanism, so a plot can set a theme default <em>and</em> override it per element in the same pipe. Anything not set falls back to the built-in look. (You can also override the raw CSS classes — <code>.vellumwidget-hl</code>, <code>[data-key].vellumwidget-selected</code>, <code>.vellumwidget-tip</code>, … — from the host document, but the arguments above are the supported API.)</p>
+<span><span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/concat.html" class="external-link">vconcat</a></span><span class="op">(</span></span>
+<span>  <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/vplot.html" class="external-link">vplot</a></span><span class="op">(</span><span class="va">df</span><span class="op">)</span> <span class="op">|&gt;</span> <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/mark_point.html" class="external-link">mark_point</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">wt</span>, y <span class="op">=</span> <span class="va">mpg</span><span class="op">)</span> <span class="op">|&gt;</span> <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/add_selection.html" class="external-link">add_selection</a></span><span class="op">(</span><span class="va">sel</span><span class="op">)</span>,</span>
+<span>  <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/vplot.html" class="external-link">vplot</a></span><span class="op">(</span><span class="va">df</span><span class="op">)</span> <span class="op">|&gt;</span> <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/mark_point.html" class="external-link">mark_point</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">mpg</span>, y <span class="op">=</span> <span class="va">wt</span><span class="op">)</span> <span class="op">|&gt;</span> <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/filter_by.html" class="external-link">filter_by</a></span><span class="op">(</span><span class="va">sel</span><span class="op">)</span></span>
+<span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="reference/as_widget.html">as_widget</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div>
+<p>This is the intended long-term home for interaction: declared once, in the plot, for any capable host to enact. Because the widget works on a frozen scene, these are reactions it can perform on what is already drawn — highlight, dim, hide, filter, pan/zoom. Anything that would recompute the grammar (re-binning on brush, retraining a scale from filtered data) needs a Shiny recompile.</p>
+<p>For per-mark control there are also the reserved mark arguments <code>hover_color</code> and <code>selected_color</code>, alongside <code>tooltip</code>/<code>data_id</code>/<code>hover_group</code>; they take a constant or a column, so different marks can highlight differently. The CSS classes (<code>.vellumwidget-hl</code>, <code>[data-key].vellumwidget-selected</code>, <code>.vellumwidget-tip</code>, …) can be overridden from the host document, but the declarations above are the supported API.</p>
+</div>
+<div class="section level2">
+<h2 id="large-scenes">Large scenes<a class="anchor" aria-label="anchor" href="#large-scenes"></a>
+</h2>
+<p>Above <code>raster_threshold</code> keyed elements (20,000 by default), <code>mode = "auto"</code> stops shipping one DOM node per mark and draws the scene once as a single embedded image, at 2× for HiDPI screens. Interaction is unaffected — it runs off the element index rather than the DOM — so hover, click, brush and pan/zoom keep working on a scatter well past 100,000 points. At 30,000 keyed points the base image is a few hundred KB where the per-element SVG would have been ~15 MB.</p>
+<p>Picking stays exact either way: a Flatbush R-tree over the bounding boxes shortlists candidates, and the true geometry ranks them.</p>
+</div>
+<div class="section level2">
+<h2 id="also-here">Also here<a class="anchor" aria-label="anchor" href="#also-here"></a>
+</h2>
+<ul>
+<li>
+<strong>Animation.</strong> <code>as_widget(animate(plot))</code> embeds a <code>vellumplot</code> keyframe animation as a self-contained animated SVG — resolution-independent, and honouring <code>prefers-reduced-motion</code>. The marks move every frame, so there is no per-element interaction index.</li>
+<li>
+<strong>Click to source.</strong> <code><a href="https://r-vellum.github.io/vellumplot/reference/inspect_source.html" class="external-link">inspect_source()</a></code> in the plot makes a click report the data rows behind the mark — as a DOM event, as <code>input$&lt;id&gt;_source</code> under Shiny, and as a small popover. Opt-in rides the spec, so it costs a plain widget nothing.</li>
+<li>
+<strong>Accessibility.</strong> Marks are focusable and arrow-key navigable, with a live region announcing the focused mark and a data table behind the figure. Text stays real <code>&lt;text&gt;</code> in SVG mode, so it is selectable and screen-reader visible.</li>
+</ul>
 </div>
 <div class="section level2">
 <h2 id="linking-views">Linking views<a class="anchor" aria-label="anchor" href="#linking-views"></a>
 </h2>
 <p>Selection can be <strong>linked across views</strong> by data key — select or brush in one plot and the same data highlight everywhere.</p>
 <p><strong>Own bus (vellumwidget ↔︎ vellumwidget, no dependency).</strong> Give the widgets a shared <code>group</code>:</p>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span></span>
 <span><span class="va">df</span><span class="op">$</span><span class="va">hp</span> <span class="op">&lt;-</span> <span class="va">mtcars</span><span class="op">$</span><span class="va">hp</span></span>
 <span></span>
@@ -173,7 +178,7 @@
 <span><span class="co"># in an HTML doc, selecting a point in p1 highlights the same car in p2</span></span></code></pre></div>
 <p>Selection <strong>projects by field</strong>: if the marks declare <code>hover_group</code>, clicking one element selects the whole series (select one cylinder count → all its cars).</p>
 <p><strong>crosstalk (interop with plotly, leaflet, DT, and <code>filter_*</code> inputs).</strong> Wrap the data in a <a href="https://rstudio.github.io/crosstalk/" class="external-link">crosstalk</a> <code>SharedData</code> (its key must match your <code>data_id</code>) and pass it to <code><a href="reference/as_widget.html">as_widget()</a></code>:</p>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://rstudio.github.io/crosstalk/" class="external-link">crosstalk</a></span><span class="op">)</span></span>
 <span><span class="va">sd</span> <span class="op">&lt;-</span> <span class="va"><a href="https://rdrr.io/pkg/crosstalk/man/SharedData.html" class="external-link">SharedData</a></span><span class="op">$</span><span class="fu">new</span><span class="op">(</span><span class="va">df</span>, key <span class="op">=</span> <span class="op">~</span><span class="va">model</span>, group <span class="op">=</span> <span class="st">"cars"</span><span class="op">)</span></span>
 <span></span>
@@ -188,7 +193,7 @@
 <h2 id="legend-interaction">Legend interaction<a class="anchor" aria-label="anchor" href="#legend-interaction"></a>
 </h2>
 <p>When a plot maps a <strong>discrete</strong> <code>color</code> or <code>shape</code> scale and declares any interactivity (e.g. a <code>data_id</code>), each legend swatch becomes a handle for its whole data series — <strong>no extra arguments needed</strong>:</p>
-<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">df</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
 <span>  wt <span class="op">=</span> <span class="va">mtcars</span><span class="op">$</span><span class="va">wt</span>, mpg <span class="op">=</span> <span class="va">mtcars</span><span class="op">$</span><span class="va">mpg</span>,</span>
 <span>  model <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/colnames.html" class="external-link">rownames</a></span><span class="op">(</span><span class="va">mtcars</span><span class="op">)</span>, cyl <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/factor.html" class="external-link">factor</a></span><span class="op">(</span><span class="va">mtcars</span><span class="op">$</span><span class="va">cyl</span><span class="op">)</span></span>
@@ -199,6 +204,20 @@
 <span><span class="co"># hover the "6" swatch -&gt; all six-cylinder cars highlight (the swatch stays lit);</span></span>
 <span><span class="co"># click it -&gt; the whole series is selected (respecting single/multiple mode).</span></span></code></pre></div>
 <p><code>vellumplot</code> tags each swatch with the series it drives and each mark with its series membership; vellumwidget projects a swatch event onto every mark in that series, reusing the same highlight/select machinery as <code>hover_group</code>. Selecting via a swatch also links across views and into crosstalk, exactly like selecting a mark.</p>
+</div>
+<div class="section level2">
+<h2 id="how-it-depends">How it depends<a class="anchor" aria-label="anchor" href="#how-it-depends"></a>
+</h2>
+<div class="sourceCode" id="cb8"><pre class="sourceCode R"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>vellumwidget ──depends──▶ vellum ◀──depends── vellumplot</span></code></pre></div>
+<p><code>vellumwidget</code> reads a built scene through six read-only <code>vellum</code> entry points — <code>as_vellum_scene()</code>, <code>scene_model()</code>, <code>element_geometry()</code>, <code>scene_svg()</code>, <code>scene_png()</code> and <code>vl_convert()</code> — and never calls back into the engine after the build, so every gesture is answered locally. That contract is all it needs, so it wraps <em>any</em> vellum scene, whoever produced it. <code>vellumplot</code> is a Suggests (for the examples/tests).</p>
+</div>
+<div class="section level2">
+<h2 id="development">Development<a class="anchor" aria-label="anchor" href="#development"></a>
+</h2>
+<p>The JS runtime is TypeScript in <code>srcts/</code>, bundled by esbuild into the committed <code>inst/htmlwidgets/vellumwidget.js</code> (so the R package installs with no Node):</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a><span class="ex">npm</span> install            <span class="co"># esbuild + typescript (+ jsdom for tests)</span></span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a><span class="ex">npm</span> run build          <span class="co"># srcts/index.ts -&gt; inst/htmlwidgets/vellumwidget.js</span></span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a><span class="ex">node</span> tests/js/behavior.test.js   <span class="co"># headless DOM behaviour suite</span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="the-vellum-ecosystem">The vellum ecosystem<a class="anchor" aria-label="anchor" href="#the-vellum-ecosystem"></a>
