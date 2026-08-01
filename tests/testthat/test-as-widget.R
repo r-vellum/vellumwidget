@@ -527,6 +527,25 @@ test_that("mode = 'raster' ships a base image with the element index (no per-ele
   expect_true(is.numeric(w$width) && w$width > 0)
 })
 
+test_that("the raster base image is encoded in memory (no temp file)", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
+  before <- list.files(tempdir())
+  w <- as_widget(scene, mode = "raster")
+  # `scene_png()` hands over the bytes, so nothing lands in tempdir() -- and
+  # nothing is left behind for a later `unlink()` to have to clean up either.
+  expect_setequal(list.files(tempdir()), before)
+  expect_match(w$x$svg, "data:image/png;base64,", fixed = TRUE)
+})
+
+test_that(".png_dims reads the IHDR of the encoded bytes", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, key = "a"))
+  png <- vellum::scene_png(scene)
+  expect_equal(.png_dims(png), list(width = 200, height = 200))
+  expect_null(.png_dims(png[1:10]))
+})
+
 test_that("mode = 'auto' switches to raster above raster_threshold, stays SVG below", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))

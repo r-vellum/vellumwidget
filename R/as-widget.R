@@ -721,16 +721,14 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 
 # Read a PNG's pixel dimensions from its IHDR chunk (bytes 17-24, big-endian),
 # dependency-free — the ground truth for the raster shell's viewBox so the element
-# bboxes (in the same device-px space) line up with the image.
-.png_dims <- function(path) {
-  con <- file(path, "rb")
-  on.exit(close(con))
-  b <- readBin(con, "raw", n = 24L)
-  if (length(b) < 24L) {
+# bboxes (in the same device-px space) line up with the image. Takes the encoded
+# bytes, since `scene_png()` hands them over without touching disk.
+.png_dims <- function(bytes) {
+  if (length(bytes) < 24L) {
     return(NULL)
   }
   be <- function(v) sum(as.integer(v) * 256^(3:0))
-  list(width = be(b[17:20]), height = be(b[21:24]))
+  list(width = be(bytes[17:20]), height = be(bytes[21:24]))
 }
 
 # Render the scene to a PNG and wrap it as a self-contained `<svg><image></svg>`
@@ -739,10 +737,8 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # scene's title/description (if any) ride along as `<title>`/`<desc>` so the chart
 # keeps an accessible name. The image is a base64 data URI (self-contained widget).
 .raster_svg <- function(scene) {
-  tmp <- tempfile(fileext = ".png")
-  on.exit(unlink(tmp), add = TRUE)
-  vellum::render(scene, tmp)
-  d <- .png_dims(tmp)
+  png <- vellum::scene_png(scene)
+  d <- .png_dims(png)
   if (is.null(d)) {
     stop("could not read the rendered raster dimensions", call. = FALSE)
   }
@@ -769,7 +765,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   } else {
     ""
   }
-  uri <- paste0("data:image/png;base64,", base64enc::base64encode(tmp))
+  uri <- paste0("data:image/png;base64,", base64enc::base64encode(png))
   svg <- sprintf(
     paste0(
       '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d"%s>',
