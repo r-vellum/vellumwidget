@@ -1,4 +1,4 @@
-# vellumwidget (development version)
+# vellumwidget 0.8.0
 
 * **The raster base image is now rendered at 2× for HiDPI screens.** A widget is
   always viewed at screen resolution, and a 1× image stretched by the browser is
