@@ -616,6 +616,36 @@ test_that("the raster base image is encoded in memory (no temp file)", {
   expect_match(w$x$svg, "data:image/png;base64,", fixed = TRUE)
 })
 
+test_that("the raster base image is rendered at 2x for HiDPI screens", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
+  w <- as_widget(scene, mode = "raster")
+  # The shell is in device px -- the space the bboxes are in -- while the image
+  # it carries has twice as many pixels per side.
+  expect_match(w$x$svg, 'width="200" height="200" viewBox="0 0 200 200"', fixed = TRUE)
+  expect_equal(w$width, 200)
+  png <- base64enc::base64decode(
+    sub('".*$', "", sub("^.*base64,", "", w$x$svg))
+  )
+  expect_equal(.png_dims(png), list(width = 400, height = 400))
+})
+
+test_that("the raster shell is the same size as the SVG mode's, at any page size", {
+  # The shell's dimensions come from the scene, not from dividing the scaled
+  # PNG: the engine rounds the scaled pixel size, so halving a 2x image drifts
+  # by a pixel on a fractional page -- a small but systematic offset between the
+  # frame and the bbox space the hit-testing uses.
+  for (wi in c(2, 3.005, 4.997, 5.333)) {
+    scene <- vellum::vl_scene(wi, 2.331, dpi = 97) |>
+      vellum::draw(vellum::points_grob(0.5, 0.5, key = "a"))
+    expect_equal(
+      as_widget(scene, mode = "raster")$width,
+      as_widget(scene, mode = "svg")$width,
+      info = paste("page width", wi)
+    )
+  }
+})
+
 test_that(".png_dims reads the IHDR of the encoded bytes", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, key = "a"))
