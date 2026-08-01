@@ -1,5 +1,33 @@
 # vellumwidget (development version)
 
+* **Exact hit-testing: picking now measures to the mark, not to its box.** The
+  payload carries each keyed element's true vertices in device pixels
+  (`vellum::element_geometry()`, computed once at build time); the Flatbush
+  R-tree still shortlists candidates by bounding box — a box distance is never
+  greater than the true distance, so nothing in range is missed — and the
+  shortlist is then ranked by distance to the actual shape. What changes:
+
+  - **Graph edges are hoverable.** An edge's box is the whole rectangle its
+    endpoints span, so a box-distance "nearest" matched it from anywhere inside
+    that rectangle; edges had to be excluded from the open-space snap entirely.
+    They are now measured to the line and compete on their merits.
+  - **A diagonal is no longer matched from the far corner of its box.** On a
+    four-series line chart whose boxes each cover ~91% of the panel, a cursor on
+    a line picks that line — where previously two or more series were tied at
+    box-distance zero at 39 of 40 probe positions.
+  - **A click inside a filled region hits the region**, at distance zero, rather
+    than snapping to whichever border happens to be nearest.
+  - **Round marks are measured to the disc**, not to the square around it.
+
+  Only the kinds whose shape is not their box (segment, line, polygon, path) are
+  shipped; a point's disc and a label's box are reconstructed from the bounding
+  box the payload already carries, so the dense scatter — where payload size
+  actually bites — pays nothing for this. Above 500,000 vertices the block is
+  dropped with a message and picking falls back to boxes.
+
+  Brush and lasso are unchanged: a box is the right answer for a rectangular
+  brush, which is what it was always for.
+
 * **Raster-mode widgets no longer touch disk.** The base image is now encoded
   with `vellum::scene_png()`, which returns the PNG bytes, instead of rendering
   to a `tempfile()` and reading it back. Widget output is unchanged. Requires
