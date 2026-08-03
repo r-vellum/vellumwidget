@@ -49,6 +49,15 @@
     </div>
 
     <div class="section level2">
+<h2 class="pkg-version" data-toc-text="0.8.0.9000" id="vellumwidget-0809000">vellumwidget 0.8.0.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-0809000"></a></h2>
+<ul><li>
+<p><strong>Bug fix: data marks are no longer drawn offset from their own coordinates.</strong> Under <code>axis_zoom</code>/<code>zoom_marks = "fixed"</code> (both default), the constant-size counter-scale is applied as an <em>inline CSS</em> transform, which outranks the SVG <code>transform</code> presentation attribute. Panel marks are positioned by that attribute (a panel-offset matrix), so the counter-scale replaced their placement and every glyph rendered at its untranslated geometry — displaced from the scene by the panel origin. The widget therefore showed the wrong data coordinates, and disagreed with the PNG and PDF of the same scene.</p>
+<p>The inline transform now carries the node’s own placement ahead of the counter-scale, so position and constant size both hold. <code>transform-origin</code> resolves the scale about the glyph’s own centre and translations commute with that, so the composition is exact for the translate-only matrices vellum emits.</p>
+<p>The visible symptom was a crosshair that missed the mark it was tracking: <code>drawCrosshair()</code> works in scene space (correctly), while hit-testing calibrates against the marks’ real rendered positions, so hover was right and the guide rule was not. Both agree again.</p>
+<p>This is the same clobbering as the 0.8.0 legend-swatch fix, which assumed data points “carry absolute coordinates” and so restricted the counter-scale to marks inside the pannable region. Marks inside that region carry a positioning transform too, so excluding the outside was not enough.</p>
+</li>
+</ul></div>
+    <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.8.0" id="vellumwidget-080">vellumwidget 0.8.0<a class="anchor" aria-label="anchor" href="#vellumwidget-080"></a></h2>
 <p>Requires <strong>vellum &gt;= 0.6.6</strong>, which fixes the coordinate space <code>element_geometry()</code> reports in — the exact hit-testing below is built on it.</p>
 <ul><li>

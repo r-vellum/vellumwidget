@@ -2221,12 +2221,40 @@
             if (glyph) {
               node.style.setProperty("transform-box", "fill-box");
               node.style.setProperty("transform-origin", "center");
-              node.style.setProperty("transform", "scale(var(--vw-ix,1),var(--vw-iy,1))");
+              const place = transAsCss(node);
+              node.style.setProperty(
+                "transform",
+                (place ? place + " " : "") + "scale(var(--vw-ix,1),var(--vw-iy,1))"
+              );
             } else {
               node.setAttribute("vector-effect", "non-scaling-stroke");
             }
           }
         }
+      }
+      function transAsCss(node) {
+        const t = (node.getAttribute("transform") || "").trim();
+        if (!t) return "";
+        const N = "([-+\\d.eE]+)";
+        const m = new RegExp(
+          "matrix\\(\\s*" + [N, N, N, N, N, N].join("[\\s,]+") + "\\s*\\)"
+        ).exec(t);
+        if (m) {
+          const v = m.slice(1, 7).map(Number);
+          if (v.some(function(x) {
+            return !isFinite(x);
+          })) return "";
+          return "matrix(" + v.join(",") + ")";
+        }
+        const tr = new RegExp(
+          "translate\\(\\s*" + N + "(?:[\\s,]+" + N + ")?\\s*\\)"
+        ).exec(t);
+        if (tr) {
+          const tx = Number(tr[1]), ty = tr[2] === void 0 ? 0 : Number(tr[2]);
+          if (!isFinite(tx) || !isFinite(ty)) return "";
+          return "translate(" + tx + "px," + ty + "px)";
+        }
+        return "";
       }
       function transTranslate(node) {
         const t = node.getAttribute("transform") || "";
