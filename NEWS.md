@@ -1,3 +1,29 @@
+# vellumwidget 0.8.0.9000
+
+* **Bug fix: data marks are no longer drawn offset from their own coordinates.**
+  Under `axis_zoom`/`zoom_marks = "fixed"` (both default), the constant-size
+  counter-scale is applied as an *inline CSS* transform, which outranks the SVG
+  `transform` presentation attribute. Panel marks are positioned by that attribute
+  (a panel-offset matrix), so the counter-scale replaced their placement and every
+  glyph rendered at its untranslated geometry — displaced from the scene by the
+  panel origin. The widget therefore showed the wrong data coordinates, and
+  disagreed with the PNG and PDF of the same scene.
+
+  The inline transform now carries the node's own placement ahead of the
+  counter-scale, so position and constant size both hold. `transform-origin`
+  resolves the scale about the glyph's own centre and translations commute with
+  that, so the composition is exact for the translate-only matrices vellum emits.
+
+  The visible symptom was a crosshair that missed the mark it was tracking:
+  `drawCrosshair()` works in scene space (correctly), while hit-testing calibrates
+  against the marks' real rendered positions, so hover was right and the guide rule
+  was not. Both agree again.
+
+  This is the same clobbering as the 0.8.0 legend-swatch fix, which assumed data
+  points "carry absolute coordinates" and so restricted the counter-scale to marks
+  inside the pannable region. Marks inside that region carry a positioning
+  transform too, so excluding the outside was not enough.
+
 # vellumwidget 0.8.0
 
 Requires **vellum >= 0.6.6**, which fixes the coordinate space

@@ -2550,5 +2550,59 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
     "the bbox corner is outside the disc, where a box would say 0");
 }
 
+{
+  // --- constant-size glyphs must not lose their placement -------------------
+  // Under axis_zoom + zoom_marks = "fixed" the runtime counter-scales glyph marks
+  // with an inline CSS transform. Inline style outranks the SVG `transform`
+  // presentation attribute, so a mark POSITIONED by that attribute (a panel-offset
+  // matrix) has to have its placement carried into the CSS as well -- otherwise it
+  // renders at its untranslated geometry, offset from the scene by the panel origin
+  // (and from the crosshair, which is drawn in scene space).
+  const OFF_X = 65.03937, OFF_Y = 50.036743;
+  const svgAZ =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="420" viewBox="0 0 600 420">' +
+    '<g data-vellum-panel="axis-x-1"><text x="10" y="415">0</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="5" y="20">0</text></g>' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1">' +
+    // positioned by a transform attribute, exactly as vellum emits panel marks
+    '<path data-key="p" d="M96 96h8v8h-8z" ' +
+    'transform="matrix(1 0 0 1 ' + OFF_X + ' ' + OFF_Y + ')"/>' +
+    // a second glyph placed with translate() rather than a matrix
+    '<path data-key="q" d="M196 96h8v8h-8z" transform="translate(10 20)"/>' +
+    '</g></g>' +
+    // a legend swatch OUTSIDE the pan group: must be left alone entirely
+    '<g data-vellum-panel="legend"><path data-key="s" d="M0 0h6v6h-6z" ' +
+    'transform="translate(560 40)"/></g>' +
+    "</svg>";
+  const elAZ = document.createElement("div");
+  document.body.appendChild(elAZ);
+  widgetDef.factory(elAZ, 600, 420).renderValue({
+    svg: svgAZ,
+    elements: [
+      { key: "p", mark: "point", x0: 96 + OFF_X, y0: 96 + OFF_Y, x1: 104 + OFF_X, y1: 104 + OFF_Y },
+      { key: "q", mark: "point", x0: 206, y0: 116, x1: 214, y1: 124 },
+      { key: "s", mark: "point", x0: 560, y0: 40, x1: 566, y1: 46 }
+    ],
+    panels: {
+      name: "panel-1-1", px0: 100, py0: 10, px1: 500, py1: 410,
+      x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+      y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+    },
+    options: { hover: true, zoom: true, axisZoom: true, zoomMarks: "fixed" }
+  });
+  const tfP = elAZ.querySelector('[data-key="p"]').style.transform;
+  const tfQ = elAZ.querySelector('[data-key="q"]').style.transform;
+  const swatch = elAZ.querySelector('[data-key="s"]');
+  ok(/scale\(var\(--vw-ix/.test(tfP), "glyph still gets the constant-size counter-scale");
+  ok(/matrix\(1, ?0, ?0, ?1, ?65\.03937, ?50\.036743\)/.test(tfP),
+    "…and the inline transform carries the placement matrix, so the mark stays put");
+  ok(tfP.indexOf("matrix") < tfP.indexOf("scale"),
+    "…placement first, counter-scale second (scale resolves about the glyph's centre)");
+  ok(/translate\(10px, ?20px\)/.test(tfQ) && /scale\(var\(--vw-ix/.test(tfQ),
+    "a translate() placement is carried too, in CSS px units");
+  ok(swatch.style.transform === "" && swatch.getAttribute("transform") === "translate(560 40)",
+    "a legend swatch outside the pan group is left untouched");
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

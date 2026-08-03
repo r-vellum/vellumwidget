@@ -2452,22 +2452,58 @@ HTMLWidgets.widget({
         for (let j = 0; j < nodes.length; j++) {
           const node = nodes[j] as SVGElement;
           // Only marks inside the pan group are scaled by T, so only they need
-          // the counter-scale. Skip glyphs that live outside it (e.g. legend
-          // swatches): those are positioned by a `transform` attribute, and the
-          // inline `transform` below would override it and fling them to a corner.
+          // the counter-scale.
           if (!panGroup.contains(node)) continue;
           if (glyph) {
             // Counter-scale about the glyph's own bbox centre (transform-box:
             // fill-box makes transform-origin resolve there), so T re-maps the
             // position but the shared inverse-scale vars cancel T's size change.
+            //
+            // The node may already be POSITIONED by a `transform` attribute (a
+            // panel-offset matrix, say). An inline CSS transform outranks the
+            // presentation attribute, so it has to carry that placement itself
+            // or the mark collapses onto its untranslated geometry. Prepending
+            // it is exact for the translate-only matrices vellum emits here:
+            // transform-origin makes the scale resolve about the glyph's own
+            // centre, and translations commute with that.
             node.style.setProperty("transform-box", "fill-box");
             node.style.setProperty("transform-origin", "center");
-            node.style.setProperty("transform", "scale(var(--vw-ix,1),var(--vw-iy,1))");
+            const place = transAsCss(node);
+            node.style.setProperty(
+              "transform",
+              (place ? place + " " : "") + "scale(var(--vw-ix,1),var(--vw-iy,1))"
+            );
           } else {
             node.setAttribute("vector-effect", "non-scaling-stroke");
           }
         }
       }
+    }
+    // A node's own `transform` attribute, restated as a CSS transform function so
+    // an inline CSS transform can carry it forward instead of silently replacing
+    // it. CSS needs comma-separated arguments and px units on lengths, neither of
+    // which the SVG attribute grammar requires. "" when there is nothing to carry.
+    function transAsCss(node: Element): string {
+      const t = (node.getAttribute("transform") || "").trim();
+      if (!t) return "";
+      const N = "([-+\\d.eE]+)";
+      const m = new RegExp(
+        "matrix\\(\\s*" + [N, N, N, N, N, N].join("[\\s,]+") + "\\s*\\)"
+      ).exec(t);
+      if (m) {
+        const v = m.slice(1, 7).map(Number);
+        if (v.some(function (x) { return !isFinite(x); })) return "";
+        return "matrix(" + v.join(",") + ")";
+      }
+      const tr = new RegExp(
+        "translate\\(\\s*" + N + "(?:[\\s,]+" + N + ")?\\s*\\)"
+      ).exec(t);
+      if (tr) {
+        const tx = Number(tr[1]), ty = tr[2] === undefined ? 0 : Number(tr[2]);
+        if (!isFinite(tx) || !isFinite(ty)) return "";
+        return "translate(" + tx + "px," + ty + "px)";
+      }
+      return "";
     }
     // Translate component of a node's `transform` (matrix e/f or translate x/y).
     function transTranslate(node: Element): { tx: number; ty: number } {
