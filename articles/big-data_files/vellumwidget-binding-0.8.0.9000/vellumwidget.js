@@ -550,23 +550,38 @@
       });
     }
     const closed = g.kind === "polygon" || g.kind === "path";
-    if (closed && n >= 3) {
-      let inside = false;
-      for (let i = 0, j = n - 1; i < n; j = i++) {
-        const xi = gx[at + i], yi = gy[at + i];
-        const xj = gx[at + j], yj = gy[at + j];
-        if (yi > y !== yj > y && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
-      }
-      if (inside) return 0;
-    }
+    // Rings are measured SEPARATELY. Joining them into one run would invent a
+    // phantom edge from each ring's last vertex to the next ring's first, and
+    // close the last ring back to the very first vertex. `rings` is absent for a
+    // single-ring element, which the whole run already describes.
+    const rings = g.rings || [n];
+    // The engine's rule (vellum's `pick_table`): a path's distance is the
+    // minimum over its rings, each measured as FILLED -- so being inside ANY
+    // ring is a hit, and the fill rule does not enter into it. A point in a
+    // hole is therefore at distance zero, matching what the engine reports.
     let best = Infinity;
-    for (let i = 1; i < n; i++) {
-      const d2 = distToSegment2(x, y, gx[at + i - 1], gy[at + i - 1], gx[at + i], gy[at + i]);
-      if (d2 < best) best = d2;
-    }
-    if (closed && n >= 3) {
-      const d2 = distToSegment2(x, y, gx[at + n - 1], gy[at + n - 1], gx[at], gy[at]);
-      if (d2 < best) best = d2;
+    let ra = at;
+    for (let r = 0; r < rings.length; r++) {
+      const rn = rings[r] | 0;
+      if (rn <= 0) continue;
+      if (closed && rn >= 3) {
+        let inside = false;
+        for (let i = 0, j = rn - 1; i < rn; j = i++) {
+          const xi = gx[ra + i], yi = gy[ra + i];
+          const xj = gx[ra + j], yj = gy[ra + j];
+          if (yi > y !== yj > y && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+        }
+        if (inside) return 0;
+      }
+      for (let i = 1; i < rn; i++) {
+        const d2 = distToSegment2(x, y, gx[ra + i - 1], gy[ra + i - 1], gx[ra + i], gy[ra + i]);
+        if (d2 < best) best = d2;
+      }
+      if (closed && rn >= 3) {
+        const d2 = distToSegment2(x, y, gx[ra + rn - 1], gy[ra + rn - 1], gx[ra], gy[ra]);
+        if (d2 < best) best = d2;
+      }
+      ra += rn;
     }
     return Math.sqrt(best);
   }
@@ -1361,11 +1376,26 @@
         if (!keys.length || xs.length !== ys.length) return;
         gx = Float64Array.from(xs);
         gy = Float64Array.from(ys);
-        let at = 0;
+        // Ring boundaries of a multi-ring path. Absent (an older payload, or a
+        // scene whose every element is one ring) means one ring per element,
+        // which is what the whole vertex run already describes.
+        const nrs = g.nr != null ? asColumn(g.nr) : null;
+        const rls = g.rl != null ? asColumn(g.rl) : null;
+        let at = 0, ra = 0;
         for (let i = 0; i < keys.length; i++) {
           const n = ns[i] | 0;
           if (n <= 0 || at + n > gx.length) break;
-          (geomByKey[keys[i]] || (geomByKey[keys[i]] = [])).push({ kind: kinds[i], at, n });
+          const rec = { kind: kinds[i], at, n };
+          if (nrs && rls) {
+            const k = nrs[i] | 0;
+            if (k > 1) {
+              const lens = [];
+              for (let j = 0; j < k; j++) lens.push(rls[ra + j] | 0);
+              rec.rings = lens;
+            }
+            ra += k > 0 ? k : 1;
+          }
+          (geomByKey[keys[i]] || (geomByKey[keys[i]] = [])).push(rec);
           at += n;
         }
         haveGeometry = at > 0;
