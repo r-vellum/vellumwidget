@@ -1,5 +1,26 @@
 # vellumwidget 0.8.0.9000
 
+* **A polygon with a hole is now hit-tested exactly, not approximately.** A
+  `path` element ships every ring's vertices concatenated, and the runtime had no
+  way to tell where one ring ended -- so it read the whole run as ONE closed ring.
+  That invents a phantom edge from each ring's last vertex to the next ring's
+  first, and closes the last ring back to the very first vertex. Exact for a
+  single-ring path (a plain sf polygon, the common case), an approximation for a
+  polygon with a hole or a multipart feature, and the error is not small: on a
+  square-with-a-hole fixture the old reading put a point 20 px outside the shape
+  at 90 px away, and called the shape's own centre a miss.
+
+  `vellum::element_geometry()` gained a `ring` column in 0.7.0, so the payload
+  now carries the ring boundaries (`nr`, `rl`) and the runtime measures each ring
+  separately. It follows the engine's own rule -- a path's distance is the minimum
+  over its rings, each measured as filled, so being inside **any** ring is a hit
+  and the fill rule does not enter into it. Client-side answers now match
+  `vl_nearest()` exactly on the same scene.
+
+  Both columns are omitted when every element is a single ring, so the usual
+  payload does not grow, and a widget saved by an older build keeps working on
+  the one-ring reading.
+
 * **Bug fix: data marks are no longer drawn offset from their own coordinates.**
   Under `axis_zoom`/`zoom_marks = "fixed"` (both default), the constant-size
   counter-scale is applied as an *inline CSS* transform, which outranks the SVG
