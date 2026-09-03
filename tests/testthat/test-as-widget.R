@@ -532,7 +532,11 @@ test_that("mode = 'raster' ships a base image with the element index (no per-ele
 test_that("the payload carries each keyed element's true geometry", {
   scene <- vellum::vl_scene(3, 2, dpi = 100) |>
     vellum::draw(vellum::segments_grob(0.1, 0.1, 0.9, 0.9, key = "diag")) |>
-    vellum::draw(vellum::lines_grob(c(.1, .5, .9), c(.2, .8, .2), key = "ln")) |>
+    vellum::draw(vellum::lines_grob(
+      c(.1, .5, .9),
+      c(.2, .8, .2),
+      key = "ln"
+    )) |>
     vellum::draw(vellum::polygon_grob(c(.2, .4, .3), c(.2, .2, .5), key = "pg"))
   g <- as_widget(scene)$x$geometry
   expect_setequal(g$key, c("diag", "ln", "pg"))
@@ -541,6 +545,67 @@ test_that("the payload carries each keyed element's true geometry", {
   expect_equal(g$n[match("ln", g$key)], 3L)
   expect_equal(length(g$x), sum(g$n))
   expect_equal(length(g$y), sum(g$n))
+})
+
+test_that("a multi-ring path ships its ring boundaries", {
+  # Concatenated ring vertices are lossy on their own: read as one closed ring
+  # they invent a phantom edge from each ring's end to the next ring's start.
+  scene <- vellum::vl_scene(4, 3, dpi = 100) |>
+    vellum::draw(vellum::path_grob(
+      x = c(0.1, 0.9, 0.9, 0.1, 0.4, 0.6, 0.6, 0.4),
+      y = c(0.1, 0.1, 0.9, 0.9, 0.4, 0.4, 0.6, 0.6),
+      id = rep(1:2, each = 4),
+      rule = "evenodd",
+      gp = vellum::vl_gpar(fill = "steelblue"),
+      key = "holed"
+    ))
+  g <- as_widget(scene)$x$geometry
+  expect_equal(g$n, 8L)
+  expect_equal(g$nr, 2L) # two rings
+  expect_equal(g$rl, c(4L, 4L)) # four vertices each
+  expect_equal(sum(g$rl), sum(g$n))
+})
+
+test_that("a single-ring scene ships no ring columns at all", {
+  # The common case (a plain polygon, every non-path kind) must not pay for a
+  # feature it does not use, and an older runtime must keep working -- absent
+  # `nr`/`rl` means one ring per element, which the vertex run already says.
+  scene <- vellum::vl_scene(3, 2, dpi = 100) |>
+    vellum::draw(vellum::polygon_grob(
+      c(.2, .8, .5),
+      c(.2, .2, .8),
+      key = "tri"
+    )) |>
+    vellum::draw(vellum::lines_grob(c(.1, .5, .9), c(.2, .8, .2), key = "ln"))
+  g <- as_widget(scene)$x$geometry
+  expect_null(g$nr)
+  expect_null(g$rl)
+})
+
+test_that("ring boundaries survive several elements in one payload", {
+  # The flat `rl` run has to stay aligned with `nr` across a mix of single- and
+  # multi-ring elements, which is where an off-by-one would hide.
+  scene <- vellum::vl_scene(4, 3, dpi = 100) |>
+    vellum::draw(vellum::polygon_grob(
+      c(.1, .3, .2),
+      c(.1, .1, .3),
+      key = "a"
+    )) |>
+    vellum::draw(vellum::path_grob(
+      x = c(0.4, 0.9, 0.9, 0.4, 0.55, 0.75, 0.75, 0.55),
+      y = c(0.1, 0.1, 0.9, 0.9, 0.4, 0.4, 0.6, 0.6),
+      id = rep(1:2, each = 4),
+      rule = "evenodd",
+      key = "b"
+    )) |>
+    vellum::draw(vellum::lines_grob(c(.1, .5), c(.9, .9), key = "c"))
+  g <- as_widget(scene)$x$geometry
+  expect_equal(length(g$nr), length(g$key))
+  expect_equal(sum(g$nr), length(g$rl))
+  expect_equal(sum(g$rl), sum(g$n))
+  # the path is the only multi-ring element
+  expect_equal(g$nr[match("b", g$key)], 2L)
+  expect_true(all(g$nr[g$key != "b"] == 1L))
 })
 
 test_that("the geometry is in the same device-px space as the bboxes", {
@@ -575,7 +640,12 @@ test_that("marks whose bbox already describes them ship no geometry", {
       size = vellum::vl_unit(4, "mm"),
       key = c("a", "b")
     )) |>
-    vellum::draw(vellum::rect_grob(x = .5, width = .2, height = .2, key = "r")) |>
+    vellum::draw(vellum::rect_grob(
+      x = .5,
+      width = .2,
+      height = .2,
+      key = "r"
+    )) |>
     vellum::draw(vellum::text_grob("hi", x = .5, y = .9, key = "t"))
   expect_null(as_widget(scene)$x$geometry)
 })
@@ -622,7 +692,11 @@ test_that("the raster base image is rendered at 2x for HiDPI screens", {
   w <- as_widget(scene, mode = "raster")
   # The shell is in device px -- the space the bboxes are in -- while the image
   # it carries has twice as many pixels per side.
-  expect_match(w$x$svg, 'width="200" height="200" viewBox="0 0 200 200"', fixed = TRUE)
+  expect_match(
+    w$x$svg,
+    'width="200" height="200" viewBox="0 0 200 200"',
+    fixed = TRUE
+  )
   expect_equal(w$width, 200)
   png <- base64enc::base64decode(
     sub('".*$', "", sub("^.*base64,", "", w$x$svg))

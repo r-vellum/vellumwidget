@@ -666,6 +666,20 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #   n    -- vertex count per element; the x/y runs are laid end to end
 #   x, y -- sum(n) coordinates, rounded to 0.01 px (far below a pixel, and it
 #           roughly halves the JSON)
+#   nr   -- rings per element, and
+#   rl   -- each ring's vertex count, laid end to end
+#
+# `nr`/`rl` are the ring boundaries of a multi-ring `path` (a polygon with a
+# hole, a multipart feature). Without them the concatenated vertices are lossy:
+# the runtime has to treat the whole run as ONE closed ring, which invents a
+# phantom edge from each ring's last vertex to the next ring's first, and closes
+# the last ring back to the very first vertex. Exact for a single-ring path, an
+# approximation otherwise.
+#
+# Both are OMITTED when every element is a single ring, which is the common case
+# (a plain sf polygon, every non-path kind) -- so the usual payload does not grow
+# at all, and an older runtime, or a payload from an older build, keeps working
+# on the one-ring reading.
 # NULL when the scene has no such elements, or when the vertex count exceeds
 # `.GEOMETRY_MAX_VERTICES` -- above that the payload cost outweighs the picking
 # accuracy and the runtime falls back to boxes, as it does for an older payload.
@@ -699,13 +713,25 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     return(NULL)
   }
   n <- diff(c(starts, nrow(g) + 1L))
-  list(
+  # Ring runs: a new run wherever the element changes or the ring index does.
+  # `ring` arrives from vellum (>= 0.7.0); tolerate its absence rather than
+  # requiring it, so this stays readable against an older engine.
+  ring <- if (is.null(g$ring)) rep(1L, nrow(g)) else as.integer(g$ring)
+  el <- rep.int(seq_along(starts), n)
+  m <- length(el)
+  chg <- c(TRUE, el[-1L] != el[-m] | ring[-1L] != ring[-m])
+  rl <- diff(c(which(chg), m + 1L))
+  nr <- tabulate(el[chg], nbins = length(starts))
+  multi <- any(nr > 1L)
+  drop_null(list(
     key = as.character(g$key[starts]),
     kind = as.character(g$kind[starts]),
     n = as.integer(n),
     x = round(as.numeric(g$x), 2),
-    y = round(as.numeric(g$y), 2)
-  )
+    y = round(as.numeric(g$y), 2),
+    nr = if (multi) as.integer(nr),
+    rl = if (multi) as.integer(rl)
+  ))
 }
 
 # The per-panel geometry + scale descriptors the runtime needs to map device
