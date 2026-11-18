@@ -1,5 +1,12 @@
 # vellumwidget 0.8.0.9000
 
+* **Click-to-source no longer shows the wrong rows for a layer with its own
+  data.** The popover looks every element's rows up in the plot's data, but a
+  layer drawn from its own `data =` indexes that layer's table, so clicking one
+  of its marks listed unrelated rows of the plot data. vellumplot now tags each
+  element with the table its rows refer to, and elements from a layer's own data
+  are left out of the popover instead of answering with the wrong rows.
+
 * **Security fix: the click-to-source popover no longer parses data as HTML.**
   The popover that `inspect_source()` opens on a click was assembled as an HTML
   string and inserted with `innerHTML`. Field names and row values only passed
