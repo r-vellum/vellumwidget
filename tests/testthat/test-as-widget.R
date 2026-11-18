@@ -566,6 +566,39 @@ test_that("a multi-ring path ships its ring boundaries", {
   expect_equal(sum(g$rl), sum(g$n))
 })
 
+test_that("an even-odd fill ships its rule so the runtime finds the hole", {
+  # Picking follows the fill rule (as vellum's `pick_table` does): the runtime
+  # needs to know which elements are even-odd to treat a hole as a hole.
+  skip_if_not("rule" %in% names(vellum::element_geometry(vellum::vl_scene(1, 1))))
+  ring <- function(rule) {
+    vellum::path_grob(
+      x = c(0.1, 0.9, 0.9, 0.1, 0.4, 0.6, 0.6, 0.4),
+      y = c(0.1, 0.1, 0.9, 0.9, 0.4, 0.4, 0.6, 0.6),
+      id = rep(1:2, each = 4),
+      rule = rule,
+      gp = vellum::vl_gpar(fill = "steelblue"),
+      key = rule
+    )
+  }
+  scene <- vellum::vl_scene(4, 3, dpi = 100) |>
+    vellum::draw(ring("evenodd")) |>
+    vellum::draw(ring("winding")) |>
+    vellum::draw(vellum::lines_grob(c(.1, .5), c(.9, .9), key = "ln"))
+  g <- as_widget(scene)$x$geometry
+  expect_equal(length(g$eo), length(g$key))
+  expect_equal(g$eo[match("evenodd", g$key)], 1L)
+  expect_equal(g$eo[match("winding", g$key)], 0L)
+  expect_equal(g$eo[match("ln", g$key)], 0L)
+})
+
+test_that("a scene with no even-odd fill ships no rule column", {
+  # Absent means nonzero, the engine's default, so the common payload is
+  # unchanged.
+  scene <- vellum::vl_scene(3, 2, dpi = 100) |>
+    vellum::draw(vellum::polygon_grob(c(.2, .8, .5), c(.2, .2, .8), key = "tri"))
+  expect_null(as_widget(scene)$x$geometry$eo)
+})
+
 test_that("a single-ring scene ships no ring columns at all", {
   # The common case (a plain polygon, every non-path kind) must not pay for a
   # feature it does not use, and an older runtime must keep working -- absent
