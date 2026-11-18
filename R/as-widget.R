@@ -823,7 +823,10 @@ meta_num <- function(meta, field) {
 # with none (raw vellum, or non-cartesian coords) yields NULL and the widget stays
 # pixel-only. Each panel carries its resolved device-px rectangle and, per axis, a
 # compact scale descriptor (type / transform / data + native domains / time unit)
-# --- enough to invert px -> native -> data. `scene_model()$panels` is specified in
+# --- enough to invert px -> native -> data --- plus the static `breaks` (native
+# positions) and their `labels`, which axis-aware zoom re-positions on discrete /
+# binned axes and reads to match a date axis's label format. Both stay arrays
+# (`I()`) so a one-break axis isn't unboxed to a scalar. `scene_model()$panels` is specified in
 # vellum's "The scene contract" vignette.
 .vellumwidget_panels <- function(model) {
   p <- model$panels
@@ -842,6 +845,8 @@ meta_num <- function(meta, field) {
       native_lo = as.numeric(a$native_lo),
       native_hi = as.numeric(a$native_hi),
       time_unit = if (is.null(a$time_unit)) NULL else as.character(a$time_unit),
+      breaks = if (is.null(a$breaks)) NULL else I(as.numeric(a$breaks)),
+      labels = if (is.null(a$labels)) NULL else I(as.character(a$labels)),
       # The aesthetic the axis shows (swapped under coord_flip) and a discrete
       # axis's levels in position order, for interval-selection membership. A
       # list keeps a one-level axis a JSON array.

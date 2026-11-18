@@ -213,6 +213,8 @@ interface AxisScale {
   time_unit?: string; // "day" | "second" for date/datetime axes
   aes?: string; // the aesthetic this axis shows ("x" | "y"; swapped under coord_flip)
   levels?: string[] | string; // discrete axis: the levels in position order (level i at native i)
+  breaks?: number[] | number; // static tick positions (native units), as vellumplot drew them
+  labels?: string[] | string; // their formatted strings (htmlwidgets may unbox length-1)
 }
 // A cartesian data panel: its device-px rectangle (from vellum's resolved layout)
 // plus each axis's scale descriptor. The px rect + native domain give the affine
@@ -817,6 +819,32 @@ function panToView(vb: ViewBox, vb0: ViewBox, x: number, y: number): { x: number
   const t = viewToPan(vb, vb0);
   return { x: t.sx ? vb.x + (x - vb0.x) / t.sx : x, y: t.sy ? vb.y + (y - vb0.y) / t.sy : y };
 }
+// Multi-panel axis zoom: the view `vb` is read in the frame of a REFERENCE panel
+// (the first), and every other panel gets the same zoom about its corresponding
+// point — the reference T conjugated by the affine A that maps the reference
+// panel's rect onto this one's (x -> ax*x + bx, y -> ay*y + by): T_i = A T A⁻¹.
+// The scale is unchanged (so constant-size glyphs share one inverse scale); only
+// the translation moves. With A = identity (one panel) this is T itself.
+function conjugatePan(t: PanTransform, ax: number, bx: number, ay: number, by: number): PanTransform {
+  return { sx: t.sx, sy: t.sy, tx: ax * t.tx + bx * (1 - t.sx), ty: ay * t.ty + by * (1 - t.sy) };
+}
+// Where an axis's re-ticked labels go for one panel: the label line (baseline y
+// for an x axis, anchor x for a y axis) and the text alignment, scraped from the
+// static axis group vellum drew for that panel. `gap` > 0 when vellum wrapped the
+// static labels onto two lines (a long datetime label): the line spacing to reuse.
+interface AxisAnchor { pos: number; anchor: string; baseline: string; gap: number; }
+// One axis-zoomable panel: its scale descriptor, the pannable group T_i moves, the
+// clipped outer group (host for its re-ticked gridlines), A (reference rect ->
+// this rect), and its label anchors (null for an interior facet with no axis).
+interface AzPanel {
+  p: PanelInfo;
+  pan: SVGGElement;
+  outer: SVGGElement;
+  grid: SVGGElement | null;
+  ax: number; bx: number; ay: number; by: number;
+  xLab: AxisAnchor | null;
+  yLab: AxisAnchor | null;
+}
 // "Nice" round tick values covering [lo, hi] (1/2/5 x 10^k steps), a handful of
 // them. The client-side re-ticker for a linear axis: vellum's own ticks span the
 // full data range and don't follow a zoom, so we regenerate for the visible range.
@@ -833,8 +861,8 @@ function niceTicks(lo: number, hi: number, count: number): number[] {
   return out;
 }
 // Format a linear tick value for a given step: enough decimals to tell adjacent
-// ticks apart, trailing zeros trimmed. (Date/log axes fall back to viewBox zoom, so
-// this only ever formats plain numbers.)
+// ticks apart, trailing zeros trimmed. (Log, date and discrete axes have their own
+// generators below; this formats the plain linear numbers.)
 function fmtTick(v: number, step: number): string {
   if (v === 0) return "0";
   const decimals = Math.min(20, Math.max(0, -Math.floor(Math.log10(Math.abs(step)) + 1e-9)));
@@ -842,15 +870,303 @@ function fmtTick(v: number, step: number): string {
   if (s.indexOf(".") >= 0) s = s.replace(/\.?0+$/, "");
   return s;
 }
-// Forward axis transform data -> native (inverse of nativeToData). Only ever
-// called for identity/reverse under axis_zoom (native == data numerically), but
-// kept general for symmetry with nativeToData.
+// Forward axis transform data -> native (inverse of nativeToData).
 function dataToNative(ax: AxisScale, d: number): number {
   switch (ax.transform) {
     case "log10": return Math.log10(d);
     case "sqrt": return Math.sqrt(d);
     default: return d; // identity, reverse (the flip lives in the decreasing domain)
   }
+}
+
+// --- axis-zoom tick generators (log10 / date / datetime / discrete) ---
+// Each returns the ticks for a VISIBLE native range [lo, hi] as {n, label}: `n`
+// is the tick position in native (viewport) units, which the re-ticker maps to
+// device px through the panel affine and the pan transform. Labels follow the
+// format vellumplot uses for that axis type, so an un-zoomed re-tick reads like
+// the static axis it replaces.
+interface Tick { n: number; label: string; }
+
+// R's `format(x, scientific = FALSE)` for a numeric vector: one common number of
+// decimals (enough for 7 significant digits of every value), so `c(0.1, 1, 10)`
+// reads "0.1", "1.0", "10.0" exactly as vellumplot's static log axis does.
+function fmtRNum(vals: number[]): string[] {
+  let dec = 0;
+  for (let i = 0; i < vals.length; i++) {
+    const v = vals[i];
+    if (!isFinite(v) || v === 0) continue;
+    const target = Number(v.toPrecision(7));
+    let d = 0;
+    while (d < 15 && Math.abs(Number(v.toFixed(d)) - target) > Math.abs(target) * 1e-9) d++;
+    if (d > dec) dec = d;
+  }
+  return vals.map(function (v) { return isFinite(v) ? v.toFixed(dec) : String(v); });
+}
+
+// Ticks for a log10 axis over the visible native (log10) range [lo, hi], with
+// their data values. Mirrors `scales::breaks_log()` (vellumplot's static log
+// breaks): whole decades when at least n-2 of them are in view (thinned to every
+// `by`-th decade on a wide range), else progressively denser 1-3 / 1-2-5 /
+// 1-2-3-5 / 1..9 subdivisions of each decade, else (deep zoom inside one decade)
+// plain linear ticks in data space.
+interface LogTicks { ticks: { n: number; d: number }[]; linear: boolean; }
+function logTicks(lo: number, hi: number, n: number): LogTicks {
+  if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return { ticks: [], linear: false };
+  const need = Math.max(2, n - 2);
+  const p0 = Math.ceil(lo - 1e-9), p1 = Math.floor(hi + 1e-9);
+  if (p1 - p0 + 1 >= need) {
+    // Thin to every `by`-th decade, aligned to multiples of `by` so a pan keeps
+    // the same decades rather than re-phasing them.
+    const by = Math.floor((hi - lo) / n) + 1;
+    const out: { n: number; d: number }[] = [];
+    for (let k = Math.ceil(p0 / by) * by; k <= p1; k += by) {
+      out.push({ n: k, d: Number(Math.pow(10, k).toPrecision(12)) });
+    }
+    if (out.length >= need || by === 1) return { ticks: out, linear: false };
+  }
+  const sets = [[1, 3], [1, 2, 5], [1, 2, 3, 5], [1, 2, 3, 4, 5, 6, 7, 8, 9]];
+  for (let s = 0; s < sets.length; s++) {
+    const out: { n: number; d: number }[] = [];
+    for (let k = Math.floor(lo) - 1; k <= Math.ceil(hi); k++) {
+      for (let j = 0; j < sets[s].length; j++) {
+        const m = sets[s][j];
+        const nv = k + Math.log10(m);
+        if (nv < lo - 1e-9 || nv > hi + 1e-9) continue;
+        out.push({ n: nv, d: Number((m * Math.pow(10, k)).toPrecision(12)) });
+      }
+    }
+    if (out.length >= need) return { ticks: out, linear: false };
+  }
+  // Zoomed inside a decade: linear ticks in data space.
+  const dlo = Math.pow(10, lo), dhi = Math.pow(10, hi);
+  const lin = niceTicks(dlo, dhi, n).filter(function (d) { return d > 0; })
+    .map(function (d) { return { n: Math.log10(d), d: d }; });
+  return { ticks: lin, linear: true };
+}
+
+// A minimal strftime over a UTC instant (`ms` since the epoch). Covers the
+// conversions date axes use (vellumplot's `date_labels` are R strftime formats);
+// month/day names are English, like R in the C locale.
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+  "August", "September", "October", "November", "December"];
+const WDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+function pad2(v: number): string { return v < 10 ? "0" + v : String(v); }
+function strftimeUTC(fmt: string, ms: number): string {
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return "";
+  return fmt.replace(/%([a-zA-Z%])/g, function (_m: string, c: string): string {
+    switch (c) {
+      case "Y": return String(d.getUTCFullYear());
+      case "y": return pad2(((d.getUTCFullYear() % 100) + 100) % 100);
+      case "m": return pad2(d.getUTCMonth() + 1);
+      case "d": return pad2(d.getUTCDate());
+      case "e": return (d.getUTCDate() < 10 ? " " : "") + d.getUTCDate();
+      case "H": return pad2(d.getUTCHours());
+      case "I": return pad2(((d.getUTCHours() + 11) % 12) + 1);
+      case "p": return d.getUTCHours() < 12 ? "AM" : "PM";
+      case "M": return pad2(d.getUTCMinutes());
+      case "S": return pad2(d.getUTCSeconds());
+      case "b": case "h": return MONTHS[d.getUTCMonth()].slice(0, 3);
+      case "B": return MONTHS[d.getUTCMonth()];
+      case "a": return WDAYS[d.getUTCDay()].slice(0, 3);
+      case "A": return WDAYS[d.getUTCDay()];
+      case "j": {
+        const doy = Math.floor((ms - Date.UTC(d.getUTCFullYear(), 0, 1)) / 86400000) + 1;
+        return (doy < 10 ? "00" : doy < 100 ? "0" : "") + doy;
+      }
+      case "%": return "%";
+      default: return "%" + c;
+    }
+  });
+}
+// The finest calendar unit a format shows: 0 second, 1 minute, 2 hour, 3 day,
+// 4 month, 5 year. A format is fine enough for a tick step when its rank is no
+// coarser than the step's (a "%b %Y" label can't tell two days apart).
+function fmtRank(fmt: string): number {
+  if (/%S/.test(fmt)) return 0;
+  if (/%M/.test(fmt)) return 1;
+  if (/%[HIp]/.test(fmt)) return 2;
+  if (/%[deja]|%A/.test(fmt)) return 3;
+  if (/%[mbBh]/.test(fmt)) return 4;
+  return 5;
+}
+// Candidate formats tried against a date axis's static labels, finest first so an
+// ambiguous match keeps the most detail.
+const TIME_FORMATS = [
+  "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%H:%M:%S", "%H:%M", "%b %d %H:%M",
+  "%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y", "%m/%d", "%d/%m",
+  "%b %d", "%d %b", "%b %d %Y", "%d %b %Y", "%B %d", "%d %B", "%B %d, %Y", "%e %b",
+  "%Y-%m", "%b %Y", "%B %Y", "%b %y", "%m/%Y", "%b", "%B", "%Y", "%y"
+];
+// UTC offsets (ms) tried for a datetime axis, nearest-to-UTC first: the scene
+// carries epoch seconds but its labels were formatted in the plot's time zone.
+const TZ_OFFSETS: number[] = (function () {
+  const out = [0];
+  for (let q = 1; q <= 56; q++) out.push(q * 900000, -q * 900000);
+  return out;
+})();
+interface TimeFormatInfo { fmt: string | null; off: number; }
+const timeFmtCache: WeakMap<AxisScale, TimeFormatInfo> = new WeakMap();
+// Recover the strftime format (and, for datetime, the time-zone offset) that
+// produced a date axis's static labels, by formatting its static breaks with each
+// candidate until one reproduces every label. `fmt` is null when nothing matches
+// (custom label functions) — the generator then picks a format per tick step.
+function detectTimeFormat(ax: AxisScale): TimeFormatInfo {
+  const hit = timeFmtCache.get(ax);
+  if (hit) return hit;
+  const breaks = asColumn(ax.breaks), labels = asColumn(ax.labels).map(String);
+  const unitMs = ax.time_unit === "second" ? 1000 : 86400000;
+  let info: TimeFormatInfo = { fmt: null, off: 0 };
+  if (breaks.length && breaks.length === labels.length) {
+    const offs = ax.time_unit === "second" ? TZ_OFFSETS : [0];
+    search:
+    for (let o = 0; o < offs.length; o++) {
+      for (let f = 0; f < TIME_FORMATS.length; f++) {
+        let all = true;
+        for (let i = 0; i < breaks.length && all; i++) {
+          all = strftimeUTC(TIME_FORMATS[f], Number(breaks[i]) * unitMs + offs[o]) === labels[i].trim();
+        }
+        if (all) { info = { fmt: TIME_FORMATS[f], off: offs[o] }; break search; }
+      }
+    }
+  }
+  timeFmtCache.set(ax, info);
+  return info;
+}
+
+// Calendar tick steps, finest first: rank (see fmtRank), a nominal length in ms
+// (to pick the step), and how to lay ticks out — a fixed `ms` stride, or every
+// `mo` months / `yr` years on calendar boundaries.
+interface TimeStep { rank: number; ms: number; mo?: number; yr?: number; }
+const TIME_STEPS: TimeStep[] = (function () {
+  const s = 1000, mi = 60 * s, h = 60 * mi, d = 24 * h;
+  const out: TimeStep[] = [];
+  [1, 2, 5, 10, 15, 30].forEach(function (k) { out.push({ rank: 0, ms: k * s }); });
+  [1, 2, 5, 10, 15, 30].forEach(function (k) { out.push({ rank: 1, ms: k * mi }); });
+  [1, 3, 6, 12].forEach(function (k) { out.push({ rank: 2, ms: k * h }); });
+  [1, 2, 7].forEach(function (k) { out.push({ rank: 3, ms: k * d }); });
+  [1, 2, 3, 6].forEach(function (k) { out.push({ rank: 4, ms: k * 30.4375 * d, mo: k }); });
+  [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].forEach(function (k) {
+    out.push({ rank: 5, ms: k * 365.25 * d, yr: k });
+  });
+  return out;
+})();
+// Ticks for a date (epoch days) or datetime (epoch seconds) axis over the visible
+// range [lo, hi] in those units: the coarsest-but-dense-enough calendar step
+// (seconds .. years, at most ~`n` ticks), placed on calendar boundaries in the
+// axis's own time zone and labelled with the static axis's format when it is fine
+// enough for the step, else a step-appropriate ISO-style format.
+function timeTicks(ax: AxisScale, lo: number, hi: number, n: number): Tick[] {
+  if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return [];
+  const isDate = ax.time_unit !== "second";
+  const unitMs = isDate ? 86400000 : 1000;
+  const info = detectTimeFormat(ax);
+  const off = info.off;
+  const slo = lo * unitMs + off, shi = hi * unitMs + off; // shifted to the axis's wall clock
+  const span = shi - slo;
+  let step: TimeStep | null = null;
+  for (let i = 0; i < TIME_STEPS.length; i++) {
+    const st = TIME_STEPS[i];
+    if (isDate && st.rank < 3) continue; // a Date axis has no time of day
+    if (span / st.ms <= n) { step = st; break; }
+  }
+  if (!step) {
+    // Beyond the table: nice 1/2/5 x 10^k years.
+    const yrs = span / (365.25 * 86400000);
+    const raw = yrs / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const k = (raw / mag < 2 ? 2 : raw / mag < 5 ? 5 : 10) * mag;
+    step = { rank: 5, ms: k * 365.25 * 86400000, yr: k };
+  }
+  const walls: number[] = [];
+  if (step.yr) {
+    const y0 = new Date(slo).getUTCFullYear(), y1 = new Date(shi).getUTCFullYear();
+    for (let y = Math.ceil(y0 / step.yr) * step.yr; y <= y1; y += step.yr) walls.push(Date.UTC(y, 0, 1));
+  } else if (step.mo) {
+    const a = new Date(slo), b = new Date(shi);
+    let mIdx = a.getUTCFullYear() * 12 + a.getUTCMonth();
+    mIdx = Math.ceil(mIdx / step.mo) * step.mo;
+    const mEnd = b.getUTCFullYear() * 12 + b.getUTCMonth();
+    for (; mIdx <= mEnd; mIdx += step.mo) walls.push(Date.UTC(Math.floor(mIdx / 12), mIdx % 12, 1));
+  } else {
+    // Fixed strides; weeks start on a Monday (1970-01-05 is epoch day 4).
+    const origin = step.ms === 7 * 86400000 ? 4 * 86400000 : 0;
+    for (let t = Math.ceil((slo - origin) / step.ms - 1e-9) * step.ms + origin; t <= shi + 1e-6; t += step.ms) {
+      walls.push(t);
+    }
+  }
+  const defFmt = step.rank >= 5 ? "%Y" : step.rank === 4 ? "%Y-%m" : step.rank === 3 ? "%Y-%m-%d"
+    : step.rank === 0 ? "%H:%M:%S" : "%H:%M";
+  const useStatic = info.fmt != null && fmtRank(info.fmt) <= step.rank;
+  const out: Tick[] = [];
+  for (let i = 0; i < walls.length; i++) {
+    const w = walls[i];
+    if (w < slo - 1e-6 || w > shi + 1e-6) continue;
+    let fmt = useStatic ? info.fmt! : defFmt;
+    // Sub-day steps label each midnight with its date so the day stays readable.
+    if (!useStatic && step.rank <= 2 && w % 86400000 === 0) fmt = "%Y-%m-%d";
+    out.push({ n: (w - off) / unitMs, label: strftimeUTC(fmt, w) });
+  }
+  return out;
+}
+
+// Transforms the re-ticker generates nice data-space ticks for (anything else
+// re-positions the static breaks).
+const NICE_TRANSFORMS: Record<string, boolean> = { identity: true, reverse: true, sqrt: true };
+// Does the axis carry its static breaks + labels (needed to re-position discrete /
+// binned / custom-transform ticks, and to match a date axis's label format)?
+function hasStaticBreaks(ax: AxisScale): boolean {
+  const b = asColumn(ax.breaks), l = asColumn(ax.labels);
+  return b.length > 0 && b.length === l.length;
+}
+// Can the re-ticker follow a zoom on this axis? (An absent axis is trivially fine.)
+function axisRetickable(ax: AxisScale | undefined): boolean {
+  if (!ax) return true;
+  if (ax.type === "discrete" || ax.type === "binned") return hasStaticBreaks(ax);
+  if (ax.time_unit === "day" || ax.time_unit === "second") return true;
+  if (ax.transform === "log10") return true;
+  if (ax.type === "continuous" && NICE_TRANSFORMS[ax.transform]) return true;
+  return hasStaticBreaks(ax);
+}
+// The ticks to draw for an axis whose visible native range is [lo, hi] (lo < hi):
+//  - discrete / binned / other transforms: vellumplot's own breaks that are still
+//    in view, with their labels (categories don't re-tick, they re-position);
+//  - date / datetime: calendar steps (timeTicks);
+//  - log10: decades + subdivisions (logTicks), labelled like the static axis;
+//  - linear / reverse / sqrt: nice 1-2-5 steps in data space (niceTicks).
+function axisTicks(ax: AxisScale, lo: number, hi: number, n: number): Tick[] {
+  if (!(hi > lo)) return [];
+  const statics = function (): Tick[] {
+    const b = asColumn(ax.breaks), l = asColumn(ax.labels);
+    const tol = (hi - lo) * 1e-6;
+    const out: Tick[] = [];
+    for (let i = 0; i < b.length && i < l.length; i++) {
+      const v = Number(b[i]);
+      if (isFinite(v) && v >= lo - tol && v <= hi + tol) out.push({ n: v, label: String(l[i]) });
+    }
+    return out;
+  };
+  if (ax.type === "discrete" || ax.type === "binned") return statics();
+  if (ax.time_unit === "day" || ax.time_unit === "second") return timeTicks(ax, lo, hi, n);
+  if (ax.transform === "log10") {
+    const lt = logTicks(lo, hi, n), t = lt.ticks;
+    // Decades/subdivisions read like R's format(); a deep-zoom linear fallback
+    // uses the linear formatter for its step.
+    const step = t.length > 1 ? t[1].d - t[0].d : 1;
+    const labs = lt.linear ? t.map(function (x) { return fmtTick(x.d, step); })
+      : fmtRNum(t.map(function (x) { return x.d; }));
+    return t.map(function (x, i) { return { n: x.n, label: labs[i] }; });
+  }
+  if (NICE_TRANSFORMS[ax.transform]) {
+    // native -> data at both ends (sqrt squares; identity/reverse pass through).
+    // (A sqrt axis's expanded domain can dip below 0; clamp, sqrt data is >= 0.)
+    const sq = ax.transform === "sqrt";
+    const a = nativeToData(ax, sq ? Math.max(lo, 0) : lo), b = nativeToData(ax, sq ? Math.max(hi, 0) : hi);
+    const dlo = Math.min(a, b), dhi = Math.max(a, b);
+    const ticks = niceTicks(dlo, dhi, n);
+    const step = ticks.length > 1 ? ticks[1] - ticks[0] : dhi - dlo;
+    return ticks.map(function (d) { return { n: dataToNative(ax, d), label: fmtTick(d, step) }; });
+  }
+  return statics();
 }
 
 // Union bbox of the given keys' elements (for zoom-to-selection), or null.
@@ -1323,12 +1639,11 @@ HTMLWidgets.widget({
     let vb: ViewBox | null = null; // current viewBox
     // Axis-aware zoom (opt-in). When active, applyViewBox scales `panGroup` by T
     // instead of moving the base viewBox, and hit-testing routes through panToView.
-    let panGroup: SVGGElement | null = null; // the pannable data group (transformed by T)
-    let outerPanelGroup: SVGGElement | null = null; // its clipped parent (host for re-ticked gridlines)
-    let axisPanel: PanelInfo | null = null; // the single cartesian panel that drives axis_zoom
-    let axisZoomActive = false; // opt-in on + a single linear cartesian pannable panel present
+    let azPanels: AzPanel[] = []; // the zoomable panels (the first is the reference frame of `vb`)
+    let panGroup: SVGGElement | null = null; // the first panel's pannable group (transformed by T)
+    let axisZoomActive = false; // opt-in on + every cartesian panel pannable with re-tickable axes
     let retickLayer: SVGSVGElement | null = null; // overlay carrying re-ticked axis labels (fixed at vb0)
-    let retickGrid: SVGGElement | null = null; // re-ticked gridlines (inside the clipped panel, below marks)
+    let anchorPanel: AzPanel | null = null; // the panel a press started in (pins the gesture's frame)
     // Range-navigator x-only zoom: with the navigator on, zoom/pan is 1-D along x
     // (the selected x-range fills the width; the full y-range stays on screen), the
     // way a time-series range selector behaves. Implemented as a non-uniform
@@ -1336,8 +1651,7 @@ HTMLWidgets.widget({
     let xZoom = false;
     const axisStyle = { // presentation scraped from vellum's own axis/grid nodes so the re-tick matches the theme
       textFill: "#333333", fontFamily: "sans-serif", fontSize: 12,
-      gridStroke: "#ffffff", gridWidth: 1,
-      xBaselineY: 0, yLabelX: 0 // device-px placement of the x/y tick labels
+      gridStroke: "#ffffff", gridWidth: 1
     };
     let mode: "brush" | "pan" | "lasso" = "brush";
     let lastBrush: Bbox | null = null; // last brushed region (user coords)
@@ -1345,6 +1659,7 @@ HTMLWidgets.widget({
     // the brushed data range (null when it fell back to pixel hit-testing).
     let intervals: Record<string, { keys: string[]; range: IntervalRange | null }> = {};
     let intervalEl: SVGRectElement | null = null; // the persistent brush band (in crosshairLayer)
+    let intervalBand: Bbox | null = null; // that band in scene (device-px) coords
     let lassoPts: Pt[] = []; // in-progress lasso path (user/viewBox coords)
     let lassoEl: SVGPolygonElement | null = null; // the drawn lasso outline (in crosshairLayer)
     // Linking state.
@@ -1359,7 +1674,9 @@ HTMLWidgets.widget({
     // The live viewBox: the zoom/pan state `vb`, else the svg's viewBox attribute,
     // else the rendered box (a raw vellum scene may omit a viewBox).
     function currentViewBox(): ViewBox {
-      if (vb) return vb;
+      // Under axis_zoom the svg itself stays at the base view (only the data region
+      // moves), so client px map into vb0; toView/toAnchor then undo the pan.
+      if (vb) return axisZoomActive && vb0 ? vb0 : vb;
       const parsed = svgEl ? parseViewBox(svgEl.getAttribute("viewBox")) : null;
       if (parsed) return parsed;
       const r = (svgEl || el).getBoundingClientRect();
@@ -1386,8 +1703,53 @@ HTMLWidgets.widget({
     // T⁻¹(toUser). Every gesture/hit-test uses this, so the two modes share one path.
     function toView(clientX: number, clientY: number): { x: number; y: number } {
       const u = toUser(clientX, clientY);
-      if (axisZoomActive && vb && vb0) return panToView(vb, vb0, u.x, u.y);
+      if (axisZoomActive && vb && vb0) return azBaseToScene(u.x, u.y);
       return u;
+    }
+    // The gesture anchor for a client position: the point in `vb`'s own frame (the
+    // reference panel's) that a zoom/pan should hold under the cursor. Equal to
+    // toView for one panel; with several, the cursor's panel is first mapped back
+    // onto the reference panel (A⁻¹) so zooming in panel 3 zooms about the cursor.
+    function toAnchor(clientX: number, clientY: number): { x: number; y: number } {
+      const u = toUser(clientX, clientY);
+      if (!axisZoomActive || !vb || !vb0) return u;
+      const a = anchorPanel || azNearest(u.x, u.y);
+      if (!a) return panToView(vb, vb0, u.x, u.y);
+      return panToView(vb, vb0, (u.x - a.bx) / a.ax, (u.y - a.by) / a.ay);
+    }
+    // --- multi-panel axis-zoom geometry ---
+    // The zoomable panel whose (fixed) rect contains or is nearest to a point. The
+    // rects are the same in scene and base coordinates (the clip never moves).
+    function azNearest(x: number, y: number): AzPanel | null {
+      let best: AzPanel | null = null, bestD = Infinity;
+      for (let i = 0; i < azPanels.length; i++) {
+        const p = azPanels[i].p;
+        const dx = x < p.px0 ? p.px0 - x : x > p.px1 ? x - p.px1 : 0;
+        const dy = y < p.py0 ? p.py0 - y : y > p.py1 ? y - p.py1 : 0;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = azPanels[i]; }
+      }
+      return best;
+    }
+    // T_i for a panel at the current view.
+    function azT(a: AzPanel): PanTransform {
+      return conjugatePan(viewToPan(vb || vb0!, vb0!), a.ax, a.bx, a.ay, a.by);
+    }
+    // A point in the fixed base (vb0) space -> the scene (device-px) point drawn
+    // there: T_i⁻¹ for the panel under it.
+    function azBaseToScene(x: number, y: number): { x: number; y: number } {
+      const a = azNearest(x, y);
+      if (!a) return vb && vb0 ? panToView(vb, vb0, x, y) : { x: x, y: y };
+      const t = azT(a);
+      return { x: t.sx ? (x - t.tx) / t.sx : x, y: t.sy ? (y - t.ty) / t.sy : y };
+    }
+    // Several panels zoom independently-translated (T_i differ), so overlays drawn
+    // in scene coordinates must be placed per panel rather than by one viewBox.
+    function azMulti(): boolean {
+      return axisZoomActive && azPanels.length > 1 && !!vb0;
+    }
+    function fmtPan(t: PanTransform): string {
+      return "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")";
     }
 
     // Client px -> scene (element-bbox) coords, calibrated from the ACTUAL rendered
@@ -1402,6 +1764,10 @@ HTMLWidgets.widget({
     // so no separate panToView is needed). Per-axis two-point fit over the
     // most-separated elements; falls back to toView() when it can't calibrate.
     function calibrateXform(): { sx: number; ox: number; sy: number; oy: number } | null {
+      // Multi-panel axis zoom: each panel is translated differently, so fit client
+      // -> BASE (vb0) space instead, using each element's on-screen base position
+      // T_i(centre); clientToScene then undoes the T_i of the panel under the point.
+      if (azMulti()) return calibrateBase();
       let xi: ElemMeta | null = null, xj: ElemMeta | null = null;
       let yi: ElemMeta | null = null, yj: ElemMeta | null = null;
       for (let i = 0; i < elements.length; i++) {
@@ -1435,7 +1801,45 @@ HTMLWidgets.widget({
     function clientToScene(clientX: number, clientY: number): { x: number; y: number } {
       const f = calibrateXform();
       if (!f) return toView(clientX, clientY);
+      if (azMulti()) return azBaseToScene(f.ox + clientX * f.sx, f.oy + clientY * f.sy);
       return { x: f.ox + clientX * f.sx, y: f.oy + clientY * f.sy };
+    }
+    // calibrateXform's multi-panel fit: client px -> base (vb0) user space, from
+    // the extreme elements' rendered centres versus their T_i-mapped centres.
+    function calibrateBase(): { sx: number; ox: number; sy: number; oy: number } | null {
+      const base = function (e: ElemMeta): { x: number; y: number } {
+        const cx = (e.x0! + e.x1!) / 2, cy = (e.y0! + e.y1!) / 2;
+        const a = azNearest(cx, cy);
+        if (!a) return { x: cx, y: cy };
+        const t = azT(a);
+        return { x: t.sx * cx + t.tx, y: t.sy * cy + t.ty };
+      };
+      type BasePt = { x: number; y: number; e: ElemMeta };
+      let xi: BasePt | null = null, xj: BasePt | null = null, yi: BasePt | null = null, yj: BasePt | null = null;
+      for (let i = 0; i < elements.length; i++) {
+        const e = elements[i];
+        if (!hasBbox(e)) continue;
+        const b = { x: 0, y: 0, e: e };
+        const q = base(e); b.x = q.x; b.y = q.y;
+        if (!xi || b.x < xi.x) xi = b;
+        if (!xj || b.x > xj.x) xj = b;
+        if (!yi || b.y < yi.y) yi = b;
+        if (!yj || b.y > yj.y) yj = b;
+      }
+      if (!xi || !xj || !yi || !yj) return null;
+      const scr = (e: ElemMeta): { x: number; y: number } | null => {
+        const n = elementsForKey(e.key)[0] as Element | undefined;
+        if (!n) return null;
+        const r = n.getBoundingClientRect();
+        if (!r.width && !r.height) return null;
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      };
+      const xa = scr(xi.e), xb = scr(xj.e), ya = scr(yi.e), yb = scr(yj.e);
+      if (!xa || !xb || !ya || !yb) return null;
+      const dScrx = xb.x - xa.x, dScry = yb.y - ya.y;
+      if (Math.abs(dScrx) < 1 || Math.abs(dScry) < 1) return null;
+      const sx = (xj.x - xi.x) / dScrx, sy = (yj.y - yi.y) / dScry;
+      return { sx: sx, ox: xi.x - xa.x * sx, sy: sy, oy: yi.y - ya.y * sy };
     }
 
     // --- highlight / tooltip (Phase 3) ---
@@ -1789,9 +2193,23 @@ HTMLWidgets.widget({
         for (let j = 0; j < nodes.length; j++) {
           const c = nodes[j].cloneNode(true) as Element;
           c.classList.add("vellumwidget-hl");
-          dimLayer.appendChild(c);
+          dimLayer.appendChild(azOverlayWrap(c, keys[i]));
         }
       }
+    }
+    // Multi-panel axis zoom: the overlay sits at the fixed base view, so a clone
+    // drawn in scene coordinates is wrapped in its own panel's T_i. (One panel:
+    // the overlay's viewBox tracks `vb`, which already applies T.)
+    function azOverlayWrap(node: Element, key: string): Element {
+      if (!azMulti()) return node;
+      const m = meta[key];
+      if (!m || !hasBbox(m)) return node;
+      const a = azNearest((m.x0 + m.x1) / 2, (m.y0 + m.y1) / 2);
+      if (!a) return node;
+      const g = document.createElementNS(SVGNS, "g");
+      g.setAttribute("transform", fmtPan(azT(a)));
+      g.appendChild(node);
+      return g;
     }
     function hideHighlightOverlay(): void {
       if (holder) holder.style.opacity = "";
@@ -2007,9 +2425,19 @@ HTMLWidgets.widget({
       if (!m || !hasBbox(m)) return;
       const view = vb || vb0;
       if (!view) return;
-      const cx = (m.x0 + m.x1) / 2;
-      const cy = (m.y0 + m.y1) / 2;
-      const x0 = view.x, x1 = view.x + view.w, y0 = view.y, y1 = view.y + view.h;
+      let cx = (m.x0 + m.x1) / 2;
+      let cy = (m.y0 + m.y1) / 2;
+      let x0 = view.x, x1 = view.x + view.w, y0 = view.y, y1 = view.y + view.h;
+      if (azMulti()) {
+        // Several panels: the layer is at the base view, so place the mark's centre
+        // through its panel's T_i and span that panel's rect.
+        const a = azNearest(cx, cy);
+        if (a) {
+          const t = azT(a);
+          cx = t.sx * cx + t.tx; cy = t.sy * cy + t.ty;
+          x0 = a.p.px0; x1 = a.p.px1; y0 = a.p.py0; y1 = a.p.py1;
+        }
+      }
       if (hm !== "y") crosshairLayer.appendChild(crosshairLine(cx, y0, cx, y1));
       if (hm !== "x") crosshairLayer.appendChild(crosshairLine(x0, cy, x1, cy));
     }
@@ -2473,7 +2901,30 @@ HTMLWidgets.widget({
     // Draw (or move) the persistent brush band in the view-tracking overlay, in
     // scene coords, so it stays on the brushed data through pan/zoom.
     function drawIntervalBand(b: Bbox): void {
-      if (!crosshairLayer) return;
+      intervalBand = b;
+      placeIntervalBand();
+    }
+    // Place the band for the current view. The overlay tracks the view, so scene
+    // coords line up, except under multi-panel axis zoom: there the overlay holds
+    // the base view and each panel has its own T_i, so map the band through the
+    // brushed panel's transform and clip it to that panel's frame.
+    function placeIntervalBand(): void {
+      const sb = intervalBand;
+      if (!crosshairLayer || !sb) return;
+      let b = sb;
+      if (azMulti()) {
+        const a = azNearest((sb.x0 + sb.x1) / 2, (sb.y0 + sb.y1) / 2);
+        if (a) {
+          const t = azT(a);
+          const p = a.p;
+          b = {
+            x0: Math.max(Math.min(p.px0, p.px1), t.sx * sb.x0 + t.tx),
+            x1: Math.min(Math.max(p.px0, p.px1), t.sx * sb.x1 + t.tx),
+            y0: Math.max(Math.min(p.py0, p.py1), t.sy * sb.y0 + t.ty),
+            y1: Math.min(Math.max(p.py0, p.py1), t.sy * sb.y1 + t.ty)
+          };
+        }
+      }
       if (!intervalEl) {
         intervalEl = document.createElementNS(SVGNS, "rect") as SVGRectElement;
         intervalEl.setAttribute("class", "vellumwidget-interval");
@@ -2481,6 +2932,7 @@ HTMLWidgets.widget({
       }
       if (intervalEl.parentNode !== crosshairLayer) crosshairLayer.appendChild(intervalEl);
       intervalEl.setAttribute("x", String(b.x0));
+      // (b may be empty once the brushed range is panned out of its panel)
       intervalEl.setAttribute("y", String(b.y0));
       intervalEl.setAttribute("width", String(Math.max(0, b.x1 - b.x0)));
       intervalEl.setAttribute("height", String(Math.max(0, b.y1 - b.y0)));
@@ -2489,6 +2941,7 @@ HTMLWidgets.widget({
     function clearIntervals(): boolean {
       const had = Object.keys(intervals).length > 0;
       intervals = {};
+      intervalBand = null;
       if (intervalEl && intervalEl.parentNode) intervalEl.parentNode.removeChild(intervalEl);
       return had;
     }
@@ -2654,10 +3107,8 @@ HTMLWidgets.widget({
       if (axisZoomActive && panGroup && vb && vb0) {
         // Axis-aware zoom: hold the base frame at vb0 and scale only the data region
         // by T (so axes/titles/legend stay put), then re-tick for the visible range.
-        const t = viewToPan(vb, vb0);
-        panGroup.setAttribute("transform",
-          "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")");
-        setPanScaleVars(t); // keep constant-size glyphs the same pixel size
+        // Each panel gets T conjugated onto its own rect (T itself for one panel).
+        applyPanTransforms();
         if (svgEl) svgEl.setAttribute("viewBox", fmtViewBox(vb0));
         retick();
       } else if (svgEl && vb) {
@@ -2666,8 +3117,12 @@ HTMLWidgets.widget({
       // Overlays that sit over the panel marks track the view (their device-px
       // content zooms with the marks); the colorbar overlay tracks the FIXED base
       // under axis_zoom (the colorbar is furniture outside the panel, so it stays put).
-      if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
-      if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
+      // With several zoomed panels no single viewBox fits them all, so the overlays
+      // hold the base view and place their content per panel (azOverlayWrap).
+      const overlayVb = azMulti() ? vb0 : vb;
+      if (dimLayer && overlayVb) dimLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
+      if (crosshairLayer && overlayVb) crosshairLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
+      placeIntervalBand(); // an active interval band follows the per-panel zoom
       if (colorbarLayer && (vb || vb0)) {
         colorbarLayer.setAttribute("viewBox", fmtViewBox(axisZoomActive && vb0 ? vb0 : vb!));
       }
@@ -2687,6 +3142,17 @@ HTMLWidgets.widget({
     }
     function zoomTo(rect: Bbox, pad = 0.05): void {
       if (!vb) return;
+      // Multi-panel axis zoom: `vb` is in the reference panel's frame, so map a
+      // region in another panel back onto the reference rect first (A⁻¹).
+      if (azMulti()) {
+        const a = azNearest((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2);
+        if (a) {
+          rect = {
+            x0: (rect.x0 - a.bx) / a.ax, x1: (rect.x1 - a.bx) / a.ax,
+            y0: (rect.y0 - a.by) / a.ay, y1: (rect.y1 - a.by) / a.ay
+          };
+        }
+      }
       const w = Math.max(rect.x1 - rect.x0, 1e-6);
       const h = Math.max(rect.y1 - rect.y0, 1e-6);
       const px = w * pad;
@@ -2696,66 +3162,96 @@ HTMLWidgets.widget({
     }
 
     // --- axis-aware zoom (Phase 2, opt-in) ---
-    // A linear (identity/reverse continuous) axis is the tractable, correct case
-    // for the client-side re-ticker: nice round numbers in data space. Log/date/
-    // discrete axes report some other transform/type and fall back to viewBox zoom.
-    function isLinearAxis(ax: AxisScale | undefined): ax is AxisScale {
-      return !!ax && ax.type === "continuous" &&
-        (ax.transform === "identity" || ax.transform === "reverse");
-    }
     // Decide whether this render can do axis-aware zoom, wire its DOM once, and hide
     // vellum's static axes/gridlines (which would go stale under a zoom that only
-    // re-scales the data region). Gated to: opt-in on, SVG (not raster), a single
-    // cartesian panel whose x AND y are linear and match a pannable group by name.
+    // re-scales the data region). Gated to: opt-in on, SVG (not raster), and every
+    // pannable group in the scene backed by a cartesian panel whose x and y axes the
+    // re-ticker can follow (linear/sqrt/reverse, log10, date/datetime, or discrete/
+    // binned/other with their static breaks). Several panels (facets) zoom together:
+    // the first is the reference frame of `vb`, the rest follow by conjugation.
     // Anything else leaves axisZoomActive false and the ordinary viewBox zoom stands.
     function setupAxisZoom(): void {
-      panGroup = null; outerPanelGroup = null; axisPanel = null; axisZoomActive = false;
+      for (let i = 0; i < azPanels.length; i++) {
+        const g = azPanels[i].grid;
+        if (g && g.parentNode) g.parentNode.removeChild(g);
+      }
+      azPanels = []; panGroup = null; axisZoomActive = false; anchorPanel = null;
       if (retickLayer) { retickLayer.remove(); retickLayer = null; }
-      retickGrid = null;
-      if (!opts.axisZoom || rasterMode || !svgEl || !vb0 || !stage || panels.length !== 1) return;
-      const p = panels[0];
-      if (!isLinearAxis(p.x) || !isLinearAxis(p.y)) return;
+      if (!opts.axisZoom || rasterMode || !svgEl || !vb0 || !stage || !panels.length) return;
+      for (let i = 0; i < panels.length; i++) {
+        if (!axisRetickable(panels[i].x) || !axisRetickable(panels[i].y)) return;
+      }
       // A void panel (a graph's aspect-locked layout, or theme_void) has no static
       // axes in the frozen scene. There is nothing to re-tick, and re-ticking would
       // invent axes the render never had; the independent-axis pan transform would
       // also shear an aspect-locked graph. Fall back to plain viewBox zoom.
       if (!svgEl.querySelector('[data-vellum-panel^="axis-x"] text, [data-vellum-panel^="axis-y"] text')) return;
-      const pan = svgEl.querySelector('[data-vellum-pan="' + cssEscape(p.name) + '"]');
-      const outer = svgEl.querySelector('[data-vellum-panel="' + cssEscape(p.name) + '"]');
-      if (!pan || !outer) return; // upstream not pannable (older vellum/vellumplot)
-      panGroup = pan as SVGGElement;
-      outerPanelGroup = outer as SVGGElement;
-      axisPanel = p;
+      // Every pannable group must belong to a described panel: one the widget can't
+      // re-tick (e.g. a polar panel in a composition) would freeze while the rest zoom.
+      const pans = svgEl.querySelectorAll("[data-vellum-pan]");
+      for (let i = 0; i < pans.length; i++) {
+        const nm = pans[i].getAttribute("data-vellum-pan");
+        if (!panels.some(function (p) { return p.name === nm; })) return;
+      }
+      const ref = panels[0];
+      const rw = ref.px1 - ref.px0, rh = ref.py1 - ref.py0;
+      if (!rw || !rh) return;
+      const found: AzPanel[] = [];
+      for (let i = 0; i < panels.length; i++) {
+        const p = panels[i];
+        const pan = svgEl.querySelector('[data-vellum-pan="' + cssEscape(p.name) + '"]');
+        const outer = svgEl.querySelector('[data-vellum-panel="' + cssEscape(p.name) + '"]');
+        if (!pan || !outer) return; // upstream not pannable (older vellum/vellumplot)
+        const ax = (p.px1 - p.px0) / rw, ay = (p.py1 - p.py0) / rh;
+        if (!(ax > 0) || !(ay > 0)) return;
+        found.push({
+          p: p, pan: pan as SVGGElement, outer: outer as SVGGElement, grid: null,
+          ax: ax, bx: p.px0 - ax * ref.px0, ay: ay, by: p.py0 - ay * ref.py0,
+          xLab: null, yLab: null
+        });
+      }
+      azPanels = found;
+      panGroup = found[0].pan;
       axisZoomActive = true;
-      scrapeAxisStyle(p);
+      scrapeAxisStyle();
+      scrapeAxisAnchors();
       hideStaticAxes();
-      // Re-ticked gridlines: a group inside the clipped panel, before the pan group,
+      // Re-ticked gridlines: a group inside each clipped panel, before its pan group,
       // so they render under the marks and are clipped to the panel (like vellum's).
-      retickGrid = document.createElementNS(SVGNS, "g") as SVGGElement;
-      retickGrid.setAttribute("class", "vellumwidget-retick-grid");
-      outer.insertBefore(retickGrid, pan);
+      for (let i = 0; i < azPanels.length; i++) {
+        const a = azPanels[i];
+        const g = document.createElementNS(SVGNS, "g") as SVGGElement;
+        g.setAttribute("class", "vellumwidget-retick-grid");
+        a.outer.insertBefore(g, a.pan);
+        a.grid = g;
+      }
       // Re-ticked axis labels: an overlay pinned to the fixed base coordinate space.
       retickLayer = document.createElementNS(SVGNS, "svg") as SVGSVGElement;
       retickLayer.setAttribute("class", "vellumwidget-retick-layer");
       retickLayer.setAttribute("aria-hidden", "true");
       retickLayer.setAttribute("viewBox", fmtViewBox(vb0));
       stage.appendChild(retickLayer);
-      // Seed the (identity) transform + inverse-scale vars and the initial ticks for
-      // the full view, so the pan group is transform-ready before the first gesture.
-      const t = viewToPan(vb || vb0, vb0);
-      panGroup.setAttribute("transform",
-        "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")");
-      setPanScaleVars(t);
+      // Seed the transforms + inverse-scale vars and the initial ticks for the
+      // current view, so the pan groups are transform-ready before the first gesture.
+      applyPanTransforms();
       setupConstantMarks(); // fixed-size glyphs (default) + crisp strokes
       retick();
+    }
+    // Set every zoomable panel's T_i (and its constant-size inverse-scale vars).
+    function applyPanTransforms(): void {
+      if (!vb0) return;
+      for (let i = 0; i < azPanels.length; i++) {
+        const t = azT(azPanels[i]);
+        azPanels[i].pan.setAttribute("transform", fmtPan(t));
+        setPanScaleVars(azPanels[i].pan, t);
+      }
     }
     // The inverse of the pan-group scale, published as CSS custom properties so
     // constant-size glyphs (which carry `scale(var(--vw-ix),var(--vw-iy))`) cancel
     // it and keep their pixel size while their position still re-maps with T.
-    function setPanScaleVars(t: PanTransform): void {
-      if (!panGroup) return;
-      panGroup.style.setProperty("--vw-ix", String(t.sx ? 1 / t.sx : 1));
-      panGroup.style.setProperty("--vw-iy", String(t.sy ? 1 / t.sy : 1));
+    function setPanScaleVars(g: SVGGElement, t: PanTransform): void {
+      g.style.setProperty("--vw-ix", String(t.sx ? 1 / t.sx : 1));
+      g.style.setProperty("--vw-iy", String(t.sy ? 1 / t.sy : 1));
     }
     // Once per render (axis_zoom active, SVG): keep glyph marks a constant pixel
     // size by counter-scaling them about their own centre from the shared vars, and
@@ -2771,9 +3267,9 @@ HTMLWidgets.widget({
         const glyph = GLYPH_MARKS[e.mark] === true;
         for (let j = 0; j < nodes.length; j++) {
           const node = nodes[j] as SVGElement;
-          // Only marks inside the pan group are scaled by T, so only they need
+          // Only marks inside a pan group are scaled by T, so only they need
           // the counter-scale.
-          if (!panGroup.contains(node)) continue;
+          if (!azPanels.some(function (a) { return a.pan.contains(node); })) continue;
           if (glyph) {
             // Counter-scale about the glyph's own bbox centre (transform-box:
             // fill-box makes transform-origin resolve there), so T re-maps the
@@ -2832,34 +3328,81 @@ HTMLWidgets.widget({
         /translate\(\s*([-\d.eE]+)[ ,]+([-\d.eE]+)\s*\)/.exec(t);
       return m ? { tx: parseFloat(m[1]), ty: parseFloat(m[2]) } : { tx: 0, ty: 0 };
     }
-    // Scrape the axis text presentation + the tick-label anchor positions from
-    // vellum's own axis/grid nodes, so the re-tick matches the active theme. Falls
-    // back to sensible defaults (grey text, white gridlines) if a node is absent.
-    function scrapeAxisStyle(p: PanelInfo): void {
+    // Scrape the axis text + gridline presentation from vellum's own nodes, so the
+    // re-tick matches the active theme. Falls back to sensible defaults (grey text,
+    // white gridlines) if a node is absent.
+    function scrapeAxisStyle(): void {
       if (!svgEl) return;
-      const xText = svgEl.querySelector('[data-vellum-panel^="axis-x"] text');
+      const xText = svgEl.querySelector('[data-vellum-panel^="axis-x"] text, [data-vellum-panel^="axis-y"] text');
       if (xText) {
         axisStyle.textFill = xText.getAttribute("fill") || axisStyle.textFill;
         axisStyle.fontFamily = xText.getAttribute("font-family") || axisStyle.fontFamily;
         const fs = parseFloat(xText.getAttribute("font-size") || "");
         if (fs) axisStyle.fontSize = fs;
-        const y = parseFloat(xText.getAttribute("y") || "");
-        axisStyle.xBaselineY = isFinite(y) ? transTranslate(xText).ty + y : p.py1 + axisStyle.fontSize;
-      } else {
-        axisStyle.xBaselineY = p.py1 + axisStyle.fontSize;
-      }
-      const yText = svgEl.querySelector('[data-vellum-panel^="axis-y"] text');
-      if (yText) {
-        const x = parseFloat(yText.getAttribute("x") || "");
-        axisStyle.yLabelX = isFinite(x) ? transTranslate(yText).tx + x : p.px0 - 6;
-      } else {
-        axisStyle.yLabelX = p.px0 - 6;
       }
       const grid = svgEl.querySelector('[role="grid"] path, [role="grid"] line');
       if (grid) {
         axisStyle.gridStroke = grid.getAttribute("stroke") || axisStyle.gridStroke;
         const sw = parseFloat(grid.getAttribute("stroke-width") || "");
         if (sw) axisStyle.gridWidth = sw;
+      }
+    }
+    // Assign each static tick-label group (axis-x-* / axis-y-*) to the panel it
+    // labels, and record where its labels sit: an x group labels the nearest panel
+    // above (or below, for a top axis) whose x-extent holds its labels; a y group
+    // the nearest panel to its right (or left) whose y-extent holds them. Facets
+    // label only their outer panels, so an interior panel keeps no anchor and is
+    // re-ticked with gridlines only, exactly as the static render drew it.
+    function scrapeAxisAnchors(): void {
+      if (!svgEl) return;
+      const groups = svgEl.querySelectorAll('[data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
+      for (let g = 0; g < groups.length; g++) {
+        const isX = /^axis-x/.test(groups[g].getAttribute("data-vellum-panel") || "");
+        const texts = groups[g].querySelectorAll("text");
+        if (!texts.length) continue;
+        let sx = 0, sy = 0, n = 0, gap = 0;
+        let first: { x: number; y: number } | null = null;
+        for (let i = 0; i < texts.length; i++) {
+          const tr = transTranslate(texts[i]);
+          const x = tr.tx + (parseFloat(texts[i].getAttribute("x") || "") || 0);
+          const y = tr.ty + (parseFloat(texts[i].getAttribute("y") || "") || 0);
+          if (!first) first = { x: x, y: y };
+          else if (isX && !gap && y - first.y > 1) gap = y - first.y; // a wrapped second line
+          sx += x; sy += y; n++;
+        }
+        if (!first || !n) continue;
+        const mx = sx / n, my = sy / n;
+        let best: AzPanel | null = null, bestD = Infinity;
+        for (let i = 0; i < azPanels.length; i++) {
+          const p = azPanels[i].p;
+          let d: number;
+          // The labels' mean anchor must fall within the panel's extent, give or
+          // take a quarter panel (start-anchored / wrapped labels sit left of
+          // their tick, so a lone edge label can start outside the panel).
+          if (isX) {
+            const slack = (p.px1 - p.px0) / 4;
+            if (mx < p.px0 - slack || mx > p.px1 + slack) continue;
+            d = first.y >= p.py1 - 1 ? first.y - p.py1 : first.y <= p.py0 + 1 ? p.py0 - first.y : Infinity;
+          } else {
+            const slack = (p.py1 - p.py0) / 4;
+            if (my < p.py0 - slack || my > p.py1 + slack) continue;
+            d = first.x <= p.px0 + 1 ? p.px0 - first.x : first.x >= p.px1 - 1 ? first.x - p.px1 : Infinity;
+          }
+          if (d < bestD) { bestD = d; best = azPanels[i]; }
+        }
+        if (!best) continue;
+        const t0 = texts[0];
+        const anchor: AxisAnchor = {
+          pos: isX ? first.y : first.x,
+          // x labels centre on their tick (vellum centres wrapped lines itself, with
+          // a start anchor and per-line offsets, so its anchor isn't reusable there).
+          anchor: isX ? "middle" : (t0.getAttribute("text-anchor") || "end"),
+          baseline: t0.getAttribute("dominant-baseline") || (isX ? "text-before-edge" : "central"),
+          gap: gap
+        };
+        // First group wins (the primary axis; a secondary axis is hidden with it).
+        if (isX && !best.xLab) best.xLab = anchor;
+        if (!isX && !best.yLab) best.yLab = anchor;
       }
     }
     // Hide vellum's gridlines (role="grid", inside the pan group -> would stretch
@@ -2891,52 +3434,67 @@ HTMLWidgets.widget({
       t.textContent = text;
       return t;
     }
-    // Redraw the re-ticked gridlines + axis labels for the currently visible data
-    // range. Called on every applyViewBox while axis_zoom is active.
+    // Break a label onto two lines at its first space (as vellum wrapped the static
+    // axis): "2020-01-01 06:00:00" -> "2020-01-01" over "06:00:00".
+    function wrapLabel(t: SVGTextElement, text: string, x: number, gap: number): void {
+      const sp = text.indexOf(" ");
+      if (sp < 0) return;
+      t.textContent = "";
+      const parts = [text.slice(0, sp), text.slice(sp + 1)];
+      for (let i = 0; i < parts.length; i++) {
+        const ts = document.createElementNS(SVGNS, "tspan");
+        ts.setAttribute("x", String(x));
+        if (i > 0) ts.setAttribute("dy", String(gap));
+        ts.textContent = parts[i];
+        t.appendChild(ts);
+      }
+    }
+    // Redraw the re-ticked gridlines + axis labels for each panel's currently
+    // visible range. Called on every applyViewBox while axis_zoom is active.
     function retick(): void {
-      if (!axisZoomActive || !axisPanel || !vb || !vb0 || !retickGrid || !retickLayer) return;
-      const p = axisPanel;
-      while (retickGrid.firstChild) retickGrid.removeChild(retickGrid.firstChild);
+      if (!axisZoomActive || !vb || !vb0 || !retickLayer) return;
       while (retickLayer.firstChild) retickLayer.removeChild(retickLayer.firstChild);
-      const t = viewToPan(vb, vb0);
-      // Visible data range: invert the panel's screen corners through T to the device
-      // px now sitting there, then px -> data via the panel affine.
-      const cTL = panToView(vb, vb0, p.px0, p.py0);
-      const cBR = panToView(vb, vb0, p.px1, p.py1);
-      if (p.x) {
-        const a = pxToDataX(p, cTL.x), b = pxToDataX(p, cBR.x);
-        if (a != null && b != null) {
-          const lo = Math.min(a, b), hi = Math.max(a, b);
-          const ticks = niceTicks(lo, hi, 5);
-          const step = ticks.length > 1 ? ticks[1] - ticks[0] : hi - lo;
-          const nlo = p.x.native_lo, nhi = p.x.native_hi;
-          for (let i = 0; i < ticks.length; i++) {
-            const nx = dataToNative(p.x, ticks[i]);
-            const px = p.px0 + ((nx - nlo) / (nhi - nlo)) * (p.px1 - p.px0);
-            const sx = t.sx * px + t.tx; // screen device-px
-            if (sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
-            retickGrid.appendChild(gridLine(sx, p.py0, sx, p.py1));
-            retickLayer.appendChild(
-              axisLabel(fmtTick(ticks[i], step), sx, axisStyle.xBaselineY, "middle", "text-before-edge"));
+      for (let i = 0; i < azPanels.length; i++) retickPanel(azPanels[i]);
+    }
+    function retickPanel(a: AzPanel): void {
+      const p = a.p, grid = a.grid, layer = retickLayer;
+      if (!grid || !layer) return;
+      while (grid.firstChild) grid.removeChild(grid.firstChild);
+      const t = azT(a);
+      // Visible native range: invert the panel's fixed screen rect through T_i to
+      // the device px now sitting there, then px -> native via the panel affine.
+      if (p.x && p.px1 !== p.px0) {
+        const ax = p.x;
+        const k = (ax.native_hi - ax.native_lo) / (p.px1 - p.px0);
+        const nA = ax.native_lo + ((p.px0 - t.tx) / t.sx - p.px0) * k;
+        const nB = ax.native_lo + ((p.px1 - t.tx) / t.sx - p.px0) * k;
+        const ticks = axisTicks(ax, Math.min(nA, nB), Math.max(nA, nB), 5);
+        for (let i = 0; i < ticks.length; i++) {
+          const px = p.px0 + (ticks[i].n - ax.native_lo) / k;
+          const sx = t.sx * px + t.tx; // screen device-px
+          if (!isFinite(sx) || sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
+          grid.appendChild(gridLine(sx, p.py0, sx, p.py1));
+          if (a.xLab) {
+            const lab = axisLabel(ticks[i].label, sx, a.xLab.pos, a.xLab.anchor, a.xLab.baseline);
+            if (a.xLab.gap > 0) wrapLabel(lab, ticks[i].label, sx, a.xLab.gap);
+            layer.appendChild(lab);
           }
         }
       }
-      if (p.y) {
-        const a = pxToDataY(p, cTL.y), b = pxToDataY(p, cBR.y);
-        if (a != null && b != null) {
-          const lo = Math.min(a, b), hi = Math.max(a, b);
-          const ticks = niceTicks(lo, hi, 5);
-          const step = ticks.length > 1 ? ticks[1] - ticks[0] : hi - lo;
-          const nlo = p.y.native_lo, nhi = p.y.native_hi;
-          for (let i = 0; i < ticks.length; i++) {
-            const ny = dataToNative(p.y, ticks[i]);
-            // device y is top-down: native_hi at py0 (top), native_lo at py1 (bottom)
-            const py = p.py0 + ((nhi - ny) / (nhi - nlo)) * (p.py1 - p.py0);
-            const sy = t.sy * py + t.ty;
-            if (sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
-            retickGrid.appendChild(gridLine(p.px0, sy, p.px1, sy));
-            retickLayer.appendChild(
-              axisLabel(fmtTick(ticks[i], step), axisStyle.yLabelX, sy, "end", "central"));
+      if (p.y && p.py1 !== p.py0) {
+        const ay = p.y;
+        // device y is top-down: native_hi at py0 (top), native_lo at py1 (bottom)
+        const k = (ay.native_hi - ay.native_lo) / (p.py1 - p.py0);
+        const nA = ay.native_hi - ((p.py0 - t.ty) / t.sy - p.py0) * k;
+        const nB = ay.native_hi - ((p.py1 - t.ty) / t.sy - p.py0) * k;
+        const ticks = axisTicks(ay, Math.min(nA, nB), Math.max(nA, nB), 5);
+        for (let i = 0; i < ticks.length; i++) {
+          const py = p.py0 + (ay.native_hi - ticks[i].n) / k;
+          const sy = t.sy * py + t.ty;
+          if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
+          grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
+          if (a.yLab) {
+            layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline));
           }
         }
       }
@@ -3243,6 +3801,8 @@ HTMLWidgets.widget({
         crosshairLayer.appendChild(lassoEl);
       }
       lassoEl.setAttribute("points", lassoPointsAttr());
+      if (azMulti() && anchorPanel) lassoEl.setAttribute("transform", fmtPan(azT(anchorPanel)));
+      else lassoEl.removeAttribute("transform");
     }
     function clearLasso(): void {
       lassoPts = [];
@@ -3335,7 +3895,7 @@ HTMLWidgets.widget({
         const pts = Array.from(pointers.values());
         const d = Math.hypot(pts[0].cx - pts[1].cx, pts[0].cy - pts[1].cy);
         if (d > 0) {
-          const u = toView((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
+          const u = toAnchor((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
           vb = zoomViewBox(vb, d / pinchDist, u.x, u.y);
           applyViewBox();
           pinchDist = d;
@@ -3365,11 +3925,11 @@ HTMLWidgets.widget({
         lassoPts.push(clientToScene(ev.clientX, ev.clientY));
         updateLassoPath();
       } else if (dragging === "pan" && vb) {
-        const u = toView(ev.clientX, ev.clientY);
+        const u = toAnchor(ev.clientX, ev.clientY);
         vb.x -= u.x - down.ux;
         vb.y -= u.y - down.uy;
         applyViewBox();
-        const u2 = toView(ev.clientX, ev.clientY); // re-anchor: track cursor 1:1
+        const u2 = toAnchor(ev.clientX, ev.clientY); // re-anchor: track cursor 1:1
         down.ux = u2.x;
         down.uy = u2.y;
       }
@@ -3394,7 +3954,9 @@ HTMLWidgets.widget({
         el.classList.remove("vellumwidget-panning");
         return;
       }
-      const u = toView(ev.clientX, ev.clientY);
+      // Pin the press's panel so a pan that drifts across a facet keeps one frame.
+      if (axisZoomActive) { const pu = toUser(ev.clientX, ev.clientY); anchorPanel = azNearest(pu.x, pu.y); }
+      const u = toAnchor(ev.clientX, ev.clientY);
       down = { cx: ev.clientX, cy: ev.clientY, ux: u.x, uy: u.y };
       dragging = "";
       movedDuringDrag = false;
@@ -3405,6 +3967,7 @@ HTMLWidgets.widget({
       const wasPinch = pinchDist > 0;
       if (pointers.size < 2) pinchDist = 0;
       if (pointers.size === 0) {
+        anchorPanel = null;
         window.removeEventListener("pointermove", onDragMove);
         window.removeEventListener("pointerup", onDragUp);
         window.removeEventListener("pointercancel", onDragUp);
@@ -3604,7 +4167,7 @@ HTMLWidgets.widget({
     function onWheel(ev: WheelEvent): void {
       if (!opts.zoom || !vb) return;
       ev.preventDefault();
-      const u = toView(ev.clientX, ev.clientY);
+      const u = toAnchor(ev.clientX, ev.clientY);
       const factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
       vb = zoomViewBox(vb, factor, u.x, u.y);
       applyViewBox();
@@ -4110,6 +4673,7 @@ HTMLWidgets.widget({
         lastBrush = null;
         intervals = {};
         intervalEl = null;
+        intervalBand = null;
         mode = "brush";
         group = opts.group || null;
         for (let i = 0; i < elements.length; i++) {
@@ -4346,7 +4910,23 @@ HTMLWidgets.widget({
             return { text: t.textContent, x: parseFloat(t.getAttribute("x") || "NaN"), y: parseFloat(t.getAttribute("y") || "NaN") };
           });
         },
-        retickGridCount: function () { return retickGrid ? retickGrid.querySelectorAll("line").length : 0; },
+        retickGridCount: function () {
+          let n = 0;
+          for (let i = 0; i < azPanels.length; i++) { const g = azPanels[i].grid; if (g) n += g.querySelectorAll("line").length; }
+          return n;
+        },
+        // Every zoomable panel's name + current pan transform (multi-panel axis zoom).
+        panTransforms: function () {
+          return azPanels.map(function (a) { return { name: a.p.name, transform: a.pan.getAttribute("transform") }; });
+        },
+        // Per panel: which axes got a label anchor (outer facets) — interior ones none.
+        axisAnchors: function () {
+          return azPanels.map(function (a) { return { name: a.p.name, x: a.xLab, y: a.yLab }; });
+        },
+        toAnchor: toAnchor,
+        clientToScene: clientToScene,
+        zoomTo: zoomTo,
+        getView: function () { return vb ? { x: vb.x, y: vb.y, w: vb.w, h: vb.h } : null; },
         staticAxesHidden: function () {
           if (!svgEl) return null;
           const nodes = svgEl.querySelectorAll('[role="grid"], [data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
@@ -4435,8 +5015,16 @@ registerProxyHandler();
   normalizePanels,
   viewToPan,
   panToView,
+  conjugatePan,
   niceTicks,
   fmtTick,
   dataToNative,
+  logTicks,
+  fmtRNum,
+  strftimeUTC,
+  timeTicks,
+  detectTimeFormat,
+  axisTicks,
+  axisRetickable,
   sourceTable
 };

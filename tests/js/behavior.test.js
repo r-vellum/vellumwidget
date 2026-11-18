@@ -1874,16 +1874,17 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   const tmR = /matrix\(([-\d.eE]+)/.exec(on.inst._test.panTransform());
   ok(tmR && Math.abs(parseFloat(tmR[1]) - 1) < 1e-6, "axis_zoom: reset to full view -> identity scale");
 
-  // fallbacks: a log10 axis, raster mode, and multiple panels all decline axis_zoom.
-  const logPanels = Object.assign({}, linPanels, {
-    x: { type: "log10", transform: "log10", data_lo: 1, data_hi: 1000, native_lo: 0, native_hi: 3 }
+  // fallbacks: an axis the re-ticker can't follow, raster mode, and a described
+  // panel with no pannable group all decline axis_zoom.
+  const symPanels = Object.assign({}, linPanels, {
+    x: { type: "continuous", transform: "symlog", data_lo: -10, data_hi: 10, native_lo: -1, native_hi: 1 }
   });
-  ok(mountAZ({ axisZoom: true }, linSvg, logPanels).inst._test.axisZoomActive() === false,
-    "axis_zoom: a log axis falls back to viewBox zoom");
+  ok(mountAZ({ axisZoom: true }, linSvg, symPanels).inst._test.axisZoomActive() === false,
+    "axis_zoom: a custom-transform axis without static breaks falls back to viewBox zoom");
   ok(mountAZ({ axisZoom: true, raster: true }).inst._test.axisZoomActive() === false,
     "axis_zoom: raster mode falls back to viewBox zoom");
   ok(mountAZ({ axisZoom: true }, linSvg, [linPanels, Object.assign({}, linPanels, { name: "panel-1-2" })]).inst._test.axisZoomActive() === false,
-    "axis_zoom: multiple panels fall back to viewBox zoom");
+    "axis_zoom: a described panel with no pannable group falls back to viewBox zoom");
   // a scene with no pan group (older upstream) also declines.
   const noPanSvg = linSvg.replace('<g data-vellum-pan="panel-1-1">', "").replace("</g></g>", "</g>");
   ok(mountAZ({ axisZoom: true }, noPanSvg).inst._test.axisZoomActive() === false,
@@ -1911,6 +1912,253 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     "nav+axis_zoom: pan transform is x-only (sx=2, sy=1) — full y kept, x-range zoomed");
   ok(nz.el.querySelector("svg").getAttribute("viewBox") === "0 0 200 100",
     "nav+axis_zoom: base viewBox stays fixed (frame doesn't move)");
+}
+
+// ============ axis-zoom tick generators: log / date / discrete / multi-panel ============
+{
+  const T = window.__vellumwidgetTest;
+  const labelsOf = (ticks) => ticks.map((t) => t.label);
+  const near = (a, b, tol) => Math.abs(a - b) < (tol || 1e-6);
+
+  // --- log10: decades, thinned decades, 1-3 / 1-2-5 subdivisions, linear deep zoom.
+  // Expectations are vellumplot's own static breaks/labels for the same ranges.
+  const logAx = { type: "continuous", transform: "log10" };
+  ok(JSON.stringify(labelsOf(T.axisTicks(logAx, 0, 5, 5))) === JSON.stringify(["1", "100", "10000"]),
+    "log ticks: a 5-decade range thins to every 2nd decade (1, 100, 10000), as vellumplot draws it");
+  ok(JSON.stringify(labelsOf(T.axisTicks(logAx, 0, 3, 5))) === JSON.stringify(["1", "10", "100", "1000"]),
+    "log ticks: a 3-decade range ticks every decade");
+  ok(JSON.stringify(labelsOf(T.axisTicks(logAx, Math.log10(0.03), Math.log10(7), 5))) ===
+    JSON.stringify(["0.03", "0.10", "0.30", "1.00", "3.00"]),
+    "log ticks: < 3 decades adds 1-3 subdivisions, labelled with R's common decimals");
+  ok(JSON.stringify(labelsOf(T.axisTicks(logAx, Math.log10(2), Math.log10(7), 5))) === JSON.stringify(["2", "3", "5"]),
+    "log ticks: inside one decade -> 2/3/5 subdivisions (matches vellumplot)");
+  const lt = T.axisTicks(logAx, Math.log10(1.5), Math.log10(9), 5);
+  ok(labelsOf(lt).indexOf("2") >= 0 && labelsOf(lt).indexOf("5") >= 0,
+    "log ticks: zoomed in to under a decade -> 2/5 subdivisions");
+  ok(lt.every((t) => near(Math.pow(10, t.n), Number(t.label))),
+    "log ticks: each tick's native position is log10 of its labelled value");
+  const deep = labelsOf(T.axisTicks(logAx, Math.log10(2), Math.log10(2.5), 5));
+  ok(deep.indexOf("2.1") >= 0 && deep.indexOf("2.5") >= 0,
+    "log ticks: a deep zoom inside one decade falls back to linear ticks (2.1, 2.2, ...)");
+  ok(T.fmtRNum([0.1, 1, 10]).join(",") === "0.1,1.0,10.0" && T.fmtRNum([1, 10, 100]).join(",") === "1,10,100",
+    "fmtRNum: R format() common decimals");
+
+  // --- strftime + date-format detection from the static labels
+  ok(T.strftimeUTC("%d %b %Y %H:%M", Date.UTC(2021, 2, 5, 7, 9)) === "05 Mar 2021 07:09",
+    "strftimeUTC: day/month-name/year/hour/minute");
+  ok(T.strftimeUTC("%j %B %y", Date.UTC(2020, 1, 1)) === "032 February 20", "strftimeUTC: %j %B %y");
+  const dateAx = {
+    type: "date", transform: "identity", time_unit: "day",
+    breaks: [18262, 18353, 18444, 18536], labels: ["2020-01-01", "2020-04-01", "2020-07-01", "2020-10-01"]
+  };
+  ok(T.detectTimeFormat(dateAx).fmt === "%Y-%m-%d", "detectTimeFormat: a default date axis is ISO %Y-%m-%d");
+  const monAx = {
+    type: "date", transform: "identity", time_unit: "day",
+    breaks: [18262, 18322, 18383, 18444, 18506], labels: ["Jan 2020", "Mar 2020", "May 2020", "Jul 2020", "Sep 2020"]
+  };
+  ok(T.detectTimeFormat(monAx).fmt === "%b %Y", "detectTimeFormat: recovers a date_labels format (%b %Y)");
+  const zrhAx = {
+    type: "datetime", transform: "identity", time_unit: "second",
+    breaks: [1577833200, 1577854800, 1577876400],
+    labels: ["2020-01-01 00:00:00", "2020-01-01 06:00:00", "2020-01-01 12:00:00"]
+  };
+  const zi = T.detectTimeFormat(zrhAx);
+  ok(zi.fmt === "%Y-%m-%d %H:%M:%S" && zi.off === 3600000,
+    "detectTimeFormat: a datetime axis drawn in UTC+1 recovers its format and offset");
+  ok(T.detectTimeFormat({ type: "date", transform: "identity", time_unit: "day", breaks: [18262], labels: ["Q1"] }).fmt === null,
+    "detectTimeFormat: custom labels -> no format (generator picks one per step)");
+
+  // --- date ticks: calendar steps, the static format when fine enough
+  ok(JSON.stringify(labelsOf(T.axisTicks(dateAx, 18262, 18627, 5))) ===
+    JSON.stringify(["2020-01-01", "2020-04-01", "2020-07-01", "2020-10-01"]),
+    "date ticks: a year-long view -> quarterly ticks in the static ISO format");
+  const d10 = T.axisTicks(dateAx, 18262, 18272, 5);
+  ok(d10.length === 6 && d10[0].label === "2020-01-01" && d10[1].label === "2020-01-03" && d10[1].n === 18264,
+    "date ticks: a 10-day view -> every 2nd day, positioned in epoch days");
+  ok(labelsOf(T.axisTicks(monAx, 18262, 18627, 5))[1] === "Apr 2020",
+    "date ticks: month steps keep a %b %Y axis's own format");
+  ok(labelsOf(T.axisTicks(monAx, 18262, 18272, 5))[0] === "2020-01-01",
+    "date ticks: day steps outgrow a %b %Y format -> ISO day labels");
+  ok(T.axisTicks(dateAx, 18262, 18262.5, 5).length <= 1,
+    "date ticks: a Date axis never ticks below one day");
+  ok(labelsOf(T.axisTicks(dateAx, 0, 365.25 * 300, 5)).every((l) => /^\d{4}$/.test(l) || /^\d{4}-\d\d-\d\d$/.test(l)),
+    "date ticks: a centuries-wide view ticks on whole years");
+  const utcAx = {
+    type: "datetime", transform: "identity", time_unit: "second",
+    breaks: [1577836800, 1585699200, 1593561600], labels: ["2020-01-01", "2020-04-01", "2020-07-01"]
+  };
+  ok(JSON.stringify(labelsOf(T.axisTicks(utcAx, 1577836800, 1577836800 + 21600, 5))) ===
+    JSON.stringify(["2020-01-01", "03:00", "06:00"]),
+    "datetime ticks: zoomed to hours -> %H:%M, midnight labelled with its date");
+  const zt = T.axisTicks(zrhAx, 1577833200, 1577833200 + 21600, 5);
+  ok(zt.length === 3 && zt[1].n === 1577833200 + 10800 && zt[1].label === "2020-01-01 03:00:00",
+    "datetime ticks: hour ticks land on the axis's own (UTC+1) wall clock");
+
+  // --- discrete / binned / custom transform: static breaks re-positioned, kept in view
+  const discAx = { type: "discrete", transform: "identity", breaks: [1, 2, 3, 4], labels: ["a", "b", "c", "d"] };
+  ok(JSON.stringify(labelsOf(T.axisTicks(discAx, 1.6, 3.4, 5))) === JSON.stringify(["b", "c"]),
+    "discrete ticks: only the categories still in view, at their own positions");
+  ok(T.axisTicks({ type: "discrete", transform: "identity", breaks: 1, labels: "a" }, 0.5, 1.5, 5)[0].label === "a",
+    "discrete ticks: a single unboxed break/label still works");
+  ok(T.axisRetickable(discAx) && !T.axisRetickable({ type: "discrete", transform: "identity" }),
+    "axisRetickable: a discrete axis needs its static breaks");
+  ok(T.axisRetickable({ type: "continuous", transform: "log-2", breaks: [0, 1], labels: ["1", "2"] }) &&
+    !T.axisRetickable({ type: "continuous", transform: "log-2" }),
+    "axisRetickable: a custom transform re-positions its static breaks, or declines without them");
+  ok(T.axisRetickable({ type: "continuous", transform: "sqrt" }) && T.axisRetickable(logAx) && T.axisRetickable(dateAx),
+    "axisRetickable: sqrt / log10 / date generate their own ticks");
+  // conjugatePan: identity A leaves T alone; a shifted panel keeps scale, moves translation.
+  const tc = T.conjugatePan({ sx: 2, sy: 2, tx: -100, ty: -50 }, 1, 200, 1, 0);
+  ok(tc.sx === 2 && tc.tx === -300 && tc.ty === -50, "conjugatePan: a panel shifted 200px right gets T's zoom about its own point");
+
+  // --- integration: log / date / discrete axes re-tick on zoom (single panel)
+  const svgOne =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1" clip-path="url(#c0)"><g data-vellum-pan="panel-1-1">' +
+    '<g role="grid"><path d="M0 0 L0 80" stroke="#ffffff" stroke-width="1"/></g>' +
+    '<path data-key="a" d="M100 50h2v2z"/></g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">x</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">y</text></g></svg>';
+  const yLin = { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 };
+  function mountOne(xAx) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e, 200, 100);
+    i.renderValue({
+      svg: svgOne,
+      elements: { key: ["a"], x0: [100], y0: [50], x1: [102], y1: [52] },
+      panels: { name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90, x: xAx, y: yLin },
+      options: { axisZoom: true, hover: true, select: true, zoom: true }
+    });
+    return i;
+  }
+  // x labels sit on the scraped x-axis baseline (94); y labels at x = 16.
+  const xLabels = (i) => i._test.retickLabels().filter((l) => near(l.y, 94)).map((l) => l.text);
+
+  const logW = mountOne({ type: "continuous", transform: "log10", data_lo: 1, data_hi: 1000, native_lo: 0, native_hi: 3 });
+  ok(logW._test.axisZoomActive() === true, "axis_zoom log: a log10 axis is now axis-zoomable");
+  ok(JSON.stringify(xLabels(logW)) === JSON.stringify(["1", "10", "100", "1000"]),
+    "axis_zoom log: full view ticks every decade");
+  logW._test.setView({ x: 50, y: 25, w: 100, h: 50 }); // visible native 0.75 .. 2.25
+  ok(JSON.stringify(xLabels(logW)) === JSON.stringify(["10", "30", "100"]),
+    "axis_zoom log: zoomed in, the decades gain 1-3 subdivisions");
+
+  const dateW = mountOne(Object.assign({ data_lo: 18262, data_hi: 18627, native_lo: 18262, native_hi: 18627 }, dateAx));
+  ok(dateW._test.axisZoomActive() === true, "axis_zoom date: a date axis is axis-zoomable");
+  ok(JSON.stringify(xLabels(dateW)) === JSON.stringify(["2020-01-01", "2020-04-01", "2020-07-01", "2020-10-01"]),
+    "axis_zoom date: full view matches the static quarterly ISO labels");
+  dateW._test.setView({ x: 50, y: 25, w: 100, h: 50 }); // ~Apr 1 .. Sep 30
+  ok(JSON.stringify(xLabels(dateW)) === JSON.stringify(["2020-05-01", "2020-07-01", "2020-09-01"]),
+    "axis_zoom date: zoomed to half a year -> bi-monthly calendar ticks");
+
+  const discW = mountOne(Object.assign({ data_lo: 1, data_hi: 4, native_lo: 0.5, native_hi: 4.5 }, discAx));
+  ok(discW._test.axisZoomActive() === true, "axis_zoom discrete: a discrete axis with breaks is axis-zoomable");
+  ok(JSON.stringify(xLabels(discW)) === JSON.stringify(["a", "b", "c", "d"]), "axis_zoom discrete: all categories at full view");
+  discW._test.setView({ x: 50, y: 25, w: 100, h: 50 }); // visible native 1.5 .. 3.5
+  const dl = discW._test.retickLabels().filter((l) => near(l.y, 94));
+  ok(dl.map((l) => l.text).join(",") === "b,c", "axis_zoom discrete: zoomed in, only the categories still in view remain");
+  ok(near(dl[0].x, 60), "axis_zoom discrete: a category label follows its zoomed position");
+  // The frame stays at the base view under axis_zoom, so a client point maps into
+  // vb0 first and THEN through T⁻¹ (mapping it into the zoomed view first would
+  // undo the zoom twice and drift the wheel anchor off the cursor).
+  document.body.lastChild.querySelector("svg").getBoundingClientRect =
+    () => ({ left: 0, top: 0, width: 200, height: 100, right: 200, bottom: 100 });
+  const tv = discW._test.toView(150, 50);
+  ok(near(tv.x, 125) && near(tv.y, 50), "axis_zoom: toView maps a client point through the base frame, then T⁻¹");
+
+  // a datetime axis whose static labels vellum wrapped onto two lines re-ticks
+  // wrapped too (date over time), centred on the tick.
+  const wrapSvg = svgOne.replace(
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">x</text></g>',
+    '<g data-vellum-panel="axis-x-3"><text x="-8" y="16" transform="matrix(1 0 0 1 20 90)" text-anchor="start" dominant-baseline="alphabetic" font-size="12">2020-01-01</text>' +
+    '<text x="-1" y="30.4" transform="matrix(1 0 0 1 20 90)" text-anchor="start" dominant-baseline="alphabetic" font-size="12">00:00:00</text></g>');
+  const e2 = document.createElement("div");
+  document.body.appendChild(e2);
+  const wrapW = widgetDef.factory(e2, 200, 100);
+  wrapW.renderValue({
+    svg: wrapSvg,
+    elements: { key: ["a"], x0: [100], y0: [50], x1: [102], y1: [52] },
+    panels: { name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90, y: yLin,
+      x: Object.assign({ data_lo: 1577836800, data_hi: 1577923200, native_lo: 1577836800, native_hi: 1577923200 }, {
+        type: "datetime", transform: "identity", time_unit: "second",
+        breaks: [1577836800, 1577858400], labels: ["2020-01-01 00:00:00", "2020-01-01 06:00:00"] }) },
+    options: { axisZoom: true, zoom: true }
+  });
+  const wl = e2.querySelector(".vellumwidget-retick-layer text");
+  const wts = wl ? wl.querySelectorAll("tspan") : [];
+  ok(wts.length === 2 && near(parseFloat(wts[1].getAttribute("dy")), 14.4),
+    "axis_zoom datetime: a wrapped static axis re-ticks as two lines with the same spacing");
+  ok(wl && wl.getAttribute("text-anchor") === "middle" && wl.querySelector("tspan").textContent === "2020-01-01",
+    "axis_zoom datetime: wrapped labels are centred, date on the first line");
+
+  // --- integration: multi-panel (facets) zoom together, each re-ticked
+  const facetSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">' +
+    '<g data-vellum-panel="panel-1-1" clip-path="url(#c0)"><g data-vellum-pan="panel-1-1">' +
+    '<g role="grid"><path d="M0 0 L0 80" stroke="#ffffff" stroke-width="1"/></g>' +
+    '<path data-key="a" d="M99 49h2v2z"/></g></g>' +
+    '<g data-vellum-panel="panel-1-2" clip-path="url(#c1)"><g data-vellum-pan="panel-1-2">' +
+    '<path data-key="b" d="M299 49h2v2z"/></g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-x-5"><text x="20" y="4" transform="matrix(1 0 0 1 220 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g></svg>';
+  const xLin = { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 };
+  const facetPanels = [
+    { name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90, x: xLin, y: yLin },
+    { name: "panel-1-2", px0: 220, py0: 10, px1: 380, py1: 90, x: xLin, y: yLin }
+  ];
+  function mountFacet(svgStr, panels) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e, 400, 100);
+    i.renderValue({
+      svg: svgStr || facetSvg,
+      elements: { key: ["a", "b"], mark: ["point", "point"], x0: [99, 299], y0: [49, 49], x1: [101, 301], y1: [51, 51] },
+      panels: panels || facetPanels,
+      options: { axisZoom: true, hover: true, select: true, zoom: true, selectMode: "multiple" }
+    });
+    e.querySelector("svg").getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 100, right: 400, bottom: 100 });
+    return { el: e, inst: i };
+  }
+  const fw = mountFacet();
+  ok(fw.inst._test.axisZoomActive() === true, "axis_zoom facets: a two-panel scene is axis-zoomable");
+  ok(fw.inst._test.panTransforms().length === 2, "axis_zoom facets: each panel's pan group is driven");
+  const anc = fw.inst._test.axisAnchors();
+  ok(anc[0].x && anc[0].y && anc[1].x && !anc[1].y,
+    "axis_zoom facets: x labels for both panels, y labels only for the outer (left) panel");
+  ok(near(anc[1].x.pos, 94), "axis_zoom facets: the second panel's x labels sit on its own axis baseline");
+  fw.inst._test.setView({ x: 50, y: 25, w: 200, h: 50 }); // 2x about the reference panel's centre
+  const pt = fw.inst._test.panTransforms();
+  ok(pt[0].transform === "matrix(2 0 0 2 -100 -50)" && pt[1].transform === "matrix(2 0 0 2 -300 -50)",
+    "axis_zoom facets: the second panel zooms 2x about its own corresponding point");
+  const fl = fw.inst._test.retickLabels();
+  const x30 = fl.filter((l) => l.text === "30" && near(l.y, 94));
+  ok(x30.length === 2 && x30.some((l) => l.x > 200) && x30.some((l) => l.x < 200),
+    "axis_zoom facets: both panels re-tick their x axis for the zoomed range (25..75)");
+  ok(fl.filter((l) => near(l.x, 16)).length > 0 && fl.filter((l) => l.x > 380).length === 0,
+    "axis_zoom facets: y labels drawn once, left of the outer panel");
+  ok(fw.inst._test.retickGridCount() > 0 &&
+    fw.el.querySelectorAll('[data-vellum-panel="panel-1-2"] .vellumwidget-retick-grid line').length > 0,
+    "axis_zoom facets: each panel gets its own re-ticked gridlines");
+  // hit-testing: a client point in panel 2 inverts through panel 2's transform
+  const sv = fw.inst._test.toView(340, 50);
+  ok(near(sv.x, 320) && near(sv.y, 50), "axis_zoom facets: toView inverts the panel under the cursor (T_2⁻¹)");
+  // gesture anchor: the same spot in either panel anchors the same reference point
+  const a1 = fw.inst._test.toAnchor(140, 50), a2 = fw.inst._test.toAnchor(340, 50);
+  ok(near(a1.x, a2.x) && near(a1.y, a2.y) && near(a1.x, 120),
+    "axis_zoom facets: a wheel/pinch in panel 2 anchors at the corresponding reference point");
+  // zoom-to-selection in panel 2 frames the same region of every panel
+  fw.inst._test.setView({ x: 0, y: 0, w: 400, h: 100 });
+  fw.inst._test.zoomTo({ x0: 250, y0: 20, x1: 350, y1: 80 }, 0);
+  const zv = fw.inst._test.getView();
+  ok(zv && near(zv.x, 50) && near(zv.w, 100) && near(zv.y, 20) && near(zv.h, 60),
+    "axis_zoom facets: zoom-to a region in panel 2 maps onto the reference frame");
+  fw.inst._test.setView({ x: 0, y: 0, w: 400, h: 100 });
+  ok(fw.inst._test.panTransforms().every((p) => p.transform === "matrix(1 0 0 1 0 0)"),
+    "axis_zoom facets: reset restores identity on every panel");
+  // a pannable group with no described panel (e.g. a polar panel) declines
+  ok(mountFacet(facetSvg, [facetPanels[0]]).inst._test.axisZoomActive() === false,
+    "axis_zoom facets: an undescribed pannable panel falls back to viewBox zoom");
 }
 
 // ===================== constant-size markers on zoom (2B) =====================
@@ -3035,6 +3283,55 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(Object.keys(iK._test.intervals()).length === 1, "interval: a pointer brush fills the named selection");
   HTMLWidgets.shinyMode = false;
   delete window.Shiny;
+}
+
+// Interval selection under multi-panel axis zoom (facets): a brush in panel 2 is
+// resolved through panel 2's scale, selects by value in every facet, and its band
+// follows panel 2's own zoom transform.
+{
+  const lin = { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100, aes: "x" };
+  const linY = { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100, aes: "y" };
+  const svgF =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">' +
+    '<g data-vellum-panel="panel-1-1" clip-path="url(#c0)"><g data-vellum-pan="panel-1-1">' +
+    '<g role="grid"><path d="M0 0 L0 80" stroke="#ffffff" stroke-width="1"/></g>' +
+    '<path data-key="a" d="M99 49h2v2z"/><path data-key="c" d="M30 49h2v2z"/></g></g>' +
+    '<g data-vellum-panel="panel-1-2" clip-path="url(#c1)"><g data-vellum-pan="panel-1-2">' +
+    '<path data-key="b" d="M299 49h2v2z"/></g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-x-5"><text x="20" y="4" transform="matrix(1 0 0 1 220 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g></svg>';
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const inst = widgetDef.factory(e, 400, 100);
+  inst.renderValue({
+    svg: svgF,
+    elements: { key: ["a", "c", "b"], mark: ["point", "point", "point"], x0: [99, 30, 299], y0: [49, 49, 49],
+      x1: [101, 32, 301], y1: [51, 51, 51], ix: [60, 5, 60], cond: ["br:color", "br:color", "br:color"] },
+    panels: [
+      { name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90, x: lin, y: linY },
+      { name: "panel-1-2", px0: 220, py0: 10, px1: 380, py1: 90, x: lin, y: linY }
+    ],
+    interactions: {
+      selections: [{ name: "br", kind: "interval", on: "x", region: "rect", empty: true, encodings: "x" }],
+      conditions: [{ selection: "br", aes: "color", empty: true }]
+    },
+    options: { axisZoom: true, hover: true, select: true, brush: true, zoom: true, selectMode: "multiple" }
+  });
+  e.querySelector("svg").getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 100, right: 400, bottom: 100 });
+  ok(inst._test.axisZoomActive() === true, "interval+axis_zoom facets: fixture is axis-zoomable");
+  // panel 2 px 300..340 -> data 50..75
+  const res = inst._test.brushInterval({ x0: 300, y0: 40, x1: 340, y1: 60 });
+  ok(res && res.fields.interval.x[0] === 50 && res.fields.interval.x[1] === 75,
+    "interval+axis_zoom facets: the brush resolves through the brushed panel's scale");
+  ok(JSON.stringify(res.keys.slice().sort()) === '["a","b"]',
+    "interval+axis_zoom facets: members by value in every facet (a in panel 1, b in panel 2)");
+  ok(e.querySelector('[data-key="c"]').classList.contains("vellumwidget-cond-dim"),
+    "interval+axis_zoom facets: the non-member is dimmed");
+  inst._test.setView({ x: 50, y: 25, w: 200, h: 50 }); // panel 2's T = matrix(2 0 0 2 -300 -50)
+  const band = inst._test.intervalBand();
+  ok(band && band.x === 300 && band.w === 80 && band.y === 10 && band.h === 80,
+    "interval+axis_zoom facets: the band follows panel 2's zoom and is clipped to its frame");
 }
 
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
