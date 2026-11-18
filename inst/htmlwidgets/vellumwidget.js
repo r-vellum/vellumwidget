@@ -1,7 +1,7 @@
 // Generated from srcts/index.ts by esbuild — do not edit by hand.
 "use strict";
 (() => {
-  // ../../../../../../../Users/david/git/R_packages/vellumwidget/node_modules/flatqueue/index.js
+  // node_modules/flatqueue/index.js
   var FlatQueue = class {
     /**
      * Creates an empty queue. If `capacity` is provided, the queue is backed by fixed-size typed
@@ -107,7 +107,7 @@
     }
   };
 
-  // ../../../../../../../Users/david/git/R_packages/vellumwidget/node_modules/flatbush/index.js
+  // node_modules/flatbush/index.js
   var ARRAY_TYPES = [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array];
   var VERSION = 3;
   var Flatbush = class _Flatbush {
