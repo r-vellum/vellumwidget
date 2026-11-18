@@ -282,6 +282,9 @@ interface GeometryPayload {
   // payload, or when every element is a single ring.
   nr?: number[] | number;
   rl?: number[] | number;
+  // Per element, 1 when it is filled under the even-odd rule. Absent when no
+  // element is (nonzero, the engine's default) or from an older engine.
+  eo?: number[] | number;
 }
 
 // One geometry element, as a slice of the flat coordinate arrays.
@@ -290,6 +293,7 @@ interface Geom {
   at: number; // index of its first vertex in gx/gy
   n: number; // vertex count
   rings?: number[]; // per-ring vertex counts of a multi-ring path (sum = n)
+  evenodd?: boolean; // filled under the even-odd rule (else nonzero winding)
 }
 
 // Is this mark kind round, so that its bbox describes a disc rather than a box?
@@ -316,13 +320,15 @@ function distToSegment2(
 //                    its bbox, since the geometry carries the centre only) --
 //                    zero anywhere on the glyph
 //   segment / line   perpendicular distance to the nearest edge of the polyline
-//   polygon / path   zero anywhere INSIDE, else distance to the nearest edge, so
-//                    clicking the middle of a choropleth region hits the region
+//   polygon / path / zero anywhere INSIDE (by the fill rule), else distance to
+//   hexagon / sector the nearest edge, so clicking the middle of a choropleth
+//                    region hits the region
 //   rect/text/       distance to the box the two vertices span (which for a label
 //   roundrect        is a fair description of the target)
 //
 // A multi-ring path (a polygon with holes, a multipolygon) is measured ring by
-// ring, using the boundaries `element_geometry()` ships in its `ring` column.
+// ring, using the boundaries `element_geometry()` ships in its `ring` column,
+// and "inside" follows the element's fill rule across all of its rings.
 function distToGeom(
   x: number, y: number, g: Geom, gx: Float64Array, gy: Float64Array, box: Bbox | null
 ): number {
@@ -346,30 +352,36 @@ function distToGeom(
       y0: Math.min(gy[at], gy[at + 1]), y1: Math.max(gy[at], gy[at + 1])
     });
   }
-  const closed = g.kind === "polygon" || g.kind === "path";
+  const closed = g.kind === "polygon" || g.kind === "path" || g.kind === "hexagon" || g.kind === "sector";
   // Rings are measured SEPARATELY. Joining them into one run would invent a
   // phantom edge from each ring's last vertex to the next ring's first, and
   // close the last ring back to the very first vertex. `rings` is absent for a
   // single-ring element, which the whole run already describes.
   const rings = g.rings || [n];
-  // The engine's rule (vellum's `pick_table`): a path's distance is the
-  // minimum over its rings, each measured as FILLED -- so being inside ANY
-  // ring is a hit, and the fill rule does not enter into it. A point in a
-  // hole is therefore at distance zero, matching what the engine reports.
+  // The engine's rule (vellum's `pick_table`): containment is decided ONCE
+  // across all rings under the fill rule the element is painted with --
+  // even-odd parity of the crossings, or a nonzero sum of signed windings --
+  // so a point in a hole is not a hit. Inside is 0; otherwise the distance is
+  // to the nearest edge of any ring, each ring closing on itself.
   let best = Infinity;
+  let cross = 0; // even-odd: crossings over every ring
+  let wind = 0; // nonzero: signed winding number over every ring
   let ra = at;
   for (let r = 0; r < rings.length; r++) {
     const rn = rings[r] | 0;
     if (rn <= 0) continue;
     if (closed && rn >= 3) {
-      // Even-odd crossing test, inlined over the flat arrays.
-      let inside = false;
       for (let i = 0, j = rn - 1; i < rn; j = i++) {
         const xi = gx[ra + i], yi = gy[ra + i];
         const xj = gx[ra + j], yj = gy[ra + j];
-        if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+        if ((yi > y) !== (yj > y)) {
+          if (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) cross++;
+          // Winding: an upward edge (j -> i) with the point on its left adds
+          // one, a downward edge with the point on its right subtracts one.
+          const side = (xi - xj) * (y - yj) - (x - xj) * (yi - yj);
+          if (yi > yj) { if (side > 0) wind++; } else if (side < 0) wind--;
+        }
       }
-      if (inside) return 0;
     }
     for (let i = 1; i < rn; i++) {
       const d2 = distToSegment2(x, y, gx[ra + i - 1], gy[ra + i - 1], gx[ra + i], gy[ra + i]);
@@ -381,6 +393,7 @@ function distToGeom(
     }
     ra += rn;
   }
+  if (closed && (g.evenodd ? (cross & 1) === 1 : wind !== 0)) return 0;
   return Math.sqrt(best);
 }
 
@@ -1451,11 +1464,13 @@ HTMLWidgets.widget({
       // which is what the whole vertex run already describes.
       const nrs = g.nr != null ? asColumn<number>(g.nr) : null;
       const rls = g.rl != null ? asColumn<number>(g.rl) : null;
+      const eos = g.eo != null ? asColumn<number>(g.eo) : null;
       let at = 0, ra = 0;
       for (let i = 0; i < keys.length; i++) {
         const n = ns[i] | 0;
         if (n <= 0 || at + n > gx.length) break; // malformed: keep what parsed
         const rec: Geom = { kind: kinds[i], at: at, n: n };
+        if (eos && eos[i] === 1) rec.evenodd = true;
         if (nrs && rls) {
           const k = nrs[i] | 0;
           if (k > 1) {

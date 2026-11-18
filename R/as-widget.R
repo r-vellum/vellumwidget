@@ -696,7 +696,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # keeps the block near-free for the dense scatter, the case where payload size
 # actually bites (150k keyed points would otherwise add ~2 MB of centres the
 # bboxes already imply).
-.GEOMETRY_KINDS <- c("segment", "line", "polygon", "path")
+.GEOMETRY_KINDS <- c("segment", "line", "polygon", "path", "hexagon", "sector")
 
 # Wire format, columnar for the same reason `.vellumwidget_elements()` is:
 #   key  -- one per geometry element (NOT unique: a key can own several)
@@ -704,8 +704,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #   n    -- vertex count per element; the x/y runs are laid end to end
 #   x, y -- sum(n) coordinates, rounded to 0.01 px (far below a pixel, and it
 #           roughly halves the JSON)
-#   nr   -- rings per element, and
-#   rl   -- each ring's vertex count, laid end to end
+#   nr   -- rings per element,
+#   rl   -- each ring's vertex count, laid end to end, and
+#   eo   -- per element, 1 when it is filled under the even-odd rule, else 0
 #
 # `nr`/`rl` are the ring boundaries of a multi-ring `path` (a polygon with a
 # hole, a multipart feature). Without them the concatenated vertices are lossy:
@@ -718,6 +719,11 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # (a plain sf polygon, every non-path kind) -- so the usual payload does not grow
 # at all, and an older runtime, or a payload from an older build, keeps working
 # on the one-ring reading.
+#
+# `eo` is the fill rule the runtime decides containment with, so a point in a
+# hole is not a hit (vellum's `pick_table` does the same). It is OMITTED unless
+# some element is even-odd: absent means nonzero, the engine's default, and an
+# engine older than the `rule` column (vellum < 0.7.2) ships none.
 # NULL when the scene has no such elements, or when the vertex count exceeds
 # `.GEOMETRY_MAX_VERTICES` -- above that the payload cost outweighs the picking
 # accuracy and the runtime falls back to boxes, as it does for an older payload.
@@ -761,6 +767,11 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   rl <- diff(c(which(chg), m + 1L))
   nr <- tabulate(el[chg], nbins = length(starts))
   multi <- any(nr > 1L)
+  eo <- if (is.null(g$rule)) {
+    logical(length(starts))
+  } else {
+    g$rule[starts] %in% "evenodd"
+  }
   drop_null(list(
     key = as.character(g$key[starts]),
     kind = as.character(g$kind[starts]),
@@ -768,7 +779,8 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     x = round(as.numeric(g$x), 2),
     y = round(as.numeric(g$y), 2),
     nr = if (multi) as.integer(nr),
-    rl = if (multi) as.integer(rl)
+    rl = if (multi) as.integer(rl),
+    eo = if (any(eo)) as.integer(eo)
   ))
 }
 

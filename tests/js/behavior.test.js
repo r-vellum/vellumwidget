@@ -2660,15 +2660,19 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
 // client measures against is not the one the engine measured. `nr`/`rl` carry
 // the ring lengths and fix that.
 //
-// The fixture is a 200x200 square with a 80x80 square hole, as one keyed path.
-// The engine's rule is that being inside ANY ring is a hit (each ring is
-// measured as filled and the minimum taken), so a point in the hole is at
-// distance 0 -- these numbers come from `vl_nearest()` on the same scene.
+// The fixture is a 200x200 square with a 40x40 square hole, as one keyed path.
+// Containment follows the fill rule across all rings, as the engine's
+// `pick_table` does: a point in the hole is not a hit, and its distance is to
+// the hole's boundary.
 {
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">' +
     '<g data-vellum-id="p1"><path data-key="holed" d="M40 40h200v200h-200z"/></g>' +
     "</svg>";
-  const mk = (withRings) => {
+  // inner: the hole's vertices, in the same (cw) or the reverse (ccw) direction
+  const SAME = { x: [120, 160, 160, 120], y: [120, 120, 160, 160] };
+  const REV = { x: [120, 120, 160, 160], y: [120, 160, 160, 120] };
+  const mk = (withRings, eo, inner) => {
+    inner = inner || SAME;
     const payload = {
       svg: svg,
       elements: [{ key: "holed", x0: 40, y0: 40, x1: 240, y1: 240, tooltip: "holed" }],
@@ -2676,8 +2680,8 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
         key: ["holed"],
         kind: ["path"],
         n: [8],
-        x: [40, 240, 240, 40, 120, 160, 160, 120],
-        y: [40, 40, 240, 240, 120, 120, 160, 160]
+        x: [40, 240, 240, 40].concat(inner.x),
+        y: [40, 40, 240, 240].concat(inner.y)
       },
       options: { tooltip: true, hover: true, nearest: true }
     };
@@ -2685,27 +2689,35 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
       payload.geometry.nr = [2];
       payload.geometry.rl = [4, 4];
     }
+    if (eo) payload.geometry.eo = [1];
     const el = document.createElement("div");
     document.body.appendChild(el);
     const inst = widgetDef.factory(el, 300, 300);
     inst.renderValue(payload);
     return inst._test;
   };
-  const tr = mk(true);
-  const tn = mk(false);
+  const tr = mk(true, true);
+  const tn = mk(false, true);
 
   ok(tr.geomVertexCount() === 8, "both rings' vertices are unpacked");
 
-  // Inside the outer ring but also inside the hole: a hit either way, because
-  // inside ANY ring counts -- this is the engine's rule, not even-odd.
-  ok(tr.distToKey(140, 140, "holed") === 0, "a point in the hole is at distance 0, as the engine reports");
-  // The phantom-edge reading gets this wrong: the spurious edges cut across the
-  // middle of the shape, so the centre lands outside its idea of the boundary.
-  ok(tn.distToKey(140, 140, "holed") > 0, "…and the one-ring reading does not");
-
-  // A point in the annulus is inside the outer ring.
+  // Even-odd: the hole is a hole -- 20px from its nearest edge.
+  ok(Math.abs(tr.distToKey(140, 140, "holed") - 20) < 0.01,
+     "even-odd: a point in the hole is not a hit, 20px from the hole's edge");
+  // A point in the annulus is filled.
   ok(tr.distToKey(60, 140, "holed") === 0, "a point in the ring body is inside");
-  ok(tn.distToKey(60, 140, "holed") > 0, "…which the one-ring reading also misses");
+  // The phantom-edge reading gets this wrong: the spurious edges cut across the
+  // shape, so the ring body lands outside its idea of the boundary.
+  ok(tn.distToKey(60, 140, "holed") > 0, "…which the one-ring reading misses");
+
+  // Nonzero winding (no `eo`, the engine's default): a same-direction inner
+  // ring stays filled, a reversed one is a hole.
+  ok(mk(true, false, SAME).distToKey(140, 140, "holed") === 0,
+     "nonzero: a same-direction inner ring is filled");
+  ok(Math.abs(mk(true, false, REV).distToKey(140, 140, "holed") - 20) < 0.01,
+     "nonzero: a reversed inner ring is a hole");
+  ok(mk(true, false, REV).distToKey(60, 140, "holed") === 0,
+     "nonzero: the ring body is still inside");
 
   // Just outside the left edge: the true distance is to that edge, 20px away.
   // Without rings a phantom edge is nearer than the real boundary, so the

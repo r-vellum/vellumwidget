@@ -1,7 +1,7 @@
 // Generated from srcts/index.ts by esbuild — do not edit by hand.
 "use strict";
 (() => {
-  // node_modules/flatqueue/index.js
+  // ../../../../../../../Users/david/git/R_packages/vellumwidget/node_modules/flatqueue/index.js
   var FlatQueue = class {
     /**
      * Creates an empty queue. If `capacity` is provided, the queue is backed by fixed-size typed
@@ -107,7 +107,7 @@
     }
   };
 
-  // node_modules/flatbush/index.js
+  // ../../../../../../../Users/david/git/R_packages/vellumwidget/node_modules/flatbush/index.js
   var ARRAY_TYPES = [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array];
   var VERSION = 3;
   var Flatbush = class _Flatbush {
@@ -549,21 +549,27 @@
         y1: Math.max(gy[at], gy[at + 1])
       });
     }
-    const closed = g.kind === "polygon" || g.kind === "path";
+    const closed = g.kind === "polygon" || g.kind === "path" || g.kind === "hexagon" || g.kind === "sector";
     const rings = g.rings || [n];
     let best = Infinity;
+    let cross = 0;
+    let wind = 0;
     let ra = at;
     for (let r = 0; r < rings.length; r++) {
       const rn = rings[r] | 0;
       if (rn <= 0) continue;
       if (closed && rn >= 3) {
-        let inside = false;
         for (let i = 0, j = rn - 1; i < rn; j = i++) {
           const xi = gx[ra + i], yi = gy[ra + i];
           const xj = gx[ra + j], yj = gy[ra + j];
-          if (yi > y !== yj > y && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+          if (yi > y !== yj > y) {
+            if (x < (xj - xi) * (y - yi) / (yj - yi) + xi) cross++;
+            const side = (xi - xj) * (y - yj) - (x - xj) * (yi - yj);
+            if (yi > yj) {
+              if (side > 0) wind++;
+            } else if (side < 0) wind--;
+          }
         }
-        if (inside) return 0;
       }
       for (let i = 1; i < rn; i++) {
         const d2 = distToSegment2(x, y, gx[ra + i - 1], gy[ra + i - 1], gx[ra + i], gy[ra + i]);
@@ -575,6 +581,7 @@
       }
       ra += rn;
     }
+    if (closed && (g.evenodd ? (cross & 1) === 1 : wind !== 0)) return 0;
     return Math.sqrt(best);
   }
   function asColumn(v) {
@@ -1377,11 +1384,13 @@
         gy = Float64Array.from(ys);
         const nrs = g.nr != null ? asColumn(g.nr) : null;
         const rls = g.rl != null ? asColumn(g.rl) : null;
+        const eos = g.eo != null ? asColumn(g.eo) : null;
         let at = 0, ra = 0;
         for (let i = 0; i < keys.length; i++) {
           const n = ns[i] | 0;
           if (n <= 0 || at + n > gx.length) break;
           const rec = { kind: kinds[i], at, n };
+          if (eos && eos[i] === 1) rec.evenodd = true;
           if (nrs && rls) {
             const k = nrs[i] | 0;
             if (k > 1) {
