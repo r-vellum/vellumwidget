@@ -68,7 +68,12 @@ id. All values are the element **data keys** (the `data_id` a
   rectangle in the scene's device-pixel (viewBox) coordinates. A lasso
   gesture also carries `lasso = TRUE`. When the plot carries a cartesian
   scale (a `vellumplot` plot), it *also* carries the region's
-  **data-space** bounds `x0d,y0d,x1d,y1d` and the `panel` name. An event
+  **data-space** bounds `x0d,y0d,x1d,y1d` and the `panel` name. When the
+  plot declares a
+  [`vellumplot::select_interval()`](https://r-vellum.github.io/vellumplot/reference/select_interval.html),
+  it also carries `selection` (the selection's name) and `interval` (per
+  encoding, the brushed data range `c(lo, hi)`, or the brushed levels on
+  a discrete axis), and clearing the brush sets it to `NULL`. An event
   input.
 
 - `input$plot_colorfilter`:

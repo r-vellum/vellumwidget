@@ -333,6 +333,28 @@ vplot(df) |>
   as_widget()
 ```
 
+**Brush a data range** —
+[`select_interval()`](https://r-vellum.github.io/vellumplot/reference/select_interval.html)
+turns the brush into a named selection. The widget converts the brushed
+pixels to a data range through the panel’s scale and selects every
+element whose data value lies inside it, so it works the same on
+continuous, log, date and discrete axes. `encodings = "x"` (the default)
+brushes a full-height band; `"y"` and `c("x", "y")` are also accepted.
+Click empty space or press `Escape` to clear it:
+
+``` r
+
+vplot(df) |>
+  mark_point(x = wt, y = mpg, color = condition("range", cyl, "grey85")) |>
+  select_interval("range", encodings = "x") |>
+  as_widget()
+```
+
+Under Shiny the members arrive in `input$<id>_selected`, and
+`input$<id>_brush` carries the selection name and its data range
+(`interval$x`, a `c(lo, hi)` pair or, on a discrete axis, the brushed
+levels). Clearing the brush resets `input$<id>_brush` to `NULL`.
+
 **Cross-filter** — brush one view, a linked view narrows to those rows
 while the source stays full:
 
@@ -351,7 +373,7 @@ once, in the plot, and any capable host enacts it. See the `vellumplot`
 reference for
 [`select_point()`](https://r-vellum.github.io/vellumplot/reference/select_point.html)
 /
-[`select_interval()`](https://r-vellum.github.io/vellumplot/reference/select_point.html)
+[`select_interval()`](https://r-vellum.github.io/vellumplot/reference/select_interval.html)
 /
 [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
 /

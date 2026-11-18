@@ -2,6 +2,28 @@
 
 ## vellumwidget 0.9.1.9000
 
+- **Interval selections brush a data range.** A plot that declares
+  [`vellumplot::select_interval()`](https://r-vellum.github.io/vellumplot/reference/select_interval.html)
+  now turns the brush into that named selection, and
+  [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+  /
+  [`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)
+  react to it as they do to a point selection. Membership is by data
+  value: the brushed pixels are converted to a data range through the
+  panel’s scale (continuous, log10/sqrt/reverse, date, datetime, or the
+  covered categories of a discrete axis) and each element’s own data
+  values are tested, so a brush in one facet selects matching rows in
+  every facet. An x-only (or y-only) brush leaves a band across the full
+  panel that stays on the data through pan and zoom; clicking empty
+  space or pressing `Escape` clears it. Members are reported in
+  `input$<id>_selected`; `input$<id>_brush` gains `selection` and
+  `interval`, and goes to `NULL` when the brush is cleared. When the
+  scales cannot be inverted (a raw scene, a composition, a custom
+  transform) the brush falls back to selecting what it covers on screen.
+  Needs no new
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  option, and works without Shiny.
+
 - **Axis-aware zoom now re-ticks log, date, datetime and discrete axes,
   and faceted plots.** Before, any of these fell back to scaling the
   whole scene. Log10 axes tick decades, then 1-3 or 1-2-5 subdivisions
@@ -245,7 +267,7 @@ on it.
   `zoom_marks` toggles (now **on by default** — interactive-by-default).
   The signature drops from ~36 to 24 arguments. Per-plot interaction
   (highlight, filter, cross-filter) travels with the spec via
-  [`vellumplot::select_point()`](https://r-vellum.github.io/vellumplot/reference/select_point.html)/[`select_interval()`](https://r-vellum.github.io/vellumplot/reference/select_point.html)/[`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)/[`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html).
+  [`vellumplot::select_point()`](https://r-vellum.github.io/vellumplot/reference/select_point.html)/[`select_interval()`](https://r-vellum.github.io/vellumplot/reference/select_interval.html)/[`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)/[`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html).
   Requires `vellumplot (>= 0.6.0.9000)`. (`hover_mode`, `crosshair`,
   `legend_click`, `select_mode`, and the tooltip-appearance args remain
   until their spec equivalents land.)

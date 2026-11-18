@@ -115,7 +115,11 @@ brush (or lasso) gesture completes: the selected keys and the region's
 bounding rectangle in the scene's device-pixel (viewBox) coordinates. A
 lasso gesture also carries <code>lasso = TRUE</code>. When the plot carries a cartesian
 scale (a <code>vellumplot</code> plot), it <em>also</em> carries the region's <strong>data-space</strong>
-bounds <code>x0d,y0d,x1d,y1d</code> and the <code>panel</code> name. An event input.</p></dd>
+bounds <code>x0d,y0d,x1d,y1d</code> and the <code>panel</code> name. When the plot declares a
+<code><a href="https://r-vellum.github.io/vellumplot/reference/select_interval.html" class="external-link">vellumplot::select_interval()</a></code>, it also carries <code>selection</code> (the
+selection's name) and <code>interval</code> (per encoding, the brushed data range
+<code>c(lo, hi)</code>, or the brushed levels on a discrete axis), and clearing the
+brush sets it to <code>NULL</code>. An event input.</p></dd>
 
 <dt><code>input$plot_colorfilter</code></dt>
 <dd><p>A length-2 numeric <code>c(lo, hi)</code> — the value
