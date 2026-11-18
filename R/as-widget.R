@@ -422,6 +422,13 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   }
   by_id <- list()
   for (e in pl$elements) {
+    # The runtime looks every row up in ONE table, the plot's data. A layer
+    # drawn from its own `data =` has rows into that table instead (vellumplot
+    # tags it `source = "layer:<i>"`), so leave it out rather than show the
+    # wrong rows. An untagged element (older vellumplot) is the plot data.
+    if (!(e$source %||% "plot") %in% c("plot", NA_character_)) {
+      next
+    }
     # I() so a single-row group serialises as a JSON array ([1]), not a scalar
     # (htmlwidgets auto-unboxes length-1 vectors, which would break rows.length
     # in the runtime).
