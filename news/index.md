@@ -2,6 +2,24 @@
 
 ## vellumwidget 0.9.1.9000
 
+- **Axis-aware zoom now re-ticks log, date, datetime and discrete axes,
+  and faceted plots.** Before, any of these fell back to scaling the
+  whole scene. Log10 axes tick decades, then 1-3 or 1-2-5 subdivisions
+  as you zoom in, with vellumplot’s static labels. Date and datetime
+  axes tick on calendar boundaries (years down to seconds) and keep the
+  axis’s own `date_labels` format until the step needs a finer one; a
+  datetime axis drawn in a local time zone ticks on that zone’s clock.
+  Discrete and binned axes keep the categories still in view. In a
+  faceted plot every panel zooms about the matching point and re-ticks
+  its own axes, labelling only the outer panels as the static plot does.
+  The panels payload now carries each axis’s static `breaks` and
+  `labels`.
+
+- Under axis-aware zoom, wheel and pinch zooms stay anchored under the
+  cursor once the view is already zoomed. The client-to-plot mapping
+  used the zoomed view where the frame shows the base one, so the anchor
+  drifted.
+
 ## vellumwidget 0.9.1
 
 - **Hovering or clicking a polygon’s hole no longer hits the polygon.**

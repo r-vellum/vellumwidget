@@ -203,10 +203,26 @@ vplot(df) |>
   as_widget()
 ```
 
-It applies to a single **linear** cartesian panel (continuous
-`identity`/`reverse` axes) in SVG mode, and is on by default. Plots with
-log/date/discrete axes, several panels, or in raster mode silently fall
-back to the whole-scene zoom, so it is always safe.
+Each axis type re-ticks in its own way:
+
+- **linear** (and `reverse`/`sqrt`) axes get round 1-2-5 steps for the
+  visible range;
+- **log10** axes tick whole decades, adding 1-3 or 1-2-5 subdivisions as
+  you zoom in, labelled the way vellumplot labels the static axis;
+- **date and datetime** axes tick on calendar boundaries (years, months,
+  weeks, days, hours, minutes, seconds). Labels keep the axis’s own
+  `date_labels` format while it is fine enough for the step, then switch
+  to a finer one (zooming a `"%b %Y"` axis down to days shows
+  `2020-05-04`);
+- **discrete and binned** axes keep their categories or bin edges,
+  showing only the ones still in view.
+
+Faceted plots zoom every panel together: a zoom in one panel zooms the
+others about the matching point, and each panel re-ticks its own axes
+(with free scales, each for its own range). Raster mode, and a scene
+with a panel the widget can’t re-tick (a polar panel in a composition,
+an axis with a custom transform and no breaks), silently fall back to
+the whole-scene zoom, so it is always safe.
 
 Glyph marks (points, circles, hexagons) keep a **constant pixel size**
 as you zoom — only their positions re-map, so points stay round and

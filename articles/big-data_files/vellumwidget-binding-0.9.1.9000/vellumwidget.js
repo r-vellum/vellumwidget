@@ -793,6 +793,9 @@
     const t = viewToPan(vb, vb0);
     return { x: t.sx ? vb.x + (x - vb0.x) / t.sx : x, y: t.sy ? vb.y + (y - vb0.y) / t.sy : y };
   }
+  function conjugatePan(t, ax, bx, ay, by) {
+    return { sx: t.sx, sy: t.sy, tx: ax * t.tx + bx * (1 - t.sx), ty: ay * t.ty + by * (1 - t.sy) };
+  }
   function niceTicks(lo, hi, count) {
     if (!isFinite(lo) || !isFinite(hi) || hi <= lo || count < 1) return [];
     const step0 = (hi - lo) / count;
@@ -821,6 +824,311 @@
       default:
         return d;
     }
+  }
+  function fmtRNum(vals) {
+    let dec = 0;
+    for (let i = 0; i < vals.length; i++) {
+      const v = vals[i];
+      if (!isFinite(v) || v === 0) continue;
+      const target = Number(v.toPrecision(7));
+      let d = 0;
+      while (d < 15 && Math.abs(Number(v.toFixed(d)) - target) > Math.abs(target) * 1e-9) d++;
+      if (d > dec) dec = d;
+    }
+    return vals.map(function(v) {
+      return isFinite(v) ? v.toFixed(dec) : String(v);
+    });
+  }
+  function logTicks(lo, hi, n) {
+    if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return { ticks: [], linear: false };
+    const need = Math.max(2, n - 2);
+    const p0 = Math.ceil(lo - 1e-9), p1 = Math.floor(hi + 1e-9);
+    if (p1 - p0 + 1 >= need) {
+      const by = Math.floor((hi - lo) / n) + 1;
+      const out = [];
+      for (let k = Math.ceil(p0 / by) * by; k <= p1; k += by) {
+        out.push({ n: k, d: Number(Math.pow(10, k).toPrecision(12)) });
+      }
+      if (out.length >= need || by === 1) return { ticks: out, linear: false };
+    }
+    const sets = [[1, 3], [1, 2, 5], [1, 2, 3, 5], [1, 2, 3, 4, 5, 6, 7, 8, 9]];
+    for (let s = 0; s < sets.length; s++) {
+      const out = [];
+      for (let k = Math.floor(lo) - 1; k <= Math.ceil(hi); k++) {
+        for (let j = 0; j < sets[s].length; j++) {
+          const m = sets[s][j];
+          const nv = k + Math.log10(m);
+          if (nv < lo - 1e-9 || nv > hi + 1e-9) continue;
+          out.push({ n: nv, d: Number((m * Math.pow(10, k)).toPrecision(12)) });
+        }
+      }
+      if (out.length >= need) return { ticks: out, linear: false };
+    }
+    const dlo = Math.pow(10, lo), dhi = Math.pow(10, hi);
+    const lin = niceTicks(dlo, dhi, n).filter(function(d) {
+      return d > 0;
+    }).map(function(d) {
+      return { n: Math.log10(d), d };
+    });
+    return { ticks: lin, linear: true };
+  }
+  var MONTHS = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+  ];
+  var WDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  function pad2(v) {
+    return v < 10 ? "0" + v : String(v);
+  }
+  function strftimeUTC(fmt, ms) {
+    const d = new Date(ms);
+    if (isNaN(d.getTime())) return "";
+    return fmt.replace(/%([a-zA-Z%])/g, function(_m, c) {
+      switch (c) {
+        case "Y":
+          return String(d.getUTCFullYear());
+        case "y":
+          return pad2((d.getUTCFullYear() % 100 + 100) % 100);
+        case "m":
+          return pad2(d.getUTCMonth() + 1);
+        case "d":
+          return pad2(d.getUTCDate());
+        case "e":
+          return (d.getUTCDate() < 10 ? " " : "") + d.getUTCDate();
+        case "H":
+          return pad2(d.getUTCHours());
+        case "I":
+          return pad2((d.getUTCHours() + 11) % 12 + 1);
+        case "p":
+          return d.getUTCHours() < 12 ? "AM" : "PM";
+        case "M":
+          return pad2(d.getUTCMinutes());
+        case "S":
+          return pad2(d.getUTCSeconds());
+        case "b":
+        case "h":
+          return MONTHS[d.getUTCMonth()].slice(0, 3);
+        case "B":
+          return MONTHS[d.getUTCMonth()];
+        case "a":
+          return WDAYS[d.getUTCDay()].slice(0, 3);
+        case "A":
+          return WDAYS[d.getUTCDay()];
+        case "j": {
+          const doy = Math.floor((ms - Date.UTC(d.getUTCFullYear(), 0, 1)) / 864e5) + 1;
+          return (doy < 10 ? "00" : doy < 100 ? "0" : "") + doy;
+        }
+        case "%":
+          return "%";
+        default:
+          return "%" + c;
+      }
+    });
+  }
+  function fmtRank(fmt) {
+    if (/%S/.test(fmt)) return 0;
+    if (/%M/.test(fmt)) return 1;
+    if (/%[HIp]/.test(fmt)) return 2;
+    if (/%[deja]|%A/.test(fmt)) return 3;
+    if (/%[mbBh]/.test(fmt)) return 4;
+    return 5;
+  }
+  var TIME_FORMATS = [
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%H:%M:%S",
+    "%H:%M",
+    "%b %d %H:%M",
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    "%d/%m/%Y",
+    "%m/%d/%Y",
+    "%d.%m.%Y",
+    "%m/%d",
+    "%d/%m",
+    "%b %d",
+    "%d %b",
+    "%b %d %Y",
+    "%d %b %Y",
+    "%B %d",
+    "%d %B",
+    "%B %d, %Y",
+    "%e %b",
+    "%Y-%m",
+    "%b %Y",
+    "%B %Y",
+    "%b %y",
+    "%m/%Y",
+    "%b",
+    "%B",
+    "%Y",
+    "%y"
+  ];
+  var TZ_OFFSETS = function() {
+    const out = [0];
+    for (let q = 1; q <= 56; q++) out.push(q * 9e5, -q * 9e5);
+    return out;
+  }();
+  var timeFmtCache = /* @__PURE__ */ new WeakMap();
+  function detectTimeFormat(ax) {
+    const hit = timeFmtCache.get(ax);
+    if (hit) return hit;
+    const breaks = asColumn(ax.breaks), labels = asColumn(ax.labels).map(String);
+    const unitMs = ax.time_unit === "second" ? 1e3 : 864e5;
+    let info = { fmt: null, off: 0 };
+    if (breaks.length && breaks.length === labels.length) {
+      const offs = ax.time_unit === "second" ? TZ_OFFSETS : [0];
+      search:
+        for (let o = 0; o < offs.length; o++) {
+          for (let f = 0; f < TIME_FORMATS.length; f++) {
+            let all = true;
+            for (let i = 0; i < breaks.length && all; i++) {
+              all = strftimeUTC(TIME_FORMATS[f], Number(breaks[i]) * unitMs + offs[o]) === labels[i].trim();
+            }
+            if (all) {
+              info = { fmt: TIME_FORMATS[f], off: offs[o] };
+              break search;
+            }
+          }
+        }
+    }
+    timeFmtCache.set(ax, info);
+    return info;
+  }
+  var TIME_STEPS = function() {
+    const s = 1e3, mi = 60 * s, h = 60 * mi, d = 24 * h;
+    const out = [];
+    [1, 2, 5, 10, 15, 30].forEach(function(k) {
+      out.push({ rank: 0, ms: k * s });
+    });
+    [1, 2, 5, 10, 15, 30].forEach(function(k) {
+      out.push({ rank: 1, ms: k * mi });
+    });
+    [1, 3, 6, 12].forEach(function(k) {
+      out.push({ rank: 2, ms: k * h });
+    });
+    [1, 2, 7].forEach(function(k) {
+      out.push({ rank: 3, ms: k * d });
+    });
+    [1, 2, 3, 6].forEach(function(k) {
+      out.push({ rank: 4, ms: k * 30.4375 * d, mo: k });
+    });
+    [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1e3].forEach(function(k) {
+      out.push({ rank: 5, ms: k * 365.25 * d, yr: k });
+    });
+    return out;
+  }();
+  function timeTicks(ax, lo, hi, n) {
+    if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return [];
+    const isDate = ax.time_unit !== "second";
+    const unitMs = isDate ? 864e5 : 1e3;
+    const info = detectTimeFormat(ax);
+    const off = info.off;
+    const slo = lo * unitMs + off, shi = hi * unitMs + off;
+    const span = shi - slo;
+    let step = null;
+    for (let i = 0; i < TIME_STEPS.length; i++) {
+      const st = TIME_STEPS[i];
+      if (isDate && st.rank < 3) continue;
+      if (span / st.ms <= n) {
+        step = st;
+        break;
+      }
+    }
+    if (!step) {
+      const yrs = span / (365.25 * 864e5);
+      const raw = yrs / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      const k = (raw / mag < 2 ? 2 : raw / mag < 5 ? 5 : 10) * mag;
+      step = { rank: 5, ms: k * 365.25 * 864e5, yr: k };
+    }
+    const walls = [];
+    if (step.yr) {
+      const y0 = new Date(slo).getUTCFullYear(), y1 = new Date(shi).getUTCFullYear();
+      for (let y = Math.ceil(y0 / step.yr) * step.yr; y <= y1; y += step.yr) walls.push(Date.UTC(y, 0, 1));
+    } else if (step.mo) {
+      const a = new Date(slo), b = new Date(shi);
+      let mIdx = a.getUTCFullYear() * 12 + a.getUTCMonth();
+      mIdx = Math.ceil(mIdx / step.mo) * step.mo;
+      const mEnd = b.getUTCFullYear() * 12 + b.getUTCMonth();
+      for (; mIdx <= mEnd; mIdx += step.mo) walls.push(Date.UTC(Math.floor(mIdx / 12), mIdx % 12, 1));
+    } else {
+      const origin = step.ms === 7 * 864e5 ? 4 * 864e5 : 0;
+      for (let t = Math.ceil((slo - origin) / step.ms - 1e-9) * step.ms + origin; t <= shi + 1e-6; t += step.ms) {
+        walls.push(t);
+      }
+    }
+    const defFmt = step.rank >= 5 ? "%Y" : step.rank === 4 ? "%Y-%m" : step.rank === 3 ? "%Y-%m-%d" : step.rank === 0 ? "%H:%M:%S" : "%H:%M";
+    const useStatic = info.fmt != null && fmtRank(info.fmt) <= step.rank;
+    const out = [];
+    for (let i = 0; i < walls.length; i++) {
+      const w = walls[i];
+      if (w < slo - 1e-6 || w > shi + 1e-6) continue;
+      let fmt = useStatic ? info.fmt : defFmt;
+      if (!useStatic && step.rank <= 2 && w % 864e5 === 0) fmt = "%Y-%m-%d";
+      out.push({ n: (w - off) / unitMs, label: strftimeUTC(fmt, w) });
+    }
+    return out;
+  }
+  var NICE_TRANSFORMS = { identity: true, reverse: true, sqrt: true };
+  function hasStaticBreaks(ax) {
+    const b = asColumn(ax.breaks), l = asColumn(ax.labels);
+    return b.length > 0 && b.length === l.length;
+  }
+  function axisRetickable(ax) {
+    if (!ax) return true;
+    if (ax.type === "discrete" || ax.type === "binned") return hasStaticBreaks(ax);
+    if (ax.time_unit === "day" || ax.time_unit === "second") return true;
+    if (ax.transform === "log10") return true;
+    if (ax.type === "continuous" && NICE_TRANSFORMS[ax.transform]) return true;
+    return hasStaticBreaks(ax);
+  }
+  function axisTicks(ax, lo, hi, n) {
+    if (!(hi > lo)) return [];
+    const statics = function() {
+      const b = asColumn(ax.breaks), l = asColumn(ax.labels);
+      const tol = (hi - lo) * 1e-6;
+      const out = [];
+      for (let i = 0; i < b.length && i < l.length; i++) {
+        const v = Number(b[i]);
+        if (isFinite(v) && v >= lo - tol && v <= hi + tol) out.push({ n: v, label: String(l[i]) });
+      }
+      return out;
+    };
+    if (ax.type === "discrete" || ax.type === "binned") return statics();
+    if (ax.time_unit === "day" || ax.time_unit === "second") return timeTicks(ax, lo, hi, n);
+    if (ax.transform === "log10") {
+      const lt = logTicks(lo, hi, n), t = lt.ticks;
+      const step = t.length > 1 ? t[1].d - t[0].d : 1;
+      const labs = lt.linear ? t.map(function(x) {
+        return fmtTick(x.d, step);
+      }) : fmtRNum(t.map(function(x) {
+        return x.d;
+      }));
+      return t.map(function(x, i) {
+        return { n: x.n, label: labs[i] };
+      });
+    }
+    if (NICE_TRANSFORMS[ax.transform]) {
+      const sq = ax.transform === "sqrt";
+      const a = nativeToData(ax, sq ? Math.max(lo, 0) : lo), b = nativeToData(ax, sq ? Math.max(hi, 0) : hi);
+      const dlo = Math.min(a, b), dhi = Math.max(a, b);
+      const ticks = niceTicks(dlo, dhi, n);
+      const step = ticks.length > 1 ? ticks[1] - ticks[0] : dhi - dlo;
+      return ticks.map(function(d) {
+        return { n: dataToNative(ax, d), label: fmtTick(d, step) };
+      });
+    }
+    return statics();
   }
   function unionBbox(elems, keys) {
     let out = null;
@@ -1173,12 +1481,11 @@
       let focusIdx = -1;
       let vb0 = null;
       let vb = null;
+      let azPanels = [];
       let panGroup = null;
-      let outerPanelGroup = null;
-      let axisPanel = null;
       let axisZoomActive = false;
       let retickLayer = null;
-      let retickGrid = null;
+      let anchorPanel = null;
       let xZoom = false;
       const axisStyle = {
         // presentation scraped from vellum's own axis/grid nodes so the re-tick matches the theme
@@ -1186,10 +1493,7 @@
         fontFamily: "sans-serif",
         fontSize: 12,
         gridStroke: "#ffffff",
-        gridWidth: 1,
-        xBaselineY: 0,
-        yLabelX: 0
-        // device-px placement of the x/y tick labels
+        gridWidth: 1
       };
       let mode = "brush";
       let lastBrush = null;
@@ -1202,7 +1506,7 @@
       let ctSel = null;
       let ctFilt = null;
       function currentViewBox() {
-        if (vb) return vb;
+        if (vb) return axisZoomActive && vb0 ? vb0 : vb;
         const parsed = svgEl ? parseViewBox(svgEl.getAttribute("viewBox")) : null;
         if (parsed) return parsed;
         const r = (svgEl || el).getBoundingClientRect();
@@ -1217,10 +1521,47 @@
       }
       function toView(clientX, clientY) {
         const u = toUser(clientX, clientY);
-        if (axisZoomActive && vb && vb0) return panToView(vb, vb0, u.x, u.y);
+        if (axisZoomActive && vb && vb0) return azBaseToScene(u.x, u.y);
         return u;
       }
+      function toAnchor(clientX, clientY) {
+        const u = toUser(clientX, clientY);
+        if (!axisZoomActive || !vb || !vb0) return u;
+        const a = anchorPanel || azNearest(u.x, u.y);
+        if (!a) return panToView(vb, vb0, u.x, u.y);
+        return panToView(vb, vb0, (u.x - a.bx) / a.ax, (u.y - a.by) / a.ay);
+      }
+      function azNearest(x, y) {
+        let best = null, bestD = Infinity;
+        for (let i = 0; i < azPanels.length; i++) {
+          const p = azPanels[i].p;
+          const dx = x < p.px0 ? p.px0 - x : x > p.px1 ? x - p.px1 : 0;
+          const dy = y < p.py0 ? p.py0 - y : y > p.py1 ? y - p.py1 : 0;
+          const d = dx * dx + dy * dy;
+          if (d < bestD) {
+            bestD = d;
+            best = azPanels[i];
+          }
+        }
+        return best;
+      }
+      function azT(a) {
+        return conjugatePan(viewToPan(vb || vb0, vb0), a.ax, a.bx, a.ay, a.by);
+      }
+      function azBaseToScene(x, y) {
+        const a = azNearest(x, y);
+        if (!a) return vb && vb0 ? panToView(vb, vb0, x, y) : { x, y };
+        const t = azT(a);
+        return { x: t.sx ? (x - t.tx) / t.sx : x, y: t.sy ? (y - t.ty) / t.sy : y };
+      }
+      function azMulti() {
+        return axisZoomActive && azPanels.length > 1 && !!vb0;
+      }
+      function fmtPan(t) {
+        return "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")";
+      }
       function calibrateXform() {
+        if (azMulti()) return calibrateBase();
         let xi = null, xj = null;
         let yi = null, yj = null;
         for (let i = 0; i < elements.length; i++) {
@@ -1254,7 +1595,44 @@
       function clientToScene(clientX, clientY) {
         const f = calibrateXform();
         if (!f) return toView(clientX, clientY);
+        if (azMulti()) return azBaseToScene(f.ox + clientX * f.sx, f.oy + clientY * f.sy);
         return { x: f.ox + clientX * f.sx, y: f.oy + clientY * f.sy };
+      }
+      function calibrateBase() {
+        const base = function(e) {
+          const cx = (e.x0 + e.x1) / 2, cy = (e.y0 + e.y1) / 2;
+          const a = azNearest(cx, cy);
+          if (!a) return { x: cx, y: cy };
+          const t = azT(a);
+          return { x: t.sx * cx + t.tx, y: t.sy * cy + t.ty };
+        };
+        let xi = null, xj = null, yi = null, yj = null;
+        for (let i = 0; i < elements.length; i++) {
+          const e = elements[i];
+          if (!hasBbox(e)) continue;
+          const b = { x: 0, y: 0, e };
+          const q = base(e);
+          b.x = q.x;
+          b.y = q.y;
+          if (!xi || b.x < xi.x) xi = b;
+          if (!xj || b.x > xj.x) xj = b;
+          if (!yi || b.y < yi.y) yi = b;
+          if (!yj || b.y > yj.y) yj = b;
+        }
+        if (!xi || !xj || !yi || !yj) return null;
+        const scr = (e) => {
+          const n = elementsForKey(e.key)[0];
+          if (!n) return null;
+          const r = n.getBoundingClientRect();
+          if (!r.width && !r.height) return null;
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        };
+        const xa = scr(xi.e), xb = scr(xj.e), ya = scr(yi.e), yb = scr(yj.e);
+        if (!xa || !xb || !ya || !yb) return null;
+        const dScrx = xb.x - xa.x, dScry = yb.y - ya.y;
+        if (Math.abs(dScrx) < 1 || Math.abs(dScry) < 1) return null;
+        const sx = (xj.x - xi.x) / dScrx, sy = (yj.y - yi.y) / dScry;
+        return { sx, ox: xi.x - xa.x * sx, sy, oy: yi.y - ya.y * sy };
       }
       function elementsForKey(k) {
         const cached = nodesByKey[k];
@@ -1524,9 +1902,20 @@
           for (let j = 0; j < nodes.length; j++) {
             const c = nodes[j].cloneNode(true);
             c.classList.add("vellumwidget-hl");
-            dimLayer.appendChild(c);
+            dimLayer.appendChild(azOverlayWrap(c, keys[i]));
           }
         }
+      }
+      function azOverlayWrap(node, key) {
+        if (!azMulti()) return node;
+        const m = meta[key];
+        if (!m || !hasBbox(m)) return node;
+        const a = azNearest((m.x0 + m.x1) / 2, (m.y0 + m.y1) / 2);
+        if (!a) return node;
+        const g = document.createElementNS(SVGNS, "g");
+        g.setAttribute("transform", fmtPan(azT(a)));
+        g.appendChild(node);
+        return g;
       }
       function hideHighlightOverlay() {
         if (holder) holder.style.opacity = "";
@@ -1699,9 +2088,21 @@
         if (!m || !hasBbox(m)) return;
         const view = vb || vb0;
         if (!view) return;
-        const cx = (m.x0 + m.x1) / 2;
-        const cy = (m.y0 + m.y1) / 2;
-        const x0 = view.x, x1 = view.x + view.w, y0 = view.y, y1 = view.y + view.h;
+        let cx = (m.x0 + m.x1) / 2;
+        let cy = (m.y0 + m.y1) / 2;
+        let x0 = view.x, x1 = view.x + view.w, y0 = view.y, y1 = view.y + view.h;
+        if (azMulti()) {
+          const a = azNearest(cx, cy);
+          if (a) {
+            const t = azT(a);
+            cx = t.sx * cx + t.tx;
+            cy = t.sy * cy + t.ty;
+            x0 = a.p.px0;
+            x1 = a.p.px1;
+            y0 = a.p.py0;
+            y1 = a.p.py1;
+          }
+        }
         if (hm !== "y") crosshairLayer.appendChild(crosshairLine(cx, y0, cx, y1));
         if (hm !== "x") crosshairLayer.appendChild(crosshairLine(x0, cy, x1, cy));
       }
@@ -2159,19 +2560,15 @@
           vb.h = vb0.h;
         }
         if (axisZoomActive && panGroup && vb && vb0) {
-          const t = viewToPan(vb, vb0);
-          panGroup.setAttribute(
-            "transform",
-            "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")"
-          );
-          setPanScaleVars(t);
+          applyPanTransforms();
           if (svgEl) svgEl.setAttribute("viewBox", fmtViewBox(vb0));
           retick();
         } else if (svgEl && vb) {
           svgEl.setAttribute("viewBox", fmtViewBox(vb));
         }
-        if (dimLayer && vb) dimLayer.setAttribute("viewBox", fmtViewBox(vb));
-        if (crosshairLayer && vb) crosshairLayer.setAttribute("viewBox", fmtViewBox(vb));
+        const overlayVb = azMulti() ? vb0 : vb;
+        if (dimLayer && overlayVb) dimLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
+        if (crosshairLayer && overlayVb) crosshairLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
         if (colorbarLayer && (vb || vb0)) {
           colorbarLayer.setAttribute("viewBox", fmtViewBox(axisZoomActive && vb0 ? vb0 : vb));
         }
@@ -2187,6 +2584,17 @@
       }
       function zoomTo(rect, pad = 0.05) {
         if (!vb) return;
+        if (azMulti()) {
+          const a = azNearest((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2);
+          if (a) {
+            rect = {
+              x0: (rect.x0 - a.bx) / a.ax,
+              x1: (rect.x1 - a.bx) / a.ax,
+              y0: (rect.y0 - a.by) / a.ay,
+              y1: (rect.y1 - a.by) / a.ay
+            };
+          }
+        }
         const w = Math.max(rect.x1 - rect.x0, 1e-6);
         const h = Math.max(rect.y1 - rect.y0, 1e-6);
         const px = w * pad;
@@ -2194,53 +2602,88 @@
         vb = { x: rect.x0 - px, y: rect.y0 - py, w: w + 2 * px, h: h + 2 * py };
         applyViewBox();
       }
-      function isLinearAxis(ax) {
-        return !!ax && ax.type === "continuous" && (ax.transform === "identity" || ax.transform === "reverse");
-      }
       function setupAxisZoom() {
+        for (let i = 0; i < azPanels.length; i++) {
+          const g = azPanels[i].grid;
+          if (g && g.parentNode) g.parentNode.removeChild(g);
+        }
+        azPanels = [];
         panGroup = null;
-        outerPanelGroup = null;
-        axisPanel = null;
         axisZoomActive = false;
+        anchorPanel = null;
         if (retickLayer) {
           retickLayer.remove();
           retickLayer = null;
         }
-        retickGrid = null;
-        if (!opts.axisZoom || rasterMode || !svgEl || !vb0 || !stage || panels.length !== 1) return;
-        const p = panels[0];
-        if (!isLinearAxis(p.x) || !isLinearAxis(p.y)) return;
+        if (!opts.axisZoom || rasterMode || !svgEl || !vb0 || !stage || !panels.length) return;
+        for (let i = 0; i < panels.length; i++) {
+          if (!axisRetickable(panels[i].x) || !axisRetickable(panels[i].y)) return;
+        }
         if (!svgEl.querySelector('[data-vellum-panel^="axis-x"] text, [data-vellum-panel^="axis-y"] text')) return;
-        const pan = svgEl.querySelector('[data-vellum-pan="' + cssEscape(p.name) + '"]');
-        const outer = svgEl.querySelector('[data-vellum-panel="' + cssEscape(p.name) + '"]');
-        if (!pan || !outer) return;
-        panGroup = pan;
-        outerPanelGroup = outer;
-        axisPanel = p;
+        const pans = svgEl.querySelectorAll("[data-vellum-pan]");
+        for (let i = 0; i < pans.length; i++) {
+          const nm = pans[i].getAttribute("data-vellum-pan");
+          if (!panels.some(function(p) {
+            return p.name === nm;
+          })) return;
+        }
+        const ref = panels[0];
+        const rw = ref.px1 - ref.px0, rh = ref.py1 - ref.py0;
+        if (!rw || !rh) return;
+        const found = [];
+        for (let i = 0; i < panels.length; i++) {
+          const p = panels[i];
+          const pan = svgEl.querySelector('[data-vellum-pan="' + cssEscape(p.name) + '"]');
+          const outer = svgEl.querySelector('[data-vellum-panel="' + cssEscape(p.name) + '"]');
+          if (!pan || !outer) return;
+          const ax = (p.px1 - p.px0) / rw, ay = (p.py1 - p.py0) / rh;
+          if (!(ax > 0) || !(ay > 0)) return;
+          found.push({
+            p,
+            pan,
+            outer,
+            grid: null,
+            ax,
+            bx: p.px0 - ax * ref.px0,
+            ay,
+            by: p.py0 - ay * ref.py0,
+            xLab: null,
+            yLab: null
+          });
+        }
+        azPanels = found;
+        panGroup = found[0].pan;
         axisZoomActive = true;
-        scrapeAxisStyle(p);
+        scrapeAxisStyle();
+        scrapeAxisAnchors();
         hideStaticAxes();
-        retickGrid = document.createElementNS(SVGNS, "g");
-        retickGrid.setAttribute("class", "vellumwidget-retick-grid");
-        outer.insertBefore(retickGrid, pan);
+        for (let i = 0; i < azPanels.length; i++) {
+          const a = azPanels[i];
+          const g = document.createElementNS(SVGNS, "g");
+          g.setAttribute("class", "vellumwidget-retick-grid");
+          a.outer.insertBefore(g, a.pan);
+          a.grid = g;
+        }
         retickLayer = document.createElementNS(SVGNS, "svg");
         retickLayer.setAttribute("class", "vellumwidget-retick-layer");
         retickLayer.setAttribute("aria-hidden", "true");
         retickLayer.setAttribute("viewBox", fmtViewBox(vb0));
         stage.appendChild(retickLayer);
-        const t = viewToPan(vb || vb0, vb0);
-        panGroup.setAttribute(
-          "transform",
-          "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")"
-        );
-        setPanScaleVars(t);
+        applyPanTransforms();
         setupConstantMarks();
         retick();
       }
-      function setPanScaleVars(t) {
-        if (!panGroup) return;
-        panGroup.style.setProperty("--vw-ix", String(t.sx ? 1 / t.sx : 1));
-        panGroup.style.setProperty("--vw-iy", String(t.sy ? 1 / t.sy : 1));
+      function applyPanTransforms() {
+        if (!vb0) return;
+        for (let i = 0; i < azPanels.length; i++) {
+          const t = azT(azPanels[i]);
+          azPanels[i].pan.setAttribute("transform", fmtPan(t));
+          setPanScaleVars(azPanels[i].pan, t);
+        }
+      }
+      function setPanScaleVars(g, t) {
+        g.style.setProperty("--vw-ix", String(t.sx ? 1 / t.sx : 1));
+        g.style.setProperty("--vw-iy", String(t.sy ? 1 / t.sy : 1));
       }
       function setupConstantMarks() {
         if (!axisZoomActive || opts.zoomMarks === "scale" || !panGroup) return;
@@ -2252,7 +2695,9 @@
           const glyph = GLYPH_MARKS[e.mark] === true;
           for (let j = 0; j < nodes.length; j++) {
             const node = nodes[j];
-            if (!panGroup.contains(node)) continue;
+            if (!azPanels.some(function(a) {
+              return a.pan.contains(node);
+            })) continue;
             if (glyph) {
               node.style.setProperty("transform-box", "fill-box");
               node.style.setProperty("transform-origin", "center");
@@ -2296,31 +2741,73 @@
         const m = /matrix\(\s*[-\d.eE]+\s+[-\d.eE]+\s+[-\d.eE]+\s+[-\d.eE]+\s+([-\d.eE]+)\s+([-\d.eE]+)\s*\)/.exec(t) || /translate\(\s*([-\d.eE]+)[ ,]+([-\d.eE]+)\s*\)/.exec(t);
         return m ? { tx: parseFloat(m[1]), ty: parseFloat(m[2]) } : { tx: 0, ty: 0 };
       }
-      function scrapeAxisStyle(p) {
+      function scrapeAxisStyle() {
         if (!svgEl) return;
-        const xText = svgEl.querySelector('[data-vellum-panel^="axis-x"] text');
+        const xText = svgEl.querySelector('[data-vellum-panel^="axis-x"] text, [data-vellum-panel^="axis-y"] text');
         if (xText) {
           axisStyle.textFill = xText.getAttribute("fill") || axisStyle.textFill;
           axisStyle.fontFamily = xText.getAttribute("font-family") || axisStyle.fontFamily;
           const fs = parseFloat(xText.getAttribute("font-size") || "");
           if (fs) axisStyle.fontSize = fs;
-          const y = parseFloat(xText.getAttribute("y") || "");
-          axisStyle.xBaselineY = isFinite(y) ? transTranslate(xText).ty + y : p.py1 + axisStyle.fontSize;
-        } else {
-          axisStyle.xBaselineY = p.py1 + axisStyle.fontSize;
-        }
-        const yText = svgEl.querySelector('[data-vellum-panel^="axis-y"] text');
-        if (yText) {
-          const x = parseFloat(yText.getAttribute("x") || "");
-          axisStyle.yLabelX = isFinite(x) ? transTranslate(yText).tx + x : p.px0 - 6;
-        } else {
-          axisStyle.yLabelX = p.px0 - 6;
         }
         const grid = svgEl.querySelector('[role="grid"] path, [role="grid"] line');
         if (grid) {
           axisStyle.gridStroke = grid.getAttribute("stroke") || axisStyle.gridStroke;
           const sw = parseFloat(grid.getAttribute("stroke-width") || "");
           if (sw) axisStyle.gridWidth = sw;
+        }
+      }
+      function scrapeAxisAnchors() {
+        if (!svgEl) return;
+        const groups2 = svgEl.querySelectorAll('[data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
+        for (let g = 0; g < groups2.length; g++) {
+          const isX = /^axis-x/.test(groups2[g].getAttribute("data-vellum-panel") || "");
+          const texts = groups2[g].querySelectorAll("text");
+          if (!texts.length) continue;
+          let sx = 0, sy = 0, n = 0, gap = 0;
+          let first = null;
+          for (let i = 0; i < texts.length; i++) {
+            const tr = transTranslate(texts[i]);
+            const x = tr.tx + (parseFloat(texts[i].getAttribute("x") || "") || 0);
+            const y = tr.ty + (parseFloat(texts[i].getAttribute("y") || "") || 0);
+            if (!first) first = { x, y };
+            else if (isX && !gap && y - first.y > 1) gap = y - first.y;
+            sx += x;
+            sy += y;
+            n++;
+          }
+          if (!first || !n) continue;
+          const mx = sx / n, my = sy / n;
+          let best = null, bestD = Infinity;
+          for (let i = 0; i < azPanels.length; i++) {
+            const p = azPanels[i].p;
+            let d;
+            if (isX) {
+              const slack = (p.px1 - p.px0) / 4;
+              if (mx < p.px0 - slack || mx > p.px1 + slack) continue;
+              d = first.y >= p.py1 - 1 ? first.y - p.py1 : first.y <= p.py0 + 1 ? p.py0 - first.y : Infinity;
+            } else {
+              const slack = (p.py1 - p.py0) / 4;
+              if (my < p.py0 - slack || my > p.py1 + slack) continue;
+              d = first.x <= p.px0 + 1 ? p.px0 - first.x : first.x >= p.px1 - 1 ? first.x - p.px1 : Infinity;
+            }
+            if (d < bestD) {
+              bestD = d;
+              best = azPanels[i];
+            }
+          }
+          if (!best) continue;
+          const t0 = texts[0];
+          const anchor = {
+            pos: isX ? first.y : first.x,
+            // x labels centre on their tick (vellum centres wrapped lines itself, with
+            // a start anchor and per-line offsets, so its anchor isn't reusable there).
+            anchor: isX ? "middle" : t0.getAttribute("text-anchor") || "end",
+            baseline: t0.getAttribute("dominant-baseline") || (isX ? "text-before-edge" : "central"),
+            gap
+          };
+          if (isX && !best.xLab) best.xLab = anchor;
+          if (!isX && !best.yLab) best.yLab = anchor;
         }
       }
       function hideStaticAxes() {
@@ -2352,49 +2839,60 @@
         t.textContent = text;
         return t;
       }
+      function wrapLabel(t, text, x, gap) {
+        const sp = text.indexOf(" ");
+        if (sp < 0) return;
+        t.textContent = "";
+        const parts = [text.slice(0, sp), text.slice(sp + 1)];
+        for (let i = 0; i < parts.length; i++) {
+          const ts = document.createElementNS(SVGNS, "tspan");
+          ts.setAttribute("x", String(x));
+          if (i > 0) ts.setAttribute("dy", String(gap));
+          ts.textContent = parts[i];
+          t.appendChild(ts);
+        }
+      }
       function retick() {
-        if (!axisZoomActive || !axisPanel || !vb || !vb0 || !retickGrid || !retickLayer) return;
-        const p = axisPanel;
-        while (retickGrid.firstChild) retickGrid.removeChild(retickGrid.firstChild);
+        if (!axisZoomActive || !vb || !vb0 || !retickLayer) return;
         while (retickLayer.firstChild) retickLayer.removeChild(retickLayer.firstChild);
-        const t = viewToPan(vb, vb0);
-        const cTL = panToView(vb, vb0, p.px0, p.py0);
-        const cBR = panToView(vb, vb0, p.px1, p.py1);
-        if (p.x) {
-          const a = pxToDataX(p, cTL.x), b = pxToDataX(p, cBR.x);
-          if (a != null && b != null) {
-            const lo = Math.min(a, b), hi = Math.max(a, b);
-            const ticks = niceTicks(lo, hi, 5);
-            const step = ticks.length > 1 ? ticks[1] - ticks[0] : hi - lo;
-            const nlo = p.x.native_lo, nhi = p.x.native_hi;
-            for (let i = 0; i < ticks.length; i++) {
-              const nx = dataToNative(p.x, ticks[i]);
-              const px = p.px0 + (nx - nlo) / (nhi - nlo) * (p.px1 - p.px0);
-              const sx = t.sx * px + t.tx;
-              if (sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
-              retickGrid.appendChild(gridLine(sx, p.py0, sx, p.py1));
-              retickLayer.appendChild(
-                axisLabel(fmtTick(ticks[i], step), sx, axisStyle.xBaselineY, "middle", "text-before-edge")
-              );
+        for (let i = 0; i < azPanels.length; i++) retickPanel(azPanels[i]);
+      }
+      function retickPanel(a) {
+        const p = a.p, grid = a.grid, layer = retickLayer;
+        if (!grid || !layer) return;
+        while (grid.firstChild) grid.removeChild(grid.firstChild);
+        const t = azT(a);
+        if (p.x && p.px1 !== p.px0) {
+          const ax = p.x;
+          const k = (ax.native_hi - ax.native_lo) / (p.px1 - p.px0);
+          const nA = ax.native_lo + ((p.px0 - t.tx) / t.sx - p.px0) * k;
+          const nB = ax.native_lo + ((p.px1 - t.tx) / t.sx - p.px0) * k;
+          const ticks = axisTicks(ax, Math.min(nA, nB), Math.max(nA, nB), 5);
+          for (let i = 0; i < ticks.length; i++) {
+            const px = p.px0 + (ticks[i].n - ax.native_lo) / k;
+            const sx = t.sx * px + t.tx;
+            if (!isFinite(sx) || sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
+            grid.appendChild(gridLine(sx, p.py0, sx, p.py1));
+            if (a.xLab) {
+              const lab = axisLabel(ticks[i].label, sx, a.xLab.pos, a.xLab.anchor, a.xLab.baseline);
+              if (a.xLab.gap > 0) wrapLabel(lab, ticks[i].label, sx, a.xLab.gap);
+              layer.appendChild(lab);
             }
           }
         }
-        if (p.y) {
-          const a = pxToDataY(p, cTL.y), b = pxToDataY(p, cBR.y);
-          if (a != null && b != null) {
-            const lo = Math.min(a, b), hi = Math.max(a, b);
-            const ticks = niceTicks(lo, hi, 5);
-            const step = ticks.length > 1 ? ticks[1] - ticks[0] : hi - lo;
-            const nlo = p.y.native_lo, nhi = p.y.native_hi;
-            for (let i = 0; i < ticks.length; i++) {
-              const ny = dataToNative(p.y, ticks[i]);
-              const py = p.py0 + (nhi - ny) / (nhi - nlo) * (p.py1 - p.py0);
-              const sy = t.sy * py + t.ty;
-              if (sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
-              retickGrid.appendChild(gridLine(p.px0, sy, p.px1, sy));
-              retickLayer.appendChild(
-                axisLabel(fmtTick(ticks[i], step), axisStyle.yLabelX, sy, "end", "central")
-              );
+        if (p.y && p.py1 !== p.py0) {
+          const ay = p.y;
+          const k = (ay.native_hi - ay.native_lo) / (p.py1 - p.py0);
+          const nA = ay.native_hi - ((p.py0 - t.ty) / t.sy - p.py0) * k;
+          const nB = ay.native_hi - ((p.py1 - t.ty) / t.sy - p.py0) * k;
+          const ticks = axisTicks(ay, Math.min(nA, nB), Math.max(nA, nB), 5);
+          for (let i = 0; i < ticks.length; i++) {
+            const py = p.py0 + (ay.native_hi - ticks[i].n) / k;
+            const sy = t.sy * py + t.ty;
+            if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
+            grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
+            if (a.yLab) {
+              layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline));
             }
           }
         }
@@ -2671,6 +3169,8 @@
           crosshairLayer.appendChild(lassoEl);
         }
         lassoEl.setAttribute("points", lassoPointsAttr());
+        if (azMulti() && anchorPanel) lassoEl.setAttribute("transform", fmtPan(azT(anchorPanel)));
+        else lassoEl.removeAttribute("transform");
       }
       function clearLasso() {
         lassoPts = [];
@@ -2747,7 +3247,7 @@
           const pts = Array.from(pointers.values());
           const d = Math.hypot(pts[0].cx - pts[1].cx, pts[0].cy - pts[1].cy);
           if (d > 0) {
-            const u = toView((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
+            const u = toAnchor((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
             vb = zoomViewBox(vb, d / pinchDist, u.x, u.y);
             applyViewBox();
             pinchDist = d;
@@ -2775,11 +3275,11 @@
           lassoPts.push(clientToScene(ev.clientX, ev.clientY));
           updateLassoPath();
         } else if (dragging === "pan" && vb) {
-          const u = toView(ev.clientX, ev.clientY);
+          const u = toAnchor(ev.clientX, ev.clientY);
           vb.x -= u.x - down.ux;
           vb.y -= u.y - down.uy;
           applyViewBox();
-          const u2 = toView(ev.clientX, ev.clientY);
+          const u2 = toAnchor(ev.clientX, ev.clientY);
           down.ux = u2.x;
           down.uy = u2.y;
         }
@@ -2799,7 +3299,11 @@
           el.classList.remove("vellumwidget-panning");
           return;
         }
-        const u = toView(ev.clientX, ev.clientY);
+        if (axisZoomActive) {
+          const pu = toUser(ev.clientX, ev.clientY);
+          anchorPanel = azNearest(pu.x, pu.y);
+        }
+        const u = toAnchor(ev.clientX, ev.clientY);
         down = { cx: ev.clientX, cy: ev.clientY, ux: u.x, uy: u.y };
         dragging = "";
         movedDuringDrag = false;
@@ -2809,6 +3313,7 @@
         const wasPinch = pinchDist > 0;
         if (pointers.size < 2) pinchDist = 0;
         if (pointers.size === 0) {
+          anchorPanel = null;
           window.removeEventListener("pointermove", onDragMove);
           window.removeEventListener("pointerup", onDragUp);
           window.removeEventListener("pointercancel", onDragUp);
@@ -2964,7 +3469,7 @@
       function onWheel(ev) {
         if (!opts.zoom || !vb) return;
         ev.preventDefault();
-        const u = toView(ev.clientX, ev.clientY);
+        const u = toAnchor(ev.clientX, ev.clientY);
         const factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
         vb = zoomViewBox(vb, factor, u.x, u.y);
         applyViewBox();
@@ -3624,7 +4129,30 @@
             });
           },
           retickGridCount: function() {
-            return retickGrid ? retickGrid.querySelectorAll("line").length : 0;
+            let n = 0;
+            for (let i = 0; i < azPanels.length; i++) {
+              const g = azPanels[i].grid;
+              if (g) n += g.querySelectorAll("line").length;
+            }
+            return n;
+          },
+          // Every zoomable panel's name + current pan transform (multi-panel axis zoom).
+          panTransforms: function() {
+            return azPanels.map(function(a) {
+              return { name: a.p.name, transform: a.pan.getAttribute("transform") };
+            });
+          },
+          // Per panel: which axes got a label anchor (outer facets) — interior ones none.
+          axisAnchors: function() {
+            return azPanels.map(function(a) {
+              return { name: a.p.name, x: a.xLab, y: a.yLab };
+            });
+          },
+          toAnchor,
+          clientToScene,
+          zoomTo,
+          getView: function() {
+            return vb ? { x: vb.x, y: vb.y, w: vb.w, h: vb.h } : null;
           },
           staticAxesHidden: function() {
             if (!svgEl) return null;
@@ -3699,9 +4227,17 @@
     normalizePanels,
     viewToPan,
     panToView,
+    conjugatePan,
     niceTicks,
     fmtTick,
     dataToNative,
+    logTicks,
+    fmtRNum,
+    strftimeUTC,
+    timeTicks,
+    detectTimeFormat,
+    axisTicks,
+    axisRetickable,
     sourceTable
   };
 })();
