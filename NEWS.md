@@ -1,5 +1,15 @@
 # vellumwidget 0.8.0.9000
 
+* **Security fix: the click-to-source popover no longer parses data as HTML.**
+  The popover that `inspect_source()` opens on a click was assembled as an HTML
+  string and inserted with `innerHTML`. Field names and row values only passed
+  through a regex that strips *complete* `<...>` tags, so an unterminated tag in
+  the data, such as `<img src=x onerror=alert(1) //`, survived and ran as script
+  in the viewer's page. The popover is now built element by element with
+  `textContent`, the way the accessible data table already is, so every value
+  is shown as literal text. Markup in a value (`<b>bold</b>`) now appears as
+  written instead of being stripped.
+
 * **A polygon with a hole is now hit-tested exactly, not approximately.** A
   `path` element ships every ring's vertices concatenated, and the runtime had no
   way to tell where one ring ended -- so it read the whole run as ONE closed ring.
