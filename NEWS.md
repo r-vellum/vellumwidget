@@ -1,4 +1,4 @@
-# vellumwidget 0.8.0.9000
+# vellumwidget 0.9.0
 
 * **Click-to-source no longer shows the wrong rows for a layer with its own
   data.** The popover looks every element's rows up in the plot's data, but a
