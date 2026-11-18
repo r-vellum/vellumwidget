@@ -2,6 +2,17 @@
 
 ## vellumwidget 0.9.0.9000
 
+- **Hovering or clicking a polygon’s hole no longer hits the polygon.**
+  The runtime decided “inside” per ring, so a point inside any ring, a
+  hole included, counted as on the shape. It now decides once across all
+  of an element’s rings under the rule the shape is filled with
+  (even-odd or nonzero winding), as vellum’s `vl_nearest()` does from
+  vellum 0.7.2. The payload’s geometry block gains an `eo` column, sent
+  only when some element is even-odd.
+
+- Hexagons and pie/donut sectors now hover and click by their outline
+  instead of their bounding box. vellum 0.7.2 reports their geometry.
+
 - **Click-to-source now shows each mark’s own rows, including marks from
   a layer with its own data.** vellumplot tags every element with the
   table its rows refer to, and the widget now ships each layer’s table
