@@ -132,6 +132,42 @@ test_that("the payload carries per-panel scale descriptors from vellumplot", {
   expect_true(panel$x$native_lo < min(df$wt) && panel$x$native_hi > max(df$wt))
 })
 
+test_that("panel axis descriptors carry the static breaks + labels (axis-zoom re-tick)", {
+  skip_if_not_installed("vellumplot")
+  d <- data.frame(
+    g = c("a", "b", "c"),
+    t = as.Date("2020-01-01") + c(0, 100, 300),
+    y = c(1, 2, 3)
+  )
+  # discrete x: category positions 1..k and their level labels
+  w <- vellumplot::vplot(d) |>
+    vellumplot::mark_point(x = g, y = y) |>
+    as_widget()
+  ax <- w$x$panels[[1]]$x
+  expect_equal(ax$type, "discrete")
+  expect_equal(as.numeric(ax$breaks), 1:3)
+  expect_equal(as.character(ax$labels), c("a", "b", "c"))
+  # date x: epoch-day breaks with the formatted labels the static axis drew
+  wd <- vellumplot::vplot(d) |>
+    vellumplot::mark_point(x = t, y = y) |>
+    vellumplot::scale_x_date(date_labels = "%b %Y") |>
+    as_widget()
+  axd <- wd$x$panels[[1]]$x
+  expect_equal(axd$type, "date")
+  expect_equal(length(axd$breaks), length(axd$labels))
+  expect_equal(
+    as.character(axd$labels),
+    format(as.Date(as.numeric(axd$breaks)), "%b %Y")
+  )
+  # a single-category axis still serialises its breaks/labels as JSON arrays
+  w1 <- vellumplot::vplot(d[1, ]) |>
+    vellumplot::mark_point(x = g, y = y) |>
+    as_widget()
+  js <- htmlwidgets:::toJSON(w1$x$panels)
+  expect_match(js, '"labels":\\["a"\\]')
+  expect_match(js, '"breaks":\\[1\\]')
+})
+
 test_that("data-space inversion round-trips a mark's pixel position back to its data value", {
   skip_if_not_installed("vellumplot")
   # Replicate the runtime's px -> data inversion (srcts/index.ts) in R, and assert
