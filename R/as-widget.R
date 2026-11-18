@@ -408,26 +408,45 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # asked -- the data rows themselves. Delegates to vellumplot::provenance_payload()
 # so vellumwidget needs no drawing or data logic of its own. `src` is the
 # interaction model's `source` block (`on`, `values`).
+#
+# Payload shape (backward compatible with the plot-data-only runtime):
+#   byId     id -> 1-based rows into the element's source table
+#   fields   plot-data field names        (top level, as before)
+#   values   plot-data rows, if values=   (top level, as before)
+#   sourceOf id -> source name, ONLY for elements not drawn from the plot data
+#            (a layer's own `data =`, tagged "layer:<i>"); absent means "plot"
+#   sources  source name -> list(fields, values), ONLY for those non-plot tables
+#            (the plot table is the top-level fields/values, not repeated)
+# An untagged element (older vellumplot, no `source`) is the plot data.
 .vellumwidget_provenance <- function(x, src) {
   if (!requireNamespace("vellumplot", quietly = TRUE)) {
     return(NULL)
   }
+  with_values <- isTRUE(src$values)
   pp <- getExportedValue("vellumplot", "provenance_payload")
   pl <- tryCatch(
-    pp(x, values = isTRUE(src$values)),
+    pp(x, values = with_values),
     error = function(e) NULL
   )
   if (is.null(pl) || !length(pl$elements)) {
     return(NULL)
   }
   by_id <- list()
+  source_of <- list()
+  used <- character()
   for (e in pl$elements) {
-    # The runtime looks every row up in ONE table, the plot's data. A layer
-    # drawn from its own `data =` has rows into that table instead (vellumplot
-    # tags it `source = "layer:<i>"`), so leave it out rather than show the
-    # wrong rows. An untagged element (older vellumplot) is the plot data.
-    if (!(e$source %||% "plot") %in% c("plot", NA_character_)) {
-      next
+    s <- e$source %||% "plot"
+    if (is.na(s)) {
+      s <- "plot"
+    }
+    if (s != "plot") {
+      # A layer table the payload does not describe cannot be shown correctly;
+      # leave the element out rather than index the wrong table.
+      if (is.null(pl$sources[[s]])) {
+        next
+      }
+      source_of[[e$id]] <- s
+      used <- union(used, s)
     }
     # I() so a single-row group serialises as a JSON array ([1]), not a scalar
     # (htmlwidgets auto-unboxes length-1 vectors, which would break rows.length
@@ -437,10 +456,22 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   out <- list(
     on = src$on %||% "click",
     byId = by_id,
-    fields = I(as.character(pl$fields))
+    fields = I(as.character(unlist(pl$fields)))
   )
-  if (isTRUE(src$values)) {
+  if (with_values) {
     out$values <- pl$data
+  }
+  if (length(source_of)) {
+    out$sourceOf <- source_of
+    out$sources <- list()
+    for (s in used) {
+      tbl <- pl$sources[[s]]
+      rec <- list(fields = I(as.character(unlist(tbl$fields))))
+      if (with_values) {
+        rec$values <- tbl$data
+      }
+      out$sources[[s]] <- rec
+    }
   }
   out
 }
