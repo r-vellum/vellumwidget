@@ -1039,6 +1039,13 @@
     const hit = el.closest("[data-vellum-id]");
     return hit ? hit.getAttribute("data-vellum-id") : null;
   }
+  function sourceTable(prov, id) {
+    const name = prov.sourceOf && prov.sourceOf[id] || "plot";
+    const tbl = name !== "plot" && prov.sources ? prov.sources[name] : void 0;
+    if (!tbl) return { source: "plot", fields: prov.fields, values: prov.values };
+    const fields = Array.isArray(tbl.fields) ? tbl.fields : tbl.fields == null ? [] : [tbl.fields];
+    return { source: name, fields, values: tbl.values };
+  }
   function download(blob, name) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -2850,15 +2857,20 @@
           hideSourcePopover();
           return;
         }
-        shinyInput("source", { id: pid, rows, fields: provenance.fields }, { priority: "event" });
-        const values = provenance.values ? rows.map((r) => provenance.values[r - 1]).filter(Boolean) : null;
+        const tbl = sourceTable(provenance, pid);
+        shinyInput(
+          "source",
+          { id: pid, source: tbl.source, rows, fields: tbl.fields },
+          { priority: "event" }
+        );
+        const values = tbl.values ? rows.map((r) => tbl.values[r - 1]).filter(Boolean) : null;
         el.dispatchEvent(
           new window.CustomEvent("vellum:source", {
-            detail: { id: pid, rows, fields: provenance.fields, values },
+            detail: { id: pid, source: tbl.source, rows, fields: tbl.fields, values },
             bubbles: true
           })
         );
-        if (values) showSourcePopover(target, values);
+        if (values) showSourcePopover(target, tbl.fields, values);
       }
       let sourcePopover = null;
       function hideSourcePopover() {
@@ -2867,10 +2879,9 @@
           sourcePopover = null;
         }
       }
-      function showSourcePopover(node, values) {
+      function showSourcePopover(node, fields, values) {
         var _a;
         hideSourcePopover();
-        const fields = provenance.fields;
         const pop = document.createElement("div");
         pop.className = "vellumwidget-source";
         pop.setAttribute("role", "dialog");
@@ -3681,6 +3692,7 @@
     panToView,
     niceTicks,
     fmtTick,
-    dataToNative
+    dataToNative,
+    sourceTable
   };
 })();
