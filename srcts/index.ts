@@ -220,11 +220,22 @@ interface Payload {
 // Click-to-source payload (from vellumplot::inspect_source()): the source data
 // rows behind each drawn grob, keyed by its `data-vellum-id` (the id the SVG
 // already carries). `values` is present only when inspect_source(values=TRUE).
+// Rows index the element's own source table: the plot data (top-level
+// fields/values) unless `sourceOf` names another table -- a layer drawn from its
+// own `data =` -- whose fields/values are in `sources`. An older payload has
+// neither, and every element reads the plot data.
 interface Provenance {
   on: string; // "click" | "hover"
   byId: Record<string, number[]>; // data-vellum-id -> 1-based source row indices
-  fields: string[]; // data column names
-  values?: Record<string, unknown>[]; // full data rows (optional; heavier)
+  fields: string[]; // plot-data column names
+  values?: Record<string, unknown>[]; // plot-data rows (optional; heavier)
+  sourceOf?: Record<string, string>; // data-vellum-id -> source name; absent = "plot"
+  sources?: Record<string, ProvenanceSource>; // non-plot source tables, by name
+}
+
+interface ProvenanceSource {
+  fields: string[] | string; // a one-column table may arrive auto-unboxed
+  values?: Record<string, unknown>[];
 }
 
 interface ViewBox {
@@ -955,6 +966,23 @@ function vellumIdOf(target: EventTarget | null): string | null {
   if (!el || typeof el.closest !== "function") return null;
   const hit = el.closest("[data-vellum-id]");
   return hit ? hit.getAttribute("data-vellum-id") : null;
+}
+
+// The source table an element's provenance rows index: its `sourceOf` table
+// when the payload has one (a layer drawn from its own `data =`), else the plot
+// data at the top level. An older payload (no sourceOf/sources) or an untagged
+// element reads the plot data, as before.
+function sourceTable(
+  prov: Provenance,
+  id: string,
+): { source: string; fields: string[]; values?: Record<string, unknown>[] } {
+  const name = (prov.sourceOf && prov.sourceOf[id]) || "plot";
+  const tbl = name !== "plot" && prov.sources ? prov.sources[name] : undefined;
+  if (!tbl) return { source: "plot", fields: prov.fields, values: prov.values };
+  // htmlwidgets auto-unboxes a length-1 vector: a one-column table's fields may
+  // arrive as a bare string.
+  const fields = Array.isArray(tbl.fields) ? tbl.fields : tbl.fields == null ? [] : [tbl.fields];
+  return { source: name, fields, values: tbl.values };
 }
 
 function download(blob: Blob, name: string): void {
@@ -3190,17 +3218,20 @@ HTMLWidgets.widget({
         hideSourcePopover();
         return;
       }
-      shinyInput("source", { id: pid, rows, fields: provenance.fields }, { priority: "event" });
-      const values = provenance.values
-        ? rows.map((r) => provenance!.values![r - 1]).filter(Boolean)
-        : null;
+      const tbl = sourceTable(provenance, pid);
+      shinyInput(
+        "source",
+        { id: pid, source: tbl.source, rows, fields: tbl.fields },
+        { priority: "event" },
+      );
+      const values = tbl.values ? rows.map((r) => tbl.values![r - 1]).filter(Boolean) : null;
       el.dispatchEvent(
         new window.CustomEvent("vellum:source", {
-          detail: { id: pid, rows, fields: provenance.fields, values },
+          detail: { id: pid, source: tbl.source, rows, fields: tbl.fields, values },
           bubbles: true,
         }),
       );
-      if (values) showSourcePopover(target as Element, values);
+      if (values) showSourcePopover(target as Element, tbl.fields, values);
     }
 
     let sourcePopover: HTMLElement | null = null;
@@ -3213,9 +3244,12 @@ HTMLWidgets.widget({
     // A minimal, self-styled popover listing the clicked element's rows. Kept
     // deliberately plain; a host can suppress it by handling `vellum:source` and
     // using inspect_source(values = FALSE).
-    function showSourcePopover(node: Element, values: Record<string, unknown>[]): void {
+    function showSourcePopover(
+      node: Element,
+      fields: string[],
+      values: Record<string, unknown>[],
+    ): void {
       hideSourcePopover();
-      const fields = provenance!.fields;
       // Built node by node with textContent: field names and row values are
       // arbitrary data, so none of it may be parsed as HTML.
       const pop = document.createElement("div");
@@ -4116,5 +4150,6 @@ registerProxyHandler();
   panToView,
   niceTicks,
   fmtTick,
-  dataToNative
+  dataToNative,
+  sourceTable
 };

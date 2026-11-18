@@ -1,5 +1,16 @@
 # vellumwidget 0.9.0.9000
 
+* **Click-to-source now shows each mark's own rows, including marks from a
+  layer with its own data.** vellumplot tags every element with the table its
+  rows refer to, and the widget now ships each layer's table (`fields`, plus the
+  rows when `inspect_source(values = TRUE)`) next to the plot data. Clicking a
+  mark from a layer drawn with `data =` lists that layer's fields and rows
+  instead of nothing. The `vellum:source` event and `input$<id>_source` gain a
+  `source` entry (`"plot"` or `"layer:<i>"`) and report that table's fields.
+  This supersedes the 0.9.0 stopgap that left such marks out of the popover.
+  Plot-data marks are unchanged, and an element without a source tag (an older
+  vellumplot) still reads the plot data.
+
 # vellumwidget 0.9.0
 
 * **Click-to-source no longer shows the wrong rows for a layer with its own

@@ -2447,6 +2447,112 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(pop && pop.querySelectorAll("th")[1].textContent === evilField, "xss: a field name is shown literally");
 }
 
+// --- click-to-source: each mark reads its OWN source table ---
+// A layer drawn from its own `data =` indexes that layer's table (`sourceOf` +
+// `sources`), not the plot data; plot-data and untagged marks keep the top-level
+// fields/values.
+{
+  // the pure resolver
+  const provP = {
+    on: "click",
+    byId: {},
+    fields: ["wt", "mpg"],
+    values: [{ wt: 1, mpg: 2 }],
+    sourceOf: { L: "layer:2", M: "layer:9" },
+    sources: { "layer:2": { fields: "lab", values: [{ lab: "x" }] } }
+  };
+  const tP = T.sourceTable(provP, "P");
+  ok(tP.source === "plot" && tP.fields === provP.fields, "sourceTable: an untagged id reads the plot data");
+  const tL = T.sourceTable(provP, "L");
+  ok(
+    tL.source === "layer:2" && JSON.stringify(tL.fields) === '["lab"]' && tL.values[0].lab === "x",
+    "sourceTable: a layer id reads its own table (an auto-unboxed field coerced to an array)"
+  );
+  const tM = T.sourceTable(provP, "M");
+  ok(tM.source === "plot", "sourceTable: a source with no shipped table falls back to the plot data");
+  const tOld = T.sourceTable({ on: "click", byId: {}, fields: ["a"] }, "L");
+  ok(tOld.source === "plot" && tOld.fields[0] === "a", "sourceTable: an older payload reads the plot data");
+
+  const eL = document.createElement("div");
+  eL.id = "wid_src_layer";
+  document.body.appendChild(eL);
+  const iL = widgetDef.factory(eL, 200, 100);
+  const shinyCallsL = [];
+  HTMLWidgets.shinyMode = true;
+  window.Shiny = { setInputValue: (id, v) => shinyCallsL.push({ id: id, v: v }) };
+  let evL = null;
+  eL.addEventListener("vellum:source", (e) => (evL = e));
+  iL.renderValue({
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<g data-vellum-panel="panel-1-1">' +
+      '<path data-key="p" data-vellum-id="layer-1-point-g1" d="M10 10h5v5h-5z"/>' +
+      '<path data-key="n" data-vellum-id="layer-2-point-g1" d="M40 10h5v5h-5z"/>' +
+      "</g></svg>",
+    elements: [{ key: "p" }, { key: "n" }],
+    provenance: {
+      on: "click",
+      byId: { "layer-1-point-g1": [1, 2], "layer-2-point-g1": [2] },
+      fields: ["wt", "mpg"],
+      values: [{ wt: 2.6, mpg: 21 }, { wt: 2.9, mpg: 21.5 }],
+      sourceOf: { "layer-2-point-g1": "layer:2" },
+      sources: {
+        "layer:2": {
+          fields: ["wt", "mpg", "lab"],
+          values: [{ wt: 2, mpg: 30, lab: "light" }, { wt: 5, mpg: 12, lab: "heavy" }]
+        }
+      }
+    },
+    options: {}
+  });
+  const svgL = eL.querySelector("svg");
+  const clickL = (target) => {
+    const ev = new window.MouseEvent("click", { bubbles: true, clientX: 12, clientY: 12 });
+    Object.defineProperty(ev, "target", { value: target, enumerable: true });
+    svgL.dispatchEvent(ev);
+  };
+
+  // a layer-data mark: its own fields and rows
+  clickL(eL.querySelector('[data-key="n"]'));
+  ok(evL && evL.detail.source === "layer:2", "layer source: the event names the mark's source table");
+  ok(
+    evL && JSON.stringify(evL.detail.fields) === '["wt","mpg","lab"]',
+    "layer source: the event carries the layer's fields"
+  );
+  ok(
+    evL && evL.detail.values.length === 1 && evL.detail.values[0].lab === "heavy",
+    "layer source: rows index the layer's table, not the plot data"
+  );
+  const shL = shinyCallsL.filter((c) => c.id === "wid_src_layer_source").pop();
+  ok(shL && shL.v.source === "layer:2" && shL.v.fields.length === 3, "layer source: the Shiny input carries source + fields");
+  const popL = eL.querySelector(".vellumwidget-source");
+  ok(
+    popL && Array.from(popL.querySelectorAll("th")).map((t) => t.textContent).join(",") === "wt,mpg,lab",
+    "layer source: the popover header shows the layer's fields"
+  );
+  ok(
+    popL && Array.from(popL.querySelectorAll("td")).map((t) => t.textContent).join(",") === "5,12,heavy",
+    "layer source: the popover shows the layer's row"
+  );
+
+  // a plot-data mark: unchanged
+  evL = null;
+  clickL(eL.querySelector('[data-key="p"]'));
+  ok(evL && evL.detail.source === "plot", "plot source: the event names the plot table");
+  ok(
+    evL && JSON.stringify(evL.detail.fields) === '["wt","mpg"]' && evL.detail.values.length === 2,
+    "plot source: plot fields and rows, as before"
+  );
+  const popP = eL.querySelector(".vellumwidget-source");
+  ok(
+    popP && Array.from(popP.querySelectorAll("th")).map((t) => t.textContent).join(",") === "wt,mpg",
+    "plot source: the popover shows the plot fields"
+  );
+
+  HTMLWidgets.shinyMode = false;
+  delete window.Shiny;
+}
+
 // ============ WI-3: exact hit-testing from element_geometry() ===============
 //
 // A bbox is right for a brush and wrong for picking. Each case below is one a
