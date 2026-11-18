@@ -2405,6 +2405,48 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   delete window.Shiny;
 }
 
+// --- click-to-source popover: data is shown as text, never parsed as HTML ---
+// Regression (XSS): the popover used to be built via innerHTML with only a
+// tag-stripping regex, which an UNTERMINATED tag slips past.
+{
+  const eX = document.createElement("div");
+  eX.id = "wid_src_xss";
+  document.body.appendChild(eX);
+  const iX = widgetDef.factory(eX, 200, 100);
+  const evil = "<img src=x onerror=alert(1) //";
+  const evilField = "<svg onload=alert(2) ";
+  iX.renderValue({
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<g data-vellum-panel="panel-1-1">' +
+      '<path data-key="a" data-vellum-id="layer-1-point-g1" d="M10 10h5v5h-5z"/>' +
+      "</g></svg>",
+    elements: [{ key: "a" }],
+    provenance: {
+      on: "click",
+      byId: { "layer-1-point-g1": [1] },
+      fields: ["name", evilField],
+      values: [{ name: evil, [evilField]: "<b>bold</b>" }]
+    },
+    options: {}
+  });
+  const svgX = eX.querySelector("svg");
+  const ev = new window.MouseEvent("click", { bubbles: true, clientX: 12, clientY: 12 });
+  Object.defineProperty(ev, "target", { value: eX.querySelector('[data-key="a"]'), enumerable: true });
+  svgX.dispatchEvent(ev);
+  const pop = eX.querySelector(".vellumwidget-source");
+  ok(pop !== null, "xss: the source popover is shown");
+  ok(pop && pop.querySelector("img") === null, "xss: an unterminated <img> in a value creates no element");
+  ok(pop && pop.querySelector("b") === null, "xss: markup in a value is not rendered");
+  ok(
+    pop && pop.querySelector("[onerror], [onload]") === null,
+    "xss: no element carries an event-handler attribute"
+  );
+  ok(pop && pop.querySelectorAll("td")[0].textContent === evil, "xss: a value is shown literally, as text");
+  ok(pop && pop.querySelectorAll("td")[1].textContent === "<b>bold</b>", "xss: markup is shown literally");
+  ok(pop && pop.querySelectorAll("th")[1].textContent === evilField, "xss: a field name is shown literally");
+}
+
 // ============ WI-3: exact hit-testing from element_geometry() ===============
 //
 // A bbox is right for a brush and wrong for picking. Each case below is one a

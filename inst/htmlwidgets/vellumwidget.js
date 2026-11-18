@@ -2868,21 +2868,42 @@
         }
       }
       function showSourcePopover(node, values) {
+        var _a;
         hideSourcePopover();
         const fields = provenance.fields;
-        const head = "<tr>" + fields.map((f) => "<th>" + stripTags(f) + "</th>").join("") + "</tr>";
-        const body = values.slice(0, 12).map(
-          (row) => "<tr>" + fields.map((f) => {
-            var _a;
-            return "<td>" + stripTags(String((_a = row[f]) != null ? _a : "")) + "</td>";
-          }).join("") + "</tr>"
-        ).join("");
-        const extra = values.length > 12 ? "<div class='vw-src-more'>+" + (values.length - 12) + " more</div>" : "";
         const pop = document.createElement("div");
         pop.className = "vellumwidget-source";
         pop.setAttribute("role", "dialog");
         pop.style.cssText = "position:absolute;z-index:20;max-height:220px;overflow:auto;background:var(--vw-bg,#fff);color:var(--vw-fg,#111);border:1px solid rgba(0,0,0,.2);border-radius:6px;padding:6px 8px;font:11px/1.4 system-ui,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.18);max-width:320px;";
-        pop.innerHTML = "<table style='border-collapse:collapse'><thead>" + head + "</thead><tbody>" + body + "</tbody></table>" + extra;
+        const table = document.createElement("table");
+        table.style.borderCollapse = "collapse";
+        const thead = document.createElement("thead");
+        const headRow = document.createElement("tr");
+        for (const f of fields) {
+          const th = document.createElement("th");
+          th.textContent = String(f);
+          headRow.appendChild(th);
+        }
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+        const tbody = document.createElement("tbody");
+        for (const row of values.slice(0, 12)) {
+          const tr = document.createElement("tr");
+          for (const f of fields) {
+            const td = document.createElement("td");
+            td.textContent = String((_a = row[f]) != null ? _a : "");
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        pop.appendChild(table);
+        if (values.length > 12) {
+          const more = document.createElement("div");
+          more.className = "vw-src-more";
+          more.textContent = "+" + (values.length - 12) + " more";
+          pop.appendChild(more);
+        }
         const nb = node.getBoundingClientRect();
         const cb = el.getBoundingClientRect();
         pop.style.left = Math.min(nb.left - cb.left + 8, Math.max(0, cb.width - 220)) + "px";

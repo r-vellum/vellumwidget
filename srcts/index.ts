@@ -931,8 +931,11 @@ function sanitizeTip(s: string): string {
   return out;
 }
 
-// Plain-text form of a (possibly HTML) tooltip, for an aria-label / table cell:
-// drop tags, collapse whitespace. No DOM, so it is safe in any context.
+// Plain-text form of a (possibly HTML) tooltip, for an aria-label, a spoken
+// announcement or a `textContent` cell: drop complete tags, collapse whitespace.
+// NOT an HTML sanitiser -- an unterminated tag such as `<img src=x onerror=...`
+// survives it -- so its result must only ever reach the DOM as text
+// (`textContent` / `setAttribute`), never through `innerHTML`.
 function stripTags(s: string): string {
   return String(s).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -3213,17 +3216,8 @@ HTMLWidgets.widget({
     function showSourcePopover(node: Element, values: Record<string, unknown>[]): void {
       hideSourcePopover();
       const fields = provenance!.fields;
-      const head = "<tr>" + fields.map((f) => "<th>" + stripTags(f) + "</th>").join("") + "</tr>";
-      const body = values
-        .slice(0, 12)
-        .map(
-          (row) =>
-            "<tr>" +
-            fields.map((f) => "<td>" + stripTags(String(row[f] ?? "")) + "</td>").join("") +
-            "</tr>",
-        )
-        .join("");
-      const extra = values.length > 12 ? "<div class='vw-src-more'>+" + (values.length - 12) + " more</div>" : "";
+      // Built node by node with textContent: field names and row values are
+      // arbitrary data, so none of it may be parsed as HTML.
       const pop = document.createElement("div");
       pop.className = "vellumwidget-source";
       pop.setAttribute("role", "dialog");
@@ -3231,8 +3225,35 @@ HTMLWidgets.widget({
         "position:absolute;z-index:20;max-height:220px;overflow:auto;background:var(--vw-bg,#fff);" +
         "color:var(--vw-fg,#111);border:1px solid rgba(0,0,0,.2);border-radius:6px;padding:6px 8px;" +
         "font:11px/1.4 system-ui,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.18);max-width:320px;";
-      pop.innerHTML =
-        "<table style='border-collapse:collapse'><thead>" + head + "</thead><tbody>" + body + "</tbody></table>" + extra;
+      const table = document.createElement("table");
+      table.style.borderCollapse = "collapse";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      for (const f of fields) {
+        const th = document.createElement("th");
+        th.textContent = String(f);
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      for (const row of values.slice(0, 12)) {
+        const tr = document.createElement("tr");
+        for (const f of fields) {
+          const td = document.createElement("td");
+          td.textContent = String(row[f] ?? "");
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      pop.appendChild(table);
+      if (values.length > 12) {
+        const more = document.createElement("div");
+        more.className = "vw-src-more";
+        more.textContent = "+" + (values.length - 12) + " more";
+        pop.appendChild(more);
+      }
       // position near the clicked node, clamped to the container.
       const nb = (node as SVGGraphicsElement).getBoundingClientRect();
       const cb = el.getBoundingClientRect();
