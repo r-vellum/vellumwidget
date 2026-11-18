@@ -2830,5 +2830,212 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
     "a legend swatch outside the pan group is left untouched");
 }
 
+// ============ declarative interactivity: interval selections (select_interval) ============
+// A brush fills a named interval selection whose membership is by DATA VALUE: the
+// brushed device-px range is inverted through the panel's scale and each element's
+// own data values (`ix`/`iy`, `ixd`/`iyd`) are tested. condition()/filter_by()
+// react exactly as for a point selection; clearing the brush empties it.
+{
+  const TI = window.__vellumwidgetTest;
+  // Panel: device px 100..500 (x) maps data 0..100; py 10..410 maps data 50..0.
+  const panelI = {
+    name: "panel-1-1", px0: 100, py0: 10, px1: 500, py1: 410,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100, aes: "x" },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50, aes: "y" }
+  };
+  // --- pure helpers ---
+  ok(JSON.stringify(TI.selEncodings({ name: "b", kind: "interval", on: "x", encodings: "y" })) === '["y"]',
+    "interval: selEncodings reads an auto-unboxed scalar `encodings`");
+  ok(JSON.stringify(TI.selEncodings({ name: "b", kind: "interval", on: "xy" })) === '["x","y"]',
+    "interval: selEncodings falls back to a legacy `on`");
+  const rX = TI.intervalRangeOf(panelI, { x0: 140, y0: 200, x1: 300, y1: 220 }, ["x"]);
+  ok(rX && Math.abs(rX.x.lo - 10) < 1e-9 && Math.abs(rX.x.hi - 50) < 1e-9 && !rX.y,
+    "interval: an x brush resolves to the data range [10, 50] through the scale");
+  const rY = TI.intervalRangeOf(panelI, { x0: 0, y0: 10, x1: 1, y1: 210 }, ["y"]);
+  ok(rY && Math.abs(rY.y.lo - 25) < 1e-9 && Math.abs(rY.y.hi - 50) < 1e-9,
+    "interval: a y brush inverts the top-down device axis (py 10..210 -> data 25..50)");
+  ok(TI.inInterval({ key: "a", ix: 20 }, rX) && !TI.inInterval({ key: "b", ix: 60 }, rX),
+    "interval: membership tests the element's data value");
+  ok(!TI.inInterval({ key: "c" }, rX), "interval: an element with no data value is not a member");
+  ok(TI.inInterval({ key: "s", ix: 0, ixh: 12 }, rX) && !TI.inInterval({ key: "t", ix: 60, ixh: 90 }, rX),
+    "interval: a series spanning [ix, ixh] is a member when its span overlaps the range");
+  // log10 axis: native 0..2 is data 1..100; px 300 (native 1) -> data 10.
+  const panelLog = Object.assign({}, panelI, {
+    x: { type: "continuous", transform: "log10", data_lo: 1, data_hi: 100, native_lo: 0, native_hi: 2, aes: "x" }
+  });
+  const rL = TI.intervalRangeOf(panelLog, { x0: 100, y0: 0, x1: 300, y1: 1 }, ["x"]);
+  ok(rL && Math.abs(rL.x.lo - 1) < 1e-9 && Math.abs(rL.x.hi - 10) < 1e-9,
+    "interval: a log10 axis is inverted to data units (1..10)");
+  ok(TI.inInterval({ key: "a", ix: 5 }, rL) && !TI.inInterval({ key: "b", ix: 50 }, rL),
+    "interval: log10 membership compares data values");
+  // date axis: native/data are day numbers.
+  const panelDate = Object.assign({}, panelI, {
+    x: { type: "date", transform: "identity", data_lo: 18262, data_hi: 18362, native_lo: 18262, native_hi: 18362, time_unit: "day", aes: "x" }
+  });
+  const rD = TI.intervalRangeOf(panelDate, { x0: 100, y0: 0, x1: 140, y1: 1 }, ["x"]);
+  ok(rD && Math.abs(rD.x.lo - 18262) < 1e-9 && Math.abs(rD.x.hi - 18272) < 1e-9,
+    "interval: a date axis resolves to day numbers");
+  ok(TI.inInterval({ key: "a", ix: 18265 }, rD) && !TI.inInterval({ key: "b", ix: 18300 }, rD),
+    "interval: date membership compares the epoch value");
+  // discrete axis: 4 levels at native 1..4 over domain 0.5..4.5 (100 px per band).
+  const panelCat = Object.assign({}, panelI, {
+    x: { type: "discrete", transform: "identity", data_lo: 1, data_hi: 4, native_lo: 0.5, native_hi: 4.5, aes: "x", levels: ["a", "b", "c", "d"] }
+  });
+  // px 180..360 -> native 1.3..3.1: covers the centres of b (2) and c (3) only.
+  const rC = TI.intervalRangeOf(panelCat, { x0: 180, y0: 0, x1: 360, y1: 1 }, ["x"]);
+  ok(rC && JSON.stringify(rC.x.levels) === '["b","c"]',
+    "interval: a discrete brush selects the levels whose band centre it covers");
+  ok(TI.inInterval({ key: "b", ixd: "b" }, rC) && !TI.inInterval({ key: "a", ixd: "a" }, rC),
+    "interval: discrete membership matches the category label");
+  ok(TI.intervalRangeOf(Object.assign({}, panelCat, { x: Object.assign({}, panelCat.x, { levels: undefined }) }),
+    { x0: 180, y0: 0, x1: 360, y1: 1 }, ["x"]) === null,
+    "interval: a discrete axis without levels declines (caller falls back to pixels)");
+  // coord_flip: the vertical axis shows aesthetic x.
+  const panelFlip = Object.assign({}, panelI, {
+    x: Object.assign({}, panelI.y, { aes: "y" }), y: Object.assign({}, panelI.x, { aes: "x" })
+  });
+  const hitF = TI.axisForEncoding(panelFlip, "x");
+  ok(hitF && hitF.horizontal === false, "interval: under coord_flip encoding x maps to the vertical axis");
+  const rxy = TI.intervalRangeOf(panelI, { x0: 140, y0: 210, x1: 300, y1: 410 }, ["x", "y"]);
+  ok(TI.intervalKeys([{ key: "in", ix: 20, iy: 10 }, { key: "outy", ix: 20, iy: 40 }, { key: "outx", ix: 80, iy: 10 }], rxy).join() === "in",
+    "interval: an xy brush requires both channels inside");
+
+  // --- runtime: condition + filter react; clearing empties ---
+  const elI = document.createElement("div");
+  document.body.appendChild(elI);
+  const svgI =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 420"><g data-vellum-panel="panel-1-1">' +
+    '<path data-key="1" fill="#ff0000" d="M118 300h4v4h-4z"/>' +
+    '<path data-key="2" fill="#ff0000" d="M218 200h4v4h-4z"/>' +
+    '<path data-key="3" fill="#ff0000" d="M418 100h4v4h-4z"/>' +
+    "</g></svg>";
+  const iI = widgetDef.factory(elI, 600, 420);
+  iI.renderValue({
+    svg: svgI,
+    // Data values deliberately disagree with pixel positions for key 3: it is drawn
+    // at x=420 px (data 80) but its data value is 30, so only data-value membership
+    // selects it.
+    elements: [
+      { key: "1", x0: 118, y0: 300, x1: 122, y1: 304, ix: 5, cond: ["br:color"] },
+      { key: "2", x0: 218, y0: 200, x1: 222, y1: 204, ix: 30, cond: ["br:color"] },
+      { key: "3", x0: 418, y0: 100, x1: 422, y1: 104, ix: 30, cond: ["br:color"] }
+    ],
+    panels: panelI,
+    interactions: {
+      selections: [{ name: "br", type: "interval", kind: "interval", on: "x", region: "rect", empty: true, encodings: "x" }],
+      conditions: [{ selection: "br", aes: "color", if_false: "#cccccc", empty: true }]
+    },
+    options: { hover: true, select: true, brush: true, selectMode: "multiple" }
+  });
+  const q = (k) => elI.querySelector('[data-key="' + k + '"]');
+  const grey = (n) => n.style.fill === "rgb(204, 204, 204)" || n.style.fill === "#cccccc";
+  ok(!q("1").style.fill && !q("2").style.fill, "interval: an empty selection leaves every element at its true colour");
+  // brush px 180..260 (data 20..40), only a thin y strip: an x-only brush ignores y.
+  const res = iI._test.brushInterval({ x0: 180, y0: 395, x1: 260, y1: 400 });
+  ok(res && JSON.stringify(res.keys.slice().sort()) === '["2","3"]',
+    "interval: members are the elements whose x data value is in [20, 40] (by value, not pixel)");
+  ok(grey(q("1")) && !q("2").style.fill && !q("3").style.fill,
+    "interval: condition() dims the non-member and keeps members");
+  const band = iI._test.intervalBand();
+  ok(band && band.x === 180 && band.w === 80 && band.y === 10 && band.h === 400,
+    "interval: an x-only brush draws a persistent band spanning the panel height");
+  ok(res.fields.selection === "br" && JSON.stringify(res.fields.interval.x) === "[20,40]",
+    "interval: the brush reports the selection name and its data range");
+  iI._test.clearSelection();
+  ok(!q("1").style.fill && iI._test.intervalBand() === null && Object.keys(iI._test.intervals()).length === 0,
+    "interval: clearing the brush empties the selection, restores colours, removes the band");
+}
+// filter_by + a discrete axis + Shiny read-back through real pointer events.
+{
+  const calls = [];
+  window.Shiny = { setInputValue: (iid, v, o) => calls.push({ id: iid, v: v, o: o }) };
+  HTMLWidgets.shinyMode = true;
+  const elJ = document.createElement("div");
+  elJ.id = "ivplot";
+  document.body.appendChild(elJ);
+  const svgJ =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="420" viewBox="0 0 600 420"><g data-vellum-panel="panel-1-1">' +
+    '<path data-key="a" d="M140 300h20v100h-20z"/>' +
+    '<path data-key="b" d="M240 200h20v200h-20z"/>' +
+    '<path data-key="c" d="M340 100h20v300h-20z"/>' +
+    '<path data-key="d" d="M440 250h20v150h-20z"/>' +
+    "</g></svg>";
+  const iJ = widgetDef.factory(elJ, 600, 420);
+  iJ.renderValue({
+    svg: svgJ,
+    elements: [
+      { key: "a", x0: 140, y0: 300, x1: 160, y1: 400, ixd: "a", filt: ["cat"] },
+      { key: "b", x0: 240, y0: 200, x1: 260, y1: 400, ixd: "b", filt: ["cat"] },
+      { key: "c", x0: 340, y0: 100, x1: 360, y1: 400, ixd: "c", filt: ["cat"] },
+      { key: "d", x0: 440, y0: 250, x1: 460, y1: 400, ixd: "d", filt: ["cat"] }
+    ],
+    panels: {
+      name: "panel-1-1", px0: 100, py0: 10, px1: 500, py1: 410,
+      x: { type: "discrete", transform: "identity", data_lo: 1, data_hi: 4, native_lo: 0.5, native_hi: 4.5, aes: "x", levels: ["a", "b", "c", "d"] },
+      y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50, aes: "y" }
+    },
+    interactions: {
+      selections: [{ name: "cat", kind: "interval", on: "x", region: "rect", empty: true, encodings: ["x"] }],
+      filters: [{ selection: "cat" }]
+    },
+    options: { hover: true, select: true, brush: true, selectMode: "multiple" }
+  });
+  const q = (k) => elJ.querySelector('[data-key="' + k + '"]');
+  const last = (name) => calls.filter((c) => c.id === "ivplot_" + name).pop();
+  const res = iJ._test.brushInterval({ x0: 180, y0: 50, x1: 360, y1: 60 });
+  ok(JSON.stringify(res.keys.slice().sort()) === '["b","c"]',
+    "interval (discrete): the brush selects the categories whose centre it covers");
+  ok(q("a").classList.contains("vellumwidget-filtered") && q("d").classList.contains("vellumwidget-filtered") &&
+     !q("b").classList.contains("vellumwidget-filtered") && !q("c").classList.contains("vellumwidget-filtered"),
+    "interval: filter_by() hides the elements outside the brushed categories");
+  ok(last("selected") && JSON.stringify(last("selected").v.slice().sort()) === '["b","c"]',
+    "interval: members are reported through _selected, like a point selection");
+  // Widening the brush brings filtered-out members back (they stay eligible).
+  const res2 = iJ._test.brushInterval({ x0: 100, y0: 50, x1: 500, y1: 60 });
+  ok(res2.keys.length === 4 && !q("a").classList.contains("vellumwidget-filtered"),
+    "interval: a wider brush re-includes elements its own filter had hidden");
+  ok(JSON.stringify(res2.fields.interval.x) === '["a","b","c","d"]',
+    "interval: a discrete brush reports the covered levels");
+  // Escape clears: filter lifted, `_brush` reset to NULL.
+  calls.length = 0;
+  elJ.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  ok(!q("a").classList.contains("vellumwidget-filtered") && !q("d").classList.contains("vellumwidget-filtered"),
+    "interval: Escape clears the selection and lifts the filter");
+  ok(last("brush") && last("brush").v === null, "interval: clearing pushes _brush = NULL to Shiny");
+  HTMLWidgets.shinyMode = false;
+  delete window.Shiny;
+}
+// A real pointer brush (drag) feeds the interval selection end to end.
+{
+  const calls = [];
+  window.Shiny = { setInputValue: (iid, v, o) => calls.push({ id: iid, v: v, o: o }) };
+  HTMLWidgets.shinyMode = true;
+  const elK = document.createElement("div");
+  elK.id = "ivdrag";
+  document.body.appendChild(elK);
+  const iK = widgetDef.factory(elK, 100, 100);
+  iK.renderValue({
+    svg: svg2paths,
+    elements: [{ key: "x", x0: 1, y0: 1, x1: 10, y1: 10, ix: 1 }, { key: "y", x0: 40, y0: 1, x1: 49, y1: 10, ix: 9 }],
+    panels: {
+      name: "panel-1-1", px0: 0, py0: 0, px1: 60, py1: 30,
+      x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 12, native_lo: 0, native_hi: 12, aes: "x" }
+    },
+    interactions: { selections: [{ name: "br", kind: "interval", on: "x", region: "rect", empty: true, encodings: "x" }] },
+    options: { tooltip: true, hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, selectMode: "multiple" }
+  });
+  const svgK = elK.querySelector("svg");
+  const last = (name) => calls.filter((c) => c.id === "ivdrag_" + name).pop();
+  firePointer(svgK, "pointerdown", 1, 5, 5);
+  firePointer(svgK, "pointermove", 1, 55, 25, true);
+  firePointer(svgK, "pointerup", 1, 55, 25, true);
+  const b = last("brush");
+  ok(b && b.v && b.v.selection === "br" && b.v.interval && Array.isArray(b.v.interval.x),
+    "interval: a pointer brush reports {selection, interval} in _brush");
+  ok(Object.keys(iK._test.intervals()).length === 1, "interval: a pointer brush fills the named selection");
+  HTMLWidgets.shinyMode = false;
+  delete window.Shiny;
+}
+
 console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
 process.exit(failures === 0 ? 0 : 1);

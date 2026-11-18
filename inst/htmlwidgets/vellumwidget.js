@@ -612,6 +612,11 @@
     const join = c.join != null ? asColumn(c.join) : null;
     const source = c.source != null ? asColumn(c.source) : null;
     const target = c.target != null ? asColumn(c.target) : null;
+    const ivNum = ["ix", "ixh", "iy", "iyh"].map(
+      (f) => [f, c[f] != null ? asColumn(c[f]) : null]
+    );
+    const ixd = c.ixd != null ? asColumn(c.ixd) : null;
+    const iyd = c.iyd != null ? asColumn(c.iyd) : null;
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       const e = { key: String(key[i]) };
@@ -645,6 +650,12 @@
       if (join && join[i] != null) e.join = String(join[i]);
       if (source && source[i] != null) e.source = String(source[i]);
       if (target && target[i] != null) e.target = String(target[i]);
+      for (let f = 0; f < ivNum.length; f++) {
+        const col = ivNum[f][1];
+        if (col && typeof col[i] === "number") e[ivNum[f][0]] = col[i];
+      }
+      if (ixd && ixd[i] != null) e.ixd = String(ixd[i]);
+      if (iyd && iyd[i] != null) e.iyd = String(iyd[i]);
       out[i] = e;
     }
     return out;
@@ -763,6 +774,76 @@
     const frac = (py - p.py0) / (p.py1 - p.py0);
     const nv = ax.native_hi + frac * (ax.native_lo - ax.native_hi);
     return nativeToData(ax, nv);
+  }
+  function selEncodings(sel) {
+    const enc = sel.encodings != null ? asColumn(sel.encodings) : [];
+    const out = enc.filter((e) => e === "x" || e === "y");
+    if (out.length) return out;
+    if (sel.on === "x" || sel.on === "y") return [sel.on];
+    return ["x", "y"];
+  }
+  function axisForEncoding(p, enc) {
+    if (p.x && p.x.aes === enc) return { ax: p.x, horizontal: true };
+    if (p.y && p.y.aes === enc) return { ax: p.y, horizontal: false };
+    if (p.x && p.x.aes || p.y && p.y.aes) return null;
+    if (enc === "x" && p.x) return { ax: p.x, horizontal: true };
+    if (enc === "y" && p.y) return { ax: p.y, horizontal: false };
+    return null;
+  }
+  function intervalRangeOf(p, rect, encs) {
+    const out = { panel: p.name };
+    for (let i = 0; i < encs.length; i++) {
+      const enc = encs[i];
+      const hit = axisForEncoding(p, enc);
+      if (!hit) return null;
+      const a = hit.horizontal ? pxToDataX(p, rect.x0) : pxToDataY(p, rect.y0);
+      const b = hit.horizontal ? pxToDataX(p, rect.x1) : pxToDataY(p, rect.y1);
+      if (a == null || b == null || !isFinite(a) || !isFinite(b)) return null;
+      const ch = { lo: Math.min(a, b), hi: Math.max(a, b) };
+      if (hit.ax.type === "discrete") {
+        const levels = hit.ax.levels != null ? asColumn(hit.ax.levels) : [];
+        if (!levels.length) return null;
+        ch.levels = [];
+        for (let k = 0; k < levels.length; k++) {
+          const pos = k + 1;
+          if (pos >= ch.lo && pos <= ch.hi) ch.levels.push(String(levels[k]));
+        }
+      }
+      out[enc] = ch;
+    }
+    return out;
+  }
+  function inInterval(e, r) {
+    const chans = [["x", r.x], ["y", r.y]];
+    let tested = false;
+    for (let i = 0; i < chans.length; i++) {
+      const enc = chans[i][0], ch = chans[i][1];
+      if (!ch) continue;
+      tested = true;
+      if (ch.levels) {
+        const v = enc === "x" ? e.ixd : e.iyd;
+        if (v == null || ch.levels.indexOf(v) < 0) return false;
+      } else {
+        const lo = enc === "x" ? e.ix : e.iy;
+        if (typeof lo !== "number" || !isFinite(lo)) return false;
+        const hi0 = enc === "x" ? e.ixh : e.iyh;
+        const hi = typeof hi0 === "number" && isFinite(hi0) ? hi0 : lo;
+        if (hi < ch.lo || lo > ch.hi) return false;
+      }
+    }
+    return tested;
+  }
+  function intervalKeys(elems, r) {
+    const out = [];
+    const seen = {};
+    for (let i = 0; i < elems.length; i++) {
+      const e = elems[i];
+      if (!seen[e.key] && inInterval(e, r)) {
+        seen[e.key] = true;
+        out.push(e.key);
+      }
+    }
+    return out;
   }
   function zoomViewBox(vb, factor, cx, cy) {
     const w = vb.w / factor;
@@ -991,6 +1072,10 @@
 .vellumwidget-lasso {
   fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px; stroke-dasharray: 4 3;
 }
+/* The persistent band of an active interval selection (select_interval()). */
+.vellumwidget-interval {
+  fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px;
+}
 .vellumwidget-toolbar {
   position: absolute; top: 6px; right: 6px; z-index: 25; display: flex; gap: 2px;
   padding: 3px; border-radius: 6px; background: rgba(255,255,255,0.82);
@@ -1193,6 +1278,8 @@
       };
       let mode = "brush";
       let lastBrush = null;
+      let intervals = {};
+      let intervalEl = null;
       let lassoPts = [];
       let lassoEl = null;
       const selfToken = {};
@@ -1690,7 +1777,11 @@
         return l;
       }
       function clearCrosshair() {
-        if (crosshairLayer) while (crosshairLayer.firstChild) crosshairLayer.removeChild(crosshairLayer.firstChild);
+        if (!crosshairLayer) return;
+        const kids = Array.prototype.slice.call(crosshairLayer.childNodes);
+        for (let i = 0; i < kids.length; i++) {
+          if (kids[i] !== intervalEl) crosshairLayer.removeChild(kids[i]);
+        }
       }
       function drawCrosshair(k, hm) {
         clearCrosshair();
@@ -1871,8 +1962,10 @@
       }
       function clearSelection() {
         selected = {};
+        const hadInterval = clearIntervals();
         refreshSelected();
         broadcast();
+        if (hadInterval) shinyInput("brush", null, { priority: "event" });
       }
       function applyLinkedSelection(keys) {
         selected = {};
@@ -1922,6 +2015,12 @@
       }
       function selectionMembers(sel) {
         const set = {};
+        if (sel.kind === "interval" && sel.region !== "lasso") {
+          const iv = intervals[sel.name];
+          const ks = iv ? iv.keys : [];
+          for (let i = 0; i < ks.length; i++) set[ks[i]] = true;
+          return set;
+        }
         let keys = sel.on === "hover" ? lastHoverKeys : selectedKeys();
         if (sel.on !== "hover" && sel.expand && sel.expand.mode === "neighbours" && neighbourExpand) {
           const out = [];
@@ -2019,6 +2118,84 @@
       function reevaluateInteractions() {
         applyConditions();
         applyFilters();
+      }
+      function rectIntervalSels() {
+        const sels = interactions && interactions.selections || [];
+        return sels.filter((s) => s.kind === "interval" && s.region !== "lasso");
+      }
+      function lockRect(p, rect, encs) {
+        if (!p) return rect;
+        let h = false, v = false;
+        for (let i = 0; i < encs.length; i++) {
+          const hit = axisForEncoding(p, encs[i]);
+          if (hit) {
+            if (hit.horizontal) h = true;
+            else v = true;
+          }
+        }
+        if (!h && !v) return rect;
+        return {
+          x0: h ? rect.x0 : Math.min(p.px0, p.px1),
+          x1: h ? rect.x1 : Math.max(p.px0, p.px1),
+          y0: v ? rect.y0 : Math.min(p.py0, p.py1),
+          y1: v ? rect.y1 : Math.max(p.py0, p.py1)
+        };
+      }
+      function applyIntervalBrush(rect) {
+        const sels = rectIntervalSels();
+        if (!sels.length) return null;
+        const p = panelAt((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2);
+        const eligible = (k) => !hiddenKeySet[k] && !colorHiddenSet[k];
+        intervals = {};
+        const union = [];
+        const seen = {};
+        const ranges = {};
+        let band = rect;
+        for (let i = 0; i < sels.length; i++) {
+          const encs = selEncodings(sels[i]);
+          const locked = lockRect(p, rect, encs);
+          if (i === 0) band = locked;
+          const r = p ? intervalRangeOf(p, rect, encs) : null;
+          const ks = r ? intervalKeys(elements, r).filter(eligible) : dropInert(brushKeysIn(locked));
+          intervals[sels[i].name] = { keys: ks, range: r };
+          ranges[sels[i].name] = r;
+          for (let j = 0; j < ks.length; j++) {
+            if (!seen[ks[j]]) {
+              seen[ks[j]] = true;
+              union.push(ks[j]);
+            }
+          }
+        }
+        const first = sels[0].name;
+        const fields = { selection: first };
+        const r0 = ranges[first];
+        if (r0) {
+          const iv = {};
+          if (r0.x) iv.x = r0.x.levels ? r0.x.levels : [r0.x.lo, r0.x.hi];
+          if (r0.y) iv.y = r0.y.levels ? r0.y.levels : [r0.y.lo, r0.y.hi];
+          fields.interval = iv;
+        }
+        drawIntervalBand(band);
+        return { keys: union, band, fields };
+      }
+      function drawIntervalBand(b) {
+        if (!crosshairLayer) return;
+        if (!intervalEl) {
+          intervalEl = document.createElementNS(SVGNS, "rect");
+          intervalEl.setAttribute("class", "vellumwidget-interval");
+          intervalEl.setAttribute("vector-effect", "non-scaling-stroke");
+        }
+        if (intervalEl.parentNode !== crosshairLayer) crosshairLayer.appendChild(intervalEl);
+        intervalEl.setAttribute("x", String(b.x0));
+        intervalEl.setAttribute("y", String(b.y0));
+        intervalEl.setAttribute("width", String(Math.max(0, b.x1 - b.x0)));
+        intervalEl.setAttribute("height", String(Math.max(0, b.y1 - b.y0)));
+      }
+      function clearIntervals() {
+        const had = Object.keys(intervals).length > 0;
+        intervals = {};
+        if (intervalEl && intervalEl.parentNode) intervalEl.parentNode.removeChild(intervalEl);
+        return had;
       }
       function proxyCall(method, args) {
         const keys = Array.isArray(args) ? args : args == null ? [] : [String(args)];
@@ -2830,12 +3007,15 @@
             x1: Math.max(p1.x, p2.x),
             y1: Math.max(p1.y, p2.y)
           };
-          lastBrush = rect;
-          const hitKeys = dropInert(brushKeysIn(rect));
+          const iv = applyIntervalBrush(rect);
+          lastBrush = iv ? iv.band : rect;
+          const hitKeys = iv ? iv.keys : dropInert(brushKeysIn(rect));
           if (opts.select) setSelection(hitKeys);
+          else if (iv) reevaluateInteractions();
           shinyInput("brush", Object.assign(
             { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 },
-            brushDataFields(rect)
+            brushDataFields(rect),
+            iv ? iv.fields : {}
           ), { priority: "event" });
           hideBrush();
         } else if (dragging === "lasso") {
@@ -3409,6 +3589,8 @@
           filteredKeySet = {};
           selected = {};
           lastBrush = null;
+          intervals = {};
+          intervalEl = null;
           mode = "brush";
           group = opts.group || null;
           for (let i = 0; i < elements.length; i++) {
@@ -3586,6 +3768,29 @@
           dropInert,
           panelAt,
           dataRangeOf,
+          // Interval selections: the active ranges/members, and a completed brush
+          // driven directly (device-px scene rect), bypassing pointer calibration.
+          intervals: function() {
+            return intervals;
+          },
+          brushInterval: function(rect) {
+            const iv = applyIntervalBrush(rect);
+            if (!iv) return null;
+            lastBrush = iv.band;
+            if (opts.select) setSelection(iv.keys);
+            else reevaluateInteractions();
+            return iv;
+          },
+          intervalBand: function() {
+            if (!intervalEl || !intervalEl.parentNode) return null;
+            return {
+              x: parseFloat(intervalEl.getAttribute("x") || "NaN"),
+              y: parseFloat(intervalEl.getAttribute("y") || "NaN"),
+              w: parseFloat(intervalEl.getAttribute("width") || "NaN"),
+              h: parseFloat(intervalEl.getAttribute("height") || "NaN")
+            };
+          },
+          clearSelection,
           brushDataFields,
           hasNavigator: function() {
             return !!navEl;
@@ -3695,6 +3900,11 @@
     polyBounds,
     nativeToData,
     pxToDataX,
+    selEncodings,
+    axisForEncoding,
+    intervalRangeOf,
+    inInterval,
+    intervalKeys,
     pxToDataY,
     normalizePanels,
     viewToPan,

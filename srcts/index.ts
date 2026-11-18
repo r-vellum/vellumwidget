@@ -57,6 +57,15 @@ interface ElemMeta extends Partial<Bbox> {
   join?: string; // cross-view identity (a composition cell's original id, keys being per-cell unique)
   source?: string; // graph edge: key of the endpoint node it starts at
   target?: string; // graph edge: key of the endpoint node it ends at
+  // Interval-selection data values (select_interval()): the element's value on
+  // the x / y channel -- numeric (`ix`, with `ixh` the upper end when a series
+  // spans a range), or the category label on a discrete axis (`ixd`).
+  ix?: number;
+  ixh?: number;
+  ixd?: string;
+  iy?: number;
+  iyh?: number;
+  iyd?: string;
 }
 
 // The interactive colorbar descriptor (continuous colour scale): the gradient
@@ -80,6 +89,10 @@ interface SelDef {
   name: string;
   kind: string; // "point" | "interval"
   on: string; // "click" | "hover" | "xy" | "x" | "y"
+  type?: string; // same as kind (the spec-level name)
+  // Interval: the position channels the brush constrains ("x" / "y"). A
+  // length-1 vector may arrive auto-unboxed to a scalar.
+  encodings?: string[] | string;
   region?: string; // "rect" | "lasso"
   fields?: string[] | string | null;
   toggle?: boolean;
@@ -179,6 +192,12 @@ interface ColumnElements {
   join?: (string | null)[] | string;
   source?: (string | null)[] | string;
   target?: (string | null)[] | string;
+  ix?: (number | null)[] | number;
+  ixh?: (number | null)[] | number;
+  ixd?: (string | null)[] | string;
+  iy?: (number | null)[] | number;
+  iyh?: (number | null)[] | number;
+  iyd?: (string | null)[] | string;
 }
 
 // Per-axis scale descriptor (from vellumplot's `scales` panel meta): the data and
@@ -192,6 +211,8 @@ interface AxisScale {
   native_lo: number;
   native_hi: number;
   time_unit?: string; // "day" | "second" for date/datetime axes
+  aes?: string; // the aesthetic this axis shows ("x" | "y"; swapped under coord_flip)
+  levels?: string[] | string; // discrete axis: the levels in position order (level i at native i)
 }
 // A cartesian data panel: its device-px rectangle (from vellum's resolved layout)
 // plus each axis's scale descriptor. The px rect + native domain give the affine
@@ -433,6 +454,11 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
   const join = c.join != null ? asColumn<string | null>(c.join) : null;
   const source = c.source != null ? asColumn<string | null>(c.source) : null;
   const target = c.target != null ? asColumn<string | null>(c.target) : null;
+  const ivNum: [keyof ElemMeta, (number | null)[] | null][] = (["ix", "ixh", "iy", "iyh"] as const).map(
+    (f) => [f, c[f] != null ? asColumn<number | null>(c[f]) : null] as [keyof ElemMeta, (number | null)[] | null]
+  );
+  const ixd = c.ixd != null ? asColumn<string | null>(c.ixd) : null;
+  const iyd = c.iyd != null ? asColumn<string | null>(c.iyd) : null;
   const out: ElemMeta[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const e: ElemMeta = { key: String(key[i]) };
@@ -468,6 +494,12 @@ function normalizeElements(raw: ElemMeta[] | ColumnElements | null | undefined):
     if (join && join[i] != null) e.join = String(join[i]);
     if (source && source[i] != null) e.source = String(source[i]);
     if (target && target[i] != null) e.target = String(target[i]);
+    for (let f = 0; f < ivNum.length; f++) {
+      const col = ivNum[f][1];
+      if (col && typeof col[i] === "number") (e as unknown as Record<string, number>)[ivNum[f][0]] = col[i] as number;
+    }
+    if (ixd && ixd[i] != null) e.ixd = String(ixd[i]);
+    if (iyd && iyd[i] != null) e.iyd = String(iyd[i]);
     out[i] = e;
   }
   return out;
@@ -634,6 +666,101 @@ function pxToDataY(p: PanelInfo, py: number): number | null {
   const frac = (py - p.py0) / (p.py1 - p.py0); // 0 at top, 1 at bottom
   const nv = ax.native_hi + frac * (ax.native_lo - ax.native_hi);
   return nativeToData(ax, nv);
+}
+
+// --- interval selections (select_interval()): membership by data value ---
+// One brushed channel: a data range [lo, hi] (continuous / date / datetime, in
+// the axis's data units), plus -- on a discrete axis -- the levels whose band
+// centre the brush covers.
+interface IntervalChannel { lo: number; hi: number; levels?: string[]; }
+// The brushed data range of an interval selection, per encoding, and the panel
+// it was resolved through.
+interface IntervalRange { panel: string; x?: IntervalChannel; y?: IntervalChannel; }
+
+// The position channels an interval selection constrains: its `encodings`, else
+// (an older spec) its `on` ("x" / "y" / "xy").
+function selEncodings(sel: SelDef): string[] {
+  const enc = sel.encodings != null ? asColumn<string>(sel.encodings) : [];
+  const out = enc.filter((e) => e === "x" || e === "y");
+  if (out.length) return out;
+  if (sel.on === "x" || sel.on === "y") return [sel.on];
+  return ["x", "y"];
+}
+// The panel axis that shows aesthetic `enc`, and whether it runs horizontally.
+// Matches the descriptor's `aes` (so coord_flip maps x to the vertical axis);
+// without one, x is the horizontal axis and y the vertical.
+function axisForEncoding(p: PanelInfo, enc: string): { ax: AxisScale; horizontal: boolean } | null {
+  if (p.x && p.x.aes === enc) return { ax: p.x, horizontal: true };
+  if (p.y && p.y.aes === enc) return { ax: p.y, horizontal: false };
+  if ((p.x && p.x.aes) || (p.y && p.y.aes)) return null; // described, but not this channel
+  if (enc === "x" && p.x) return { ax: p.x, horizontal: true };
+  if (enc === "y" && p.y) return { ax: p.y, horizontal: false };
+  return null;
+}
+// Resolve a device-px brush rectangle in panel `p` to a data range on each of
+// `encs`. Null when any channel can't be resolved (axis missing, a transform we
+// can't invert, a discrete axis without levels) -- the caller then falls back to
+// pixel hit-testing rather than guess.
+function intervalRangeOf(p: PanelInfo, rect: Bbox, encs: string[]): IntervalRange | null {
+  const out: IntervalRange = { panel: p.name };
+  for (let i = 0; i < encs.length; i++) {
+    const enc = encs[i];
+    const hit = axisForEncoding(p, enc);
+    if (!hit) return null;
+    const a = hit.horizontal ? pxToDataX(p, rect.x0) : pxToDataY(p, rect.y0);
+    const b = hit.horizontal ? pxToDataX(p, rect.x1) : pxToDataY(p, rect.y1);
+    if (a == null || b == null || !isFinite(a) || !isFinite(b)) return null;
+    const ch: IntervalChannel = { lo: Math.min(a, b), hi: Math.max(a, b) };
+    if (hit.ax.type === "discrete") {
+      // Native position i is level i (1-based): take the levels whose centre lies
+      // inside the brushed native range.
+      const levels = hit.ax.levels != null ? asColumn<string>(hit.ax.levels) : [];
+      if (!levels.length) return null;
+      ch.levels = [];
+      for (let k = 0; k < levels.length; k++) {
+        const pos = k + 1;
+        if (pos >= ch.lo && pos <= ch.hi) ch.levels.push(String(levels[k]));
+      }
+    }
+    (out as unknown as Record<string, IntervalChannel>)[enc] = ch;
+  }
+  return out;
+}
+// Is element `e` inside the interval on every brushed channel? A numeric value
+// (or a series' [ix, ixh] span) must overlap the range; a discrete value must be
+// one of the brushed levels. An element with no value on a channel is outside.
+function inInterval(e: ElemMeta, r: IntervalRange): boolean {
+  const chans: ["x" | "y", IntervalChannel | undefined][] = [["x", r.x], ["y", r.y]];
+  let tested = false;
+  for (let i = 0; i < chans.length; i++) {
+    const enc = chans[i][0], ch = chans[i][1];
+    if (!ch) continue;
+    tested = true;
+    if (ch.levels) {
+      const v = enc === "x" ? e.ixd : e.iyd;
+      if (v == null || ch.levels.indexOf(v) < 0) return false;
+    } else {
+      const lo = enc === "x" ? e.ix : e.iy;
+      if (typeof lo !== "number" || !isFinite(lo)) return false;
+      const hi0 = enc === "x" ? e.ixh : e.iyh;
+      const hi = typeof hi0 === "number" && isFinite(hi0) ? hi0 : lo;
+      if (hi < ch.lo || lo > ch.hi) return false;
+    }
+  }
+  return tested;
+}
+// Distinct keys of the elements inside the interval.
+function intervalKeys(elems: ElemMeta[], r: IntervalRange): string[] {
+  const out: string[] = [];
+  const seen: Record<string, boolean> = {};
+  for (let i = 0; i < elems.length; i++) {
+    const e = elems[i];
+    if (!seen[e.key] && inInterval(e, r)) {
+      seen[e.key] = true;
+      out.push(e.key);
+    }
+  }
+  return out;
 }
 
 // New viewBox after zooming by `factor` about user-space point (cx, cy) — the
@@ -899,6 +1026,10 @@ const VELLUMWIDGET_CSS = `
 .vellumwidget-root.vellumwidget-mode-lasso .vellumwidget-svg-holder svg { cursor: crosshair; }
 .vellumwidget-lasso {
   fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px; stroke-dasharray: 4 3;
+}
+/* The persistent band of an active interval selection (select_interval()). */
+.vellumwidget-interval {
+  fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px;
 }
 .vellumwidget-toolbar {
   position: absolute; top: 6px; right: 6px; z-index: 25; display: flex; gap: 2px;
@@ -1210,6 +1341,10 @@ HTMLWidgets.widget({
     };
     let mode: "brush" | "pan" | "lasso" = "brush";
     let lastBrush: Bbox | null = null; // last brushed region (user coords)
+    // Active interval selections (select_interval()), by name: the member keys and
+    // the brushed data range (null when it fell back to pixel hit-testing).
+    let intervals: Record<string, { keys: string[]; range: IntervalRange | null }> = {};
+    let intervalEl: SVGRectElement | null = null; // the persistent brush band (in crosshairLayer)
     let lassoPts: Pt[] = []; // in-progress lasso path (user/viewBox coords)
     let lassoEl: SVGPolygonElement | null = null; // the drawn lasso outline (in crosshairLayer)
     // Linking state.
@@ -1855,7 +1990,12 @@ HTMLWidgets.widget({
       return l;
     }
     function clearCrosshair(): void {
-      if (crosshairLayer) while (crosshairLayer.firstChild) crosshairLayer.removeChild(crosshairLayer.firstChild);
+      if (!crosshairLayer) return;
+      // Keep the persistent interval-selection band; it is cleared with its selection.
+      const kids = Array.prototype.slice.call(crosshairLayer.childNodes) as Node[];
+      for (let i = 0; i < kids.length; i++) {
+        if (kids[i] !== intervalEl) crosshairLayer.removeChild(kids[i]);
+      }
     }
     // Draw the guide rule(s) through mark `k`'s centre: a vertical rule for "x"
     // mode, horizontal for "y", and a full cross for "closest". Spans the visible
@@ -2053,8 +2193,11 @@ HTMLWidgets.widget({
     }
     function clearSelection(): void {
       selected = {};
+      const hadInterval = clearIntervals();
       refreshSelected();
       broadcast();
+      // Clearing the brush clears the interval selection: tell Shiny too.
+      if (hadInterval) shinyInput("brush", null, { priority: "event" });
     }
     // A selection arriving from a linked view — apply WITHOUT re-broadcasting to
     // the JS bus (feedback-loop guard), but still surface it to Shiny so the
@@ -2123,6 +2266,15 @@ HTMLWidgets.widget({
     // stage.)
     function selectionMembers(sel: SelDef): Record<string, boolean> {
       const set: Record<string, boolean> = {};
+      // A brushed interval selection is its own member set (by data value), set by
+      // the brush and emptied when the brush is cleared. A lasso interval keeps the
+      // gesture's pixel selection.
+      if (sel.kind === "interval" && sel.region !== "lasso") {
+        const iv = intervals[sel.name];
+        const ks = iv ? iv.keys : [];
+        for (let i = 0; i < ks.length; i++) set[ks[i]] = true;
+        return set;
+      }
       let keys = sel.on === "hover" ? lastHoverKeys : selectedKeys();
       // A click-driven select_neighbours() expands the raw clicked nodes to their
       // neighbourhood so a condition/filter reacts to the whole set. Hover keys are
@@ -2253,6 +2405,94 @@ HTMLWidgets.widget({
       applyConditions();
       applyFilters();
     }
+    // --- interval selections (select_interval()) ---
+    // The declared brush-driven interval selections (a lasso interval keeps the
+    // pixel selection path).
+    function rectIntervalSels(): SelDef[] {
+      const sels = (interactions && interactions.selections) || [];
+      return sels.filter((s) => s.kind === "interval" && s.region !== "lasso");
+    }
+    // The band a brush covers once locked to its encodings: an axis the selection
+    // does not constrain spans the whole panel (an x-only brush is full height).
+    function lockRect(p: PanelInfo | null, rect: Bbox, encs: string[]): Bbox {
+      if (!p) return rect;
+      let h = false, v = false;
+      for (let i = 0; i < encs.length; i++) {
+        const hit = axisForEncoding(p, encs[i]);
+        if (hit) { if (hit.horizontal) h = true; else v = true; }
+      }
+      if (!h && !v) return rect;
+      return {
+        x0: h ? rect.x0 : Math.min(p.px0, p.px1), x1: h ? rect.x1 : Math.max(p.px0, p.px1),
+        y0: v ? rect.y0 : Math.min(p.py0, p.py1), y1: v ? rect.y1 : Math.max(p.py0, p.py1)
+      };
+    }
+    // Fill every brush-driven interval selection from a completed brush (device-px
+    // scene rect): resolve it through the panel's scales to a data range per
+    // encoding and take the elements whose data values fall inside. Falls back to
+    // pixel hit-testing of the locked band when the scales can't be inverted (a raw
+    // scene, a composition, a custom transform). Returns the union of members plus
+    // the fields the `_brush` event carries, or null when none is declared.
+    function applyIntervalBrush(rect: Bbox): { keys: string[]; band: Bbox; fields: Record<string, unknown> } | null {
+      const sels = rectIntervalSels();
+      if (!sels.length) return null;
+      const p = panelAt((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2);
+      // A legend- or colorbar-hidden mark is never a member; a mark hidden by this
+      // selection's own filter_by() must stay eligible, or widening the brush could
+      // never bring it back.
+      const eligible = (k: string): boolean => !hiddenKeySet[k] && !colorHiddenSet[k];
+      intervals = {};
+      const union: string[] = [];
+      const seen: Record<string, boolean> = {};
+      const ranges: Record<string, IntervalRange | null> = {};
+      let band = rect;
+      for (let i = 0; i < sels.length; i++) {
+        const encs = selEncodings(sels[i]);
+        const locked = lockRect(p, rect, encs);
+        if (i === 0) band = locked;
+        const r = p ? intervalRangeOf(p, rect, encs) : null;
+        const ks = r ? intervalKeys(elements, r).filter(eligible) : dropInert(brushKeysIn(locked));
+        intervals[sels[i].name] = { keys: ks, range: r };
+        ranges[sels[i].name] = r;
+        for (let j = 0; j < ks.length; j++) {
+          if (!seen[ks[j]]) { seen[ks[j]] = true; union.push(ks[j]); }
+        }
+      }
+      const first = sels[0].name;
+      const fields: Record<string, unknown> = { selection: first };
+      const r0 = ranges[first];
+      if (r0) {
+        const iv: Record<string, unknown> = {};
+        if (r0.x) iv.x = r0.x.levels ? r0.x.levels : [r0.x.lo, r0.x.hi];
+        if (r0.y) iv.y = r0.y.levels ? r0.y.levels : [r0.y.lo, r0.y.hi];
+        fields.interval = iv;
+      }
+      drawIntervalBand(band);
+      return { keys: union, band: band, fields: fields };
+    }
+    // Draw (or move) the persistent brush band in the view-tracking overlay, in
+    // scene coords, so it stays on the brushed data through pan/zoom.
+    function drawIntervalBand(b: Bbox): void {
+      if (!crosshairLayer) return;
+      if (!intervalEl) {
+        intervalEl = document.createElementNS(SVGNS, "rect") as SVGRectElement;
+        intervalEl.setAttribute("class", "vellumwidget-interval");
+        intervalEl.setAttribute("vector-effect", "non-scaling-stroke");
+      }
+      if (intervalEl.parentNode !== crosshairLayer) crosshairLayer.appendChild(intervalEl);
+      intervalEl.setAttribute("x", String(b.x0));
+      intervalEl.setAttribute("y", String(b.y0));
+      intervalEl.setAttribute("width", String(Math.max(0, b.x1 - b.x0)));
+      intervalEl.setAttribute("height", String(Math.max(0, b.y1 - b.y0)));
+    }
+    // Empty every interval selection and remove its band. True if one was active.
+    function clearIntervals(): boolean {
+      const had = Object.keys(intervals).length > 0;
+      intervals = {};
+      if (intervalEl && intervalEl.parentNode) intervalEl.parentNode.removeChild(intervalEl);
+      return had;
+    }
+
     // --- server -> client proxy (vellumwidget_proxy) ---
     // Route a command from the Shiny server onto this instance, without a
     // re-render. `args` is normalised to a key array (Shiny may auto-unbox a
@@ -3184,14 +3424,20 @@ HTMLWidgets.widget({
           x0: Math.min(p1.x, p2.x), y0: Math.min(p1.y, p2.y),
           x1: Math.max(p1.x, p2.x), y1: Math.max(p1.y, p2.y)
         };
-        lastBrush = rect;
-        const hitKeys = dropInert(brushKeysIn(rect)); // never (re-)select hidden/filtered marks
+        // A declared select_interval() turns the brush into a data-value interval:
+        // its members are the elements whose data fall in the brushed range.
+        const iv = applyIntervalBrush(rect);
+        lastBrush = iv ? iv.band : rect;
+        const hitKeys = iv ? iv.keys : dropInert(brushKeysIn(rect)); // never (re-)select hidden/filtered marks
         if (opts.select) setSelection(hitKeys); // also pushes _selected
+        else if (iv) reevaluateInteractions(); // conditions/filters still react
         // The brushed region + keys, as a discrete gesture event; data-space bounds
-        // (x0d/x1d/y0d/y1d + panel) added when a panel scale applies.
+        // (x0d/x1d/y0d/y1d + panel) added when a panel scale applies, and the
+        // interval selection's name + data range when one is declared.
         shinyInput("brush", Object.assign(
           { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 },
-          brushDataFields(rect)
+          brushDataFields(rect),
+          iv ? iv.fields : {}
         ), { priority: "event" });
         hideBrush();
       } else if (dragging === "lasso") {
@@ -3862,6 +4108,8 @@ HTMLWidgets.widget({
         filteredKeySet = {};
         selected = {};
         lastBrush = null;
+        intervals = {};
+        intervalEl = null;
         mode = "brush";
         group = opts.group || null;
         for (let i = 0; i < elements.length; i++) {
@@ -4054,6 +4302,25 @@ HTMLWidgets.widget({
         dropInert: dropInert,
         panelAt: panelAt,
         dataRangeOf: dataRangeOf,
+        // Interval selections: the active ranges/members, and a completed brush
+        // driven directly (device-px scene rect), bypassing pointer calibration.
+        intervals: function () { return intervals; },
+        brushInterval: function (rect: Bbox) {
+          const iv = applyIntervalBrush(rect);
+          if (!iv) return null;
+          lastBrush = iv.band;
+          if (opts.select) setSelection(iv.keys);
+          else reevaluateInteractions();
+          return iv;
+        },
+        intervalBand: function () {
+          if (!intervalEl || !intervalEl.parentNode) return null;
+          return {
+            x: parseFloat(intervalEl.getAttribute("x") || "NaN"), y: parseFloat(intervalEl.getAttribute("y") || "NaN"),
+            w: parseFloat(intervalEl.getAttribute("width") || "NaN"), h: parseFloat(intervalEl.getAttribute("height") || "NaN")
+          };
+        },
+        clearSelection: clearSelection,
         brushDataFields: brushDataFields,
         hasNavigator: function () { return !!navEl; },
         navToView: navToView,
@@ -4159,6 +4426,11 @@ registerProxyHandler();
   polyBounds,
   nativeToData,
   pxToDataX,
+  selEncodings,
+  axisForEncoding,
+  intervalRangeOf,
+  inInterval,
+  intervalKeys,
   pxToDataY,
   normalizePanels,
   viewToPan,

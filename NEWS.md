@@ -1,5 +1,20 @@
 # vellumwidget 0.9.1.9000
 
+* **Interval selections brush a data range.** A plot that declares
+  `vellumplot::select_interval()` now turns the brush into that named selection,
+  and `condition()` / `filter_by()` react to it as they do to a point selection.
+  Membership is by data value: the brushed pixels are converted to a data range
+  through the panel's scale (continuous, log10/sqrt/reverse, date, datetime, or
+  the covered categories of a discrete axis) and each element's own data values
+  are tested, so a brush in one facet selects matching rows in every facet. An
+  x-only (or y-only) brush leaves a band across the full panel that stays on the
+  data through pan and zoom; clicking empty space or pressing `Escape` clears
+  it. Members are reported in `input$<id>_selected`; `input$<id>_brush` gains
+  `selection` and `interval`, and goes to `NULL` when the brush is cleared. When
+  the scales cannot be inverted (a raw scene, a composition, a custom transform)
+  the brush falls back to selecting what it covers on screen. Needs no new
+  `as_widget()` option, and works without Shiny.
+
 
 # vellumwidget 0.9.1
 

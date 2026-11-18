@@ -638,8 +638,41 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     if (present) cols$filter_value <- fv
   }
 
+  # Interval-selection data values (from a vellumplot `select_interval()`): the
+  # element's value on each brushed position channel -- numeric `ix`/`iy` (with
+  # `ixh`/`iyh` the upper end when the element is a series spanning a range), or
+  # the category label `ixd`/`iyd` on a discrete axis. The runtime tests these
+  # against the brushed data range.
+  if (any_meta) {
+    for (f in c("ix", "ixh", "iy", "iyh")) {
+      cols[[f]] <- meta_num(meta, f)
+    }
+    cols$ixd <- meta_col("ixd")
+    cols$iyd <- meta_col("iyd")
+  }
+
   # Drop the omitted (NULL) meta columns; the always-present key/bbox columns stay.
   cols[!vapply(cols, is.null, logical(1))]
+}
+
+# One numeric meta field across all elements (NA where absent), or NULL when no
+# element carries it.
+meta_num <- function(meta, field) {
+  present <- FALSE
+  out <- vapply(
+    meta,
+    function(m) {
+      v <- if (is.null(m)) NULL else m[[field]]
+      if (is.null(v) || !length(v)) {
+        NA_real_
+      } else {
+        present <<- TRUE
+        as.numeric(v)[[1L]]
+      }
+    },
+    numeric(1)
+  )
+  if (present) out else NULL
 }
 
 # The interactive colorbar descriptor (continuous colour scales): the gradient
@@ -808,7 +841,12 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
       data_hi = as.numeric(a$data_hi),
       native_lo = as.numeric(a$native_lo),
       native_hi = as.numeric(a$native_hi),
-      time_unit = if (is.null(a$time_unit)) NULL else as.character(a$time_unit)
+      time_unit = if (is.null(a$time_unit)) NULL else as.character(a$time_unit),
+      # The aesthetic the axis shows (swapped under coord_flip) and a discrete
+      # axis's levels in position order, for interval-selection membership. A
+      # list keeps a one-level axis a JSON array.
+      aes = if (is.null(a$aesthetic)) NULL else as.character(a$aesthetic),
+      levels = if (is.null(a$levels)) NULL else as.list(as.character(a$levels))
     ))
   }
   out <- list()
@@ -1035,7 +1073,11 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #'     bounding rectangle in the scene's device-pixel (viewBox) coordinates. A
 #'     lasso gesture also carries `lasso = TRUE`. When the plot carries a cartesian
 #'     scale (a `vellumplot` plot), it *also* carries the region's **data-space**
-#'     bounds `x0d,y0d,x1d,y1d` and the `panel` name. An event input.}
+#'     bounds `x0d,y0d,x1d,y1d` and the `panel` name. When the plot declares a
+#'     `vellumplot::select_interval()`, it also carries `selection` (the
+#'     selection's name) and `interval` (per encoding, the brushed data range
+#'     `c(lo, hi)`, or the brushed levels on a discrete axis), and clearing the
+#'     brush sets it to `NULL`. An event input.}
 #'   \item{`input$plot_colorfilter`}{A length-2 numeric `c(lo, hi)` — the value
 #'     range selected on a continuous colorbar (see the interactive colorbar
 #'     filter); `NULL` when the full range is shown. State input.}
