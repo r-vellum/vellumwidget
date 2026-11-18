@@ -7,11 +7,12 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Nightly cross-layer check kept off for now; restore before release. vellum
-  # and vellumwidget are version-locked and co-released, so a nightly catches a
-  # break in vellum's main before it bricks a release.
-  # schedule:
-  #   - cron: "0 4 * * *"
+  # Nightly cross-layer check. vellum and vellumwidget are version-locked and
+  # co-released, so a nightly catches a break in vellum's main before it bricks
+  # a release. The `Remotes:` entries (r-vellum/vellum, r-vellum/vellumplot)
+  # resolve to each repo's default branch, so every run builds against main.
+  schedule:
+    - cron: "0 4 * * *"
   workflow_dispatch:
 
 name: R-CMD-check.yaml
