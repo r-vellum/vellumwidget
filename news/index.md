@@ -1,6 +1,8 @@
 # Changelog
 
-## vellumwidget 0.9.0.9000
+## vellumwidget 0.9.1.9000
+
+## vellumwidget 0.9.1
 
 - **Hovering or clicking a polygon’s hole no longer hits the polygon.**
   The runtime decided “inside” per ring, so a point inside any ring, a

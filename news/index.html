@@ -13,7 +13,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.9.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.9.1.9000</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -49,7 +49,10 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="0.9.0.9000" id="vellumwidget-0909000">vellumwidget 0.9.0.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-0909000"></a></h2>
+<h2 class="pkg-version" data-toc-text="0.9.1.9000" id="vellumwidget-0919000">vellumwidget 0.9.1.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-0919000"></a></h2>
+</div>
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="0.9.1" id="vellumwidget-091">vellumwidget 0.9.1<a class="anchor" aria-label="anchor" href="#vellumwidget-091"></a></h2>
 <ul><li><p><strong>Hovering or clicking a polygon’s hole no longer hits the polygon.</strong> The runtime decided “inside” per ring, so a point inside any ring, a hole included, counted as on the shape. It now decides once across all of an element’s rings under the rule the shape is filled with (even-odd or nonzero winding), as vellum’s <code>vl_nearest()</code> does from vellum 0.7.2. The payload’s geometry block gains an <code>eo</code> column, sent only when some element is even-odd.</p></li>
 <li><p>Hexagons and pie/donut sectors now hover and click by their outline instead of their bounding box. vellum 0.7.2 reports their geometry.</p></li>
 <li><p><strong>Click-to-source now shows each mark’s own rows, including marks from a layer with its own data.</strong> vellumplot tags every element with the table its rows refer to, and the widget now ships each layer’s table (<code>fields</code>, plus the rows when <code>inspect_source(values = TRUE)</code>) next to the plot data. Clicking a mark from a layer drawn with <code>data =</code> lists that layer’s fields and rows instead of nothing. The <code>vellum:source</code> event and <code>input$&lt;id&gt;_source</code> gain a <code>source</code> entry (<code>"plot"</code> or <code>"layer:&lt;i&gt;"</code>) and report that table’s fields. This supersedes the 0.9.0 stopgap that left such marks out of the popover. Plot-data marks are unchanged, and an element without a source tag (an older vellumplot) still reads the plot data.</p></li>
