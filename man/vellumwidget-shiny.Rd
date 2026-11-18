@@ -48,7 +48,11 @@ brush (or lasso) gesture completes: the selected keys and the region's
 bounding rectangle in the scene's device-pixel (viewBox) coordinates. A
 lasso gesture also carries \code{lasso = TRUE}. When the plot carries a cartesian
 scale (a \code{vellumplot} plot), it \emph{also} carries the region's \strong{data-space}
-bounds \verb{x0d,y0d,x1d,y1d} and the \code{panel} name. An event input.}
+bounds \verb{x0d,y0d,x1d,y1d} and the \code{panel} name. When the plot declares a
+\code{vellumplot::select_interval()}, it also carries \code{selection} (the
+selection's name) and \code{interval} (per encoding, the brushed data range
+\code{c(lo, hi)}, or the brushed levels on a discrete axis), and clearing the
+brush sets it to \code{NULL}. An event input.}
 \item{\code{input$plot_colorfilter}}{A length-2 numeric \code{c(lo, hi)} — the value
 range selected on a continuous colorbar (see the interactive colorbar
 filter); \code{NULL} when the full range is shown. State input.}

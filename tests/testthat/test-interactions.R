@@ -64,3 +64,64 @@ test_that("a plot with no declared interaction carries no interactions block", {
   w <- as_widget(vellumplot::vplot(df) |> vellumplot::mark_point(x = x, y = y))
   expect_null(w$x$interactions)
 })
+
+# select_interval(encodings =) needs a vellumplot that emits per-element data
+# values; CI installs vellumplot from GitHub main, so skip until that is released.
+skip_if_no_interval_values <- function() {
+  skip_if_not(
+    "encodings" %in% names(formals(vellumplot::select_interval)),
+    "installed vellumplot predates select_interval(encodings =)"
+  )
+}
+
+test_that("an interval selection carries its spec record and data values", {
+  skip_if_no_interval_values()
+  df <- data.frame(
+    x = c(1, 5, 9),
+    y = c(2, 4, 6),
+    g = c("a", "b", "c"),
+    d = as.Date("2024-01-01") + c(0, 10, 20)
+  )
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(
+      x = x,
+      y = y,
+      color = vellumplot::condition("br", g, "grey80")
+    ) |>
+    vellumplot::select_interval("br", encodings = c("x", "y"))
+  w <- as_widget(p)
+  sel <- w$x$interactions$selections[[1]]
+  expect_identical(sel$type, "interval")
+  expect_identical(unlist(sel$encodings), c("x", "y"))
+  els <- w$x$elements
+  expect_equal(els$ix, df$x)
+  expect_equal(els$iy, df$y)
+  # the panel axis says which aesthetic it shows
+  expect_identical(w$x$panels[[1]]$x$aes, "x")
+
+  # a date axis ships the epoch value; a discrete axis the label + levels
+  wd <- as_widget(
+    vellumplot::vplot(df) |>
+      vellumplot::mark_point(x = d, y = y) |>
+      vellumplot::select_interval("br", encodings = "x")
+  )
+  expect_equal(wd$x$elements$ix, as.numeric(df$d))
+  expect_null(wd$x$elements$iy) # x-only selection: no y values
+  wc <- as_widget(
+    vellumplot::vplot(df) |>
+      vellumplot::mark_bar(x = g, y = y) |>
+      vellumplot::select_interval("br")
+  )
+  expect_setequal(wc$x$elements$ixd, df$g)
+  expect_identical(unlist(wc$x$panels[[1]]$x$levels), c("a", "b", "c"))
+})
+
+test_that("a plot without an interval selection ships no interval values", {
+  df <- data.frame(x = 1:3, y = 1:3)
+  w <- as_widget(
+    vellumplot::vplot(df) |>
+      vellumplot::mark_point(x = x, y = y) |>
+      vellumplot::select_point("p")
+  )
+  expect_false(any(c("ix", "iy", "ixd", "iyd") %in% names(w$x$elements)))
+})
