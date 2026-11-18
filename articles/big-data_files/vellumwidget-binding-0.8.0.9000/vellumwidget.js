@@ -550,15 +550,7 @@
       });
     }
     const closed = g.kind === "polygon" || g.kind === "path";
-    // Rings are measured SEPARATELY. Joining them into one run would invent a
-    // phantom edge from each ring's last vertex to the next ring's first, and
-    // close the last ring back to the very first vertex. `rings` is absent for a
-    // single-ring element, which the whole run already describes.
     const rings = g.rings || [n];
-    // The engine's rule (vellum's `pick_table`): a path's distance is the
-    // minimum over its rings, each measured as FILLED -- so being inside ANY
-    // ring is a hit, and the fill rule does not enter into it. A point in a
-    // hole is therefore at distance zero, matching what the engine reports.
     let best = Infinity;
     let ra = at;
     for (let r = 0; r < rings.length; r++) {
@@ -1376,9 +1368,6 @@
         if (!keys.length || xs.length !== ys.length) return;
         gx = Float64Array.from(xs);
         gy = Float64Array.from(ys);
-        // Ring boundaries of a multi-ring path. Absent (an older payload, or a
-        // scene whose every element is one ring) means one ring per element,
-        // which is what the whole vertex run already describes.
         const nrs = g.nr != null ? asColumn(g.nr) : null;
         const rls = g.rl != null ? asColumn(g.rl) : null;
         let at = 0, ra = 0;
