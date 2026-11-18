@@ -103,7 +103,7 @@ test_that("an interval selection carries its spec record and data values", {
   wd <- as_widget(
     vellumplot::vplot(df) |>
       vellumplot::mark_point(x = d, y = y) |>
-      vellumplot::select_interval("br")
+      vellumplot::select_interval("br", encodings = "x")
   )
   expect_equal(wd$x$elements$ix, as.numeric(df$d))
   expect_null(wd$x$elements$iy) # x-only selection: no y values
