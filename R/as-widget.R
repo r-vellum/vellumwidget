@@ -172,12 +172,64 @@ as_widget <- function(
   text = c("native", "outline"),
   elementId = NULL
 ) {
-  select_mode <- match.arg(select_mode)
-  hover_mode <- match.arg(hover_mode)
-  legend_click <- match.arg(legend_click)
-  mode <- match.arg(mode)
   text_set <- !missing(text)
-  text <- match.arg(text)
+  width <- .check_css_size(width, "width")
+  height <- .check_css_size(height, "height")
+  toolbar <- .check_bool(toolbar, "toolbar")
+  navigator <- .check_bool(navigator, "navigator")
+  navigator_height <- .check_number(
+    navigator_height,
+    "navigator_height",
+    min = 0,
+    min_inclusive = FALSE,
+    allow_null = TRUE
+  )
+  hover_mode <- .check_choice(hover_mode, c("closest", "x", "y"), "hover_mode")
+  crosshair <- .check_bool(crosshair, "crosshair")
+  legend_click <- .check_choice(
+    legend_click,
+    c("select", "hide", "mute"),
+    "legend_click"
+  )
+  a11y <- .check_bool(a11y, "a11y")
+  alt <- .check_string(alt, "alt", allow_null = TRUE)
+  tooltip_delay <- .check_number(
+    tooltip_delay,
+    "tooltip_delay",
+    min = 0,
+    allow_null = TRUE
+  ) %||%
+    0
+  tooltip_follow <- .check_bool(tooltip_follow, "tooltip_follow")
+  tooltip_sticky <- .check_bool(tooltip_sticky, "tooltip_sticky")
+  tooltip_style <- .check_tooltip_style(tooltip_style)
+  export_filename <- .check_string(
+    export_filename,
+    "export_filename",
+    allow_null = TRUE,
+    allow_empty = FALSE
+  )
+  export_scale <- .check_number(
+    export_scale,
+    "export_scale",
+    min = 0,
+    min_inclusive = FALSE,
+    allow_null = TRUE
+  )
+  group <- .check_string(group, "group", allow_null = TRUE, allow_empty = FALSE)
+  select_mode <- .check_choice(
+    select_mode,
+    c("multiple", "single"),
+    "select_mode"
+  )
+  mode <- .check_choice(mode, c("auto", "svg", "raster"), "mode")
+  raster_threshold <- .check_number(
+    raster_threshold,
+    "raster_threshold",
+    min = 0
+  )
+  text <- .check_choice(text, c("native", "outline"), "text")
+  elementId <- .check_string(elementId, "elementId", allow_null = TRUE)
   # A keyframe animation (from vellumplot::animate()) becomes an embedded animated
   # SVG that plays on its own -- its marks move every frame, so there is no stable
   # per-element geometry to hover, and the interactive machinery is skipped.
@@ -236,36 +288,24 @@ as_widget <- function(
       # axis-aware zoom are on by default (interactive-by-default): the runtime
       # supplies the defaults, so they no longer need per-widget flags. Per-mark
       # hover/select styling now comes from the plot spec via `condition()`.
-      navigator = isTRUE(navigator),
-      navigatorHeight = if (is.null(navigator_height)) {
-        NULL
-      } else {
-        as.numeric(navigator_height)
-      },
-      toolbar = isTRUE(toolbar),
+      navigator = navigator,
+      navigatorHeight = navigator_height,
+      toolbar = toolbar,
       hoverMode = hover_mode,
-      crosshair = isTRUE(crosshair),
+      crosshair = crosshair,
       legendClick = legend_click,
-      tooltipDelay = if (is.null(tooltip_delay)) {
-        0
-      } else {
-        as.numeric(tooltip_delay)
-      },
-      tooltipFollow = isTRUE(tooltip_follow),
-      tooltipSticky = isTRUE(tooltip_sticky),
-      a11y = isTRUE(a11y),
-      alt = if (is.null(alt)) NULL else as.character(alt),
+      tooltipDelay = tooltip_delay,
+      tooltipFollow = tooltip_follow,
+      tooltipSticky = tooltip_sticky,
+      a11y = a11y,
+      alt = alt,
       selectMode = select_mode,
       group = group,
       crosstalk = ct_group,
       style = .tooltip_style(tooltip_style),
       export = drop_null(list(
-        filename = if (is.null(export_filename)) {
-          NULL
-        } else {
-          as.character(export_filename)
-        },
-        scale = if (is.null(export_scale)) NULL else as.numeric(export_scale)
+        filename = export_filename,
+        scale = export_scale
       ))
     )
   )
@@ -370,12 +410,6 @@ as_widget <- function(
   if (is.null(ts)) {
     return(list())
   }
-  if (!is.list(ts)) {
-    stop(
-      "`tooltip_style` must be a named list (background/color/fontsize/max_width).",
-      call. = FALSE
-    )
-  }
   drop_null(list(
     tipBg = .css_color(ts$background),
     tipFg = .css_color(ts$color),
@@ -386,6 +420,54 @@ as_widget <- function(
       as.character(ts$max_width)
     }
   ))
+}
+
+# Validate a `tooltip_style` list: `NULL`, or a named list whose names are among
+# background/color/fontsize/max_width and whose entries are single values.
+# Colours are checked by `.css_color()` when the payload is built.
+.tooltip_style_fields <- c("background", "color", "fontsize", "max_width")
+
+.check_tooltip_style <- function(
+  ts,
+  arg = "tooltip_style",
+  call = parent.frame()
+) {
+  if (is.null(ts)) {
+    return(NULL)
+  }
+  nms <- names(ts)
+  if (!is.list(ts) || (length(ts) && (is.null(nms) || !all(nzchar(nms))))) {
+    cli::cli_abort(
+      c(
+        "{.arg {arg}} must be a named list, not {.obj_type_friendly {ts}}.",
+        i = "Known fields are {.val {(.tooltip_style_fields)}}."
+      ),
+      call = call
+    )
+  }
+  bad <- setdiff(nms, .tooltip_style_fields)
+  if (length(bad)) {
+    cli::cli_abort(
+      c(
+        "{.arg {arg}} has unknown field{?s} {.val {bad}}.",
+        i = "Known fields are {.val {(.tooltip_style_fields)}}."
+      ),
+      call = call
+    )
+  }
+  for (nm in nms) {
+    v <- ts[[nm]]
+    if (
+      !is.null(v) &&
+        (!(is.character(v) || is.numeric(v)) || length(v) != 1L || is.na(v))
+    ) {
+      cli::cli_abort(
+        "{.code {arg}${nm}} must be a single string or number, not {.obj_type_friendly {v}}.",
+        call = call
+      )
+    }
+  }
+  ts
 }
 
 # Drop NULL entries from a list (so unset style fields don't reach the payload).
@@ -478,19 +560,24 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 
 # Resolve the crosstalk group name from `crosstalk`: a crosstalk::SharedData (use
 # its group), a group-name string, or NULL (no crosstalk).
-.crosstalk_group <- function(crosstalk) {
+.crosstalk_group <- function(crosstalk, call = parent.frame()) {
   if (is.null(crosstalk)) {
     return(NULL)
   }
   if (inherits(crosstalk, "SharedData")) {
     return(crosstalk$groupName())
   }
-  if (is.character(crosstalk) && length(crosstalk) == 1L) {
+  if (
+    is.character(crosstalk) &&
+      length(crosstalk) == 1L &&
+      !is.na(crosstalk) &&
+      nzchar(crosstalk)
+  ) {
     return(crosstalk)
   }
-  stop(
-    "`crosstalk` must be a crosstalk::SharedData, a group-name string, or NULL.",
-    call. = FALSE
+  cli::cli_abort(
+    "{.arg crosstalk} must be a {.cls SharedData}, a group-name string, or {.code NULL}, not {.obj_type_friendly {crosstalk}}.",
+    call = call
   )
 }
 
