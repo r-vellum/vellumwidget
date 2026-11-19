@@ -3,7 +3,7 @@
 
 import { hasBbox } from "../geometry";
 import { pxToDataX, pxToDataY } from "../scales";
-import type { WidgetFns, WidgetState } from "../state";
+import type { CalibCache, CalibFit, CalibGroup, WidgetFns, WidgetState } from "../state";
 import type { AzPanel, Bbox, ElemMeta, PanelInfo, ViewBox } from "../types";
 import { conjugatePan, panToView, parseViewBox, viewToPan } from "../viewbox";
 import type { PanTransform } from "../viewbox";
@@ -13,7 +13,7 @@ export function coordsFeature(
 ): Pick<
   WidgetFns,
   "currentViewBox" | "toUser" | "toView" | "toAnchor" | "azNearest" | "azT" | "azMulti"
-  | "fmtPan" | "calibrateXform" | "clientToScene" | "panelAt" | "dataRangeOf"
+  | "fmtPan" | "calibrateXform" | "sceneToClient" | "clientToScene" | "panelAt" | "dataRangeOf"
   | "brushDataFields"
 > {
  // crosstalk filter handle
@@ -115,89 +115,149 @@ export function coordsFeature(
   // is laid out when the svg carries width/height attributes and is CSS-scaled —
   // there the content renders ~1:1 and the viewBox math offsets the pointer (the
   // hover-picked-the-wrong-mark bug). Fitting screen<->bbox from real elements is
-  // exact under any viewBox / width-attr / CSS-scale / zoom combination (the DOM
-  // rects already reflect the current transform, incl. axis_zoom's mark scaling —
-  // so no separate panToView is needed). Per-axis two-point fit over the
-  // most-separated elements; falls back to toView() when it can't calibrate.
-  function calibrateXform(): { sx: number; ox: number; sy: number; oy: number } | null {
-    // Multi-panel axis zoom: each panel is translated differently, so fit client
-    // -> BASE (vb0) space instead, using each element's on-screen base position
-    // T_i(centre); clientToScene then undoes the T_i of the panel under the point.
-    if (azMulti()) return calibrateBase();
-    let xi: ElemMeta | null = null, xj: ElemMeta | null = null;
-    let yi: ElemMeta | null = null, yj: ElemMeta | null = null;
+  // exact under any viewBox / width-attr / CSS-scale / zoom combination, because
+  // the DOM rects already reflect the current transform, axis_zoom's included.
+  //
+  // The fit is made per data panel, from that panel's own marks (VW-3): under
+  // axis zoom each facet carries its own transform and the legend none, so one
+  // global fit across marks and swatches is wrong once zoomed. Legend swatches
+  // and inert (hidden/filtered) marks never take part. The fits are measured in
+  // svg-local px and cached until a render, a view change, a resize or a
+  // legend/filter change, so a hover frame costs one getBoundingClientRect.
+  function calibGroups(): CalibCache | null {
+    if (!ws.svgEl) return null;
+    const r = ws.svgEl.getBoundingClientRect();
+    if (ws.calib && ws.calib.w === r.width && ws.calib.h === r.height) return ws.calib;
+    ws.calib = buildCalib(r);
+    return ws.calib;
+  }
+
+  function panelOfScene(x: number, y: number): number {
+    for (let i = 0; i < ws.panels.length; i++) {
+      const p = ws.panels[i];
+      if (x >= p.px0 && x <= p.px1 && y >= p.py0 && y <= p.py1) return i;
+    }
+    return -1;
+  }
+
+  function buildCalib(r: DOMRect | ClientRect): CalibCache {
+    const nGroups = Math.max(1, ws.panels.length);
+    // Per group, the extreme marks on each axis: [minX, maxX, minY, maxY].
+    const ext: (ElemMeta | null)[][] = [];
+    for (let g = 0; g < nGroups; g++) ext.push([null, null, null, null]);
+    const all: (ElemMeta | null)[] = [null, null, null, null];
+    const cxOf = (e: ElemMeta) => (e.x0! + e.x1!) / 2;
+    const cyOf = (e: ElemMeta) => (e.y0! + e.y1!) / 2;
+    const take = (q: (ElemMeta | null)[], e: ElemMeta) => {
+      const cx = cxOf(e), cy = cyOf(e);
+      if (!q[0] || cx < cxOf(q[0])) q[0] = e;
+      if (!q[1] || cx > cxOf(q[1])) q[1] = e;
+      if (!q[2] || cy < cyOf(q[2])) q[2] = e;
+      if (!q[3] || cy > cyOf(q[3])) q[3] = e;
+    };
     for (let i = 0; i < ws.elements.length; i++) {
       const e = ws.elements[i];
-      if (!hasBbox(e)) continue;
-      const scx = (e.x0! + e.x1!) / 2, scy = (e.y0! + e.y1!) / 2;
-      if (!xi || scx < (xi.x0! + xi.x1!) / 2) xi = e;
-      if (!xj || scx > (xj.x0! + xj.x1!) / 2) xj = e;
-      if (!yi || scy < (yi.y0! + yi.y1!) / 2) yi = e;
-      if (!yj || scy > (yj.y0! + yj.y1!) / 2) yj = e;
+      if (!hasBbox(e) || e.legend_for != null || ws.fx.inert(e.key)) continue;
+      let g = 0;
+      if (ws.panels.length) {
+        g = panelOfScene(cxOf(e), cyOf(e));
+        if (g < 0) continue; // outside every data panel: annotation, furniture
+      }
+      take(ext[g], e);
+      take(all, e);
     }
-    if (!xi || !xj || !yi || !yj) return null;
+    // A mark's rendered centre in svg-local px (cached: extremes repeat).
+    const seen: Record<string, { x: number; y: number } | null> = {};
     const scr = (e: ElemMeta): { x: number; y: number } | null => {
+      if (e.key in seen) return seen[e.key];
+      let out: { x: number; y: number } | null = null;
       const n = ws.fx.elementsForKey(e.key)[0] as Element | undefined;
-      if (!n) return null;
-      const r = n.getBoundingClientRect();
-      if (!r.width && !r.height) return null;
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      if (n) {
+        const b = n.getBoundingClientRect();
+        if (b.width || b.height) out = { x: b.left - r.left + b.width / 2, y: b.top - r.top + b.height / 2 };
+      }
+      seen[e.key] = out;
+      return out;
     };
-    const xa = scr(xi), xb = scr(xj), ya = scr(yi), yb = scr(yj);
-    if (!xa || !xb || !ya || !yb) return null;
-    const dScx = (xj.x0! + xj.x1!) / 2 - (xi.x0! + xi.x1!) / 2;
-    const dScrx = xb.x - xa.x;
-    const dScy = (yj.y0! + yj.y1!) / 2 - (yi.y0! + yi.y1!) / 2;
-    const dScry = yb.y - ya.y;
-    if (Math.abs(dScrx) < 1 || Math.abs(dScry) < 1) return null; // too close to fit
-    const sx = dScx / dScrx, ox = (xi.x0! + xi.x1!) / 2 - xa.x * sx;
-    const sy = dScy / dScry, oy = (yi.y0! + yi.y1!) / 2 - ya.y * sy;
-    return { sx, ox, sy, oy };
+    // One axis of the fit from its two extreme marks, or null if unmeasurable.
+    const axis = (q: (ElemMeta | null)[], lo: number, hi: number, isX: boolean): { s: number; o: number } | null => {
+      const a = q[lo], b = q[hi];
+      if (!a || !b) return null;
+      const pa = scr(a), pb = scr(b);
+      if (!pa || !pb) return null;
+      const da = isX ? pb.x - pa.x : pb.y - pa.y;
+      if (Math.abs(da) < 1) return null; // too close to fit
+      const sa = isX ? cxOf(a) : cyOf(a);
+      const sd = (isX ? cxOf(b) : cyOf(b)) - sa;
+      const s = sd / da;
+      return { s: s, o: sa - (isX ? pa.x : pa.y) * s };
+    };
+    // Panels that share one transform (no axis zoom, or a single zoomable panel)
+    // may borrow an axis they cannot fit alone (a one-row facet) from the fit
+    // over every data mark. Independently zoomed facets may not.
+    const shared = !azMulti();
+    const gx = shared ? axis(all, 0, 1, true) : null;
+    const gy = shared ? axis(all, 2, 3, false) : null;
+    const groups: CalibGroup[] = [];
+    for (let g = 0; g < nGroups; g++) {
+      const panel = ws.panels.length ? ws.panels[g] : null;
+      let az: AzPanel | null = null;
+      if (panel && ws.axisZoomActive) {
+        for (let j = 0; j < ws.azPanels.length; j++) if (ws.azPanels[j].p.name === panel.name) az = ws.azPanels[j];
+      }
+      const fx = axis(ext[g], 0, 1, true) || gx;
+      const fy = axis(ext[g], 2, 3, false) || gy;
+      groups.push({ panel: panel, az: az, fit: fx && fy ? { sx: fx.s, ox: fx.o, sy: fy.s, oy: fy.o } : null });
+    }
+    return { w: r.width, h: r.height, groups: groups };
+  }
+
+  // A fit (svg-local px -> scene) shifted to take client px.
+  function toClientFit(f: CalibFit, left: number, top: number): CalibFit {
+    return { sx: f.sx, ox: f.ox - left * f.sx, sy: f.sy, oy: f.oy - top * f.sy };
+  }
+
+  // The fit for the data panel under a client point: each panel's fit maps the
+  // point into scene space, and its own T_i back onto the fixed frame, where the
+  // panel's rect is tested; the containing (else nearest) panel wins.
+  function calibrateXform(clientX: number, clientY: number): CalibFit | null {
+    const c = calibGroups();
+    if (!c || !ws.svgEl) return null;
+    const r = ws.svgEl.getBoundingClientRect();
+    const lx = clientX - r.left, ly = clientY - r.top;
+    let best: CalibFit | null = null, bestD = Infinity;
+    for (let g = 0; g < c.groups.length; g++) {
+      const G = c.groups[g];
+      if (!G.fit) continue;
+      if (!G.panel || c.groups.length === 1) { best = G.fit; break; }
+      let x = G.fit.ox + lx * G.fit.sx, y = G.fit.oy + ly * G.fit.sy;
+      if (G.az) { const t = azT(G.az); x = t.sx * x + t.tx; y = t.sy * y + t.ty; }
+      const p = G.panel;
+      const dx = x < p.px0 ? p.px0 - x : x > p.px1 ? x - p.px1 : 0;
+      const dy = y < p.py0 ? p.py0 - y : y > p.py1 ? y - p.py1 : 0;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = G.fit; if (d === 0) break; }
+    }
+    return best ? toClientFit(best, r.left, r.top) : null;
+  }
+
+  // Scene point -> client px through the fit of the panel holding it (raster
+  // tooltip anchoring), or null when that panel has no fit.
+  function sceneToClient(x: number, y: number): { x: number; y: number } | null {
+    const c = calibGroups();
+    if (!c || !ws.svgEl) return null;
+    let g = 0;
+    if (ws.panels.length) { g = panelOfScene(x, y); if (g < 0) return null; }
+    const f = c.groups[g] && c.groups[g].fit;
+    if (!f || !f.sx || !f.sy) return null;
+    const r = ws.svgEl.getBoundingClientRect();
+    return { x: r.left + (x - f.ox) / f.sx, y: r.top + (y - f.oy) / f.sy };
   }
 
   function clientToScene(clientX: number, clientY: number): { x: number; y: number } {
-    const f = calibrateXform();
+    const f = calibrateXform(clientX, clientY);
     if (!f) return toView(clientX, clientY);
-    if (azMulti()) return azBaseToScene(f.ox + clientX * f.sx, f.oy + clientY * f.sy);
     return { x: f.ox + clientX * f.sx, y: f.oy + clientY * f.sy };
-  }
-
-  // calibrateXform's multi-panel fit: client px -> base (vb0) user space, from
-  // the extreme elements' rendered centres versus their T_i-mapped centres.
-  function calibrateBase(): { sx: number; ox: number; sy: number; oy: number } | null {
-    const base = function (e: ElemMeta): { x: number; y: number } {
-      const cx = (e.x0! + e.x1!) / 2, cy = (e.y0! + e.y1!) / 2;
-      const a = azNearest(cx, cy);
-      if (!a) return { x: cx, y: cy };
-      const t = azT(a);
-      return { x: t.sx * cx + t.tx, y: t.sy * cy + t.ty };
-    };
-    type BasePt = { x: number; y: number; e: ElemMeta };
-    let xi: BasePt | null = null, xj: BasePt | null = null, yi: BasePt | null = null, yj: BasePt | null = null;
-    for (let i = 0; i < ws.elements.length; i++) {
-      const e = ws.elements[i];
-      if (!hasBbox(e)) continue;
-      const b = { x: 0, y: 0, e: e };
-      const q = base(e); b.x = q.x; b.y = q.y;
-      if (!xi || b.x < xi.x) xi = b;
-      if (!xj || b.x > xj.x) xj = b;
-      if (!yi || b.y < yi.y) yi = b;
-      if (!yj || b.y > yj.y) yj = b;
-    }
-    if (!xi || !xj || !yi || !yj) return null;
-    const scr = (e: ElemMeta): { x: number; y: number } | null => {
-      const n = ws.fx.elementsForKey(e.key)[0] as Element | undefined;
-      if (!n) return null;
-      const r = n.getBoundingClientRect();
-      if (!r.width && !r.height) return null;
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-    };
-    const xa = scr(xi.e), xb = scr(xj.e), ya = scr(yi.e), yb = scr(yj.e);
-    if (!xa || !xb || !ya || !yb) return null;
-    const dScrx = xb.x - xa.x, dScry = yb.y - ya.y;
-    if (Math.abs(dScrx) < 1 || Math.abs(dScry) < 1) return null;
-    const sx = (xj.x - xi.x) / dScrx, sy = (yj.y - yi.y) / dScry;
-    return { sx: sx, ox: xi.x - xa.x * sx, sy: sy, oy: yi.y - ya.y * sy };
   }
 
   // --- data-space mapping helpers (need the `scales` panel payload) ---
@@ -243,5 +303,5 @@ export function coordsFeature(
     return f;
   }
 
-  return { currentViewBox, toUser, toView, toAnchor, azNearest, azT, azMulti, fmtPan, calibrateXform, clientToScene, panelAt, dataRangeOf, brushDataFields };
+  return { currentViewBox, toUser, toView, toAnchor, azNearest, azT, azMulti, fmtPan, calibrateXform, sceneToClient, clientToScene, panelAt, dataRangeOf, brushDataFields };
 }

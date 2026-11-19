@@ -125,8 +125,8 @@ export function hoverFeature(
     }
     const cx = (m.x0! + m.x1!) / 2;
     const cy = (m.y0! + m.y1!) / 2;
-    const f = ws.fx.calibrateXform();
-    if (f && f.sx && f.sy) return { x: (cx - f.ox) / f.sx, y: (cy - f.oy) / f.sy };
+    const c = ws.fx.sceneToClient(cx, cy);
+    if (c) return c;
     if (!ws.svgEl) return null;
     const r = ws.svgEl.getBoundingClientRect();
     const view = ws.fx.currentViewBox();

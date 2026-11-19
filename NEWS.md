@@ -1,5 +1,14 @@
 # vellumwidget 0.10.0.9000
 
+* **Hover in open space finds the right mark when zoomed (VW-3).** The
+  client-to-scene fit behind nearest-mark hover is now made per data panel, from
+  that panel's own marks, and ignores legend swatches and hidden or filtered
+  marks. Before, one fit across every mark and the legend went wrong once axis
+  zoom scaled the data but not the legend, and in faceted plots. The fit is
+  cached until the view, the widget size, a re-render or a legend/filter change
+  invalidates it, so a hover frame no longer scans every element and forces
+  four layouts.
+
 * **`as_widget()`'s settings are grouped into option helpers.** The flat
   arguments move into four helpers, each validating its own arguments:
 

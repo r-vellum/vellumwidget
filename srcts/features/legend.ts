@@ -24,6 +24,7 @@ export function legendFeature(
   // and dim its swatch. Rebuilds `hiddenKeySet` (the marks the hover path skips so
   // a hidden point isn't silently hovered). A no-op under the "select" policy.
   function applyLegend(): void {
+    ws.calib = null; // the set of measurable (non-inert) marks changed
     ws.fx.clearClass("vellumwidget-legend-hidden");
     ws.fx.clearClass("vellumwidget-legend-muted");
     ws.fx.clearClass("vellumwidget-legend-off");

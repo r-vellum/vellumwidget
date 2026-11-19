@@ -87,6 +87,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     ws.joinOf = {};
     ws.lastHoverKeys = [];
     ws.hoverSig = "";
+    ws.calib = null;
     ws.meta = {};
     ws.groups = {};
     ws.incidentEdges = {};
@@ -253,6 +254,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
   }
 
   function resize() {
+    ws.calib = null;
     // The SVG scales via its viewBox; only the crisp-zoom canvas is sized in
     // device pixels, so re-fit it to the new box (no-op unless raster + zoomed).
     ws.fx.drawPoints();

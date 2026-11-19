@@ -2531,6 +2531,89 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     "hover on a CSS-scaled svg snaps to the mark under the cursor (not offset top-left)");
 }
 
+// --- hover calibration: per panel, data marks only, cached (VW-3) ----------
+// jsdom has no layout, so every mark's getBoundingClientRect is stubbed with the
+// screen rect a real browser would report, and counted to check the cache.
+{
+  const svgCal =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">' +
+    '<g data-vellum-panel="panel-1-1" clip-path="url(#c0)"><g data-vellum-pan="panel-1-1">' +
+    '<rect data-key="a1" x="59" y="29" width="2" height="2"/><rect data-key="a2" x="139" y="69" width="2" height="2"/></g></g>' +
+    '<g data-vellum-panel="panel-1-2" clip-path="url(#c1)"><g data-vellum-pan="panel-1-2">' +
+    '<rect data-key="b1" x="259" y="29" width="2" height="2"/><rect data-key="b2" x="339" y="69" width="2" height="2"/></g></g>' +
+    '<rect data-key="sw" x="389" y="4" width="2" height="2"/>' + // legend swatch, outside the panels
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-x-5"><text x="20" y="4" transform="matrix(1 0 0 1 220 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g></svg>';
+  const lin = (hi) => ({ type: "continuous", transform: "identity", data_lo: 0, data_hi: hi, native_lo: 0, native_hi: hi });
+  const eCal = document.createElement("div");
+  document.body.appendChild(eCal);
+  const iCal = widgetDef.factory(eCal, 400, 100);
+  iCal.renderValue({
+    svg: svgCal,
+    elements: {
+      key: ["a1", "a2", "b1", "b2", "sw"], mark: ["point", "point", "point", "point", "point"],
+      legend_for: [null, null, null, null, "s1"],
+      x0: [59, 139, 259, 339, 389], y0: [29, 69, 29, 69, 4], x1: [61, 141, 261, 341, 391], y1: [31, 71, 31, 71, 6]
+    },
+    panels: [
+      { name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90, x: lin(100), y: lin(50) },
+      { name: "panel-1-2", px0: 220, py0: 10, px1: 380, py1: 90, x: lin(100), y: lin(50) }
+    ],
+    options: { axisZoom: true, hover: true, zoom: true, nearest: true }
+  });
+  const svgCalE = eCal.querySelector("svg");
+  let svgW = 400;
+  svgCalE.getBoundingClientRect = () => ({ left: 0, top: 0, width: svgW, height: 100, right: svgW, bottom: 100 });
+  ok(iCal._test.axisZoomActive() === true, "calibration: the two-facet fixture is axis-zoomable");
+  // Each data mark is drawn at T_i(scene) of its own panel; the legend never moves.
+  let T = [{ sx: 1, tx: 0, sy: 1, ty: 0 }, { sx: 1, tx: 0, sy: 1, ty: 0 }];
+  let rectCalls = 0;
+  const stub = (key, cx, cy, panel) => {
+    eCal.querySelector('[data-key="' + key + '"]').getBoundingClientRect = () => {
+      rectCalls++;
+      const t = panel == null ? { sx: 1, tx: 0, sy: 1, ty: 0 } : T[panel];
+      const x = t.sx * cx + t.tx, y = t.sy * cy + t.ty;
+      return { left: x - t.sx, top: y - t.sy, width: 2 * t.sx, height: 2 * t.sy, right: x + t.sx, bottom: y + t.sy };
+    };
+  };
+  stub("a1", 60, 30, 0); stub("a2", 140, 70, 0); stub("b1", 260, 30, 1); stub("b2", 340, 70, 1); stub("sw", 390, 5, null);
+  const close = (p, x, y) => p && Math.abs(p.x - x) < 1e-6 && Math.abs(p.y - y) < 1e-6;
+  ok(close(iCal._test.clientToScene(100, 50), 100, 50) && close(iCal._test.clientToScene(300, 50), 300, 50),
+    "calibration: unzoomed, client px map 1:1 onto the scene");
+  // 2x about the reference panel's centre: T1 = (2, -100, 2, -50), T2 = (2, -300, 2, -50).
+  iCal._test.setView({ x: 50, y: 25, w: 200, h: 50 });
+  T = [{ sx: 2, tx: -100, sy: 2, ty: -50 }, { sx: 2, tx: -300, sy: 2, ty: -50 }];
+  const c1 = iCal._test.clientToScene(100, 50);
+  ok(close(c1, 100, 50), "calibration: zoomed, a point in panel 1 maps through panel 1's own fit");
+  const c2 = iCal._test.clientToScene(300, 70);
+  ok(close(c2, 300, 60), "calibration: zoomed, a point in panel 2 maps through panel 2's own fit");
+  const c3 = iCal._test.clientToScene(41, 82); // T1(a1)=(20,10)... T1(a2)=(180,90): near a2's corner
+  ok(close(c3, 70.5, 66), "calibration: the unscaled legend swatch does not skew the zoomed fit");
+  // Cached: further lookups at the same view and size measure no marks.
+  const n0 = rectCalls;
+  for (let k = 0; k < 20; k++) iCal._test.clientToScene(100 + k, 50);
+  ok(rectCalls === n0, "calibration: the fit is cached between hover frames (no per-frame mark layout)");
+  // A view change re-measures.
+  iCal._test.setView({ x: 0, y: 0, w: 200, h: 100 });
+  T = [{ sx: 1, tx: 0, sy: 1, ty: 0 }, { sx: 1, tx: 0, sy: 1, ty: 0 }];
+  ok(close(iCal._test.clientToScene(300, 50), 300, 50) && rectCalls > n0, "calibration: a view change invalidates the cached fit");
+  // A resized svg box re-measures too (the browser rescales the marks).
+  const n1 = rectCalls;
+  svgW = 800;
+  T = [{ sx: 2, tx: 0, sy: 1, ty: 0 }, { sx: 2, tx: 0, sy: 1, ty: 0 }];
+  ok(close(iCal._test.clientToScene(600, 50), 300, 50) && rectCalls > n1, "calibration: a resized svg invalidates the cached fit");
+  // Hovering in open space resolves the nearest mark through the per-panel fit.
+  svgW = 400;
+  T = [{ sx: 2, tx: -100, sy: 2, ty: -50 }, { sx: 2, tx: -300, sy: 2, ty: -50 }];
+  iCal._test.setView({ x: 50, y: 25, w: 200, h: 50 });
+  const evC = new window.MouseEvent("pointermove", { bubbles: true, clientX: 379, clientY: 89 }); // T2(b2) = (380, 90)
+  Object.defineProperty(evC, "target", { value: svgCalE, enumerable: true });
+  svgCalE.dispatchEvent(evC);
+  const hlC = Array.from(eCal.querySelectorAll(".vellumwidget-hl")).map((n) => n.getAttribute("data-key"));
+  ok(hlC.length === 1 && hlC[0] === "b2", "calibration: zoomed facet hover picks the mark under the cursor");
+}
+
 // --- graph neighbour highlighting (select_neighbours preset) ---------------
 // Triangle a-b-c plus a pendant d off c. Edges carry source/target endpoint keys.
 {

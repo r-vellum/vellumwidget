@@ -96,6 +96,7 @@ export function selectionFeature(
   // Cross-filter (display tier): hide keyed elements whose key is not in the
   // shown set. `null` clears the filter (show everything).
   function applyFilter(showKeys: string[] | null): void {
+    ws.calib = null; // the set of measurable (non-inert) marks changed
     ws.fx.clearClass("vellumwidget-filtered");
     ws.filteredKeySet = {};
     if (showKeys == null) return;

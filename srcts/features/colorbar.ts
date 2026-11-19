@@ -104,6 +104,7 @@ export function colorbarFeature(
   // Set the selected value range (clamped, ordered) and apply. The runtime entry
   // point for a handle drag and the test seam.
   function setColorRange(a: number, b: number): void {
+    ws.calib = null; // the set of measurable (non-inert) marks changed
     if (!ws.colorbar) return;
     const lo = ws.colorbar.lo, hi = ws.colorbar.hi;
     a = Math.min(hi, Math.max(lo, a));
