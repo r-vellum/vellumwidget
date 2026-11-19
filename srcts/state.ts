@@ -41,6 +41,14 @@ export interface WidgetState {
   filtSelElems: Record<string, string[]>; // filter selection -> keys of its target view
   joinOf: Record<string, string>; // key -> cross-view join id (compositions)
   lastHoverKeys: string[];
+  // What the last full pointer-hover pass drew: the hover mode, the primary key
+  // and the highlighted set, joined. A move that resolves to the same signature
+  // only re-places the tooltip (VW-4). Emptied whenever anything else could have
+  // changed the drawn hover (a clear, a render, a view change, a keyboard hover).
+  hoverSig: string;
+  // True while any hover feedback may be on screen; clearHover is a no-op when
+  // false, so moving through empty space doesn't re-clear an idle plot.
+  hovering: boolean;
   colorRange: { a: number; b: number } | null;
   colorHiddenSet: Record<string, boolean>;
   meta: Record<string, ElemMeta>;
@@ -209,6 +217,7 @@ export interface WidgetFns {
   focusRoving: (i: number) => void;
   hideHighlightOverlay: () => void;
   hideTip: () => void;
+  moveTip: (clientX: number, clientY: number, anchorKey: string | null) => void;
   inert: (k: string) => boolean;
   lassoKeysIn: (poly: Pt[]) => string[];
   legendIsolate: (series: string) => void;
@@ -278,6 +287,8 @@ export function createState(el: HTMLElement): WidgetState {
     filtSelElems: {},
     joinOf: {},
     lastHoverKeys: [],
+    hoverSig: "",
+    hovering: false,
     colorRange: null,
     colorHiddenSet: {},
     meta: {},

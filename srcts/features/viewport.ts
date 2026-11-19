@@ -84,6 +84,7 @@ export function viewportFeature(
   }
 
   function applyViewBox(): void {
+    ws.hoverSig = ""; // a moved view moves the crosshair and hover overlay: redraw on the next move
     // x-only range zoom: keep the full y-extent on screen (never crop the y-axis),
     // so every zoom/pan path (nav, wheel, pinch, keyboard, linked) is 1-D in x.
     if (ws.xZoom && ws.vb && ws.vb0) { ws.vb.y = ws.vb0.y; ws.vb.h = ws.vb0.h; }

@@ -11,7 +11,7 @@ export function hoverFeature(
 ): Pick<
   WidgetFns,
   "showHighlightOverlay" | "hideHighlightOverlay" | "clearCrosshair" | "drawCrosshair"
-  | "showTip" | "showTipMulti" | "hideTip" | "clearHover"
+  | "showTip" | "showTipMulti" | "hideTip" | "moveTip" | "clearHover"
 > {
   // --- large-scene hover dim (overlay, O(hovered)) ---
   function dimOpacityVal(): string {
@@ -161,12 +161,17 @@ export function hoverFeature(
   // hidden and a delay is set, the reveal waits `tooltip_delay` ms (cancelled if
   // the hover changes first); an already-visible tip updates instantly (no
   // re-delay while moving between marks).
+  // The latest pointer position for a reveal still waiting on its delay, so a
+  // pointer that keeps moving over the same mark shows the tip where it is now.
+  let pendX = 0, pendY = 0;
+
   function revealTip(build: () => void, clientX: number, clientY: number, anchorKey: string | null): void {
     if (ws.tipHideTimer) { clearTimeout(ws.tipHideTimer); ws.tipHideTimer = 0; }
+    pendX = clientX; pendY = clientY;
     const doShow = () => {
       ws.tipShowTimer = 0;
       build();
-      placeTip(clientX, clientY, anchorKey);
+      placeTip(pendX, pendY, anchorKey);
       ws.tip.classList.add("vellumwidget-show");
     };
     const d = tipDelay();
@@ -195,6 +200,14 @@ export function hoverFeature(
     }, clientX, clientY, keys[0] || null);
   }
 
+  // The pointer moved but the hovered mark didn't: keep the content, follow the
+  // pointer (a no-op when anchored to the mark). A reveal still waiting on its
+  // delay picks up the new position when it fires.
+  function moveTip(clientX: number, clientY: number, anchorKey: string | null): void {
+    pendX = clientX; pendY = clientY;
+    if (ws.tip.classList.contains("vellumwidget-show")) placeTip(clientX, clientY, anchorKey);
+  }
+
   function hideTip(): void {
     if (ws.tipShowTimer) { clearTimeout(ws.tipShowTimer); ws.tipShowTimer = 0; }
     if (ws.tipHideTimer) { clearTimeout(ws.tipHideTimer); ws.tipHideTimer = 0; }
@@ -214,6 +227,10 @@ export function hoverFeature(
   }
 
   function clearHover(): void {
+    // Nothing hovered: skip the class sweep, the tip and the condition pass.
+    if (!ws.hovering) return;
+    ws.hovering = false;
+    ws.hoverSig = "";
     if (ws.rasterMode) ws.fx.clearGroup(ws.hovGroup);
     if (ws.largeDim) hideHighlightOverlay();
     ws.el.classList.remove("vellumwidget-hovering");
@@ -227,5 +244,5 @@ export function hoverFeature(
     }
   }
 
-  return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, clearHover };
+  return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover };
 }

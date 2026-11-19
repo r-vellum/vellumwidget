@@ -177,7 +177,9 @@ export function rasterFeature(
   // where keys = the mark's linked group, and unified hover, where keys = the
   // whole x-/y-column).
   function setHoverKeys(keys: string[]): void {
+    ws.hoverSig = ""; // the pointer fast path must redraw after any other hover
     if (!ws.opts.hover) return;
+    ws.hovering = true;
     // Raster mode: no per-element nodes — draw a hover ring on the overlay.
     if (ws.rasterMode) {
       drawHovFeedback(keys);
