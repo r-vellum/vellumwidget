@@ -1746,6 +1746,64 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(!dns.tip.classList.contains("vellumwidget-tip-sticky"), "tooltip (non-sticky): no sticky class");
 }
 
+// ===================== hover fast path: unchanged hover keys (VW-4) =====================
+{
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const i = widgetDef.factory(e, 200, 100);
+  i.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="30" viewBox="0 0 60 30">' +
+      '<g data-vellum-panel="panel-1-1"><path data-key="a" fill="#ff0000" d="M1 1h9v9z"/>' +
+      '<path data-key="b" fill="#00ff00" d="M40 1h9v9z"/></g></svg>',
+    elements: [{ key: "a", tooltip: "A", cond: ["hi:color"] }, { key: "b", tooltip: "B", cond: ["hi:color"] }],
+    interactions: {
+      selections: [{ name: "hi", kind: "point", on: "hover", empty: true }],
+      conditions: [{ selection: "hi", aes: "color", if_false: "#cccccc", empty: true }]
+    },
+    options: { tooltip: true, hover: true }
+  });
+  const sv = e.querySelector("svg");
+  const tp = e.querySelector(".vellumwidget-tip");
+  const a = e.querySelector('[data-key="a"]');
+  const b = e.querySelector('[data-key="b"]');
+  fireOn(sv, "pointermove", a, { clientX: 5, clientY: 20 });
+  ok(tp.textContent === "A" && a.classList.contains("vellumwidget-hl") && b.style.fill,
+    "hover fast path: the first move over a mark does the full hover pass");
+  // Mark the drawn state; a second move over the same mark must leave it alone.
+  tp.innerHTML = "sentinel";
+  b.style.fill = "#123456";
+  const tf0 = tp.style.transform;
+  fireOn(sv, "pointermove", a, { clientX: 9, clientY: 20 });
+  ok(tp.textContent === "sentinel", "hover fast path: same hovered key does not rebuild the tooltip");
+  ok(b.style.fill === "rgb(18, 52, 86)" || b.style.fill === "#123456",
+    "hover fast path: same hovered key does not re-run the condition pass");
+  ok(tp.style.transform !== tf0 && /translate\(9px/.test(tp.style.transform),
+    "hover fast path: the tooltip still follows the pointer");
+  // A different mark redoes everything.
+  fireOn(sv, "pointermove", b, { clientX: 45, clientY: 20 });
+  ok(tp.textContent === "B" && b.classList.contains("vellumwidget-hl") && !a.classList.contains("vellumwidget-hl"),
+    "hover fast path: a new hovered key redraws the highlight and tooltip");
+  ok(!b.style.fill && (a.style.fill === "rgb(204, 204, 204)" || a.style.fill === "#cccccc"),
+    "hover fast path: a new hovered key re-runs the conditions");
+  // A view change invalidates the fast path (crosshair/overlay depend on the view).
+  tp.innerHTML = "sentinel";
+  i._test.setView({ x: 0, y: 0, w: 30, h: 15 });
+  fireOn(sv, "pointermove", b, { clientX: 46, clientY: 20 });
+  ok(tp.textContent === "B", "hover fast path: a view change forces a full redraw on the next move");
+  // Leaving clears once; leaving again with nothing hovered is a no-op.
+  fireOn(sv, "pointerleave", sv);
+  ok(!tp.classList.contains("vellumwidget-show") && e.querySelectorAll(".vellumwidget-hl").length === 0 && !a.style.fill,
+    "hover fast path: leaving clears the hover");
+  a.classList.add("vellumwidget-hl"); // stand-in for state a redundant clear would sweep
+  fireOn(sv, "pointerleave", sv);
+  ok(a.classList.contains("vellumwidget-hl"), "hover fast path: clearHover is skipped when nothing is hovered");
+  a.classList.remove("vellumwidget-hl");
+  // After a clear, hovering the same mark again does the full pass.
+  fireOn(sv, "pointermove", b, { clientX: 45, clientY: 20 });
+  ok(tp.classList.contains("vellumwidget-show") && b.classList.contains("vellumwidget-hl"),
+    "hover fast path: re-entering the same mark after a clear redraws it");
+}
+
 // ===================== continuous colorbar filter (#12) =====================
 {
   function mountCB(withCb) {
