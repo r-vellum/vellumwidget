@@ -92,10 +92,15 @@ id. All values are the element **data keys** (the `data_id` a
   `list(x=c(lo,hi), y=c(lo,hi), panel=)`, or `NULL` for a panel scrolled
   out of view. Facets zoom per panel, so read `panels` for a faceted
   plot. A single-panel plot keeps the older `data` field, the same range
-  as its one `panels` entry. Updates as state when a zoom/pan settles
-  (wheel, drag-pan release, pinch, keyboard, reset, zoom-to-selection,
-  or a proxy
-  [`vw_zoom()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md)).
+  as its one `panels` entry. A composition names its panels per cell
+  (`"cell-1-panel-1-1"`, `"cell-2-panel-1-1"`, ...). When a
+  [`vellumplot::bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html)
+  zooms a panel to an interval selection, the panel's entry is its bound
+  range and `bound` maps each bound panel id to the selection driving
+  it. Updates as state when a zoom/pan settles (wheel, drag-pan release,
+  pinch, keyboard, reset, zoom-to-selection, a proxy
+  [`vw_zoom()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md),
+  or a brush that moves a bound panel).
 
 Data-space coordinates (`x0d`/…, `zoom$data` and `zoom$panels`) come
 from the per-panel scale descriptors `vellumplot` attaches to the scene;

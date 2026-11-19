@@ -68,16 +68,13 @@
 <li>
 <strong><code>vellumplot</code> is a spec-as-data grammar.</strong> Interaction declared <em>in the spec</em> — a named selection referenced by a conditional encoding, a filter, or a scale domain (Vega-Lite’s model) — is portable, composable, and serialisable. That is the intended long-term home for interaction: the <strong>“declarative interactivity”</strong> direction (Phase 6 of the vellumplot Tier-2 plan).</li>
 </ul><p><strong>Declarative interactivity is built.</strong> <code><a href="https://r-vellum.github.io/vellumplot/reference/interaction_model.html" class="external-link">vellumplot::interaction_model()</a></code> hands the widget the plot’s selections, conditions, filters and binds, and the runtime enacts:</p>
-<ul><li>
-<code>select_point()</code> (hover or click) and <code>select_neighbours()</code> (graph neighbourhoods);</li>
-<li>
-<code>select_interval()</code>: a data-value brush. The brushed pixels are inverted through the panel’s scale (continuous, log10/sqrt/reverse, date/datetime, discrete levels) and elements are tested by data value. It falls back to pixel hit-testing when the scale can’t be inverted (#50);</li>
-<li>
-<code>condition()</code>: styles an aesthetic by selection membership;</li>
-<li>
-<code>add_selection()</code> + <code>filter_by()</code>: cross-filtering. The filtered view hides non-members and the source view stays whole. SVG mode only.</li>
-</ul><p><code>bind_scale()</code> is carried in the payload but not enacted yet.</p>
-<p><strong>When you do route interaction through the spec, keep it display-tier.</strong> <code>vellumplot</code> is compile-once by design and deliberately has <strong>no reactive dataflow runtime</strong>. So spec-declared interactions must be reactions a host can perform on the <em>frozen</em> scene — highlight/dim, hide/isolate, filter-by-hiding, pan/zoom, linked brushing. Interactions that would <strong>recompute the grammar</strong> (re-bin or re-aggregate on brush, retrain a scale from filtered data) are out of scope client-side; they need a Shiny recompile.</p>
+<ul><li><p><code>select_point()</code> (hover or click) and <code>select_neighbours()</code> (graph neighbourhoods);</p></li>
+<li><p><code>select_interval()</code>: a data-value brush. The brushed pixels are inverted through the panel’s scale (continuous, log10/sqrt/reverse, date/datetime, discrete levels) and elements are tested by data value. It falls back to pixel hit-testing when the scale can’t be inverted (#50);</p></li>
+<li><p><code>condition()</code>: styles an aesthetic by selection membership;</p></li>
+<li><p><code>add_selection()</code> + <code>filter_by()</code>: cross-filtering. The filtered view hides non-members and the source view stays whole. SVG mode only.</p></li>
+<li><p><code>bind_scale()</code>: overview + detail. The panels of the bind’s composition <code>cell</code> (every panel but the brushed one when it names none) zoom to the interval selection’s range on the bound axis, and clearing it unbinds them (<code>srcts/features/bindScales.ts</code>, pure math in <code>srcts/binds.ts</code>). A bound panel overrides its axis in <code>azT()</code>, so the re-tick, hit-testing and <code>_zoom</code> follow;</p></li>
+<li><p><code>select_interval(bind = "scales")</code>: the selection is written from its view’s settled zoom (<code>syncScaleSelections()</code>, called from <code>reportView()</code>); a brush never fills it and the default drag is pan.</p></li>
+</ul><p><strong>When you do route interaction through the spec, keep it display-tier.</strong> <code>vellumplot</code> is compile-once by design and deliberately has <strong>no reactive dataflow runtime</strong>. So spec-declared interactions must be reactions a host can perform on the <em>frozen</em> scene — highlight/dim, hide/isolate, filter-by-hiding, pan/zoom, linked brushing. Interactions that would <strong>recompute the grammar</strong> (re-bin or re-aggregate on brush, retrain a scale from filtered data) are out of scope client-side; they need a Shiny recompile.</p>
 <p><strong>Rule of thumb.</strong> A new <code><a href="reference/as_widget.html">as_widget()</a></code> behaviour is fine for a genuinely widget-local, single-plot affordance. But if it smells like “the <em>plot</em> should know about this,” or it needs to coordinate two views, route it through the spec and flag it to the maintainer. The tripwire in <code>tests/testthat/test-as-widget.R</code> (<code>expect_lte(length(formals(as_widget)), 18L)</code>) exists to force exactly this consideration. Bump it only for a genuinely widget-local affordance, and say so in the commit.</p>
 </div>
 <div class="section level2">
