@@ -35,7 +35,7 @@ import { toolbarFeature } from "./features/toolbar";
 import { viewportFeature } from "./features/viewport";
 import { distToBbox, distToGeom, distToSegment2, rectsIntersect, unionBbox } from "./geometry";
 import { axisForEncoding, inInterval, intervalKeys, intervalRangeOf, nativeToData, pxToDataX, pxToDataY, selEncodings } from "./scales";
-import { dispatchProxyCall, registerProxyHandler } from "./shiny";
+import { cssEscape, cssEscapePolyfill, dispatchProxyCall, findWidgetById, idSelector, registerProxyHandler } from "./shiny";
 import { brushKeys, columnTolerance, lassoKeys, nearestKey, nearestSortedIdx, pointInPolygon, polyBounds } from "./spatial";
 import { vellumwidgetBus } from "./linking";
 import { createState } from "./state";
@@ -220,6 +220,10 @@ registerProxyHandler();
   unionBbox,
   sanitizeTip,
   dispatchProxyCall,
+  cssEscape,
+  cssEscapePolyfill,
+  idSelector,
+  findWidgetById,
   normalizeElements,
   isZoomedIn,
   userToCanvas,

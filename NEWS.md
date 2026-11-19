@@ -41,6 +41,12 @@
   `elementId` single strings, and `tooltip_style` a named list of its four known
   fields (an unknown field is now an error, not silently dropped) (VW-6).
 
+* **`vellumwidget_proxy()` works with module ids (VW-7).** The proxy looked up
+  its widget with a bare `"#" + id` selector, so an output id holding `.` or
+  `:` (common inside Shiny modules) silently matched nothing. The id is now
+  escaped with `CSS.escape()`, with a built-in fallback where the browser lacks
+  it.
+
 * **Hover is cheaper while the pointer stays on one mark (VW-4).** A pointer
   move that resolves to the same hovered mark and highlight set now only moves
   the tooltip; it no longer clears and re-applies the highlight classes, re-runs
