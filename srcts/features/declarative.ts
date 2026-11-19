@@ -77,8 +77,10 @@ export function declarativeFeature(
   }
 
   // Apply an active condition's `if_false` to a non-member node: an explicit
-  // colour recolours the fill/stroke it actually uses (never the fill:none twin
-  // of a point); no colour falls back to the theme-dim class.
+  // colour recolours the paints the node actually uses: fill and stroke of a
+  // point drawn as one element, or the fill of the fill element and the stroke
+  // of its fill="none" stroke twin (older vellum) -- never the twin's fill:none.
+  // No colour falls back to the theme-dim class.
   function styleCondNode(node: Element, color: string | null | undefined): void {
     if (color == null) {
       node.classList.add("vellumwidget-cond-dim");

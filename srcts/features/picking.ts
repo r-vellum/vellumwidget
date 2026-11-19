@@ -42,7 +42,7 @@ export function pickingFeature(
 
   // Unpack the columnar geometry block into flat coordinate arrays plus, per
   // key, the slices that belong to it. A key may own several geometry elements
-  // (a datum drawn as a fill and a stroke; a series' line and its end label),
+  // (a datum drawn as several shapes; a series' line and its end label),
   // and its distance is the minimum over them.
   function buildGeometry(g: GeometryPayload | undefined): void {
     ws.geomByKey = {};
