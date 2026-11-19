@@ -16,8 +16,8 @@ strategy that drops the per-element DOM entirely. Both are automatic.
 ## Raster mode
 
 Above `raster_threshold` keyed elements (default `20000`),
-`as_widget(mode = "auto")` — the default — renders the scene **once as a
-single embedded image** and drives all interaction from a compact
+`render_options(mode = "auto")` — the default — renders the scene **once
+as a single embedded image** and drives all interaction from a compact
 element index rather than the DOM.
 
 ``` r
@@ -60,9 +60,9 @@ You can force the strategy instead of letting `"auto"` decide:
 
 ``` r
 
-as_widget(p, mode = "svg")    # always per-element SVG
-as_widget(p, mode = "raster") # always the single image
-as_widget(p, mode = "auto", raster_threshold = 50000) # move the switch point
+as_widget(p, render = render_options(mode = "svg"))    # always per-element SVG
+as_widget(p, render = render_options(mode = "raster")) # always the single image
+as_widget(p, render = render_options(raster_threshold = 50000)) # move the switch point
 ```
 
 Use `"svg"` when you want per-element behaviour (grammar colours,

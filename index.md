@@ -45,8 +45,14 @@ arguments that remain are appearance and mode, not on/off switches:
 the hovered position, `crosshair`, `legend_click = "hide"` to toggle
 series visibility instead of selecting, `select_mode`,
 `navigator = TRUE` for a draggable range strip under a long series, and
-the tooltip/export settings. *What* is interactive, and how it responds,
-is declared in the plot — see below.
+the grouped
+[`tooltip_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md),
+[`export_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md),
+[`navigator_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md)
+and
+[`render_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md).
+*What* is interactive, and how it responds, is declared in the plot —
+see below.
 
 ## Installation
 
@@ -148,13 +154,14 @@ the declarations above are the supported API.
 
 ## Large scenes
 
-Above `raster_threshold` keyed elements (20,000 by default),
-`mode = "auto"` stops shipping one DOM node per mark and draws the scene
-once as a single embedded image, at 2× for HiDPI screens. Interaction is
-unaffected — it runs off the element index rather than the DOM — so
-hover, click, brush and pan/zoom keep working on a scatter well past
-100,000 points. At 30,000 keyed points the base image is a few hundred
-KB where the per-element SVG would have been ~15 MB.
+Above `raster_threshold` keyed elements (20,000 by default), the default
+`render = render_options(mode = "auto")` stops shipping one DOM node per
+mark and draws the scene once as a single embedded image, at 2× for
+HiDPI screens. Interaction is unaffected — it runs off the element index
+rather than the DOM — so hover, click, brush and pan/zoom keep working
+on a scatter well past 100,000 points. At 30,000 keyed points the base
+image is a few hundred KB where the per-element SVG would have been ~15
+MB.
 
 Picking stays exact either way: a Flatbush R-tree over the bounding
 boxes shortlists candidates, and the true geometry ranks them.

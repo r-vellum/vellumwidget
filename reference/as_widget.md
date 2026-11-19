@@ -24,25 +24,19 @@ as_widget(
   height = NULL,
   toolbar = TRUE,
   navigator = FALSE,
-  navigator_height = NULL,
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
   legend_click = c("select", "hide", "mute"),
   a11y = TRUE,
   alt = NULL,
-  tooltip_delay = 0,
-  tooltip_follow = TRUE,
-  tooltip_sticky = FALSE,
-  tooltip_style = NULL,
-  export_filename = NULL,
-  export_scale = NULL,
+  tooltip = tooltip_options(),
+  export = export_options(),
   group = NULL,
   crosstalk = NULL,
   select_mode = c("multiple", "single"),
-  mode = c("auto", "svg", "raster"),
-  raster_threshold = 20000L,
-  text = c("native", "outline"),
-  elementId = NULL
+  render = render_options(),
+  elementId = NULL,
+  ...
 )
 ```
 
@@ -82,13 +76,9 @@ as_widget(
   draggable, resizable window marking the visible x-range. Drag the
   window to pan, drag a handle to zoom; it stays two-way in sync with
   the main view (wheel/keyboard/brush and linked-group changes all move
-  it). Useful for long series. `navigator_height` sets the strip height
-  in pixels (default `56`).
-
-- navigator_height:
-
-  Height of the navigator strip in pixels (default `56`); ignored unless
-  `navigator = TRUE`.
+  it). Useful for long series. `TRUE` shows it with the defaults; pass
+  [`navigator_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md)
+  to show it and set its height.
 
 - hover_mode:
 
@@ -143,39 +133,20 @@ as_widget(
   — so an explicit value is only needed for a raw `vellum` scene or to
   override.
 
-- tooltip_delay:
+- tooltip:
 
-  Milliseconds to wait before the tooltip appears on hover (default `0`,
-  i.e. immediate). The highlight is unaffected — only the tooltip waits.
-  A short delay (e.g. `250`) calms a dense scatter.
+  Tooltip behaviour and style, from
+  [`tooltip_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md):
+  the show delay, whether the box follows the cursor, whether it is
+  sticky, and the box style. `NULL` is the same as
+  [`tooltip_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md).
 
-- tooltip_follow:
+- export:
 
-  When `TRUE` (default) the tooltip tracks the cursor; when `FALSE` it
-  anchors above the hovered mark's centre.
-
-- tooltip_sticky:
-
-  When `TRUE`, the tooltip accepts pointer events and lingers briefly
-  when you leave the mark, so you can move into it — for tooltips that
-  contain links or buttons (build the HTML via `tooltip =`). Default
-  `FALSE`.
-
-- tooltip_style:
-
-  Optional named list styling the tooltip box: `background` / `color`
-  (any R or CSS colour), `fontsize`, and `max_width` (any CSS length).
-  `NULL` (default) uses the built-in style. Tooltip text is rendered as
-  safe HTML — an author-built `tooltip =` (e.g. via `glue()`) may use
-  `<b>`/`<i>`/`<br>` for bold/italic/line breaks; data values are
-  escaped and only those inert tags are honoured (no
-  scripts/attributes).
-
-- export_filename, export_scale:
-
-  The download filename base (no extension; default `"plot"`) and the
-  PNG resolution multiplier (default `1`) for the toolbar's SVG/PNG
-  export. Exports capture the current (zoomed/panned) view.
+  The toolbar's SVG/PNG download settings, from
+  [`export_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md):
+  the filename and PNG scale. `NULL` is the same as
+  [`export_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md).
 
 - group:
 
@@ -203,41 +174,28 @@ as_widget(
   `"multiple"` (default; click toggles each element) or `"single"`
   (click replaces the selection).
 
-- mode:
+- render:
 
-  Rendering strategy for the marks. `"auto"` (default) ships a
-  per-element SVG for small/moderate plots and switches to a single
-  embedded raster image above `raster_threshold` keyed elements; `"svg"`
-  always uses the per-element SVG; `"raster"` always uses the image. In
-  raster mode the marks are drawn once as a base image and all
-  interaction (hover, click, brush, pan/zoom) is driven client-side from
-  the element index (geometry + boxes + keys), so a very large scatter
-  (100k+ points) stays navigable with a tiny DOM and a small payload.
-  The trade-offs of raster mode: per-element grammar colours, per-mark
-  screen-reader focus, and display-tier cross-filtering do not apply
-  (there are no per-element DOM nodes), and a zoomed-in view is a scaled
-  raster until re-rendered.
-
-- raster_threshold:
-
-  Keyed-element count above which `mode = "auto"` switches to the raster
-  image (default `20000`).
-
-- text:
-
-  How text is written into the SVG, passed to
-  [`vellum::scene_svg()`](https://r-vellum.github.io/vellum/reference/scene_svg.html):
-  `"native"` (default) emits selectable `<text>` referencing system
-  fonts — smaller when the page has the font, post-processable, and
-  better for accessibility and LLMs; `"outline"` emits glyph outlines
-  that are pixel-faithful and font-independent but not selectable.
-  Applies to the per-element SVG path only; in raster mode (see `mode`)
-  text is baked into the base image and this argument is ignored (with a
-  warning if set explicitly).
+  How the marks are drawn, from
+  [`render_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md):
+  per-element SVG or a single raster image (`mode`), the element count
+  at which `"auto"` switches to the image (`raster_threshold`), and how
+  SVG text is written (`text`). `NULL` is the same as
+  [`render_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md).
 
 - elementId:
 
   Optional explicit widget DOM id.
+
+- ...:
+
+  Deprecated flat arguments, still accepted with a once-per-session
+  warning: `tooltip_delay`, `tooltip_follow`, `tooltip_sticky` and
+  `tooltip_style` (now `tooltip = tooltip_options()`), `export_filename`
+  and `export_scale` (now `export = export_options()`),
+  `navigator_height` (now `navigator = navigator_options()`), and
+  `mode`, `raster_threshold` and `text` (now
+  `render = render_options()`).
 
 ## Value
 
@@ -267,6 +225,15 @@ element table and the SVG `data-key` / `data-vellum-*` attributes — is
 specified in vellum's "The scene contract" vignette
 ([`vignette("scene-contract", package = "vellum")`](https://r-vellum.github.io/vellum/articles/scene-contract.html)).
 
+## See also
+
+[`tooltip_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md),
+[`export_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md),
+[`navigator_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md)
+and
+[`render_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md)
+for the grouped settings.
+
 ## Examples
 
 ``` r
@@ -276,5 +243,14 @@ df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, model = rownames(mtcars))
 vplot(df) |>
   mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
   as_widget()
+
+# Grouped options
+vplot(df) |>
+  mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
+  as_widget(
+    tooltip = tooltip_options(delay = 250, style = list(background = "#1d3557")),
+    export = export_options(filename = "mtcars", scale = 2),
+    render = render_options(mode = "svg")
+  )
 } # }
 ```

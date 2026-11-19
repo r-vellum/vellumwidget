@@ -50,7 +50,27 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.10.0.9000" id="vellumwidget-01009000">vellumwidget 0.10.0.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-01009000"></a></h2>
-<ul><li><p><code><a href="../reference/as_widget.html">as_widget()</a></code> now checks every argument up front and fails with an error that names the argument. Before, <code>raster_threshold = NA</code> crashed with “missing value where TRUE/FALSE needed”, <code>tooltip_delay = "abc"</code> sent <code>NA</code> to the browser, and <code>group = 1:3</code> sent an array. Flags must be <code>TRUE</code> or <code>FALSE</code>, sizes and delays non-negative numbers, <code>group</code> / <code>alt</code> / <code>export_filename</code> / <code>elementId</code> single strings, and <code>tooltip_style</code> a named list of its four known fields (an unknown field is now an error, not silently dropped) (VW-6).</p></li>
+<ul><li>
+<p><strong><code><a href="../reference/as_widget.html">as_widget()</a></code>’s settings are grouped into option helpers.</strong> The flat arguments move into four helpers, each validating its own arguments:</p>
+<table class="table"><colgroup><col width="50%"><col width="50%"></colgroup><thead><tr><th>Old argument</th>
+<th>New</th>
+</tr></thead><tbody><tr><td>
+<code>tooltip_delay</code>, <code>tooltip_follow</code>, <code>tooltip_sticky</code>, <code>tooltip_style</code>
+</td>
+<td><code>tooltip = tooltip_options(delay, follow, sticky, style)</code></td>
+</tr><tr><td>
+<code>export_filename</code>, <code>export_scale</code>
+</td>
+<td><code>export = export_options(filename, scale)</code></td>
+</tr><tr><td><code>navigator_height</code></td>
+<td><code>navigator = navigator_options(height)</code></td>
+</tr><tr><td>
+<code>mode</code>, <code>raster_threshold</code>, <code>text</code>
+</td>
+<td><code>render = render_options(mode, raster_threshold, text)</code></td>
+</tr></tbody></table><p><code>navigator</code> still takes <code>TRUE</code>/<code>FALSE</code>. The old names keep working but are deprecated: each warns once per session. Passing an option object together with its own old names (say <code>tooltip = tooltip_options()</code> and <code>tooltip_delay = 250</code>) is an error. <code><a href="../reference/as_widget.html">as_widget()</a></code> drops from 24 formals to 18, and the export filename and scale now always reach the payload (<code>"plot"</code> and <code>1</code> by default, the runtime’s own fallbacks) (R-13).</p>
+</li>
+<li><p><code><a href="../reference/as_widget.html">as_widget()</a></code> now checks every argument up front and fails with an error that names the argument. Before, <code>raster_threshold = NA</code> crashed with “missing value where TRUE/FALSE needed”, <code>tooltip_delay = "abc"</code> sent <code>NA</code> to the browser, and <code>group = 1:3</code> sent an array. Flags must be <code>TRUE</code> or <code>FALSE</code>, sizes and delays non-negative numbers, <code>group</code> / <code>alt</code> / <code>export_filename</code> / <code>elementId</code> single strings, and <code>tooltip_style</code> a named list of its four known fields (an unknown field is now an error, not silently dropped) (VW-6).</p></li>
 <li><p><strong>Hover is cheaper while the pointer stays on one mark (VW-4).</strong> A pointer move that resolves to the same hovered mark and highlight set now only moves the tooltip; it no longer clears and re-applies the highlight classes, re-runs the <code><a href="https://r-vellum.github.io/vellumplot/reference/condition.html" class="external-link">condition()</a></code> pass or rebuilds the tooltip. Moving through empty space no longer re-clears a plot with nothing hovered. On a 3000-mark plot with one hover condition, 50 moves over the same mark went from about 245 ms to about 1 ms in the jsdom benchmark.</p></li>
 </ul></div>
     <div class="section level2">

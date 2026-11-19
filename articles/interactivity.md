@@ -55,22 +55,27 @@ Tooltip text is rendered as **safe HTML**: build a multi-line, formatted
 string in `tooltip =` (here with `glue`) using `<b>` and `<br>`. Data
 values are escaped, and only inert tags (`<b>`, `<i>`, `<br>`, `<span>`)
 are honoured, so there is no injection risk. Style the box with
-`tooltip_style`.
+`tooltip_options(style =)`.
 
 ``` r
 
 df$label <- glue::glue("<b>{df$model}</b><br>{df$mpg} mpg · {df$wt}k lbs")
 vplot(df) |>
   mark_point(x = wt, y = mpg, tooltip = label, data_id = model) |>
-  as_widget(tooltip_style = list(background = "#1d3557", fontsize = "13px"))
+  as_widget(
+    tooltip = tooltip_options(
+      style = list(background = "#1d3557", fontsize = "13px")
+    )
+  )
 ```
 
-Tune its behaviour too: `tooltip_delay` waits a beat before showing
-(calmer on a dense scatter), `tooltip_follow = FALSE` anchors it above
-the mark instead of tracking the cursor, and `tooltip_sticky = TRUE`
-lets you move into the tooltip — useful when the HTML holds a link or
-button. The box auto-flips below the cursor near the top edge and stays
-within the widget.
+Tune its behaviour in the same
+[`tooltip_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md)
+call: `delay` waits a beat before showing (calmer on a dense scatter),
+`follow = FALSE` anchors it above the mark instead of tracking the
+cursor, and `sticky = TRUE` lets you move into the tooltip — useful when
+the HTML holds a link or button. The box auto-flips below the cursor
+near the top edge and stays within the widget.
 
 ### Shared tooltips and a crosshair
 
@@ -232,11 +237,12 @@ constant.
 
 ### Overview navigator
 
-For long series, `navigator = TRUE` adds a strip below the plot showing
-the whole scene in miniature, with a draggable, resizable window marking
-the visible x-range. Drag the window to pan, drag a handle to zoom — it
-stays in sync with the main view (wheel, keyboard, brush, and
-linked-group changes all move it).
+For long series, `navigator = TRUE` (or `navigator_options(height =)` to
+size the strip) adds a strip below the plot showing the whole scene in
+miniature, with a draggable, resizable window marking the visible
+x-range. Drag the window to pan, drag a handle to zoom — it stays in
+sync with the main view (wheel, keyboard, brush, and linked-group
+changes all move it).
 
 The navigator is an **x-range** tool, so zoom is one-dimensional: the
 selected x-range fills the width while the **full y-range stays on
@@ -262,7 +268,7 @@ shown. Set the download name and a hi-res PNG scale:
 
 vplot(df) |>
   mark_point(x = wt, y = mpg, data_id = model) |>
-  as_widget(export_filename = "mtcars", export_scale = 2)
+  as_widget(export = export_options(filename = "mtcars", scale = 2))
 ```
 
 ## Accessibility
@@ -381,8 +387,8 @@ reference for
 
 ## Styling
 
-`tooltip_style` themes the tooltip box (above). Per-mark hover/selected
-outlines are declared in `vellumplot`
+`tooltip_options(style =)` themes the tooltip box (above). Per-mark
+hover/selected outlines are declared in `vellumplot`
 (`mark_*(hover_color =, selected_color =)`); richer per-element styling
 by selection membership uses
 [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)

@@ -88,25 +88,19 @@ focused — see the <code>a11y</code> argument.</p>
 <span>  height <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  toolbar <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  navigator <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  navigator_height <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  hover_mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"closest"</span>, <span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>,</span>
 <span>  crosshair <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  legend_click <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"select"</span>, <span class="st">"hide"</span>, <span class="st">"mute"</span><span class="op">)</span>,</span>
 <span>  a11y <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  alt <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  tooltip_delay <span class="op">=</span> <span class="fl">0</span>,</span>
-<span>  tooltip_follow <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  tooltip_sticky <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  tooltip_style <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  export_filename <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  export_scale <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  tooltip <span class="op">=</span> <span class="fu"><a href="widget-options.html">tooltip_options</a></span><span class="op">(</span><span class="op">)</span>,</span>
+<span>  export <span class="op">=</span> <span class="fu"><a href="widget-options.html">export_options</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  group <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  crosstalk <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  select_mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"multiple"</span>, <span class="st">"single"</span><span class="op">)</span>,</span>
-<span>  mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"auto"</span>, <span class="st">"svg"</span>, <span class="st">"raster"</span><span class="op">)</span>,</span>
-<span>  raster_threshold <span class="op">=</span> <span class="fl">20000L</span>,</span>
-<span>  text <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"native"</span>, <span class="st">"outline"</span><span class="op">)</span>,</span>
-<span>  elementId <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  render <span class="op">=</span> <span class="fu"><a href="widget-options.html">render_options</a></span><span class="op">(</span><span class="op">)</span>,</span>
+<span>  elementId <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  <span class="va">...</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -141,12 +135,8 @@ declared in the plot spec instead (see <code><a href="https://r-vellum.github.io
 draggable, resizable window marking the visible x-range. Drag the window to
 pan, drag a handle to zoom; it stays two-way in sync with the main view
 (wheel/keyboard/brush and linked-group changes all move it). Useful for long
-series. <code>navigator_height</code> sets the strip height in pixels (default <code>56</code>).</p></dd>
-
-
-<dt id="arg-navigator-height">navigator_height<a class="anchor" aria-label="anchor" href="#arg-navigator-height"></a></dt>
-<dd><p>Height of the navigator strip in pixels (default <code>56</code>);
-ignored unless <code>navigator = TRUE</code>.</p></dd>
+series. <code>TRUE</code> shows it with the defaults; pass <code><a href="widget-options.html">navigator_options()</a></code> to
+show it and set its height.</p></dd>
 
 
 <dt id="arg-hover-mode">hover_mode<a class="anchor" aria-label="anchor" href="#arg-hover-mode"></a></dt>
@@ -196,36 +186,16 @@ plot title and <code><a href="https://r-vellum.github.io/vellumplot/reference/pl
 a raw <code>vellum</code> scene or to override.</p></dd>
 
 
-<dt id="arg-tooltip-delay">tooltip_delay<a class="anchor" aria-label="anchor" href="#arg-tooltip-delay"></a></dt>
-<dd><p>Milliseconds to wait before the tooltip appears on hover
-(default <code>0</code>, i.e. immediate). The highlight is unaffected — only the tooltip
-waits. A short delay (e.g. <code>250</code>) calms a dense scatter.</p></dd>
+<dt id="arg-tooltip">tooltip<a class="anchor" aria-label="anchor" href="#arg-tooltip"></a></dt>
+<dd><p>Tooltip behaviour and style, from <code><a href="widget-options.html">tooltip_options()</a></code>: the
+show delay, whether the box follows the cursor, whether it is sticky, and the
+box style. <code>NULL</code> is the same as <code><a href="widget-options.html">tooltip_options()</a></code>.</p></dd>
 
 
-<dt id="arg-tooltip-follow">tooltip_follow<a class="anchor" aria-label="anchor" href="#arg-tooltip-follow"></a></dt>
-<dd><p>When <code>TRUE</code> (default) the tooltip tracks the cursor; when
-<code>FALSE</code> it anchors above the hovered mark's centre.</p></dd>
-
-
-<dt id="arg-tooltip-sticky">tooltip_sticky<a class="anchor" aria-label="anchor" href="#arg-tooltip-sticky"></a></dt>
-<dd><p>When <code>TRUE</code>, the tooltip accepts pointer events and lingers
-briefly when you leave the mark, so you can move into it — for tooltips that
-contain links or buttons (build the HTML via <code>tooltip =</code>). Default <code>FALSE</code>.</p></dd>
-
-
-<dt id="arg-tooltip-style">tooltip_style<a class="anchor" aria-label="anchor" href="#arg-tooltip-style"></a></dt>
-<dd><p>Optional named list styling the tooltip box:
-<code>background</code> / <code>color</code> (any R or CSS colour), <code>fontsize</code>, and <code>max_width</code>
-(any CSS length). <code>NULL</code> (default) uses the built-in style. Tooltip text is
-rendered as safe HTML — an author-built <code>tooltip =</code> (e.g. via <code>glue()</code>) may
-use <code>&lt;b&gt;</code>/<code>&lt;i&gt;</code>/<code>&lt;br&gt;</code> for bold/italic/line breaks; data values are escaped
-and only those inert tags are honoured (no scripts/attributes).</p></dd>
-
-
-<dt id="arg-export-filename-export-scale">export_filename, export_scale<a class="anchor" aria-label="anchor" href="#arg-export-filename-export-scale"></a></dt>
-<dd><p>The download filename base (no extension;
-default <code>"plot"</code>) and the PNG resolution multiplier (default <code>1</code>) for the
-toolbar's SVG/PNG export. Exports capture the current (zoomed/panned) view.</p></dd>
+<dt id="arg-export">export<a class="anchor" aria-label="anchor" href="#arg-export"></a></dt>
+<dd><p>The toolbar's SVG/PNG download settings, from
+<code><a href="widget-options.html">export_options()</a></code>: the filename and PNG scale. <code>NULL</code> is the same as
+<code><a href="widget-options.html">export_options()</a></code>.</p></dd>
 
 
 <dt id="arg-group">group<a class="anchor" aria-label="anchor" href="#arg-group"></a></dt>
@@ -251,37 +221,24 @@ SharedData's keys. A crosstalk filter hides the non-matching elements
 <code>"single"</code> (click replaces the selection).</p></dd>
 
 
-<dt id="arg-mode">mode<a class="anchor" aria-label="anchor" href="#arg-mode"></a></dt>
-<dd><p>Rendering strategy for the marks. <code>"auto"</code> (default) ships a
-per-element SVG for small/moderate plots and switches to a single embedded
-raster image above <code>raster_threshold</code> keyed elements; <code>"svg"</code> always uses the
-per-element SVG; <code>"raster"</code> always uses the image. In raster mode the marks are
-drawn once as a base image and all interaction (hover, click, brush, pan/zoom)
-is driven client-side from the element index (geometry + boxes + keys), so a very
-large scatter (100k+ points) stays navigable with a tiny DOM and a small
-payload. The trade-offs of raster mode: per-element grammar colours,
-per-mark screen-reader focus, and display-tier cross-filtering do not apply
-(there are no per-element DOM nodes), and a zoomed-in view is a scaled raster
-until re-rendered.</p></dd>
-
-
-<dt id="arg-raster-threshold">raster_threshold<a class="anchor" aria-label="anchor" href="#arg-raster-threshold"></a></dt>
-<dd><p>Keyed-element count above which <code>mode = "auto"</code> switches
-to the raster image (default <code>20000</code>).</p></dd>
-
-
-<dt id="arg-text">text<a class="anchor" aria-label="anchor" href="#arg-text"></a></dt>
-<dd><p>How text is written into the SVG, passed to <code><a href="https://r-vellum.github.io/vellum/reference/scene_svg.html" class="external-link">vellum::scene_svg()</a></code>:
-<code>"native"</code> (default) emits selectable <code>&lt;text&gt;</code> referencing system fonts —
-smaller when the page has the font, post-processable, and better for
-accessibility and LLMs; <code>"outline"</code> emits glyph outlines that are
-pixel-faithful and font-independent but not selectable. Applies to the
-per-element SVG path only; in raster mode (see <code>mode</code>) text is baked into the
-base image and this argument is ignored (with a warning if set explicitly).</p></dd>
+<dt id="arg-render">render<a class="anchor" aria-label="anchor" href="#arg-render"></a></dt>
+<dd><p>How the marks are drawn, from <code><a href="widget-options.html">render_options()</a></code>: per-element
+SVG or a single raster image (<code>mode</code>), the element count at which <code>"auto"</code>
+switches to the image (<code>raster_threshold</code>), and how SVG text is written
+(<code>text</code>). <code>NULL</code> is the same as <code><a href="widget-options.html">render_options()</a></code>.</p></dd>
 
 
 <dt id="arg-elementid">elementId<a class="anchor" aria-label="anchor" href="#arg-elementid"></a></dt>
 <dd><p>Optional explicit widget DOM id.</p></dd>
+
+
+<dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
+<dd><p>Deprecated flat arguments, still accepted with a once-per-session
+warning: <code>tooltip_delay</code>, <code>tooltip_follow</code>, <code>tooltip_sticky</code> and
+<code>tooltip_style</code> (now <code>tooltip = tooltip_options()</code>), <code>export_filename</code> and
+<code>export_scale</code> (now <code>export = export_options()</code>), <code>navigator_height</code> (now
+<code>navigator = navigator_options()</code>), and <code>mode</code>, <code>raster_threshold</code> and
+<code>text</code> (now <code>render = render_options()</code>).</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -304,6 +261,11 @@ table and the SVG <code>data-key</code> / <code>data-vellum-*</code> attributes 
 vellum's "The scene contract" vignette
 (<code><a href="https://r-vellum.github.io/vellum/articles/scene-contract.html" class="external-link">vignette("scene-contract", package = "vellum")</a></code>).</p>
     </div>
+    <div class="section level2">
+    <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
+    <div class="dont-index"><p><code><a href="widget-options.html">tooltip_options()</a></code>, <code><a href="widget-options.html">export_options()</a></code>, <code><a href="widget-options.html">navigator_options()</a></code> and
+<code><a href="widget-options.html">render_options()</a></code> for the grouped settings.</p></div>
+    </div>
 
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
@@ -313,6 +275,15 @@ vellum's "The scene contract" vignette
 <span class="r-in"><span><span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/vplot.html" class="external-link">vplot</a></span><span class="op">(</span><span class="va">df</span><span class="op">)</span> <span class="op">|&gt;</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/mark_point.html" class="external-link">mark_point</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">wt</span>, y <span class="op">=</span> <span class="va">mpg</span>, tooltip <span class="op">=</span> <span class="va">model</span>, data_id <span class="op">=</span> <span class="va">model</span><span class="op">)</span> <span class="op">|&gt;</span></span></span>
 <span class="r-in"><span>  <span class="fu">as_widget</span><span class="op">(</span><span class="op">)</span></span></span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span><span class="co"># Grouped options</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/vplot.html" class="external-link">vplot</a></span><span class="op">(</span><span class="va">df</span><span class="op">)</span> <span class="op">|&gt;</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://r-vellum.github.io/vellumplot/reference/mark_point.html" class="external-link">mark_point</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">wt</span>, y <span class="op">=</span> <span class="va">mpg</span>, tooltip <span class="op">=</span> <span class="va">model</span>, data_id <span class="op">=</span> <span class="va">model</span><span class="op">)</span> <span class="op">|&gt;</span></span></span>
+<span class="r-in"><span>  <span class="fu">as_widget</span><span class="op">(</span></span></span>
+<span class="r-in"><span>    tooltip <span class="op">=</span> <span class="fu"><a href="widget-options.html">tooltip_options</a></span><span class="op">(</span>delay <span class="op">=</span> <span class="fl">250</span>, style <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>background <span class="op">=</span> <span class="st">"#1d3557"</span><span class="op">)</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>    export <span class="op">=</span> <span class="fu"><a href="widget-options.html">export_options</a></span><span class="op">(</span>filename <span class="op">=</span> <span class="st">"mtcars"</span>, scale <span class="op">=</span> <span class="fl">2</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>    render <span class="op">=</span> <span class="fu"><a href="widget-options.html">render_options</a></span><span class="op">(</span>mode <span class="op">=</span> <span class="st">"svg"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span> <span class="co"># }</span></span></span>
 </code></pre></div>
     </div>

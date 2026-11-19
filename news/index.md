@@ -2,6 +2,26 @@
 
 ## vellumwidget 0.10.0.9000
 
+- **[`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)’s
+  settings are grouped into option helpers.** The flat arguments move
+  into four helpers, each validating its own arguments:
+
+  | Old argument | New |
+  |----|----|
+  | `tooltip_delay`, `tooltip_follow`, `tooltip_sticky`, `tooltip_style` | `tooltip = tooltip_options(delay, follow, sticky, style)` |
+  | `export_filename`, `export_scale` | `export = export_options(filename, scale)` |
+  | `navigator_height` | `navigator = navigator_options(height)` |
+  | `mode`, `raster_threshold`, `text` | `render = render_options(mode, raster_threshold, text)` |
+
+  `navigator` still takes `TRUE`/`FALSE`. The old names keep working but
+  are deprecated: each warns once per session. Passing an option object
+  together with its own old names (say `tooltip = tooltip_options()` and
+  `tooltip_delay = 250`) is an error.
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  drops from 24 formals to 18, and the export filename and scale now
+  always reach the payload (`"plot"` and `1` by default, the runtime’s
+  own fallbacks) (R-13).
+
 - [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
   now checks every argument up front and fails with an error that names
   the argument. Before, `raster_threshold = NA` crashed with “missing

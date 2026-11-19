@@ -8,6 +8,15 @@ self-contained, client-side interactive HTML widget.
 - [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
   : Turn a vellum scene (or vellumplot plot) into an interactive widget
 
+- [`tooltip_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md)
+  [`export_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md)
+  [`navigator_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md)
+  [`render_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md)
+  :
+
+  Option helpers for
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+
 ## Shiny
 
 Output and render bindings for embedding a vellumwidget widget in a
