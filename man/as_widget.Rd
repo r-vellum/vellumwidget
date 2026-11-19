@@ -10,25 +10,19 @@ as_widget(
   height = NULL,
   toolbar = TRUE,
   navigator = FALSE,
-  navigator_height = NULL,
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
   legend_click = c("select", "hide", "mute"),
   a11y = TRUE,
   alt = NULL,
-  tooltip_delay = 0,
-  tooltip_follow = TRUE,
-  tooltip_sticky = FALSE,
-  tooltip_style = NULL,
-  export_filename = NULL,
-  export_scale = NULL,
+  tooltip = tooltip_options(),
+  export = export_options(),
   group = NULL,
   crosstalk = NULL,
   select_mode = c("multiple", "single"),
-  mode = c("auto", "svg", "raster"),
-  raster_threshold = 20000L,
-  text = c("native", "outline"),
-  elementId = NULL
+  render = render_options(),
+  elementId = NULL,
+  ...
 )
 }
 \arguments{
@@ -52,10 +46,8 @@ declared in the plot spec instead (see \code{vellumplot::condition()} /
 draggable, resizable window marking the visible x-range. Drag the window to
 pan, drag a handle to zoom; it stays two-way in sync with the main view
 (wheel/keyboard/brush and linked-group changes all move it). Useful for long
-series. \code{navigator_height} sets the strip height in pixels (default \code{56}).}
-
-\item{navigator_height}{Height of the navigator strip in pixels (default \code{56});
-ignored unless \code{navigator = TRUE}.}
+series. \code{TRUE} shows it with the defaults; pass \code{\link[=navigator_options]{navigator_options()}} to
+show it and set its height.}
 
 \item{hover_mode}{How hover gathers marks into the tooltip. \code{"closest"}
 (default) shows the single nearest mark. \code{"x"} (or \code{"y"}) gives a \emph{unified}
@@ -94,27 +86,13 @@ the scene's own title/description — which \code{vellumplot} sets automatically
 plot title and \code{\link[vellumplot:plot_alt]{vellumplot::plot_alt()}} — so an explicit value is only needed for
 a raw \code{vellum} scene or to override.}
 
-\item{tooltip_delay}{Milliseconds to wait before the tooltip appears on hover
-(default \code{0}, i.e. immediate). The highlight is unaffected — only the tooltip
-waits. A short delay (e.g. \code{250}) calms a dense scatter.}
+\item{tooltip}{Tooltip behaviour and style, from \code{\link[=tooltip_options]{tooltip_options()}}: the
+show delay, whether the box follows the cursor, whether it is sticky, and the
+box style. \code{NULL} is the same as \code{tooltip_options()}.}
 
-\item{tooltip_follow}{When \code{TRUE} (default) the tooltip tracks the cursor; when
-\code{FALSE} it anchors above the hovered mark's centre.}
-
-\item{tooltip_sticky}{When \code{TRUE}, the tooltip accepts pointer events and lingers
-briefly when you leave the mark, so you can move into it — for tooltips that
-contain links or buttons (build the HTML via \verb{tooltip =}). Default \code{FALSE}.}
-
-\item{tooltip_style}{Optional named list styling the tooltip box:
-\code{background} / \code{color} (any R or CSS colour), \code{fontsize}, and \code{max_width}
-(any CSS length). \code{NULL} (default) uses the built-in style. Tooltip text is
-rendered as safe HTML — an author-built \verb{tooltip =} (e.g. via \code{glue()}) may
-use \verb{<b>}/\verb{<i>}/\verb{<br>} for bold/italic/line breaks; data values are escaped
-and only those inert tags are honoured (no scripts/attributes).}
-
-\item{export_filename, export_scale}{The download filename base (no extension;
-default \code{"plot"}) and the PNG resolution multiplier (default \code{1}) for the
-toolbar's SVG/PNG export. Exports capture the current (zoomed/panned) view.}
+\item{export}{The toolbar's SVG/PNG download settings, from
+\code{\link[=export_options]{export_options()}}: the filename and PNG scale. \code{NULL} is the same as
+\code{export_options()}.}
 
 \item{group}{Optional linking group name. Widgets sharing a \code{group} link
 client-side: selecting (or brushing) in one highlights the same data keys in
@@ -133,30 +111,19 @@ SharedData's keys. A crosstalk filter hides the non-matching elements
 \item{select_mode}{\code{"multiple"} (default; click toggles each element) or
 \code{"single"} (click replaces the selection).}
 
-\item{mode}{Rendering strategy for the marks. \code{"auto"} (default) ships a
-per-element SVG for small/moderate plots and switches to a single embedded
-raster image above \code{raster_threshold} keyed elements; \code{"svg"} always uses the
-per-element SVG; \code{"raster"} always uses the image. In raster mode the marks are
-drawn once as a base image and all interaction (hover, click, brush, pan/zoom)
-is driven client-side from the element index (geometry + boxes + keys), so a very
-large scatter (100k+ points) stays navigable with a tiny DOM and a small
-payload. The trade-offs of raster mode: per-element grammar colours,
-per-mark screen-reader focus, and display-tier cross-filtering do not apply
-(there are no per-element DOM nodes), and a zoomed-in view is a scaled raster
-until re-rendered.}
-
-\item{raster_threshold}{Keyed-element count above which \code{mode = "auto"} switches
-to the raster image (default \code{20000}).}
-
-\item{text}{How text is written into the SVG, passed to \code{\link[vellum:scene_svg]{vellum::scene_svg()}}:
-\code{"native"} (default) emits selectable \verb{<text>} referencing system fonts —
-smaller when the page has the font, post-processable, and better for
-accessibility and LLMs; \code{"outline"} emits glyph outlines that are
-pixel-faithful and font-independent but not selectable. Applies to the
-per-element SVG path only; in raster mode (see \code{mode}) text is baked into the
-base image and this argument is ignored (with a warning if set explicitly).}
+\item{render}{How the marks are drawn, from \code{\link[=render_options]{render_options()}}: per-element
+SVG or a single raster image (\code{mode}), the element count at which \code{"auto"}
+switches to the image (\code{raster_threshold}), and how SVG text is written
+(\code{text}). \code{NULL} is the same as \code{render_options()}.}
 
 \item{elementId}{Optional explicit widget DOM id.}
+
+\item{...}{Deprecated flat arguments, still accepted with a once-per-session
+warning: \code{tooltip_delay}, \code{tooltip_follow}, \code{tooltip_sticky} and
+\code{tooltip_style} (now \code{tooltip = tooltip_options()}), \code{export_filename} and
+\code{export_scale} (now \code{export = export_options()}), \code{navigator_height} (now
+\code{navigator = navigator_options()}), and \code{mode}, \code{raster_threshold} and
+\code{text} (now \code{render = render_options()}).}
 }
 \value{
 An htmlwidget of class \code{"vellumwidget"}.
@@ -197,5 +164,18 @@ df <- data.frame(wt = mtcars$wt, mpg = mtcars$mpg, model = rownames(mtcars))
 vplot(df) |>
   mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
   as_widget()
+
+# Grouped options
+vplot(df) |>
+  mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
+  as_widget(
+    tooltip = tooltip_options(delay = 250, style = list(background = "#1d3557")),
+    export = export_options(filename = "mtcars", scale = 2),
+    render = render_options(mode = "svg")
+  )
 }
+}
+\seealso{
+\code{\link[=tooltip_options]{tooltip_options()}}, \code{\link[=export_options]{export_options()}}, \code{\link[=navigator_options]{navigator_options()}} and
+\code{\link[=render_options]{render_options()}} for the grouped settings.
 }

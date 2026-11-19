@@ -316,9 +316,7 @@ test_that("tooltip behavior options round-trip", {
   expect_false(o$tooltipSticky)
   o2 <- as_widget(
     scene,
-    tooltip_delay = 250,
-    tooltip_follow = FALSE,
-    tooltip_sticky = TRUE
+    tooltip = tooltip_options(delay = 250, follow = FALSE, sticky = TRUE)
   )$x$options
   expect_equal(o2$tooltipDelay, 250)
   expect_false(o2$tooltipFollow)
@@ -334,7 +332,7 @@ test_that("navigator options round-trip (default off)", {
       key = "a"
     ))
   expect_false(as_widget(scene)$x$options$navigator) # default FALSE
-  o <- as_widget(scene, navigator = TRUE, navigator_height = 80)$x$options
+  o <- as_widget(scene, navigator = navigator_options(height = 80))$x$options
   expect_true(o$navigator)
   expect_equal(o$navigatorHeight, 80)
 })
@@ -416,11 +414,13 @@ test_that("tooltip_style normalises into the payload tip* CSS vars", {
     ))
   s <- as_widget(
     scene,
-    tooltip_style = list(
-      background = "steelblue",
-      color = "white",
-      fontsize = "14px",
-      max_width = "260px"
+    tooltip = tooltip_options(
+      style = list(
+        background = "steelblue",
+        color = "white",
+        fontsize = "14px",
+        max_width = "260px"
+      )
     )
   )$x$options$style
   expect_equal(s$tipBg, "#4682b4") # colour name -> hex
@@ -433,7 +433,7 @@ test_that("tooltip_style normalises into the payload tip* CSS vars", {
   expect_false("tipFontSize" %in% names(s0))
 })
 
-test_that("export_filename / export_scale round-trip into the payload", {
+test_that("export_options() round-trips into the payload", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
     vellum::draw(vellum::points_grob(
       0.5,
@@ -443,15 +443,14 @@ test_that("export_filename / export_scale round-trip into the payload", {
     ))
   ex <- as_widget(
     scene,
-    export_filename = "myplot",
-    export_scale = 2
+    export = export_options(filename = "myplot", scale = 2)
   )$x$options$export
   expect_equal(ex$filename, "myplot")
   expect_equal(ex$scale, 2)
-  # unset -> empty (JS falls back to "plot" @ 1x)
+  # defaults: "plot" @ 1x (the runtime's own fallbacks)
   ex0 <- as_widget(scene)$x$options$export
-  expect_null(ex0$filename)
-  expect_null(ex0$scale)
+  expect_equal(ex0$filename, "plot")
+  expect_equal(ex0$scale, 1)
 })
 
 test_that("per-element grammar colours flow into the payload, normalised (Option 2)", {
@@ -550,7 +549,7 @@ test_that("mode = 'raster' ships a base image with the element index (no per-ele
       key = c("a", "b"),
       meta = list(list(tooltip = "Alpha"), list(tooltip = "Beta"))
     ))
-  w <- as_widget(scene, mode = "raster")
+  w <- as_widget(scene, render = render_options(mode = "raster"))
   expect_true(w$x$options$raster)
   expect_match(w$x$svg, "<image", fixed = TRUE)
   expect_match(w$x$svg, "data:image/png;base64,", fixed = TRUE)
@@ -605,7 +604,9 @@ test_that("a multi-ring path ships its ring boundaries", {
 test_that("an even-odd fill ships its rule so the runtime finds the hole", {
   # Picking follows the fill rule (as vellum's `pick_table` does): the runtime
   # needs to know which elements are even-odd to treat a hole as a hole.
-  skip_if_not("rule" %in% names(vellum::element_geometry(vellum::vl_scene(1, 1))))
+  skip_if_not(
+    "rule" %in% names(vellum::element_geometry(vellum::vl_scene(1, 1)))
+  )
   ring <- function(rule) {
     vellum::path_grob(
       x = c(0.1, 0.9, 0.9, 0.1, 0.4, 0.6, 0.6, 0.4),
@@ -631,7 +632,11 @@ test_that("a scene with no even-odd fill ships no rule column", {
   # Absent means nonzero, the engine's default, so the common payload is
   # unchanged.
   scene <- vellum::vl_scene(3, 2, dpi = 100) |>
-    vellum::draw(vellum::polygon_grob(c(.2, .8, .5), c(.2, .2, .8), key = "tri"))
+    vellum::draw(vellum::polygon_grob(
+      c(.2, .8, .5),
+      c(.2, .2, .8),
+      key = "tri"
+    ))
   expect_null(as_widget(scene)$x$geometry$eo)
 })
 
@@ -748,7 +753,7 @@ test_that("the raster base image is encoded in memory (no temp file)", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
   before <- list.files(tempdir())
-  w <- as_widget(scene, mode = "raster")
+  w <- as_widget(scene, render = render_options(mode = "raster"))
   # `scene_png()` hands over the bytes, so nothing lands in tempdir() -- and
   # nothing is left behind for a later `unlink()` to have to clean up either.
   expect_setequal(list.files(tempdir()), before)
@@ -758,7 +763,7 @@ test_that("the raster base image is encoded in memory (no temp file)", {
 test_that("the raster base image is rendered at 2x for HiDPI screens", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
-  w <- as_widget(scene, mode = "raster")
+  w <- as_widget(scene, render = render_options(mode = "raster"))
   # The shell is in device px -- the space the bboxes are in -- while the image
   # it carries has twice as many pixels per side.
   expect_match(
@@ -782,8 +787,8 @@ test_that("the raster shell is the same size as the SVG mode's, at any page size
     scene <- vellum::vl_scene(wi, 2.331, dpi = 97) |>
       vellum::draw(vellum::points_grob(0.5, 0.5, key = "a"))
     expect_equal(
-      as_widget(scene, mode = "raster")$width,
-      as_widget(scene, mode = "svg")$width,
+      as_widget(scene, render = render_options(mode = "raster"))$width,
+      as_widget(scene, render = render_options(mode = "svg"))$width,
       info = paste("page width", wi)
     )
   }
@@ -804,10 +809,18 @@ test_that("mode = 'auto' switches to raster above raster_threshold, stays SVG be
   expect_false(as_widget(scene)$x$options$raster)
   expect_match(as_widget(scene)$x$svg, 'data-key="a"', fixed = TRUE)
   # a low threshold flips auto to raster
-  expect_true(as_widget(scene, raster_threshold = 1)$x$options$raster)
+  expect_true(
+    as_widget(
+      scene,
+      render = render_options(raster_threshold = 1)
+    )$x$options$raster
+  )
   # mode = 'svg' overrides the threshold
   expect_false(
-    as_widget(scene, mode = "svg", raster_threshold = 1)$x$options$raster
+    as_widget(
+      scene,
+      render = render_options(mode = "svg", raster_threshold = 1)
+    )$x$options$raster
   )
 })
 
@@ -820,7 +833,7 @@ test_that("raster shell carries the scene title/description for accessibility", 
     desc = "A big scatter."
   ) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
-  svg <- as_widget(scene, mode = "raster")$x$svg
+  svg <- as_widget(scene, render = render_options(mode = "raster"))$x$svg
   expect_match(svg, "<title id=\"vw-t\">My cloud</title>", fixed = TRUE)
   expect_match(svg, "<desc id=\"vw-d\">A big scatter.</desc>", fixed = TRUE)
   expect_match(svg, "role=\"img\"", fixed = TRUE)
@@ -838,7 +851,10 @@ test_that("text = 'native' (default) emits selectable <text>; 'outline' emits gl
   svg_default <- as_widget(scene)$x$svg
   expect_match(svg_default, "<text", fixed = TRUE)
   # explicit outline: glyph paths, no <text>
-  svg_outline <- as_widget(scene, text = "outline")$x$svg
+  svg_outline <- as_widget(
+    scene,
+    render = render_options(text = "outline")
+  )$x$svg
   expect_match(svg_outline, "<path", fixed = TRUE)
   expect_no_match(svg_outline, "<text")
 })
@@ -847,11 +863,14 @@ test_that("text is ignored (with a warning) in raster mode", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
   expect_warning(
-    as_widget(scene, mode = "raster", text = "outline"),
+    as_widget(
+      scene,
+      render = render_options(mode = "raster", text = "outline")
+    ),
     "ignored in raster mode"
   )
   # not passing `text` explicitly stays quiet
-  expect_no_warning(as_widget(scene, mode = "raster"))
+  expect_no_warning(as_widget(scene, render = render_options(mode = "raster")))
 })
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
@@ -920,5 +939,9 @@ test_that("as_widget() argument count is a tripwire (prefer the spec; see CLAUDE
   # affordance, bump the baseline below by one (and note it in the commit).
   # Interaction-intent flags were removed in favour of declarative interactivity
   # in the plot spec (select_point/condition/filter_by); the baseline is now 24.
-  expect_lte(length(formals(as_widget)), 24L)
+  # R-13 grouped the tooltip_*/export_*/navigator_height/mode/raster_threshold/
+  # text flags into tooltip_options()/export_options()/navigator_options()/
+  # render_options() (the old names ride along in `...`), so the baseline is
+  # now 18 (17 named arguments plus `...`).
+  expect_lte(length(formals(as_widget)), 18L)
 })
