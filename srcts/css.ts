@@ -90,18 +90,23 @@ export const VELLUMWIDGET_CSS = `
 /* Optional hover stroke, opt-in per element (.vellumwidget-hc) or widget-wide
    (.vellumwidget-hc-all on the root). Never applied to a mark that has no hover colour,
    so a bordered shape is not clobbered on hover. Colour resolves from the nearest
-   --vellumwidget-hl-stroke (element var overrides the root var). */
+   --vellumwidget-hl-stroke (element var overrides the root var).
+   The rings use paint-order: normal (stroke over fill), so the whole ring shows
+   whether a keyed mark is one element carrying both fill and stroke (newer
+   vellum) or a fill followed by a fill="none" stroke twin (older vellum).
+   Painting the stroke under the fill, a single element's fill would hide the inner
+   half of the ring. */
 .vellumwidget-hc-all [data-key].vellumwidget-hl, [data-key].vellumwidget-hc.vellumwidget-hl {
-  stroke: var(--vellumwidget-hl-stroke); stroke-width: var(--vellumwidget-hl-width, 2px); paint-order: stroke fill;
+  stroke: var(--vellumwidget-hl-stroke); stroke-width: var(--vellumwidget-hl-width, 2px); paint-order: normal;
 }
 [data-key].vellumwidget-selected {
   stroke: var(--vellumwidget-selected-stroke, #111827);
-  stroke-width: var(--vellumwidget-selected-width, 1.4px); paint-order: stroke fill;
+  stroke-width: var(--vellumwidget-selected-width, 1.4px); paint-order: normal;
 }
 /* Keyboard focus ring on the currently-traversed mark (a11y). */
 [data-key].vellumwidget-focus {
   stroke: var(--vellumwidget-focus-stroke, #2563eb);
-  stroke-width: var(--vellumwidget-focus-width, 2.5px); paint-order: stroke fill;
+  stroke-width: var(--vellumwidget-focus-width, 2.5px); paint-order: normal;
 }
 [data-key]:focus { outline: none; }
 [data-key]:focus-visible { outline: 2px solid var(--vellumwidget-focus-stroke, #2563eb); outline-offset: 1px; }

@@ -1,5 +1,15 @@
 # vellumwidget 0.11.0.9000
 
+* **Selection, hover and focus rings show in full on a point drawn as one
+  element (VW-12).** vellum is moving a keyed point with a solid fill and an
+  undashed solid stroke from a fill element plus a `fill="none"` stroke twin to
+  one element carrying both paints, halving the DOM nodes of a scatter. The ring
+  rules painted the stroke under the fill (`paint-order: stroke fill`), which on
+  one element hides the inner half of the ring; they now use
+  `paint-order: normal`, so the ring looks the same on both outputs. The widget
+  works with either: hover, selection and conditional colours act on every node
+  of a key, and a condition recolours the fill and stroke a node actually uses.
+
 # vellumwidget 0.11.0
 
 * **Linked widgets follow a changed `group` and are freed when removed (VW-5).**
