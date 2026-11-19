@@ -129,14 +129,18 @@ filter); <code>NULL</code> when the full range is shown. State input.</p></dd>
 <dt><code>input$plot_zoom</code></dt>
 <dd><p>A list <code>list(x=, y=, w=, h=, zoomed=)</code> — the current
 view (the SVG <code>viewBox</code> in device-pixel coordinates) plus a <code>zoomed</code> flag
-(is the view narrower/shorter than the full extent). For a single-panel
-cartesian plot it also carries <code>data = list(x=c(lo,hi), y=c(lo,hi), panel=)</code>,
-the visible range in <strong>data</strong> coordinates. Updates as state when a zoom/pan
+(is the view narrower/shorter than the full extent). A cartesian plot
+also carries <code>panels</code>, a list keyed by panel id (<code>"panel-1-1"</code>, ...) with
+each panel's visible range in <strong>data</strong> coordinates,
+<code>list(x=c(lo,hi), y=c(lo,hi), panel=)</code>, or <code>NULL</code> for a panel scrolled out
+of view. Facets zoom per panel, so read <code>panels</code> for a faceted plot. A
+single-panel plot keeps the older <code>data</code> field, the same range as its one
+<code>panels</code> entry. Updates as state when a zoom/pan
 settles (wheel, drag-pan release, pinch, keyboard, reset, zoom-to-selection,
 or a proxy <code><a href="vellumwidget-proxy-verbs.html">vw_zoom()</a></code>).</p></dd>
 
 
-</dl><p>Data-space coordinates (<code>x0d</code>/… and <code>zoom$data</code>) come from the per-panel scale
+</dl><p>Data-space coordinates (<code>x0d</code>/…, <code>zoom$data</code> and <code>zoom$panels</code>) come from the per-panel scale
 descriptors <code>vellumplot</code> attaches to the scene; a raw <code>vellum</code> scene or a
 non-cartesian coordinate system carries none, and only the device-pixel fields
 are reported. Some specifics:</p><ul><li><p>They describe the <strong>visual</strong> axes: <code>x0d</code>/<code>x1d</code> (and <code>zoom$data$x</code>) are the

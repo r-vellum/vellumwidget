@@ -765,6 +765,50 @@
     return out;
   }();
   var timeFmtCache = /* @__PURE__ */ new WeakMap();
+  var tzFormatters = {};
+  function zoneOffset(tz, ms) {
+    let f = tzFormatters[tz];
+    if (f === void 0) {
+      try {
+        f = new Intl.DateTimeFormat("en-US", {
+          timeZone: tz,
+          hour12: false,
+          year: "numeric",
+          month: "numeric",
+          day: "numeric",
+          hour: "numeric",
+          minute: "numeric",
+          second: "numeric"
+        });
+      } catch (e) {
+        f = null;
+      }
+      tzFormatters[tz] = f;
+    }
+    if (!f || !isFinite(ms)) return null;
+    const parts = f.formatToParts(new Date(ms));
+    const get = (t) => {
+      for (let i = 0; i < parts.length; i++) if (parts[i].type === t) return Number(parts[i].value);
+      return NaN;
+    };
+    const wall = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"), get("second"));
+    return isFinite(wall) ? wall - Math.floor(ms / 1e3) * 1e3 : null;
+  }
+  function browserZone() {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function allZones() {
+    const I = Intl;
+    try {
+      return typeof I.supportedValuesOf === "function" ? I.supportedValuesOf("timeZone") : [];
+    } catch (e) {
+      return [];
+    }
+  }
   function detectTimeFormat(ax) {
     const hit = timeFmtCache.get(ax);
     if (hit) return hit;
@@ -772,23 +816,104 @@
     const unitMs = ax.time_unit === "second" ? 1e3 : 864e5;
     let info = { fmt: null, off: 0 };
     if (breaks.length && breaks.length === labels.length) {
-      const offs = ax.time_unit === "second" ? TZ_OFFSETS : [0];
-      search:
-        for (let o = 0; o < offs.length; o++) {
-          for (let f = 0; f < TIME_FORMATS.length; f++) {
-            let all = true;
-            for (let i = 0; i < breaks.length && all; i++) {
-              all = strftimeUTC(TIME_FORMATS[f], Number(breaks[i]) * unitMs + offs[o]) === labels[i].trim();
-            }
-            if (all) {
-              info = { fmt: TIME_FORMATS[f], off: offs[o] };
-              break search;
-            }
+      const ms = breaks.map(function(b) {
+        return Number(b) * unitMs;
+      });
+      const lab = labels.map(function(l) {
+        return l.trim();
+      });
+      if (ax.time_unit !== "second") {
+        for (let f = 0; f < TIME_FORMATS.length; f++) {
+          let all = true;
+          for (let i = 0; i < ms.length && all; i++) all = strftimeUTC(TIME_FORMATS[f], ms[i]) === lab[i];
+          if (all) {
+            info = { fmt: TIME_FORMATS[f], off: 0 };
+            break;
           }
         }
+      } else {
+        for (let f = 0; f < TIME_FORMATS.length; f++) {
+          const r = detectZone(TIME_FORMATS[f], ms, lab);
+          if (r) {
+            info = r;
+            break;
+          }
+        }
+      }
     }
     timeFmtCache.set(ax, info);
     return info;
+  }
+  function detectZone(fmt, ms, lab) {
+    const DAY = 864e5;
+    const ok = [];
+    for (let i = 0; i < ms.length; i++) {
+      const set = {};
+      let any = false;
+      for (let o = 0; o < TZ_OFFSETS.length; o++) {
+        if (strftimeUTC(fmt, ms[i] + TZ_OFFSETS[o]) === lab[i]) {
+          set[TZ_OFFSETS[o]] = true;
+          any = true;
+        }
+      }
+      if (!any) return null;
+      ok.push(set);
+    }
+    const fits = (i, o) => ok[i][o] === true;
+    let fixed = null;
+    for (let o = 0; o < TZ_OFFSETS.length && fixed === null; o++) {
+      let all = true;
+      for (let i = 0; i < ms.length && all; i++) all = fits(i, TZ_OFFSETS[o]);
+      if (all) fixed = TZ_OFFSETS[o];
+    }
+    const midnights = (offs) => {
+      let c = 0;
+      for (let i = 0; i < ms.length; i++) if (((ms[i] + offs[i]) % DAY + DAY) % DAY === 0) c++;
+      return c;
+    };
+    const zoneOffs = (tz) => {
+      const out = [];
+      for (let i = 0; i < ms.length; i++) {
+        const o = zoneOffset(tz, ms[i]);
+        if (o === null || !fits(i, o)) return null;
+        out.push(o);
+      }
+      return out;
+    };
+    let best = null, bestScore = -1;
+    const own = browserZone();
+    if (own) {
+      const zo = zoneOffs(own);
+      if (zo) {
+        best = { fmt, off: zo[0], tz: own };
+        bestScore = midnights(zo);
+      }
+    }
+    if (fixed !== null) {
+      const sc = midnights(ms.map(function() {
+        return fixed;
+      }));
+      if (sc > bestScore) {
+        best = { fmt, off: fixed };
+        bestScore = sc;
+      }
+    }
+    const dayLevel = fmtRank(fmt) >= 3;
+    if (fixed === null || dayLevel && bestScore < ms.length) {
+      const zones = allZones();
+      for (let z = 0; z < zones.length; z++) {
+        if (zones[z] === own) continue;
+        const zo = zoneOffs(zones[z]);
+        if (!zo) continue;
+        const sc = midnights(zo);
+        if (sc > bestScore) {
+          best = { fmt, off: zo[0], tz: zones[z] };
+          bestScore = sc;
+        }
+        if (bestScore === ms.length) break;
+      }
+    }
+    return best;
   }
   var TIME_STEPS = function() {
     const s = 1e3, mi = 60 * s, h = 60 * mi, d = 24 * h;
@@ -819,7 +944,13 @@
     const unitMs = isDate ? 864e5 : 1e3;
     const info = detectTimeFormat(ax);
     const off = info.off;
-    const slo = lo * unitMs + off, shi = hi * unitMs + off;
+    const tz = !isDate && info.tz ? info.tz : null;
+    const offAt = (t) => {
+      if (!tz) return off;
+      const o = zoneOffset(tz, t);
+      return o === null ? off : o;
+    };
+    const slo = lo * unitMs + offAt(lo * unitMs), shi = hi * unitMs + offAt(hi * unitMs);
     const span = shi - slo;
     let step = null;
     for (let i = 0; i < TIME_STEPS.length; i++) {
@@ -860,7 +991,12 @@
       if (w < slo - 1e-6 || w > shi + 1e-6) continue;
       let fmt = useStatic ? info.fmt : defFmt;
       if (!useStatic && step.rank <= 2 && w % 864e5 === 0) fmt = "%Y-%m-%d";
-      out.push({ n: (w - off) / unitMs, label: strftimeUTC(fmt, w) });
+      let inst = w - off;
+      if (tz) {
+        inst = w - offAt(w - offAt(w));
+        if (inst + offAt(inst) !== w) continue;
+      }
+      out.push({ n: inst / unitMs, label: strftimeUTC(fmt, w) });
     }
     return out;
   }
@@ -914,6 +1050,106 @@
       });
     }
     return statics();
+  }
+  function parseSecLabels(labels) {
+    if (labels.length < 2) return null;
+    const NUM = /[-+\u2212]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?(?:[eE][-+]?\d+)?/;
+    let prefix = null, suffix = null, comma = false;
+    const vals = [];
+    for (let i = 0; i < labels.length; i++) {
+      const t = labels[i].trim();
+      const re = new RegExp(NUM.source, "g");
+      let m = null, hit = null;
+      while ((m = re.exec(t)) !== null) {
+        if (/\d/.test(m[0])) {
+          hit = m;
+          break;
+        }
+        re.lastIndex = m.index + 1;
+      }
+      if (!hit) return null;
+      const pre = t.slice(0, hit.index), suf = t.slice(hit.index + hit[0].length);
+      if (/\d/.test(pre) || /\d/.test(suf)) return null;
+      if (prefix === null) {
+        prefix = pre;
+        suffix = suf;
+      } else if (pre !== prefix || suf !== suffix) return null;
+      if (hit[0].indexOf(",") >= 0) comma = true;
+      const v = Number(hit[0].replace(/,/g, "").replace("\u2212", "-"));
+      if (!isFinite(v)) return null;
+      vals.push(v);
+    }
+    return { vals, prefix: prefix || "", suffix: suffix || "", comma };
+  }
+  function secAxisMap(native, labels) {
+    const parsed = parseSecLabels(labels);
+    if (!parsed || native.length !== parsed.vals.length) return null;
+    const idx = native.map(function(_, i) {
+      return i;
+    }).filter(function(i) {
+      return isFinite(native[i]);
+    });
+    idx.sort(function(a, b) {
+      return native[a] - native[b];
+    });
+    const n = idx.map(function(i) {
+      return native[i];
+    });
+    const v = idx.map(function(i) {
+      return parsed.vals[i];
+    });
+    if (n.length < 2) return null;
+    const up = v[1] > v[0];
+    for (let i = 1; i < n.length; i++) {
+      if (!(n[i] > n[i - 1])) return null;
+      if (up ? !(v[i] > v[i - 1]) : !(v[i] < v[i - 1])) return null;
+    }
+    const k = (v[n.length - 1] - v[0]) / (n[n.length - 1] - n[0]);
+    const span = Math.abs(v[n.length - 1] - v[0]) || 1;
+    let linear = true;
+    for (let i = 1; i < n.length - 1 && linear; i++) linear = Math.abs(v[0] + k * (n[i] - n[0]) - v[i]) <= 1e-6 * span;
+    return { n, v, linear, prefix: parsed.prefix, suffix: parsed.suffix, comma: parsed.comma };
+  }
+  function interp(xs, ys, x) {
+    const m = xs.length;
+    const asc = xs[m - 1] > xs[0];
+    let j = 1;
+    while (j < m - 1 && (asc ? x > xs[j] : x < xs[j])) j++;
+    const x0 = xs[j - 1], x1 = xs[j];
+    return ys[j - 1] + (ys[j] - ys[j - 1]) * (x - x0) / (x1 - x0);
+  }
+  function secForward(m, native) {
+    if (m.linear) {
+      const L = m.n.length - 1;
+      return m.v[0] + (m.v[L] - m.v[0]) * (native - m.n[0]) / (m.n[L] - m.n[0]);
+    }
+    return interp(m.n, m.v, native);
+  }
+  function secInverse(m, value) {
+    if (m.linear) {
+      const L = m.n.length - 1;
+      return m.n[0] + (m.n[L] - m.n[0]) * (value - m.v[0]) / (m.v[L] - m.v[0]);
+    }
+    return interp(m.v, m.n, value);
+  }
+  function secTicks(m, lo, hi, count) {
+    const a = secForward(m, lo), b = secForward(m, hi);
+    const vals = niceTicks(Math.min(a, b), Math.max(a, b), count);
+    if (!vals.length) return [];
+    const step = vals.length > 1 ? Math.abs(vals[1] - vals[0]) : Math.abs(vals[0]) || 1;
+    const out = [];
+    for (let i = 0; i < vals.length; i++) {
+      let s = fmtTick(vals[i], step);
+      if (m.comma) {
+        const neg = s.charAt(0) === "-";
+        const body = neg ? s.slice(1) : s;
+        const dot = body.indexOf(".");
+        const int = dot < 0 ? body : body.slice(0, dot);
+        s = (neg ? "-" : "") + int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (dot < 0 ? "" : body.slice(dot));
+      }
+      out.push({ n: secInverse(m, vals[i]), label: m.prefix + s + m.suffix });
+    }
+    return out;
   }
 
   // srcts/viewbox.ts
@@ -998,7 +1234,11 @@
           ay,
           by: p.py0 - ay * ref.py0,
           xLab: null,
-          yLab: null
+          yLab: null,
+          x2Lab: null,
+          y2Lab: null,
+          x2Map: null,
+          y2Map: null
         });
       }
       ws.azPanels = found;
@@ -1111,15 +1351,20 @@
       if (!ws.svgEl) return;
       const groups = ws.svgEl.querySelectorAll('[data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
       for (let g = 0; g < groups.length; g++) {
-        const isX = /^axis-x/.test(groups[g].getAttribute("data-vellum-panel") || "");
+        const gname = groups[g].getAttribute("data-vellum-panel") || "";
+        const isX = /^axis-x/.test(gname);
+        const isSec = /^axis-[xy]2-/.test(gname);
         const texts = groups[g].querySelectorAll("text");
         if (!texts.length) continue;
         let sx = 0, sy = 0, n = 0, gap = 0;
         let first = null;
+        const along = [], labs = [];
         for (let i = 0; i < texts.length; i++) {
           const tr = transTranslate(texts[i]);
           const x = tr.tx + (parseFloat(texts[i].getAttribute("x") || "") || 0);
           const y = tr.ty + (parseFloat(texts[i].getAttribute("y") || "") || 0);
+          along.push(isX ? x : y);
+          labs.push(texts[i].textContent || "");
           if (!first) first = { x, y };
           else if (isX && !gap && y - first.y > 1) gap = y - first.y;
           sx += x;
@@ -1156,6 +1401,27 @@
           baseline: t0.getAttribute("dominant-baseline") || (isX ? "text-before-edge" : "central"),
           gap
         };
+        if (isSec) {
+          const p = best.p;
+          const sc = isX ? p.x : p.y;
+          if (!sc || isX && (t0.getAttribute("text-anchor") || "middle") !== "middle") continue;
+          const k = isX ? (sc.native_hi - sc.native_lo) / (p.px1 - p.px0) : (sc.native_hi - sc.native_lo) / (p.py1 - p.py0);
+          if (!isFinite(k) || !k) continue;
+          const native = along.map(function(v) {
+            return isX ? sc.native_lo + (v - p.px0) * k : sc.native_hi - (v - p.py0) * k;
+          });
+          const map = secAxisMap(native, labs);
+          if (!map) continue;
+          if (isX && !best.x2Lab) {
+            best.x2Lab = anchor;
+            best.x2Map = map;
+          }
+          if (!isX && !best.y2Lab) {
+            best.y2Lab = anchor;
+            best.y2Map = map;
+          }
+          continue;
+        }
         if (isX && !best.xLab) best.xLab = anchor;
         if (!isX && !best.yLab) best.yLab = anchor;
       }
@@ -1229,6 +1495,14 @@
             layer.appendChild(lab);
           }
         }
+        if (a.x2Lab && a.x2Map) {
+          const st = secTicks(a.x2Map, Math.min(nA, nB), Math.max(nA, nB), 5);
+          for (let i = 0; i < st.length; i++) {
+            const sx = t.sx * (p.px0 + (st[i].n - ax.native_lo) / k) + t.tx;
+            if (!isFinite(sx) || sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
+            layer.appendChild(axisLabel(st[i].label, sx, a.x2Lab.pos, a.x2Lab.anchor, a.x2Lab.baseline));
+          }
+        }
       }
       if (p.y && p.py1 !== p.py0) {
         const ay = p.y;
@@ -1243,6 +1517,14 @@
           grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
           if (a.yLab) {
             layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline));
+          }
+        }
+        if (a.y2Lab && a.y2Map) {
+          const st = secTicks(a.y2Map, Math.min(nA, nB), Math.max(nA, nB), 5);
+          for (let i = 0; i < st.length; i++) {
+            const sy = t.sy * (p.py0 + (ay.native_hi - st[i].n) / k) + t.ty;
+            if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
+            layer.appendChild(axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline));
           }
         }
       }
@@ -3660,6 +3942,44 @@
     const inst = findInstance(msg.id);
     if (inst && typeof inst._call === "function") inst._call(msg.method, msg.args);
   }
+  function cssEscape2(value) {
+    const C = typeof window !== "undefined" ? window.CSS : void 0;
+    if (C && typeof C.escape === "function") return C.escape(value);
+    return cssEscapePolyfill(value);
+  }
+  function cssEscapePolyfill(value) {
+    const s = String(value);
+    const n = s.length;
+    let out = "";
+    const first = n ? s.charCodeAt(0) : 0;
+    for (let i = 0; i < n; i++) {
+      const c = s.charCodeAt(i);
+      if (c === 0) {
+        out += "\uFFFD";
+        continue;
+      }
+      if (c >= 1 && c <= 31 || c === 127 || i === 0 && c >= 48 && c <= 57 || i === 1 && c >= 48 && c <= 57 && first === 45) {
+        out += "\\" + c.toString(16) + " ";
+        continue;
+      }
+      if (i === 0 && n === 1 && c === 45) {
+        out += "\\" + s.charAt(i);
+        continue;
+      }
+      if (c >= 128 || c === 45 || c === 95 || c >= 48 && c <= 57 || c >= 65 && c <= 90 || c >= 97 && c <= 122) {
+        out += s.charAt(i);
+        continue;
+      }
+      out += "\\" + s.charAt(i);
+    }
+    return out;
+  }
+  function idSelector(id) {
+    return "#" + cssEscape2(String(id));
+  }
+  function findWidgetById(id) {
+    return HTMLWidgets.find ? HTMLWidgets.find(idSelector(id)) : null;
+  }
   var proxyHandlerRegistered = false;
   function registerProxyHandler() {
     if (proxyHandlerRegistered) return;
@@ -3667,9 +3987,7 @@
     if (!sh || typeof sh.addCustomMessageHandler !== "function") return;
     proxyHandlerRegistered = true;
     sh.addCustomMessageHandler("vellumwidget-calls", function(msg) {
-      dispatchProxyCall(msg, function(id) {
-        return HTMLWidgets.find ? HTMLWidgets.find("#" + id) : null;
-      });
+      dispatchProxyCall(msg, findWidgetById);
     });
   }
 
@@ -4331,20 +4649,46 @@
 
   // srcts/features/viewport.ts
   function viewportFeature(ws) {
+    function panelRange(i) {
+      if (!ws.vb) return null;
+      const p = ws.panels[i];
+      if (ws.axisZoomActive && ws.vb0) {
+        let a, b;
+        const az = ws.azPanels.filter(function(q) {
+          return q.p.name === p.name;
+        })[0];
+        if (az) {
+          const t = ws.fx.azT(az);
+          if (!t.sx || !t.sy) return null;
+          a = { x: (p.px0 - t.tx) / t.sx, y: (p.py0 - t.ty) / t.sy };
+          b = { x: (p.px1 - t.tx) / t.sx, y: (p.py1 - t.ty) / t.sy };
+        } else {
+          a = panToView(ws.vb, ws.vb0, p.px0, p.py0);
+          b = panToView(ws.vb, ws.vb0, p.px1, p.py1);
+        }
+        return ws.fx.dataRangeOf(p, a.x, a.y, b.x, b.y);
+      }
+      let x0 = ws.vb.x, y0 = ws.vb.y, x1 = ws.vb.x + ws.vb.w, y1 = ws.vb.y + ws.vb.h;
+      if (ws.panels.length > 1) {
+        x0 = Math.max(x0, p.px0);
+        y0 = Math.max(y0, p.py0);
+        x1 = Math.min(x1, p.px1);
+        y1 = Math.min(y1, p.py1);
+        if (x1 <= x0 || y1 <= y0) return null;
+      }
+      return ws.fx.dataRangeOf(p, x0, y0, x1, y1);
+    }
     function reportView() {
       if (!ws.vb) return;
       const payload = { x: ws.vb.x, y: ws.vb.y, w: ws.vb.w, h: ws.vb.h, zoomed: ws.vb0 ? isZoomedIn(ws.vb, ws.vb0) : false };
-      if (ws.panels.length === 1) {
-        let d;
-        if (ws.axisZoomActive && ws.vb0) {
-          const p = ws.panels[0];
-          const a = panToView(ws.vb, ws.vb0, p.px0, p.py0);
-          const b = panToView(ws.vb, ws.vb0, p.px1, p.py1);
-          d = ws.fx.dataRangeOf(p, a.x, a.y, b.x, b.y);
-        } else {
-          d = ws.fx.dataRangeOf(ws.panels[0], ws.vb.x, ws.vb.y, ws.vb.x + ws.vb.w, ws.vb.y + ws.vb.h);
+      if (ws.panels.length) {
+        const per = {};
+        for (let i = 0; i < ws.panels.length; i++) per[ws.panels[i].name] = panelRange(i);
+        payload.panels = per;
+        if (ws.panels.length === 1) {
+          const d = per[ws.panels[0].name];
+          if (d) payload.data = d;
         }
-        if (d) payload.data = d;
       }
       ws.fx.shinyInput("zoom", payload);
       if (ws.group && ws.vb0 && !ws.receivingView && ws.vb0.w && ws.vb0.h) {
@@ -4779,6 +5123,10 @@
     unionBbox,
     sanitizeTip,
     dispatchProxyCall,
+    cssEscape: cssEscape2,
+    cssEscapePolyfill,
+    idSelector,
+    findWidgetById,
     normalizeElements,
     isZoomedIn,
     userToCanvas,
@@ -4809,6 +5157,9 @@
     detectTimeFormat,
     axisTicks,
     axisRetickable,
+    parseSecLabels,
+    secAxisMap,
+    secTicks,
     sourceTable,
     bus: vellumwidgetBus
   };

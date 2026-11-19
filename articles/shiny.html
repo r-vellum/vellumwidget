@@ -184,9 +184,11 @@ plot adds data-space bounds <code>x0d,y0d,x1d,y1d</code> +
 <td><code>input$plot_zoom</code></td>
 <td>
 <code>list(x=, y=, w=, h=, zoomed=)</code> — the current view
-(viewBox, device px) + a zoomed flag; a single-panel cartesian plot adds
-<code>data=list(x=, y=, panel=)</code> (visible range in data
-coordinates)</td>
+(viewBox, device px) + a zoomed flag; a cartesian plot adds
+<code>panels</code>, keyed by panel id, each
+<code>list(x=, y=, panel=)</code> (that panel’s visible range in data
+coordinates; facets zoom per panel); a single-panel plot also keeps
+<code>data</code>, the same range</td>
 <td>state</td>
 </tr>
 <tr class="even">
@@ -198,18 +200,18 @@ colorbar; <code>NULL</code> at the full range</td>
 </tr>
 </tbody>
 </table>
-<p>Data-space fields (<code>x0d</code>/… and <code>zoom$data</code>)
-appear only when the plot carries a cartesian scale (any
-<code>vellumplot</code> plot); a raw <code>vellum</code> scene reports
-device-pixel fields only. They describe the <strong>visual</strong> axes
-— <code>x0d</code>/<code>x1d</code> is the horizontal axis, which under
-<code><a href="https://r-vellum.github.io/vellumplot/reference/coord_cartesian.html" class="external-link">coord_flip()</a></code> is the plot’s <code>y</code> aesthetic.
-Date/time axes report the numeric epoch (days for <code>Date</code>,
-seconds for <code>POSIXct</code>) — map back with <code><a href="https://rdrr.io/r/base/as.Date.html" class="external-link">as.Date()</a></code>
-/ <code><a href="https://rdrr.io/r/base/base-internal.html" class="external-link">.POSIXct()</a></code>. A discrete axis reports fractional band
-positions, and an axis with a custom <code>scales::transform_*()</code>
-(beyond identity / log10 / sqrt / reverse) is omitted from the
-data-space fields.</p>
+<p>Data-space fields (<code>x0d</code>/…, <code>zoom$data</code> and
+<code>zoom$panels</code>) appear only when the plot carries a cartesian
+scale (any <code>vellumplot</code> plot); a raw <code>vellum</code>
+scene reports device-pixel fields only. They describe the
+<strong>visual</strong> axes — <code>x0d</code>/<code>x1d</code> is the
+horizontal axis, which under <code><a href="https://r-vellum.github.io/vellumplot/reference/coord_cartesian.html" class="external-link">coord_flip()</a></code> is the plot’s
+<code>y</code> aesthetic. Date/time axes report the numeric epoch (days
+for <code>Date</code>, seconds for <code>POSIXct</code>) — map back with
+<code><a href="https://rdrr.io/r/base/as.Date.html" class="external-link">as.Date()</a></code> / <code><a href="https://rdrr.io/r/base/base-internal.html" class="external-link">.POSIXct()</a></code>. A discrete axis
+reports fractional band positions, and an axis with a custom
+<code>scales::transform_*()</code> (beyond identity / log10 / sqrt /
+reverse) is omitted from the data-space fields.</p>
 <p><strong>State vs event.</strong> <em>State</em> inputs
 (<code>_selected</code>, <code>_hover</code>, <code>_zoom</code>) update
 only when the value changes, so re-selecting the same set (or settling

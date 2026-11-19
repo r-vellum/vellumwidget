@@ -40,6 +40,28 @@
   always reach the payload (`"plot"` and `1` by default, the runtime’s
   own fallbacks) (R-13).
 
+- **Zoom follow-ups for facets, secondary axes and time zones (VW-10).**
+
+  - `input$<id>_zoom` gains `panels`, a list keyed by panel id with each
+    panel’s visible data range (`list(x=, y=, panel=)`), so a faceted
+    plot reports what every facet shows. Under plain viewBox zoom a
+    panel outside the view reports `NULL`. Single-panel plots keep
+    `data` as before, so existing code is unaffected.
+  - Axis-aware zoom re-ticks secondary axes
+    ([`sec_axis()`](https://r-vellum.github.io/vellumplot/reference/sec_axis.html)
+    /
+    [`dup_axis()`](https://r-vellum.github.io/vellumplot/reference/sec_axis.html))
+    instead of hiding them. The transform is read back from the static
+    axis’s own labels: exact for a linear transform, interpolated
+    between the static breaks otherwise. A shared prefix or suffix
+    (`"$"`, `" km"`) and thousands separators carry over. An axis whose
+    labels are not plain numbers stays hidden under zoom.
+  - Datetime ticks get their own UTC offset when the static labels show
+    a daylight-saving change. Such an axis is matched to an IANA time
+    zone that reproduces its labels (the viewer’s zone is tried first),
+    so zooming into a DST change no longer shifts labels by an hour. An
+    axis that one fixed offset explains keeps that offset.
+
 - [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
   now checks every argument up front and fails with an error that names
   the argument. Before, `raster_threshold = NA` crashed with “missing
@@ -49,6 +71,13 @@
   `export_filename` / `elementId` single strings, and `tooltip_style` a
   named list of its four known fields (an unknown field is now an error,
   not silently dropped) (VW-6).
+
+- **[`vellumwidget_proxy()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget_proxy.md)
+  works with module ids (VW-7).** The proxy looked up its widget with a
+  bare `"#" + id` selector, so an output id holding `.` or `:` (common
+  inside Shiny modules) silently matched nothing. The id is now escaped
+  with `CSS.escape()`, with a built-in fallback where the browser lacks
+  it.
 
 - **Hover is cheaper while the pointer stays on one mark (VW-4).** A
   pointer move that resolves to the same hovered mark and highlight set
