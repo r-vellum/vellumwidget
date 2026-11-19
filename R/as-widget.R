@@ -44,9 +44,8 @@
 #'   draggable, resizable window marking the visible x-range. Drag the window to
 #'   pan, drag a handle to zoom; it stays two-way in sync with the main view
 #'   (wheel/keyboard/brush and linked-group changes all move it). Useful for long
-#'   series. `navigator_height` sets the strip height in pixels (default `56`).
-#' @param navigator_height Height of the navigator strip in pixels (default `56`);
-#'   ignored unless `navigator = TRUE`.
+#'   series. `TRUE` shows it with the defaults; pass [navigator_options()] to
+#'   show it and set its height.
 #' @param hover_mode How hover gathers marks into the tooltip. `"closest"`
 #'   (default) shows the single nearest mark. `"x"` (or `"y"`) gives a *unified*
 #'   hover: every mark sharing the hovered x (or y) position is highlighted and
@@ -79,23 +78,12 @@
 #'   the scene's own title/description — which `vellumplot` sets automatically from the
 #'   plot title and [vellumplot::plot_alt()] — so an explicit value is only needed for
 #'   a raw `vellum` scene or to override.
-#' @param tooltip_delay Milliseconds to wait before the tooltip appears on hover
-#'   (default `0`, i.e. immediate). The highlight is unaffected — only the tooltip
-#'   waits. A short delay (e.g. `250`) calms a dense scatter.
-#' @param tooltip_follow When `TRUE` (default) the tooltip tracks the cursor; when
-#'   `FALSE` it anchors above the hovered mark's centre.
-#' @param tooltip_sticky When `TRUE`, the tooltip accepts pointer events and lingers
-#'   briefly when you leave the mark, so you can move into it — for tooltips that
-#'   contain links or buttons (build the HTML via `tooltip =`). Default `FALSE`.
-#' @param tooltip_style Optional named list styling the tooltip box:
-#'   `background` / `color` (any R or CSS colour), `fontsize`, and `max_width`
-#'   (any CSS length). `NULL` (default) uses the built-in style. Tooltip text is
-#'   rendered as safe HTML — an author-built `tooltip =` (e.g. via `glue()`) may
-#'   use `<b>`/`<i>`/`<br>` for bold/italic/line breaks; data values are escaped
-#'   and only those inert tags are honoured (no scripts/attributes).
-#' @param export_filename,export_scale The download filename base (no extension;
-#'   default `"plot"`) and the PNG resolution multiplier (default `1`) for the
-#'   toolbar's SVG/PNG export. Exports capture the current (zoomed/panned) view.
+#' @param tooltip Tooltip behaviour and style, from [tooltip_options()]: the
+#'   show delay, whether the box follows the cursor, whether it is sticky, and the
+#'   box style. `NULL` is the same as `tooltip_options()`.
+#' @param export The toolbar's SVG/PNG download settings, from
+#'   [export_options()]: the filename and PNG scale. `NULL` is the same as
+#'   `export_options()`.
 #' @param select_mode `"multiple"` (default; click toggles each element) or
 #'   `"single"` (click replaces the selection).
 #' @param group Optional linking group name. Widgets sharing a `group` link
@@ -110,27 +98,17 @@
 #'   DT, and crosstalk's `filter_*` inputs). The widget's `data_id`s must match the
 #'   SharedData's keys. A crosstalk filter hides the non-matching elements
 #'   (display-tier cross-filter). Requires the crosstalk package.
-#' @param mode Rendering strategy for the marks. `"auto"` (default) ships a
-#'   per-element SVG for small/moderate plots and switches to a single embedded
-#'   raster image above `raster_threshold` keyed elements; `"svg"` always uses the
-#'   per-element SVG; `"raster"` always uses the image. In raster mode the marks are
-#'   drawn once as a base image and all interaction (hover, click, brush, pan/zoom)
-#'   is driven client-side from the element index (geometry + boxes + keys), so a very
-#'   large scatter (100k+ points) stays navigable with a tiny DOM and a small
-#'   payload. The trade-offs of raster mode: per-element grammar colours,
-#'   per-mark screen-reader focus, and display-tier cross-filtering do not apply
-#'   (there are no per-element DOM nodes), and a zoomed-in view is a scaled raster
-#'   until re-rendered.
-#' @param raster_threshold Keyed-element count above which `mode = "auto"` switches
-#'   to the raster image (default `20000`).
-#' @param text How text is written into the SVG, passed to [vellum::scene_svg()]:
-#'   `"native"` (default) emits selectable `<text>` referencing system fonts —
-#'   smaller when the page has the font, post-processable, and better for
-#'   accessibility and LLMs; `"outline"` emits glyph outlines that are
-#'   pixel-faithful and font-independent but not selectable. Applies to the
-#'   per-element SVG path only; in raster mode (see `mode`) text is baked into the
-#'   base image and this argument is ignored (with a warning if set explicitly).
+#' @param render How the marks are drawn, from [render_options()]: per-element
+#'   SVG or a single raster image (`mode`), the element count at which `"auto"`
+#'   switches to the image (`raster_threshold`), and how SVG text is written
+#'   (`text`). `NULL` is the same as `render_options()`.
 #' @param elementId Optional explicit widget DOM id.
+#' @param ... Deprecated flat arguments, still accepted with a once-per-session
+#'   warning: `tooltip_delay`, `tooltip_follow`, `tooltip_sticky` and
+#'   `tooltip_style` (now `tooltip = tooltip_options()`), `export_filename` and
+#'   `export_scale` (now `export = export_options()`), `navigator_height` (now
+#'   `navigator = navigator_options()`), and `mode`, `raster_threshold` and
+#'   `text` (now `render = render_options()`).
 #' @return An htmlwidget of class `"vellumwidget"`.
 #' @examples
 #' \dontrun{
@@ -139,51 +117,49 @@
 #' vplot(df) |>
 #'   mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
 #'   as_widget()
+#'
+#' # Grouped options
+#' vplot(df) |>
+#'   mark_point(x = wt, y = mpg, tooltip = model, data_id = model) |>
+#'   as_widget(
+#'     tooltip = tooltip_options(delay = 250, style = list(background = "#1d3557")),
+#'     export = export_options(filename = "mtcars", scale = 2),
+#'     render = render_options(mode = "svg")
+#'   )
 #' }
+#' @seealso [tooltip_options()], [export_options()], [navigator_options()] and
+#'   [render_options()] for the grouped settings.
 #' @export
 # NOTE (agents/maintainers): `as_widget()` already carries many behaviour flags.
 # Before adding another interaction argument, consider whether the behaviour
 # belongs in the vellumplot *spec* (declarative interactivity) rather than as one
 # more imperative widget flag. See CLAUDE.md, "Interactivity: prefer the spec over
-# new as_widget() flags". A tripwire test (test-as-widget.R) guards this count.
+# new as_widget() flags". Related settings are grouped into option helpers
+# (R/options.R); a new setting in one of those families belongs in its helper.
+# A tripwire test (test-as-widget.R) guards this count.
 as_widget <- function(
   x,
   width = NULL,
   height = NULL,
   toolbar = TRUE,
   navigator = FALSE,
-  navigator_height = NULL,
   hover_mode = c("closest", "x", "y"),
   crosshair = FALSE,
   legend_click = c("select", "hide", "mute"),
   a11y = TRUE,
   alt = NULL,
-  tooltip_delay = 0,
-  tooltip_follow = TRUE,
-  tooltip_sticky = FALSE,
-  tooltip_style = NULL,
-  export_filename = NULL,
-  export_scale = NULL,
+  tooltip = tooltip_options(),
+  export = export_options(),
   group = NULL,
   crosstalk = NULL,
   select_mode = c("multiple", "single"),
-  mode = c("auto", "svg", "raster"),
-  raster_threshold = 20000L,
-  text = c("native", "outline"),
-  elementId = NULL
+  render = render_options(),
+  elementId = NULL,
+  ...
 ) {
-  text_set <- !missing(text)
   width <- .check_css_size(width, "width")
   height <- .check_css_size(height, "height")
   toolbar <- .check_bool(toolbar, "toolbar")
-  navigator <- .check_bool(navigator, "navigator")
-  navigator_height <- .check_number(
-    navigator_height,
-    "navigator_height",
-    min = 0,
-    min_inclusive = FALSE,
-    allow_null = TRUE
-  )
   hover_mode <- .check_choice(hover_mode, c("closest", "x", "y"), "hover_mode")
   crosshair <- .check_bool(crosshair, "crosshair")
   legend_click <- .check_choice(
@@ -193,43 +169,68 @@ as_widget <- function(
   )
   a11y <- .check_bool(a11y, "a11y")
   alt <- .check_string(alt, "alt", allow_null = TRUE)
-  tooltip_delay <- .check_number(
-    tooltip_delay,
-    "tooltip_delay",
-    min = 0,
-    allow_null = TRUE
-  ) %||%
-    0
-  tooltip_follow <- .check_bool(tooltip_follow, "tooltip_follow")
-  tooltip_sticky <- .check_bool(tooltip_sticky, "tooltip_sticky")
-  tooltip_style <- .check_tooltip_style(tooltip_style)
-  export_filename <- .check_string(
-    export_filename,
-    "export_filename",
-    allow_null = TRUE,
-    allow_empty = FALSE
-  )
-  export_scale <- .check_number(
-    export_scale,
-    "export_scale",
-    min = 0,
-    min_inclusive = FALSE,
-    allow_null = TRUE
-  )
   group <- .check_string(group, "group", allow_null = TRUE, allow_empty = FALSE)
   select_mode <- .check_choice(
     select_mode,
     c("multiple", "single"),
     "select_mode"
   )
-  mode <- .check_choice(mode, c("auto", "svg", "raster"), "mode")
-  raster_threshold <- .check_number(
-    raster_threshold,
-    "raster_threshold",
-    min = 0
-  )
-  text <- .check_choice(text, c("native", "outline"), "text")
   elementId <- .check_string(elementId, "elementId", allow_null = TRUE)
+
+  # Which option objects the caller passed explicitly (read before any of them
+  # is reassigned, which would make missing() FALSE).
+  supplied <- c(
+    if (!missing(tooltip)) "tooltip",
+    if (!missing(export)) "export",
+    if (!missing(render)) "render",
+    if (!is.logical(navigator)) "navigator"
+  )
+
+  # The grouped options. `navigator` is TRUE/FALSE or a navigator_options();
+  # the others take their helper's object (NULL = the defaults).
+  if (!is.logical(navigator)) {
+    navigator <- .check_options(
+      navigator,
+      "navigator",
+      "vellumwidget_navigator_options",
+      "navigator_options"
+    )
+  }
+  tooltip <- .check_options(
+    tooltip,
+    "tooltip",
+    "vellumwidget_tooltip_options",
+    "tooltip_options"
+  )
+  export <- .check_options(
+    export,
+    "export",
+    "vellumwidget_export_options",
+    "export_options"
+  )
+  render <- .check_options(
+    render,
+    "render",
+    "vellumwidget_render_options",
+    "render_options"
+  )
+  # The deprecated flat arguments (tooltip_delay, mode, ...) arrive in `...`
+  # and are folded into the option objects. A logical `navigator` combines with
+  # the old `navigator_height` (as it always did); an explicit option object
+  # does not mix with its own deprecated flat arguments.
+  dep <- .fold_deprecated(list(...), supplied)
+  tooltip <- dep$tooltip %||% tooltip
+  export <- dep$export %||% export
+  render <- dep$render %||% render
+  if (is.logical(navigator)) {
+    navigator <- .check_bool(navigator, "navigator")
+    navigator <- if (!navigator) {
+      NULL
+    } else {
+      dep$navigator %||% navigator_options()
+    }
+  }
+
   # A keyframe animation (from vellumplot::animate()) becomes an embedded animated
   # SVG that plays on its own -- its marks move every frame, so there is no stable
   # per-element geometry to hover, and the interactive machinery is skipped.
@@ -250,16 +251,16 @@ as_widget <- function(
     sum(!is.na(model$elements$key))
   }
   use_raster <- switch(
-    mode,
+    render$mode,
     raster = TRUE,
     svg = FALSE,
-    auto = n_keyed > raster_threshold
+    auto = n_keyed > render$raster_threshold
   )
   if (use_raster) {
     # Raster mode bakes the marks (text included) into a single PNG, so the SVG
     # `text` control has nothing to act on. Flag it only when the caller asked
     # explicitly, so the drop is visible rather than silent.
-    if (text_set) {
+    if (isTRUE(render$text_set)) {
       warning(
         "`text` is ignored in raster mode; text is rendered into the base image.",
         call. = FALSE
@@ -269,7 +270,7 @@ as_widget <- function(
     svg <- r$svg
     dims <- list(width = r$width, height = r$height)
   } else {
-    svg <- vellum::scene_svg(scene, text = text)
+    svg <- vellum::scene_svg(scene, text = render$text)
     dims <- .svg_dims(svg)
   }
 
@@ -288,25 +289,25 @@ as_widget <- function(
       # axis-aware zoom are on by default (interactive-by-default): the runtime
       # supplies the defaults, so they no longer need per-widget flags. Per-mark
       # hover/select styling now comes from the plot spec via `condition()`.
-      navigator = navigator,
-      navigatorHeight = navigator_height,
+      navigator = !is.null(navigator),
+      navigatorHeight = navigator$height,
       toolbar = toolbar,
       hoverMode = hover_mode,
       crosshair = crosshair,
       legendClick = legend_click,
-      tooltipDelay = tooltip_delay,
-      tooltipFollow = tooltip_follow,
-      tooltipSticky = tooltip_sticky,
+      tooltipDelay = tooltip$delay,
+      tooltipFollow = tooltip$follow,
+      tooltipSticky = tooltip$sticky,
       a11y = a11y,
       alt = alt,
       selectMode = select_mode,
       group = group,
       crosstalk = ct_group,
-      style = .tooltip_style(tooltip_style),
-      export = drop_null(list(
-        filename = export_filename,
-        scale = export_scale
-      ))
+      style = .tooltip_style(tooltip$style),
+      export = list(
+        filename = export$filename,
+        scale = export$scale
+      )
     )
   )
 

@@ -87,6 +87,7 @@ reference:
     client-side interactive HTML widget.
   contents:
   - as_widget
+  - widget-options
 
 - title: Shiny
   desc: >

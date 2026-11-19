@@ -44,7 +44,7 @@ test_that("a plot without inspect_source() carries no provenance payload", {
 
 test_that("as_widget() argument count is unchanged (opt-in rides the spec)", {
   # click-to-source must NOT add an as_widget() flag (CLAUDE.md + the tripwire).
-  expect_lte(length(formals(as_widget)), 24L)
+  expect_lte(length(formals(as_widget)), 18L)
 })
 
 layer_data_plot <- function(values = TRUE) {
@@ -59,7 +59,10 @@ layer_data_plot <- function(values = TRUE) {
 skip_if_untagged <- function(p) {
   pl <- vellumplot::provenance_payload(p)
   srcs <- vapply(pl$elements, function(e) e$source %||% NA_character_, "")
-  skip_if(all(is.na(srcs)), "installed vellumplot does not tag provenance sources")
+  skip_if(
+    all(is.na(srcs)),
+    "installed vellumplot does not tag provenance sources"
+  )
   skip_if(is.null(pl$sources), "installed vellumplot ships no `sources` block")
   pl
 }
@@ -112,7 +115,10 @@ test_that("without values, a layer source ships its fields but no rows", {
   skip_if_untagged(p)
   prov <- as_widget(p)$x$provenance
   expect_null(prov$values)
-  expect_identical(as.character(prov$sources[["layer:2"]]$fields), c("wt", "mpg", "lab"))
+  expect_identical(
+    as.character(prov$sources[["layer:2"]]$fields),
+    c("wt", "mpg", "lab")
+  )
   expect_null(prov$sources[["layer:2"]]$values)
 })
 
@@ -134,7 +140,13 @@ test_that("an untagged element (older vellumplot) falls back to the plot data", 
         list(id = "layer-1-point-g1", rows = 1:2), # no `source`
         list(id = "layer-1-point-g2", rows = 3L, source = NA_character_)
       ),
-      data = if (values) list(list(wt = 1, mpg = 2), list(wt = 3, mpg = 4), list(wt = 5, mpg = 6))
+      data = if (values) {
+        list(
+          list(wt = 1, mpg = 2),
+          list(wt = 3, mpg = 4),
+          list(wt = 5, mpg = 6)
+        )
+      }
     )
   }
   local_mocked_bindings(provenance_payload = fake, .package = "vellumplot")

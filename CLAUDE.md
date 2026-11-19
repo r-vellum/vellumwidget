@@ -7,12 +7,30 @@ layers interaction on top in the browser. It does **not** compile the grammar.
 
 ## Interactivity: prefer the spec over new `as_widget()` flags
 
-`as_widget()` has 24 arguments, and a tripwire test caps it there. Hover,
-click-select, brush, lasso, pan/zoom and axis-aware zoom are on by default and
-have no per-widget toggles. The remaining arguments are host-level options
-(`toolbar`, `navigator`, `hover_mode`, `crosshair`, `legend_click`, the
-`tooltip_*` family, `group`, `crosstalk`, `select_mode`, `mode`,
-`raster_threshold`, …). **Before adding another interaction/behaviour argument,
+`as_widget()` has 18 formals (17 named arguments plus `...`), and a tripwire
+test caps it there. Hover, click-select, brush, lasso, pan/zoom and axis-aware
+zoom are on by default and have no per-widget toggles. The remaining arguments
+are host-level options (`toolbar`, `navigator`, `hover_mode`, `crosshair`,
+`legend_click`, `a11y`, `alt`, `group`, `crosstalk`, `select_mode`, …).
+Families of related settings are grouped into option helpers (R-13), each
+validated by its constructor:
+
+- `tooltip = tooltip_options(delay, follow, sticky, style)`
+- `export = export_options(filename, scale)`
+- `navigator = TRUE/FALSE` or `navigator_options(height)`
+- `render = render_options(mode, raster_threshold, text)`
+
+The old flat names (`tooltip_delay`, `tooltip_follow`, `tooltip_sticky`,
+`tooltip_style`, `export_filename`, `export_scale`, `navigator_height`, `mode`,
+`raster_threshold`, `text`) are soft-deprecated: they arrive through `...`, are
+folded into the option objects by `.fold_deprecated()` (`R/options.R`), and warn
+once per session (honouring `lifecycle_verbosity`). Do not use them in new code,
+docs or tests. A new setting that belongs to one of these families goes into its
+helper, not into `as_widget()`. Argument checks live in `R/validate.R`
+(`.check_bool()`, `.check_number()`, `.check_string()`, `.check_choice()`, …);
+every argument is validated, so do the same for anything you add.
+
+**Before adding another interaction/behaviour argument,
 stop and consider whether the behaviour belongs in the `vellumplot` *spec*
 instead**, declared as part of the plot rather than as one more imperative
 widget flag.
@@ -57,7 +75,7 @@ scope client-side; they need a Shiny recompile.
 widget-local, single-plot affordance. But if it smells like "the *plot* should
 know about this," or it needs to coordinate two views, route it through the spec
 and flag it to the maintainer. The tripwire in `tests/testthat/test-as-widget.R`
-(`expect_lte(length(formals(as_widget)), 24L)`) exists to force exactly this
+(`expect_lte(length(formals(as_widget)), 18L)`) exists to force exactly this
 consideration. Bump it only for a genuinely widget-local affordance, and say so
 in the commit.
 
