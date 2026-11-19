@@ -69,23 +69,28 @@ export function pointerFeature(
       ws.fx.clearHover(); // emits hover = null
       return;
     }
+    const hm = ws.opts.hoverMode || "closest";
+    const unified = hm === "x" || hm === "y";
+    const keys = ws.fx.dropInert(unified ? ws.fx.columnKeys(k, hm) : ws.fx.linkedKeys(k));
+    if (!keys.length) { ws.fx.clearHover(); return; }
+    // Same mark, same highlighted set as the last pass: the classes, conditions,
+    // crosshair and tip content are all still right, so only follow the pointer.
+    const sig = hm + "\u0001" + k + "\u0001" + keys.join("\u0001");
+    if (sig === ws.hoverSig) {
+      if (ws.opts.tooltip) ws.fx.moveTip(clientX, clientY, k);
+      return;
+    }
     // The `hover` input reports the primary (nearest) mark in every mode, so the
     // Shiny read-back contract is unchanged; unified mode adds the shared box.
     ws.fx.shinyInput("hover", k); // deduped -> re-fires only when the hovered key changes
-    const hm = ws.opts.hoverMode || "closest";
-    if (hm === "x" || hm === "y") {
-      const keys = ws.fx.dropInert(ws.fx.columnKeys(k, hm));
-      if (!keys.length) { ws.fx.clearHover(); return; }
-      ws.fx.setHoverKeys(keys);
-      if (ws.opts.crosshair) ws.fx.drawCrosshair(k, hm);
-      if (ws.opts.tooltip) ws.fx.showTipMulti(clientX, clientY, keys);
-    } else {
-      const keys = ws.fx.dropInert(ws.fx.linkedKeys(k));
-      if (!keys.length) { ws.fx.clearHover(); return; }
-      ws.fx.setHoverKeys(keys);
-      if (ws.opts.crosshair) ws.fx.drawCrosshair(k, "closest");
-      if (ws.opts.tooltip) ws.fx.showTip(clientX, clientY, k);
+    ws.hovering = true;
+    ws.fx.setHoverKeys(keys);
+    if (ws.opts.crosshair) ws.fx.drawCrosshair(k, unified ? hm : "closest");
+    if (ws.opts.tooltip) {
+      if (unified) ws.fx.showTipMulti(clientX, clientY, keys);
+      else ws.fx.showTip(clientX, clientY, k);
     }
+    ws.hoverSig = sig; // after setHoverKeys, which resets it
   }
 
   function onHoverMove(ev: MouseEvent): void {

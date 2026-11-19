@@ -8,6 +8,14 @@
   `elementId` single strings, and `tooltip_style` a named list of its four known
   fields (an unknown field is now an error, not silently dropped) (VW-6).
 
+* **Hover is cheaper while the pointer stays on one mark (VW-4).** A pointer
+  move that resolves to the same hovered mark and highlight set now only moves
+  the tooltip; it no longer clears and re-applies the highlight classes, re-runs
+  the `condition()` pass or rebuilds the tooltip. Moving through empty space no
+  longer re-clears a plot with nothing hovered. On a 3000-mark plot with one
+  hover condition, 50 moves over the same mark went from about 245 ms to about
+  1 ms in the jsdom benchmark.
+
 # vellumwidget 0.10.0
 
 * **Interval selections brush a data range.** A plot that declares

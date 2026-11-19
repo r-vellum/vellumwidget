@@ -86,6 +86,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     ws.filtSelElems = {};
     ws.joinOf = {};
     ws.lastHoverKeys = [];
+    ws.hoverSig = "";
     ws.meta = {};
     ws.groups = {};
     ws.incidentEdges = {};
