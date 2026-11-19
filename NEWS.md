@@ -1,4 +1,4 @@
-# vellumwidget 0.9.1.9000
+# vellumwidget 0.10.0
 
 * **Interval selections brush a data range.** A plot that declares
   `vellumplot::select_interval()` now turns the brush into that named selection,
