@@ -9,12 +9,15 @@ element table) and layers interaction on top in the browser. It does
 ## Interactivity: prefer the spec over new `as_widget()` flags
 
 [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
-already carries ~36 arguments, most of them behaviour flags (`hover`,
-`select`, `brush`, `lasso`, `legend_click`, `crosshair`, `hover_mode`,
-`navigator`, `axis_zoom`, …). **Before adding another
+has 24 arguments, and a tripwire test caps it there. Hover,
+click-select, brush, lasso, pan/zoom and axis-aware zoom are on by
+default and have no per-widget toggles. The remaining arguments are
+host-level options (`toolbar`, `navigator`, `hover_mode`, `crosshair`,
+`legend_click`, the `tooltip_*` family, `group`, `crosstalk`,
+`select_mode`, `mode`, `raster_threshold`, …). **Before adding another
 interaction/behaviour argument, stop and consider whether the behaviour
-belongs in the `vellumplot` *spec* instead** — declared as part of the
-plot — rather than as one more imperative widget flag.
+belongs in the `vellumplot` *spec* instead**, declared as part of the
+plot rather than as one more imperative widget flag.
 
 Why this matters:
 
@@ -27,11 +30,25 @@ Why this matters:
   filter, or a scale domain (Vega-Lite’s model) — is portable,
   composable, and serialisable. That is the intended long-term home for
   interaction: the **“declarative interactivity”** direction (Phase 6 of
-  the vellumplot Tier-2 plan). It is **not built yet**, and building it
-  is a deliberate, checkpointed design decision — but every new
-  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
-  flag added in the meantime is one more thing a future declarative
-  model would have to duplicate or migrate.
+  the vellumplot Tier-2 plan).
+
+**Declarative interactivity is built.**
+[`vellumplot::interaction_model()`](https://r-vellum.github.io/vellumplot/reference/interaction_model.html)
+hands the widget the plot’s selections, conditions, filters and binds,
+and the runtime enacts:
+
+- `select_point()` (hover or click) and `select_neighbours()` (graph
+  neighbourhoods);
+- `select_interval()`: a data-value brush. The brushed pixels are
+  inverted through the panel’s scale (continuous, log10/sqrt/reverse,
+  date/datetime, discrete levels) and elements are tested by data value.
+  It falls back to pixel hit-testing when the scale can’t be inverted
+  (#50);
+- `condition()`: styles an aesthetic by selection membership;
+- `add_selection()` + `filter_by()`: cross-filtering. The filtered view
+  hides non-members and the source view stays whole. SVG mode only.
+
+`bind_scale()` is carried in the payload but not enacted yet.
 
 **When you do route interaction through the spec, keep it
 display-tier.** `vellumplot` is compile-once by design and deliberately
@@ -47,9 +64,32 @@ need a Shiny recompile.
 behaviour is fine for a genuinely widget-local, single-plot affordance.
 But if it smells like “the *plot* should know about this,” or it needs
 to coordinate two views, route it through the spec and flag it to the
-maintainer. A tripwire test in `tests/testthat/test-as-widget.R` fails
-when the
-[`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
-argument count grows past its current baseline — its purpose is to force
-exactly this consideration (and remind you of the Phase 6 direction)
-before the signature grows further.
+maintainer. The tripwire in `tests/testthat/test-as-widget.R`
+(`expect_lte(length(formals(as_widget)), 24L)`) exists to force exactly
+this consideration. Bump it only for a genuinely widget-local
+affordance, and say so in the commit.
+
+## Axis-aware zoom
+
+On by default in SVG mode (no flag). Zoom scales only the data region
+and re-ticks the axes; the frame (axes, titles, legend) stays put. It
+re-ticks linear, reverse, sqrt, log10 and date/datetime axes, and
+re-positions the static breaks of discrete/binned axes. Facets zoom per
+panel (#51). Raster mode, void panels (graphs, `theme_void`) and panels
+the re-ticker can’t follow (e.g. polar) fall back to whole-scene viewBox
+zoom. Glyph marks keep a constant pixel size.
+
+## Build and test
+
+- The runtime is TypeScript in `srcts/index.ts`. Build it with
+  `node esbuild.js` (`npm run build`) into
+  `inst/htmlwidgets/vellumwidget.js`.
+- **Always commit the rebuilt bundle with the source change.** The
+  `js-runtime` CI job rebuilds it and fails if the committed copy is
+  stale. It also runs `npx tsc --noEmit` and
+  `node tests/js/behavior.test.js` (jsdom).
+- In a git worktree, **copy** `node_modules` from the main checkout
+  (`cp -R`); never symlink it.
+- Run R tests with `devtools::test()`. Never run
+  [`testthat::test_dir()`](https://testthat.r-lib.org/reference/test_dir.html)
+  against an installed build: it deletes snapshot files.

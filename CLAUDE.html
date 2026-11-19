@@ -53,18 +53,41 @@
 <p><code>vellumwidget</code> turns a compiled <code>vellumplot</code> scene into an interactive htmlwidget. It is a <strong>host adapter</strong>: it consumes an already-compiled, <em>static</em> <code>vellum</code> scene (SVG with <code>data-key</code>s + the <code>scene_model()</code> element table) and layers interaction on top in the browser. It does <strong>not</strong> compile the grammar.</p>
 <div class="section level2">
 <h2 id="interactivity-prefer-the-spec-over-new-as_widget-flags">Interactivity: prefer the spec over new <code>as_widget()</code> flags<a class="anchor" aria-label="anchor" href="#interactivity-prefer-the-spec-over-new-as_widget-flags"></a></h2>
-<p><code><a href="reference/as_widget.html">as_widget()</a></code> already carries ~36 arguments, most of them behaviour flags (<code>hover</code>, <code>select</code>, <code>brush</code>, <code>lasso</code>, <code>legend_click</code>, <code>crosshair</code>, <code>hover_mode</code>, <code>navigator</code>, <code>axis_zoom</code>, …). <strong>Before adding another interaction/behaviour argument, stop and consider whether the behaviour belongs in the <code>vellumplot</code> <em>spec</em> instead</strong> — declared as part of the plot — rather than as one more imperative widget flag.</p>
+<p><code><a href="reference/as_widget.html">as_widget()</a></code> has 24 arguments, and a tripwire test caps it there. Hover, click-select, brush, lasso, pan/zoom and axis-aware zoom are on by default and have no per-widget toggles. The remaining arguments are host-level options (<code>toolbar</code>, <code>navigator</code>, <code>hover_mode</code>, <code>crosshair</code>, <code>legend_click</code>, the <code>tooltip_*</code> family, <code>group</code>, <code>crosstalk</code>, <code>select_mode</code>, <code>mode</code>, <code>raster_threshold</code>, …). <strong>Before adding another interaction/behaviour argument, stop and consider whether the behaviour belongs in the <code>vellumplot</code> <em>spec</em> instead</strong>, declared as part of the plot rather than as one more imperative widget flag.</p>
 <p>Why this matters:</p>
 <ul><li>
 <strong>A widget flag is per-plot, per-host, imperative config, with a low ceiling.</strong> It cannot express cross-view coordination (brush panel A → filter panel B), it is not portable to any other host, and it does not travel with the plot when the spec is saved / printed / round-tripped.</li>
 <li>
-<strong><code>vellumplot</code> is a spec-as-data grammar.</strong> Interaction declared <em>in the spec</em> — a named selection referenced by a conditional encoding, a filter, or a scale domain (Vega-Lite’s model) — is portable, composable, and serialisable. That is the intended long-term home for interaction: the <strong>“declarative interactivity”</strong> direction (Phase 6 of the vellumplot Tier-2 plan). It is <strong>not built yet</strong>, and building it is a deliberate, checkpointed design decision — but every new <code><a href="reference/as_widget.html">as_widget()</a></code> flag added in the meantime is one more thing a future declarative model would have to duplicate or migrate.</li>
-</ul><p><strong>When you do route interaction through the spec, keep it display-tier.</strong> <code>vellumplot</code> is compile-once by design and deliberately has <strong>no reactive dataflow runtime</strong>. So spec-declared interactions must be reactions a host can perform on the <em>frozen</em> scene — highlight/dim, hide/isolate, filter-by-hiding, pan/zoom, linked brushing. Interactions that would <strong>recompute the grammar</strong> (re-bin or re-aggregate on brush, retrain a scale from filtered data) are out of scope client-side; they need a Shiny recompile.</p>
-<p><strong>Rule of thumb.</strong> A new <code><a href="reference/as_widget.html">as_widget()</a></code> behaviour is fine for a genuinely widget-local, single-plot affordance. But if it smells like “the <em>plot</em> should know about this,” or it needs to coordinate two views, route it through the spec and flag it to the maintainer. A tripwire test in <code>tests/testthat/test-as-widget.R</code> fails when the <code><a href="reference/as_widget.html">as_widget()</a></code> argument count grows past its current baseline — its purpose is to force exactly this consideration (and remind you of the Phase 6 direction) before the signature grows further.</p>
+<strong><code>vellumplot</code> is a spec-as-data grammar.</strong> Interaction declared <em>in the spec</em> — a named selection referenced by a conditional encoding, a filter, or a scale domain (Vega-Lite’s model) — is portable, composable, and serialisable. That is the intended long-term home for interaction: the <strong>“declarative interactivity”</strong> direction (Phase 6 of the vellumplot Tier-2 plan).</li>
+</ul><p><strong>Declarative interactivity is built.</strong> <code><a href="https://r-vellum.github.io/vellumplot/reference/interaction_model.html" class="external-link">vellumplot::interaction_model()</a></code> hands the widget the plot’s selections, conditions, filters and binds, and the runtime enacts:</p>
+<ul><li>
+<code>select_point()</code> (hover or click) and <code>select_neighbours()</code> (graph neighbourhoods);</li>
+<li>
+<code>select_interval()</code>: a data-value brush. The brushed pixels are inverted through the panel’s scale (continuous, log10/sqrt/reverse, date/datetime, discrete levels) and elements are tested by data value. It falls back to pixel hit-testing when the scale can’t be inverted (#50);</li>
+<li>
+<code>condition()</code>: styles an aesthetic by selection membership;</li>
+<li>
+<code>add_selection()</code> + <code>filter_by()</code>: cross-filtering. The filtered view hides non-members and the source view stays whole. SVG mode only.</li>
+</ul><p><code>bind_scale()</code> is carried in the payload but not enacted yet.</p>
+<p><strong>When you do route interaction through the spec, keep it display-tier.</strong> <code>vellumplot</code> is compile-once by design and deliberately has <strong>no reactive dataflow runtime</strong>. So spec-declared interactions must be reactions a host can perform on the <em>frozen</em> scene — highlight/dim, hide/isolate, filter-by-hiding, pan/zoom, linked brushing. Interactions that would <strong>recompute the grammar</strong> (re-bin or re-aggregate on brush, retrain a scale from filtered data) are out of scope client-side; they need a Shiny recompile.</p>
+<p><strong>Rule of thumb.</strong> A new <code><a href="reference/as_widget.html">as_widget()</a></code> behaviour is fine for a genuinely widget-local, single-plot affordance. But if it smells like “the <em>plot</em> should know about this,” or it needs to coordinate two views, route it through the spec and flag it to the maintainer. The tripwire in <code>tests/testthat/test-as-widget.R</code> (<code>expect_lte(length(formals(as_widget)), 24L)</code>) exists to force exactly this consideration. Bump it only for a genuinely widget-local affordance, and say so in the commit.</p>
 </div>
+<div class="section level2">
+<h2 id="axis-aware-zoom">Axis-aware zoom<a class="anchor" aria-label="anchor" href="#axis-aware-zoom"></a></h2>
+<p>On by default in SVG mode (no flag). Zoom scales only the data region and re-ticks the axes; the frame (axes, titles, legend) stays put. It re-ticks linear, reverse, sqrt, log10 and date/datetime axes, and re-positions the static breaks of discrete/binned axes. Facets zoom per panel (#51). Raster mode, void panels (graphs, <code>theme_void</code>) and panels the re-ticker can’t follow (e.g. polar) fall back to whole-scene viewBox zoom. Glyph marks keep a constant pixel size.</p>
+</div>
+<div class="section level2">
+<h2 id="build-and-test">Build and test<a class="anchor" aria-label="anchor" href="#build-and-test"></a></h2>
+<ul><li>The runtime is TypeScript in <code>srcts/index.ts</code>. Build it with <code>node esbuild.js</code> (<code>npm run build</code>) into <code>inst/htmlwidgets/vellumwidget.js</code>.</li>
+<li>
+<strong>Always commit the rebuilt bundle with the source change.</strong> The <code>js-runtime</code> CI job rebuilds it and fails if the committed copy is stale. It also runs <code>npx tsc --noEmit</code> and <code>node tests/js/behavior.test.js</code> (jsdom).</li>
+<li>In a git worktree, <strong>copy</strong> <code>node_modules</code> from the main checkout (<code>cp -R</code>); never symlink it.</li>
+<li>Run R tests with <code>devtools::test()</code>. Never run <code><a href="https://testthat.r-lib.org/reference/test_dir.html" class="external-link">testthat::test_dir()</a></code> against an installed build: it deletes snapshot files.</li>
+</ul></div>
 </div>
 
-  </main></div>
+  </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
+    </nav></aside></div>
 
 
     <footer><div class="pkgdown-footer-left">
