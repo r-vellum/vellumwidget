@@ -2,6 +2,16 @@
 
 ## vellumwidget 0.10.0.9000
 
+- [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  now checks every argument up front and fails with an error that names
+  the argument. Before, `raster_threshold = NA` crashed with “missing
+  value where TRUE/FALSE needed”, `tooltip_delay = "abc"` sent `NA` to
+  the browser, and `group = 1:3` sent an array. Flags must be `TRUE` or
+  `FALSE`, sizes and delays non-negative numbers, `group` / `alt` /
+  `export_filename` / `elementId` single strings, and `tooltip_style` a
+  named list of its four known fields (an unknown field is now an error,
+  not silently dropped) (VW-6).
+
 - **Hover is cheaper while the pointer stays on one mark (VW-4).** A
   pointer move that resolves to the same hovered mark and highlight set
   now only moves the tooltip; it no longer clears and re-applies the
