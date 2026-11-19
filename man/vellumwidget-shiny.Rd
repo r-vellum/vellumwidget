@@ -64,9 +64,13 @@ each panel's visible range in \strong{data} coordinates,
 \code{list(x=c(lo,hi), y=c(lo,hi), panel=)}, or \code{NULL} for a panel scrolled out
 of view. Facets zoom per panel, so read \code{panels} for a faceted plot. A
 single-panel plot keeps the older \code{data} field, the same range as its one
-\code{panels} entry. Updates as state when a zoom/pan
+\code{panels} entry. A composition names its panels per cell
+(\code{"cell-1-panel-1-1"}, \code{"cell-2-panel-1-1"}, ...). When a
+\code{vellumplot::bind_scale()} zooms a panel to an interval selection, the
+panel's entry is its bound range and \code{bound} maps each bound panel id to
+the selection driving it. Updates as state when a zoom/pan
 settles (wheel, drag-pan release, pinch, keyboard, reset, zoom-to-selection,
-or a proxy \code{\link[=vw_zoom]{vw_zoom()}}).}
+a proxy \code{\link[=vw_zoom]{vw_zoom()}}, or a brush that moves a bound panel).}
 }
 
 Data-space coordinates (\code{x0d}/…, \code{zoom$data} and \code{zoom$panels}) come from the per-panel scale

@@ -1,6 +1,7 @@
 // The widget's shared mutable state: everything the factory closure used to
 // hold in local variables, now one object the feature modules take.
 
+import type { BoundDomain } from "./binds";
 import type Flatbush from "flatbush";
 import type { Geom, GeometryPayload } from "./geometry";
 import type { CrosstalkHandle, ViewFraction } from "./linking";
@@ -148,6 +149,12 @@ export interface WidgetState {
   // Active interval selections (select_interval()), by name: the member keys and
   // the brushed data range (null when it fell back to pixel hit-testing).
   intervals: Record<string, { keys: string[]; range: IntervalRange | null }>;
+  // Scale binds (bind_scale()): each bound panel's visible native domain, keyed
+  // by panel name, and the selection driving it. `bindGuard` blocks re-entry
+  // while a bind redraws the view.
+  scaleBinds: Record<string, BoundDomain>;
+  scaleBoundBy: Record<string, string>;
+  bindGuard: boolean;
   intervalEl: SVGRectElement | null; // the persistent brush band (in crosshairLayer)
   intervalBand: Bbox | null; // that band in scene (device-px) coords
   lassoPts: Pt[]; // in-progress lasso path (user/viewBox coords)
@@ -196,6 +203,9 @@ export interface WidgetFns {
   applyFilter: (showKeys: string[] | null) => void;
   applyIntervalBrush: (rect: Bbox) => { keys: string[]; band: Bbox; fields: Record<string, unknown> } | null;
   applyLegend: () => void;
+  applyScaleBinds: () => void;
+  boundT: (a: AzPanel, t: PanTransform) => PanTransform;
+  syncScaleSelections: () => void;
   applyLinkedView: (v: ViewFraction) => void;
   applyPanTransforms: () => void;
   applyViewBox: () => void;
@@ -378,6 +388,9 @@ export function createState(el: HTMLElement): WidgetState {
     mode: "brush",
     lastBrush: null,
     intervals: {},
+    scaleBinds: {},
+    scaleBoundBy: {},
+    bindGuard: false,
     intervalEl: null,
     intervalBand: null,
     lassoPts: [],

@@ -1537,6 +1537,172 @@
     return { setupAxisZoom, applyPanTransforms, retick };
   }
 
+  // srcts/binds.ts
+  var UNIT_SECONDS = { day: 86400, second: 1 };
+  function channelToNative(ch, src, dst) {
+    if (dst.type === "discrete") {
+      if (!ch.levels) return null;
+      const levels = dst.levels != null ? asColumn(dst.levels).map(String) : [];
+      let lo = Infinity, hi = -Infinity;
+      for (let i = 0; i < ch.levels.length; i++) {
+        const k = levels.indexOf(String(ch.levels[i]));
+        if (k < 0) continue;
+        lo = Math.min(lo, k + 1 - 0.5);
+        hi = Math.max(hi, k + 1 + 0.5);
+      }
+      return isFinite(lo) && isFinite(hi) ? [lo, hi] : null;
+    }
+    if (ch.levels) return null;
+    let a = ch.lo, b = ch.hi;
+    const su = src && src.time_unit ? UNIT_SECONDS[src.time_unit] : void 0;
+    const du = dst.time_unit ? UNIT_SECONDS[dst.time_unit] : void 0;
+    if (su && du && su !== du) {
+      a = a * su / du;
+      b = b * su / du;
+    }
+    const na = dataToNative(dst, a), nb = dataToNative(dst, b);
+    if (!isFinite(na) || !isFinite(nb) || na === nb) return null;
+    return [Math.min(na, nb), Math.max(na, nb)];
+  }
+  function boundPan(p, t, b) {
+    const out = { sx: t.sx, sy: t.sy, tx: t.tx, ty: t.ty };
+    if (b.h && p.x && p.px1 !== p.px0 && p.x.native_hi !== p.x.native_lo) {
+      const ax = p.x;
+      const rising = ax.native_hi > ax.native_lo;
+      const d0 = rising ? b.h[0] : b.h[1], d1 = rising ? b.h[1] : b.h[0];
+      const k = (p.px1 - p.px0) / (ax.native_hi - ax.native_lo);
+      const k2 = (p.px1 - p.px0) / (d1 - d0);
+      out.sx = k2 / k;
+      out.tx = p.px0 * (1 - out.sx) + (ax.native_lo - d0) * k2;
+    }
+    if (b.v && p.y && p.py1 !== p.py0 && p.y.native_hi !== p.y.native_lo) {
+      const ay = p.y;
+      const rising = ay.native_hi > ay.native_lo;
+      const d0 = rising ? b.v[0] : b.v[1], d1 = rising ? b.v[1] : b.v[0];
+      const k = (p.py1 - p.py0) / (ay.native_hi - ay.native_lo);
+      const k2 = (p.py1 - p.py0) / (d1 - d0);
+      out.sy = k2 / k;
+      out.ty = p.py0 * (1 - out.sy) + (d1 - ay.native_hi) * k2;
+    }
+    return out;
+  }
+  function sameBounds(a, b) {
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    const eq = (x, y) => !x && !y || !!x && !!y && Math.abs(x[0] - y[0]) < 1e-9 && Math.abs(x[1] - y[1]) < 1e-9;
+    for (let i = 0; i < ka.length; i++) {
+      const p = a[ka[i]], q = b[ka[i]];
+      if (!q || !eq(p.h, q.h) || !eq(p.v, q.v)) return false;
+    }
+    return true;
+  }
+
+  // srcts/features/bindScales.ts
+  function isScalesBound(sel) {
+    return sel.kind === "interval" && sel.bind === "scales";
+  }
+  function bindScalesFeature(ws) {
+    function inCells(p, cells) {
+      if (!cells || !cells.length) return true;
+      return p.cell != null && cells.indexOf(p.cell) >= 0;
+    }
+    function panelByName(name) {
+      for (let i = 0; i < ws.panels.length; i++) if (ws.panels[i].name === name) return ws.panels[i];
+      return null;
+    }
+    function boundT(a, t) {
+      const b = ws.scaleBinds[a.p.name];
+      return b ? boundPan(a.p, t, b) : t;
+    }
+    function applyScaleBinds() {
+      const ix = ws.interactions;
+      if (!ix || !ix.binds || !ws.panels.length || ws.bindGuard) return;
+      const next = {};
+      const by = {};
+      const binds = asColumn(ix.binds);
+      for (let i = 0; i < binds.length; i++) {
+        const bd = binds[i];
+        const iv = ws.intervals[bd.selection];
+        const r = iv && iv.range;
+        const ch = r ? r[bd.aes] : void 0;
+        if (!r || !ch) continue;
+        const src = panelByName(r.panel);
+        const srcAx = src ? axisForEncoding(src, bd.aes) : null;
+        const cells = bd.cell != null ? [bd.cell] : null;
+        for (let j = 0; j < ws.panels.length; j++) {
+          const p = ws.panels[j];
+          if (p.name === r.panel || !inCells(p, cells)) continue;
+          const hit = axisForEncoding(p, bd.aes);
+          if (!hit) continue;
+          const dom = channelToNative(ch, srcAx ? srcAx.ax : void 0, hit.ax);
+          if (!dom) continue;
+          const b = next[p.name] || (next[p.name] = {});
+          if (hit.horizontal) b.h = dom;
+          else b.v = dom;
+          by[p.name] = bd.selection;
+        }
+      }
+      if (sameBounds(next, ws.scaleBinds)) return;
+      ws.scaleBinds = next;
+      ws.scaleBoundBy = by;
+      if (!ws.axisZoomActive) return;
+      ws.bindGuard = true;
+      try {
+        ws.fx.applyViewBox();
+      } finally {
+        ws.bindGuard = false;
+      }
+    }
+    function visibleRect(p) {
+      if (!ws.vb || !ws.vb0) return null;
+      let a, b;
+      const az = ws.azPanels.filter((q) => q.p.name === p.name)[0];
+      if (ws.axisZoomActive && az) {
+        const t = ws.fx.azT(az);
+        if (!t.sx || !t.sy) return null;
+        a = { x: (p.px0 - t.tx) / t.sx, y: (p.py0 - t.ty) / t.sy };
+        b = { x: (p.px1 - t.tx) / t.sx, y: (p.py1 - t.ty) / t.sy };
+      } else {
+        a = panToView(ws.vb, ws.vb0, p.px0, p.py0);
+        b = panToView(ws.vb, ws.vb0, p.px1, p.py1);
+      }
+      return { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) };
+    }
+    function syncScaleSelections() {
+      const ix = ws.interactions;
+      if (!ix || !ix.selections || ws.bindGuard) return;
+      const sels = asColumn(ix.selections).filter(isScalesBound);
+      if (!sels.length) return;
+      const zoomed = !!ws.vb && !!ws.vb0 && isZoomedIn(ws.vb, ws.vb0);
+      let changed = false;
+      for (let i = 0; i < sels.length; i++) {
+        const sel = sels[i];
+        const cells = sel.cells != null ? asColumn(sel.cells) : null;
+        let src = null;
+        for (let j = 0; j < ws.panels.length && !src; j++) {
+          const p = ws.panels[j];
+          if (inCells(p, cells) && ws.scaleBoundBy[p.name] !== sel.name) src = p;
+        }
+        const prev = ws.intervals[sel.name];
+        const rect = zoomed && src ? visibleRect(src) : null;
+        const r = rect && src ? intervalRangeOf(src, rect, selEncodings(sel)) : null;
+        if (!r) {
+          if (prev) {
+            delete ws.intervals[sel.name];
+            changed = true;
+          }
+          continue;
+        }
+        const same = prev && prev.range && JSON.stringify(prev.range) === JSON.stringify(r);
+        if (same) continue;
+        ws.intervals[sel.name] = { keys: intervalKeys(ws.elements, r), range: r };
+        changed = true;
+      }
+      if (changed) ws.fx.reevaluateInteractions();
+    }
+    return { applyScaleBinds, syncScaleSelections, boundT };
+  }
+
   // srcts/features/colorbar.ts
   function colorbarFeature(ws) {
     function cbPos(v) {
@@ -1820,7 +1986,7 @@
       return best;
     }
     function azT(a) {
-      return conjugatePan(viewToPan(ws.vb || ws.vb0, ws.vb0), a.ax, a.bx, a.ay, a.by);
+      return ws.fx.boundT(a, conjugatePan(viewToPan(ws.vb || ws.vb0, ws.vb0), a.ax, a.bx, a.ay, a.by));
     }
     function azBaseToScene(x, y) {
       const a = azNearest(x, y);
@@ -2130,6 +2296,7 @@
     function reevaluateInteractions() {
       applyConditions();
       applyFilters();
+      ws.fx.applyScaleBinds();
     }
     return { setupInteractions, reevaluateInteractions };
   }
@@ -2410,7 +2577,15 @@
   function intervalFeature(ws) {
     function rectIntervalSels() {
       const sels = ws.interactions && ws.interactions.selections || [];
-      return sels.filter((s) => s.kind === "interval" && s.region !== "lasso");
+      return sels.filter((s) => s.kind === "interval" && s.region !== "lasso" && !isScalesBound(s));
+    }
+    function scalesIntervals() {
+      const keep = {};
+      const sels = ws.interactions && ws.interactions.selections || [];
+      for (let i = 0; i < sels.length; i++) {
+        if (isScalesBound(sels[i]) && ws.intervals[sels[i].name]) keep[sels[i].name] = ws.intervals[sels[i].name];
+      }
+      return keep;
     }
     function lockRect(p, rect, encs) {
       if (!p) return rect;
@@ -2431,11 +2606,14 @@
       };
     }
     function applyIntervalBrush(rect) {
-      const sels = rectIntervalSels();
-      if (!sels.length) return null;
       const p = ws.fx.panelAt((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2);
+      const sels = rectIntervalSels().filter((s) => {
+        const cells = s.cells != null ? asColumn(s.cells) : [];
+        return !cells.length || !p || p.cell == null || cells.indexOf(p.cell) >= 0;
+      });
+      if (!sels.length) return null;
       const eligible = (k) => !ws.hiddenKeySet[k] && !ws.colorHiddenSet[k];
-      ws.intervals = {};
+      ws.intervals = scalesIntervals();
       const union = [];
       const seen = {};
       const ranges = {};
@@ -2500,8 +2678,9 @@
       ws.intervalEl.setAttribute("height", String(Math.max(0, b.y1 - b.y0)));
     }
     function clearIntervals() {
-      const had = Object.keys(ws.intervals).length > 0;
-      ws.intervals = {};
+      const keep = scalesIntervals();
+      const had = Object.keys(ws.intervals).length > Object.keys(keep).length;
+      ws.intervals = keep;
       ws.intervalBand = null;
       if (ws.intervalEl && ws.intervalEl.parentNode) ws.intervalEl.parentNode.removeChild(ws.intervalEl);
       return had;
@@ -4034,6 +4213,12 @@
         }
       }
     }
+    function defaultMode() {
+      const modes = ws.fx.availableModes();
+      const ivs = asColumn(ws.interactions && ws.interactions.selections || []).filter((s) => s.kind === "interval");
+      if (ivs.length && ivs.every(isScalesBound) && modes.indexOf("pan") >= 0) return "pan";
+      return modes[0] || "brush";
+    }
     function wire(svg) {
       svg.addEventListener("pointermove", ws.fx.onHoverMove);
       svg.addEventListener("pointerleave", ws.fx.clearHover);
@@ -4188,7 +4373,7 @@
         ws.fx.setupAxisZoom();
         ws.xZoom = !!ws.opts.navigator && !ws.rasterMode;
         ws.fx.applyAspect();
-        ws.fx.setMode(ws.fx.availableModes()[0] || "brush");
+        ws.fx.setMode(defaultMode());
         ws.tip.classList.toggle("vellumwidget-tip-sticky", !!ws.opts.tooltipSticky);
         applyStyling();
         ws.fx.applyLegend();
@@ -4686,6 +4871,7 @@
     function reportView() {
       if (!ws.vb) return;
       const payload = { x: ws.vb.x, y: ws.vb.y, w: ws.vb.w, h: ws.vb.h, zoomed: ws.vb0 ? isZoomedIn(ws.vb, ws.vb0) : false };
+      if (ws.axisZoomActive && Object.keys(ws.scaleBinds).length) payload.bound = Object.assign({}, ws.scaleBoundBy);
       if (ws.panels.length) {
         const per = {};
         for (let i = 0; i < ws.panels.length; i++) per[ws.panels[i].name] = panelRange(i);
@@ -4696,6 +4882,7 @@
         }
       }
       ws.fx.shinyInput("zoom", payload);
+      ws.fx.syncScaleSelections();
       if (ws.group && ws.vb0 && !ws.receivingView && ws.vb0.w && ws.vb0.h) {
         busPublishView(ws.group, ws.selfToken, {
           x: (ws.vb.x - ws.vb0.x) / ws.vb0.w,
@@ -4886,6 +5073,9 @@
       mode: "brush",
       lastBrush: null,
       intervals: {},
+      scaleBinds: {},
+      scaleBoundBy: {},
+      bindGuard: false,
       intervalEl: null,
       intervalBand: null,
       lassoPts: [],
@@ -4926,6 +5116,7 @@
         selectionFeature(ws),
         declarativeFeature(ws),
         intervalFeature(ws),
+        bindScalesFeature(ws),
         proxyFeature(ws),
         viewportFeature(ws),
         axisZoomFeature(ws),
@@ -5004,6 +5195,10 @@
           // driven directly (device-px scene rect), bypassing pointer calibration.
           intervals: function() {
             return ws.intervals;
+          },
+          // Scale binds (bind_scale()): each bound panel's native domain + its driver.
+          scaleBinds: function() {
+            return { domains: ws.scaleBinds, by: ws.scaleBoundBy };
           },
           brushInterval: function(rect) {
             const iv = ws.fx.applyIntervalBrush(rect);
@@ -5152,6 +5347,8 @@
     viewToPan,
     panToView,
     conjugatePan,
+    boundPan,
+    channelToNative,
     niceTicks,
     fmtTick,
     dataToNative,

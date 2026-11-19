@@ -1,5 +1,26 @@
 # vellumwidget 0.11.0.9000
 
+* **Overview + detail: `vellumplot::bind_scale()` is enacted (F-15).** Brushing
+  an overview view zooms every panel bound to the brush to the brushed range on
+  the bound axis, re-ticking its axes; clearing the brush resets it. The view
+  the brush is drawn in never zooms itself, and in a composition a brush in
+  another cell leaves the selection alone. Date and datetime axes convert
+  between days and seconds, a discrete target zooms to the brushed levels, and
+  log/sqrt/reversed axes map through their transform. `input$<id>_zoom`
+  reports the bound range in `panels` and names the bound panels in `bound`.
+  SVG mode with axis-aware zoom only.
+
+* **`vellumplot::select_interval(bind = "scales")` (F-15).** The selection is
+  the view's own pan/zoom: the settled visible range of its cell writes it (no
+  brush band), resetting the zoom empties it, and the default drag is pan. A
+  `bind_scale()` on another view then follows it (linked zoom), and
+  `condition()` / `filter_by()` react to what is in view.
+
+* Panel descriptors carry the composition `cell` vellumplot now records, so a
+  composition's per-cell panels (`"cell-2-panel-1-1"`, ...) zoom and report
+  individually. With vellumplot 0.14.1.9000 or later an aligned composition's
+  panels are described and pannable, so compositions get axis-aware zoom too.
+
 * **Selection, hover and focus rings show in full on a point drawn as one
   element (VW-12).** vellum is moving a keyed point with a solid fill and an
   undashed solid stroke from a fill element plus a `fill="none"` stroke twin to

@@ -1,7 +1,8 @@
 // Rendering: per-render styling, event wiring, and the htmlwidgets
 // renderValue / resize entry points.
 
-import { normalizeElements, normalizePanels } from "../elements";
+import { asColumn, normalizeElements, normalizePanels } from "../elements";
+import { isScalesBound } from "./bindScales";
 import { DIM_OVERLAY_MIN, SVGNS } from "./constants";
 import { registerProxyHandler } from "../shiny";
 import type { WidgetFns, WidgetState } from "../state";
@@ -53,6 +54,16 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
         if (e.legend_for != null) n.classList.add("vellumwidget-legend");
       }
     }
+  }
+
+  // The default drag: the first enabled mode, except that a plot whose interval
+  // selections are all scales-bound (select_interval(bind = "scales")) pans,
+  // since such a selection is written by panning/zooming, not by a brush.
+  function defaultMode(): "brush" | "pan" | "lasso" {
+    const modes = ws.fx.availableModes();
+    const ivs = asColumn((ws.interactions && ws.interactions.selections) || []).filter((s) => s.kind === "interval");
+    if (ivs.length && ivs.every(isScalesBound) && modes.indexOf("pan") >= 0) return "pan";
+    return modes[0] || "brush";
   }
 
   function wire(svg: SVGSVGElement): void {
@@ -239,7 +250,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       // re-ticked x-axis), else via a non-uniform stretch fallback. SVG only.
       ws.xZoom = !!ws.opts.navigator && !ws.rasterMode;
       ws.fx.applyAspect();
-      ws.fx.setMode(ws.fx.availableModes()[0] || "brush"); // first enabled mode is the default
+      ws.fx.setMode(defaultMode()); // first enabled mode, or pan for a scales-bound view
       ws.tip.classList.toggle("vellumwidget-tip-sticky", !!ws.opts.tooltipSticky);
       applyStyling();
       ws.fx.applyLegend(); // clears any stale legend-off state from a prior render

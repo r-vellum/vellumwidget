@@ -85,8 +85,10 @@ export function coordsFeature(
   }
 
   // T_i for a panel at the current view.
+  // A panel bound to an interval selection (bind_scale()) shows the selection's
+  // range on its bound axis instead (ws.fx.boundT).
   function azT(a: AzPanel): PanTransform {
-    return conjugatePan(viewToPan(ws.vb || ws.vb0!, ws.vb0!), a.ax, a.bx, a.ay, a.by);
+    return ws.fx.boundT(a, conjugatePan(viewToPan(ws.vb || ws.vb0!, ws.vb0!), a.ax, a.bx, a.ay, a.by));
   }
 
   // A point in the fixed base (vb0) space -> the scene (device-px) point drawn
