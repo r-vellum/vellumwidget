@@ -1332,6 +1332,7 @@
       ws.fx.shinyInput("colorfilter", full ? null : [a, b]);
     }
     function setColorRange(a, b) {
+      ws.calib = null;
       if (!ws.colorbar) return;
       const lo = ws.colorbar.lo, hi = ws.colorbar.hi;
       a = Math.min(hi, Math.max(lo, a));
@@ -1546,79 +1547,136 @@
     function fmtPan(t) {
       return "matrix(" + t.sx + " 0 0 " + t.sy + " " + t.tx + " " + t.ty + ")";
     }
-    function calibrateXform() {
-      if (azMulti()) return calibrateBase();
-      let xi = null, xj = null;
-      let yi = null, yj = null;
+    function calibGroups() {
+      if (!ws.svgEl) return null;
+      const r = ws.svgEl.getBoundingClientRect();
+      if (ws.calib && ws.calib.w === r.width && ws.calib.h === r.height) return ws.calib;
+      ws.calib = buildCalib(r);
+      return ws.calib;
+    }
+    function panelOfScene(x, y) {
+      for (let i = 0; i < ws.panels.length; i++) {
+        const p = ws.panels[i];
+        if (x >= p.px0 && x <= p.px1 && y >= p.py0 && y <= p.py1) return i;
+      }
+      return -1;
+    }
+    function buildCalib(r) {
+      const nGroups = Math.max(1, ws.panels.length);
+      const ext = [];
+      for (let g = 0; g < nGroups; g++) ext.push([null, null, null, null]);
+      const all = [null, null, null, null];
+      const cxOf = (e) => (e.x0 + e.x1) / 2;
+      const cyOf = (e) => (e.y0 + e.y1) / 2;
+      const take = (q, e) => {
+        const cx = cxOf(e), cy = cyOf(e);
+        if (!q[0] || cx < cxOf(q[0])) q[0] = e;
+        if (!q[1] || cx > cxOf(q[1])) q[1] = e;
+        if (!q[2] || cy < cyOf(q[2])) q[2] = e;
+        if (!q[3] || cy > cyOf(q[3])) q[3] = e;
+      };
       for (let i = 0; i < ws.elements.length; i++) {
         const e = ws.elements[i];
-        if (!hasBbox(e)) continue;
-        const scx = (e.x0 + e.x1) / 2, scy = (e.y0 + e.y1) / 2;
-        if (!xi || scx < (xi.x0 + xi.x1) / 2) xi = e;
-        if (!xj || scx > (xj.x0 + xj.x1) / 2) xj = e;
-        if (!yi || scy < (yi.y0 + yi.y1) / 2) yi = e;
-        if (!yj || scy > (yj.y0 + yj.y1) / 2) yj = e;
+        if (!hasBbox(e) || e.legend_for != null || ws.fx.inert(e.key)) continue;
+        let g = 0;
+        if (ws.panels.length) {
+          g = panelOfScene(cxOf(e), cyOf(e));
+          if (g < 0) continue;
+        }
+        take(ext[g], e);
+        take(all, e);
       }
-      if (!xi || !xj || !yi || !yj) return null;
+      const seen = {};
       const scr = (e) => {
+        if (e.key in seen) return seen[e.key];
+        let out = null;
         const n = ws.fx.elementsForKey(e.key)[0];
-        if (!n) return null;
-        const r = n.getBoundingClientRect();
-        if (!r.width && !r.height) return null;
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        if (n) {
+          const b = n.getBoundingClientRect();
+          if (b.width || b.height) out = { x: b.left - r.left + b.width / 2, y: b.top - r.top + b.height / 2 };
+        }
+        seen[e.key] = out;
+        return out;
       };
-      const xa = scr(xi), xb = scr(xj), ya = scr(yi), yb = scr(yj);
-      if (!xa || !xb || !ya || !yb) return null;
-      const dScx = (xj.x0 + xj.x1) / 2 - (xi.x0 + xi.x1) / 2;
-      const dScrx = xb.x - xa.x;
-      const dScy = (yj.y0 + yj.y1) / 2 - (yi.y0 + yi.y1) / 2;
-      const dScry = yb.y - ya.y;
-      if (Math.abs(dScrx) < 1 || Math.abs(dScry) < 1) return null;
-      const sx = dScx / dScrx, ox = (xi.x0 + xi.x1) / 2 - xa.x * sx;
-      const sy = dScy / dScry, oy = (yi.y0 + yi.y1) / 2 - ya.y * sy;
-      return { sx, ox, sy, oy };
+      const axis = (q, lo, hi, isX) => {
+        const a = q[lo], b = q[hi];
+        if (!a || !b) return null;
+        const pa = scr(a), pb = scr(b);
+        if (!pa || !pb) return null;
+        const da = isX ? pb.x - pa.x : pb.y - pa.y;
+        if (Math.abs(da) < 1) return null;
+        const sa = isX ? cxOf(a) : cyOf(a);
+        const sd = (isX ? cxOf(b) : cyOf(b)) - sa;
+        const s = sd / da;
+        return { s, o: sa - (isX ? pa.x : pa.y) * s };
+      };
+      const shared = !azMulti();
+      const gx = shared ? axis(all, 0, 1, true) : null;
+      const gy = shared ? axis(all, 2, 3, false) : null;
+      const groups = [];
+      for (let g = 0; g < nGroups; g++) {
+        const panel = ws.panels.length ? ws.panels[g] : null;
+        let az = null;
+        if (panel && ws.axisZoomActive) {
+          for (let j = 0; j < ws.azPanels.length; j++) if (ws.azPanels[j].p.name === panel.name) az = ws.azPanels[j];
+        }
+        const fx = axis(ext[g], 0, 1, true) || gx;
+        const fy = axis(ext[g], 2, 3, false) || gy;
+        groups.push({ panel, az, fit: fx && fy ? { sx: fx.s, ox: fx.o, sy: fy.s, oy: fy.o } : null });
+      }
+      return { w: r.width, h: r.height, groups };
+    }
+    function toClientFit(f, left, top) {
+      return { sx: f.sx, ox: f.ox - left * f.sx, sy: f.sy, oy: f.oy - top * f.sy };
+    }
+    function calibrateXform(clientX, clientY) {
+      const c = calibGroups();
+      if (!c || !ws.svgEl) return null;
+      const r = ws.svgEl.getBoundingClientRect();
+      const lx = clientX - r.left, ly = clientY - r.top;
+      let best = null, bestD = Infinity;
+      for (let g = 0; g < c.groups.length; g++) {
+        const G = c.groups[g];
+        if (!G.fit) continue;
+        if (!G.panel || c.groups.length === 1) {
+          best = G.fit;
+          break;
+        }
+        let x = G.fit.ox + lx * G.fit.sx, y = G.fit.oy + ly * G.fit.sy;
+        if (G.az) {
+          const t = azT(G.az);
+          x = t.sx * x + t.tx;
+          y = t.sy * y + t.ty;
+        }
+        const p = G.panel;
+        const dx = x < p.px0 ? p.px0 - x : x > p.px1 ? x - p.px1 : 0;
+        const dy = y < p.py0 ? p.py0 - y : y > p.py1 ? y - p.py1 : 0;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          best = G.fit;
+          if (d === 0) break;
+        }
+      }
+      return best ? toClientFit(best, r.left, r.top) : null;
+    }
+    function sceneToClient(x, y) {
+      const c = calibGroups();
+      if (!c || !ws.svgEl) return null;
+      let g = 0;
+      if (ws.panels.length) {
+        g = panelOfScene(x, y);
+        if (g < 0) return null;
+      }
+      const f = c.groups[g] && c.groups[g].fit;
+      if (!f || !f.sx || !f.sy) return null;
+      const r = ws.svgEl.getBoundingClientRect();
+      return { x: r.left + (x - f.ox) / f.sx, y: r.top + (y - f.oy) / f.sy };
     }
     function clientToScene(clientX, clientY) {
-      const f = calibrateXform();
+      const f = calibrateXform(clientX, clientY);
       if (!f) return toView(clientX, clientY);
-      if (azMulti()) return azBaseToScene(f.ox + clientX * f.sx, f.oy + clientY * f.sy);
       return { x: f.ox + clientX * f.sx, y: f.oy + clientY * f.sy };
-    }
-    function calibrateBase() {
-      const base = function(e) {
-        const cx = (e.x0 + e.x1) / 2, cy = (e.y0 + e.y1) / 2;
-        const a = azNearest(cx, cy);
-        if (!a) return { x: cx, y: cy };
-        const t = azT(a);
-        return { x: t.sx * cx + t.tx, y: t.sy * cy + t.ty };
-      };
-      let xi = null, xj = null, yi = null, yj = null;
-      for (let i = 0; i < ws.elements.length; i++) {
-        const e = ws.elements[i];
-        if (!hasBbox(e)) continue;
-        const b = { x: 0, y: 0, e };
-        const q = base(e);
-        b.x = q.x;
-        b.y = q.y;
-        if (!xi || b.x < xi.x) xi = b;
-        if (!xj || b.x > xj.x) xj = b;
-        if (!yi || b.y < yi.y) yi = b;
-        if (!yj || b.y > yj.y) yj = b;
-      }
-      if (!xi || !xj || !yi || !yj) return null;
-      const scr = (e) => {
-        const n = ws.fx.elementsForKey(e.key)[0];
-        if (!n) return null;
-        const r = n.getBoundingClientRect();
-        if (!r.width && !r.height) return null;
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-      };
-      const xa = scr(xi.e), xb = scr(xj.e), ya = scr(yi.e), yb = scr(yj.e);
-      if (!xa || !xb || !ya || !yb) return null;
-      const dScrx = xb.x - xa.x, dScry = yb.y - ya.y;
-      if (Math.abs(dScrx) < 1 || Math.abs(dScry) < 1) return null;
-      const sx = (xj.x - xi.x) / dScrx, sy = (yj.y - yi.y) / dScry;
-      return { sx, ox: xi.x - xa.x * sx, sy, oy: yi.y - ya.y * sy };
     }
     function panelAt(x, y) {
       for (let i = 0; i < ws.panels.length; i++) {
@@ -1655,7 +1713,7 @@
       }
       return f;
     }
-    return { currentViewBox, toUser, toView, toAnchor, azNearest, azT, azMulti, fmtPan, calibrateXform, clientToScene, panelAt, dataRangeOf, brushDataFields };
+    return { currentViewBox, toUser, toView, toAnchor, azNearest, azT, azMulti, fmtPan, calibrateXform, sceneToClient, clientToScene, panelAt, dataRangeOf, brushDataFields };
   }
 
   // srcts/features/declarative.ts
@@ -1944,8 +2002,8 @@
       }
       const cx = (m.x0 + m.x1) / 2;
       const cy = (m.y0 + m.y1) / 2;
-      const f = ws.fx.calibrateXform();
-      if (f && f.sx && f.sy) return { x: (cx - f.ox) / f.sx, y: (cy - f.oy) / f.sy };
+      const c = ws.fx.sceneToClient(cx, cy);
+      if (c) return c;
       if (!ws.svgEl) return null;
       const r = ws.svgEl.getBoundingClientRect();
       const view = ws.fx.currentViewBox();
@@ -2175,6 +2233,7 @@
       return m && m.legend_for != null ? m.legend_for : null;
     }
     function applyLegend() {
+      ws.calib = null;
       ws.fx.clearClass("vellumwidget-legend-hidden");
       ws.fx.clearClass("vellumwidget-legend-muted");
       ws.fx.clearClass("vellumwidget-legend-off");
@@ -3681,6 +3740,7 @@
       ws.joinOf = {};
       ws.lastHoverKeys = [];
       ws.hoverSig = "";
+      ws.calib = null;
       ws.meta = {};
       ws.groups = {};
       ws.incidentEdges = {};
@@ -3816,6 +3876,7 @@
       }
     }
     function resize() {
+      ws.calib = null;
       ws.fx.drawPoints();
     }
     return { renderValue, resize };
@@ -3902,6 +3963,7 @@
       shinyInput("selected", selectedKeys());
     }
     function applyFilter(showKeys) {
+      ws.calib = null;
       ws.fx.clearClass("vellumwidget-filtered");
       ws.filteredKeySet = {};
       if (showKeys == null) return;
@@ -4214,6 +4276,7 @@
       if (ws.colorbarLayer) ws.colorbarLayer.setAttribute("preserveAspectRatio", par);
     }
     function applyViewBox() {
+      ws.calib = null;
       ws.hoverSig = "";
       if (ws.xZoom && ws.vb && ws.vb0) {
         ws.vb.y = ws.vb0.y;
@@ -4289,6 +4352,7 @@
       lastHoverKeys: [],
       hoverSig: "",
       hovering: false,
+      calib: null,
       colorRange: null,
       colorHiddenSet: {},
       meta: {},
