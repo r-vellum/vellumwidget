@@ -1,5 +1,13 @@
 # vellumwidget 0.10.0.9000
 
+* `as_widget()` now checks every argument up front and fails with an error that
+  names the argument. Before, `raster_threshold = NA` crashed with "missing
+  value where TRUE/FALSE needed", `tooltip_delay = "abc"` sent `NA` to the
+  browser, and `group = 1:3` sent an array. Flags must be `TRUE` or `FALSE`,
+  sizes and delays non-negative numbers, `group` / `alt` / `export_filename` /
+  `elementId` single strings, and `tooltip_style` a named list of its four known
+  fields (an unknown field is now an error, not silently dropped) (VW-6).
+
 # vellumwidget 0.10.0
 
 * **Interval selections brush a data range.** A plot that declares

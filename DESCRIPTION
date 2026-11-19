@@ -19,6 +19,7 @@ Depends:
     R (>= 4.2)
 Imports:
     base64enc,
+    cli (>= 3.4.0),
     grDevices,
     htmlwidgets,
     vellum (>= 0.8.0)
