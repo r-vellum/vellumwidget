@@ -73,10 +73,13 @@ fall back to whole-scene viewBox zoom. Glyph marks keep a constant pixel size.
 ## Build and test
 
 - The runtime is TypeScript in `srcts/`. `srcts/index.ts` is the entry point
-  (the widget factory); the pure helpers live in sibling modules (`geometry`,
+  (registers the widget). Pure helpers live in sibling modules (`geometry`,
   `spatial`, `scales`, `viewbox`, `ticks`, `css`, `tooltip`, `dom`, `linking`,
-  `shiny`, `types`). Build it with `node esbuild.js` (`npm run build`) into
-  `inst/htmlwidgets/vellumwidget.js`.
+  `shiny`, `types`). Per-widget state is one `WidgetState` object
+  (`srcts/state.ts`); the feature code lives in `srcts/features/*.ts`, each a
+  `xxxFeature(ws)` factory. A function another module calls is listed in
+  `WidgetFns` and reached as `ws.fx.name`. Build it with `node esbuild.js`
+  (`npm run build`) into `inst/htmlwidgets/vellumwidget.js`.
 - **Always commit the rebuilt bundle with the source change.** The `js-runtime`
   CI job rebuilds it and fails if the committed copy is stale. It also runs
   `npx tsc --noEmit` and `node tests/js/behavior.test.js` (jsdom).
