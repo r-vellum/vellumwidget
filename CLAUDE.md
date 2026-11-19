@@ -61,7 +61,14 @@ enacts:
 - `add_selection()` + `filter_by()`: cross-filtering. The filtered view hides
   non-members and the source view stays whole. SVG mode only.
 
-`bind_scale()` is carried in the payload but not enacted yet.
+- `bind_scale()`: overview + detail. The panels of the bind's composition
+  `cell` (every panel but the brushed one when it names none) zoom to the
+  interval selection's range on the bound axis, and clearing it unbinds them
+  (`srcts/features/bindScales.ts`, pure math in `srcts/binds.ts`). A bound panel
+  overrides its axis in `azT()`, so the re-tick, hit-testing and `_zoom` follow;
+- `select_interval(bind = "scales")`: the selection is written from its view's
+  settled zoom (`syncScaleSelections()`, called from `reportView()`); a brush
+  never fills it and the default drag is pan.
 
 **When you do route interaction through the spec, keep it display-tier.**
 `vellumplot` is compile-once by design and deliberately has **no reactive

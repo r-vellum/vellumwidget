@@ -125,3 +125,51 @@ test_that("a plot without an interval selection ships no interval values", {
   )
   expect_false(any(c("ix", "iy", "ixd", "iyd") %in% names(w$x$elements)))
 })
+
+# --- bind_scale() / select_interval(bind = "scales") (F-15) --------------------
+
+test_that("panel descriptors forward a composition cell id", {
+  model <- list(panels = data.frame(
+    name = c("cell-1-panel-1-1", "panel-1-1"),
+    px0 = c(10, 10),
+    py0 = c(10, 10),
+    px1 = c(100, 100),
+    py1 = c(50, 50)
+  ))
+  ax <- list(
+    type = "continuous",
+    transform = "identity",
+    data_lo = 0,
+    data_hi = 1,
+    native_lo = 0,
+    native_hi = 1
+  )
+  sc <- list(cartesian = TRUE, x = ax, y = ax)
+  model$panels$meta <- list(list(scales = sc, cell = "cell-1"), list(scales = sc))
+  p <- vellumwidget:::.vellumwidget_panels(model)
+  expect_identical(p[[1]]$cell, "cell-1")
+  expect_null(p[[2]]$cell)
+})
+
+test_that("an overview + detail composition ships per-cell panels and scoped binds", {
+  skip_if_not("bind" %in% names(formals(vellumplot::select_interval)))
+  df <- data.frame(t = 1:30, v = sin(1:30 / 4))
+  brush <- vellumplot::select_interval("brush", encodings = "x")
+  cmp <- vellumplot::vconcat(
+    vellumplot::vplot(df) |>
+      vellumplot::mark_line(x = t, y = v) |>
+      vellumplot::add_selection(brush),
+    vellumplot::vplot(df) |>
+      vellumplot::mark_line(x = t, y = v) |>
+      vellumplot::bind_scale(brush)
+  )
+  w <- as_widget(cmp)
+  nm <- vapply(w$x$panels, function(p) p$name, character(1))
+  cells <- vapply(w$x$panels, function(p) p$cell, character(1))
+  expect_identical(nm, c("cell-1-panel-1-1", "cell-2-panel-1-1"))
+  expect_identical(cells, c("cell-1", "cell-2"))
+  expect_identical(w$x$interactions$binds[[1]]$cell, "cell-2")
+  js <- as.character(htmlwidgets:::toJSON(w$x$interactions))
+  expect_match(js, '"cells":["cell-1"]', fixed = TRUE)
+  expect_match(w$x$svg, 'data-vellum-pan="cell-2-panel-1-1"', fixed = TRUE)
+})

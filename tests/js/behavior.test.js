@@ -3719,6 +3719,144 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
     "interval+axis_zoom facets: the band follows panel 2's zoom and is clipped to its frame");
 }
 
+// ============ scale binds: bind_scale() overview + detail, bind = "scales" (F-15) ============
+{
+  const T = window.__vellumwidgetTest;
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  const lin = (hi) => ({ type: "continuous", transform: "identity", data_lo: 0, data_hi: hi, native_lo: 0, native_hi: hi, aes: "x" });
+  const linY = { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50, aes: "y" };
+
+  // pure: boundPan / channelToNative
+  const P = { name: "p", px0: 220, py0: 10, px1: 380, py1: 90, x: lin(100), y: linY };
+  const id = { sx: 1, sy: 1, tx: 0, ty: 0 };
+  const full = T.boundPan(P, id, { h: [0, 100] });
+  ok(near(full.sx, 1) && near(full.tx, 0), "boundPan: the full domain is the identity");
+  const bp = T.boundPan(P, id, { h: [25, 50] });
+  ok(near(bp.sx, 4) && near(bp.tx, -820) && bp.sy === 1 && bp.ty === 0,
+    "boundPan: a bound x domain fills the panel; the unbound y keeps the shared transform");
+  ok(near(bp.sx * (220 + 25 * 1.6) + bp.tx, 220) && near(bp.sx * (220 + 50 * 1.6) + bp.tx, 380),
+    "boundPan: the bound range lands on the panel's edges");
+  const bv = T.boundPan(P, id, { v: [10, 20] }); // y 10..20 of 0..50 across py 10..90
+  ok(near(bv.sy * (10 + (50 - 20) * 1.6) + bv.ty, 10) && near(bv.sy * (10 + (50 - 10) * 1.6) + bv.ty, 90),
+    "boundPan: a bound y domain maps hi to the top, lo to the bottom");
+  const rev = Object.assign({}, P, { x: { type: "continuous", transform: "reverse", native_lo: 100, native_hi: 0 } });
+  const br = T.boundPan(rev, id, { h: [25, 50] });
+  ok(near(br.sx * (220 + (100 - 50) * 1.6) + br.tx, 220) && near(br.sx * (220 + (100 - 25) * 1.6) + br.tx, 380),
+    "boundPan: a reversed axis stays reversed (50 on the left, 25 on the right)");
+  const dSrc = { type: "date", transform: "identity", time_unit: "day" };
+  const dDst = { type: "datetime", transform: "identity", time_unit: "second" };
+  const cn = T.channelToNative({ lo: 1, hi: 2 }, dSrc, dDst);
+  ok(cn && cn[0] === 86400 && cn[1] === 172800, "channelToNative: a Date brush drives a POSIXct axis in seconds");
+  const lg = T.channelToNative({ lo: 10, hi: 1000 }, lin(1), { type: "log10", transform: "log10" });
+  ok(lg && near(lg[0], 1) && near(lg[1], 3), "channelToNative: a log10 target maps through its transform");
+  const dc = T.channelToNative({ lo: 1.5, hi: 3.5, levels: ["b", "c"] }, null, { type: "discrete", transform: "identity", levels: ["a", "b", "c"] });
+  ok(dc && dc[0] === 1.5 && dc[1] === 3.5, "channelToNative: a discrete target spans the brushed levels' bands");
+  ok(T.channelToNative({ lo: 1, hi: 1 }, lin(1), lin(1)) === null, "channelToNative: an empty range binds nothing");
+
+  // integration: two composition cells side by side, overview (cell-1) + detail (cell-2)
+  const svgOD =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">' +
+    '<g data-vellum-panel="cell-1-panel-1-1" clip-path="url(#c0)"><g data-vellum-pan="cell-1-panel-1-1">' +
+    '<path data-key="o1" d="M59 49h2v2z"/><path data-key="o2" d="M139 49h2v2z"/></g></g>' +
+    '<g data-vellum-panel="cell-2-panel-1-1" clip-path="url(#c1)"><g data-vellum-pan="cell-2-panel-1-1">' +
+    '<path data-key="d1" d="M259 49h2v2z"/><path data-key="d2" d="M339 49h2v2z"/></g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-x-5"><text x="20" y="4" transform="matrix(1 0 0 1 220 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-y-2"><text x="-4" y="0" transform="matrix(1 0 0 1 220 90)" font-size="12">0</text></g></svg>';
+  const elsOD = { key: ["o1", "o2", "d1", "d2"], mark: ["point", "point", "point", "point"],
+    x0: [59, 139, 259, 339], y0: [49, 49, 49, 49], x1: [61, 141, 261, 341], y1: [51, 51, 51, 51], ix: [25, 75, 25, 75] };
+  const captured = {};
+  const savedShiny = window.Shiny, savedMode = window.HTMLWidgets.shinyMode;
+  window.HTMLWidgets.shinyMode = true;
+  window.Shiny = { setInputValue: function (iid, v) { captured[iid] = v; } };
+  const mountOD = (id, interactions, detailX) => {
+    const e = document.createElement("div");
+    e.id = id;
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 400, 100);
+    inst.renderValue({
+      svg: svgOD,
+      elements: elsOD,
+      panels: [
+        { name: "cell-1-panel-1-1", cell: "cell-1", px0: 20, py0: 10, px1: 180, py1: 90, x: lin(100), y: linY },
+        { name: "cell-2-panel-1-1", cell: "cell-2", px0: 220, py0: 10, px1: 380, py1: 90, x: detailX || lin(100), y: linY }
+      ],
+      interactions: interactions,
+      options: { axisZoom: true, hover: true, select: true, brush: true, zoom: true, selectMode: "multiple" }
+    });
+    e.querySelector("svg").getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 100, right: 400, bottom: 100 });
+    return inst;
+  };
+  const tOf = (inst, name) => inst._test.panTransforms().filter((p) => p.name === name)[0].transform;
+  const iOD = mountOD("bindod", {
+    selections: [{ name: "br", kind: "interval", on: "x", region: "rect", empty: true, encodings: "x", cells: "cell-1" }],
+    conditions: [], filters: [],
+    binds: [{ selection: "br", aes: "x", cell: "cell-2" }]
+  });
+  ok(iOD._test.axisZoomActive() === true, "bind_scale: the two-cell fixture is axis-zoomable");
+  iOD._test.brushInterval({ x0: 60, y0: 20, x1: 100, y1: 80 }); // overview data 25..50
+  ok(tOf(iOD, "cell-2-panel-1-1") === "matrix(4 0 0 1 -820 0)",
+    "bind_scale: brushing the overview zooms the detail to the brushed range");
+  ok(tOf(iOD, "cell-1-panel-1-1") === "matrix(1 0 0 1 0 0)", "bind_scale: the overview itself does not zoom");
+  const z1 = captured["bindod_zoom"];
+  const dr = z1 && z1.panels && z1.panels["cell-2-panel-1-1"];
+  ok(dr && near(dr.x[0], 25) && near(dr.x[1], 50), "bind_scale: input$<id>_zoom reports the detail's bound range");
+  ok(z1 && z1.panels["cell-1-panel-1-1"] && near(z1.panels["cell-1-panel-1-1"].x[1], 100),
+    "bind_scale: input$<id>_zoom reports the overview's full range");
+  ok(z1 && z1.bound && z1.bound["cell-2-panel-1-1"] === "br" && !z1.bound["cell-1-panel-1-1"],
+    "bind_scale: input$<id>_zoom names the bound panel and its selection");
+  const labs = iOD._test.retickLabels().filter((l) => l.x >= 220 && l.y > 90).map((l) => l.text);
+  ok(labs.length > 0 && labs.every((t) => +t >= 25 && +t <= 50),
+    "bind_scale: the detail's x axis is re-ticked for the bound range (" + labs.join(",") + ")");
+  // a brush in the detail cell leaves the overview's selection alone
+  iOD._test.brushInterval({ x0: 300, y0: 20, x1: 340, y1: 80 });
+  ok(tOf(iOD, "cell-2-panel-1-1") === "matrix(4 0 0 1 -820 0)" && iOD._test.intervals().br.range.panel === "cell-1-panel-1-1",
+    "bind_scale: brushing the detail cell does not re-drive its own bind");
+  // the shared zoom still drives the detail's unbound axis
+  iOD._test.setView({ x: 50, y: 25, w: 200, h: 50 });
+  const tz = tOf(iOD, "cell-2-panel-1-1");
+  ok(/^matrix\(4 0 0 2 -820 /.test(tz), "bind_scale: the bound x holds while y follows the shared zoom (" + tz + ")");
+  iOD._test.setView({ x: 0, y: 0, w: 400, h: 100 });
+  iOD._test.clearSelection();
+  ok(tOf(iOD, "cell-2-panel-1-1") === "matrix(1 0 0 1 0 0)", "bind_scale: clearing the brush resets the detail's zoom");
+  const z2 = captured["bindod_zoom"];
+  ok(z2 && !z2.bound && near(z2.panels["cell-2-panel-1-1"].x[1], 100), "bind_scale: the reset is reported, with no bound panel");
+
+  // an older payload: a bind with no cell drives every panel but the brushed one
+  const iOld = mountOD("bindold", {
+    selections: [{ name: "br", kind: "interval", on: "x", region: "rect", empty: true, encodings: "x" }],
+    binds: [{ selection: "br", aes: "x" }]
+  });
+  iOld._test.brushInterval({ x0: 60, y0: 20, x1: 100, y1: 80 });
+  ok(tOf(iOld, "cell-2-panel-1-1") === "matrix(4 0 0 1 -820 0)" && tOf(iOld, "cell-1-panel-1-1") === "matrix(1 0 0 1 0 0)",
+    "bind_scale: a cell-less bind zooms the other panels, never the brushed one");
+
+  // bind = "scales": zooming the overview writes the selection; the detail follows it
+  const iSc = mountOD("bindsc", {
+    selections: [{ name: "z", kind: "interval", on: "x", region: "rect", empty: true, encodings: "x", bind: "scales", cells: ["cell-1"] }],
+    conditions: [{ selection: "z", aes: "color", empty: true }],
+    binds: [{ selection: "z", aes: "x", cell: "cell-2" }]
+  }, lin(200));
+  ok(iSc._test.mode() === "pan", "bind = scales: a scales-bound view drags to pan by default");
+  ok(iSc._test.brushInterval({ x0: 60, y0: 20, x1: 100, y1: 80 }) === null,
+    "bind = scales: a brush does not fill a scales-bound selection");
+  iSc._test.setView({ x: 50, y: 0, w: 200, h: 100 }); // 2x in x about panel 1's centre -> 25..75
+  const zr = iSc._test.intervals().z;
+  ok(zr && zr.range && near(zr.range.x.lo, 25) && near(zr.range.x.hi, 75) && zr.range.panel === "cell-1-panel-1-1",
+    "bind = scales: the overview's visible range is the selection");
+  ok(tOf(iSc, "cell-2-panel-1-1") === "matrix(4 0 0 1 -740 0)",
+    "bind = scales: the detail (its own 0..200 scale) zooms to 25..75 (" + tOf(iSc, "cell-2-panel-1-1") + ")");
+  const zd = captured["bindsc_zoom"].panels["cell-2-panel-1-1"];
+  ok(zd && near(zd.x[0], 25) && near(zd.x[1], 75), "bind = scales: the detail reports the linked range");
+  iSc._test.clearSelection(); // an empty-space click keeps the view-driven selection
+  ok(iSc._test.intervals().z, "bind = scales: clearing the selection does not drop the view-driven interval");
+  iSc._test.setView({ x: 0, y: 0, w: 400, h: 100 });
+  ok(!iSc._test.intervals().z && tOf(iSc, "cell-2-panel-1-1") === "matrix(1 0 0 1 0 0)",
+    "bind = scales: resetting the zoom empties the selection and unbinds the detail");
+  window.Shiny = savedShiny; window.HTMLWidgets.shinyMode = savedMode;
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();

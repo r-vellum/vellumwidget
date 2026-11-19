@@ -16,6 +16,7 @@ import { sourceTable } from "./dom";
 import { normalizeElements, normalizePanels } from "./elements";
 import { a11yFeature } from "./features/a11y";
 import { axisZoomFeature } from "./features/axisZoom";
+import { bindScalesFeature } from "./features/bindScales";
 import { colorbarFeature } from "./features/colorbar";
 import { coordsFeature } from "./features/coords";
 import { declarativeFeature } from "./features/declarative";
@@ -34,6 +35,7 @@ import { sourceFeature } from "./features/source";
 import { toolbarFeature } from "./features/toolbar";
 import { viewportFeature } from "./features/viewport";
 import { distToBbox, distToGeom, distToSegment2, rectsIntersect, unionBbox } from "./geometry";
+import { boundPan, channelToNative } from "./binds";
 import { axisForEncoding, inInterval, intervalKeys, intervalRangeOf, nativeToData, pxToDataX, pxToDataY, selEncodings } from "./scales";
 import { cssEscape, cssEscapePolyfill, dispatchProxyCall, findWidgetById, idSelector, registerProxyHandler } from "./shiny";
 import { brushKeys, columnTolerance, lassoKeys, nearestKey, nearestSortedIdx, pointInPolygon, polyBounds } from "./spatial";
@@ -61,6 +63,7 @@ HTMLWidgets.widget({
       selectionFeature(ws),
       declarativeFeature(ws),
       intervalFeature(ws),
+      bindScalesFeature(ws),
       proxyFeature(ws),
       viewportFeature(ws),
       axisZoomFeature(ws),
@@ -122,6 +125,8 @@ HTMLWidgets.widget({
         // Interval selections: the active ranges/members, and a completed brush
         // driven directly (device-px scene rect), bypassing pointer calibration.
         intervals: function () { return ws.intervals; },
+        // Scale binds (bind_scale()): each bound panel's native domain + its driver.
+        scaleBinds: function () { return { domains: ws.scaleBinds, by: ws.scaleBoundBy }; },
         brushInterval: function (rect: Bbox) {
           const iv = ws.fx.applyIntervalBrush(rect);
           if (!iv) return null;
@@ -244,6 +249,8 @@ registerProxyHandler();
   viewToPan,
   panToView,
   conjugatePan,
+  boundPan,
+  channelToNative,
   niceTicks,
   fmtTick,
   dataToNative,

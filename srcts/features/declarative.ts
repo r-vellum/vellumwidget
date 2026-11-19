@@ -184,6 +184,7 @@ export function declarativeFeature(
   function reevaluateInteractions(): void {
     applyConditions();
     applyFilters();
+    ws.fx.applyScaleBinds(); // bind_scale(): bound panels follow their selection
   }
 
   return { setupInteractions, reevaluateInteractions };

@@ -82,6 +82,12 @@ export interface SelDef {
   // A projection that expands a raw gesture to a related set before applying it.
   // From select_neighbours(): a graph node gesture -> its neighbourhood.
   expand?: { mode: string; degree?: number; edges?: boolean } | null;
+  // Interval: "scales" binds the selection to its view's own pan/zoom domain
+  // (Vega-Lite `bind: "scales"`); absent for a drawn brush.
+  bind?: string;
+  // The composition cells ("cell-<k>") that register the selection; absent for
+  // a lone plot. A length-1 vector may arrive auto-unboxed.
+  cells?: string[] | string;
 }
 export interface CondDef {
   selection: string;
@@ -93,8 +99,11 @@ export interface InteractionSpec {
   selections?: SelDef[];
   conditions?: CondDef[];
   filters?: { selection: string }[];
-  binds?: { selection: string; aes: string }[];
+  // Scale binds (bind_scale()): the panels of `cell` (every panel when absent)
+  // follow the interval selection's range on `aes`.
+  binds?: BindDef[];
 }
+export interface BindDef { selection: string; aes: string; cell?: string; }
 
 export interface Options {
   tooltip: boolean;
@@ -203,6 +212,7 @@ export interface AxisScale {
 // device px <-> native; the transform closes native <-> data.
 export interface PanelInfo {
   name: string;
+  cell?: string; // the composition cell the panel belongs to ("cell-<k>"), if any
   px0: number;
   py0: number;
   px1: number;

@@ -52,8 +52,10 @@ export function viewportFeature(
     if (!ws.vb) return;
     const payload: {
       x: number; y: number; w: number; h: number; zoomed: boolean;
-      data?: DataRange; panels?: Record<string, DataRange | null>;
+      data?: DataRange; panels?: Record<string, DataRange | null>; bound?: Record<string, string>;
     } = { x: ws.vb.x, y: ws.vb.y, w: ws.vb.w, h: ws.vb.h, zoomed: ws.vb0 ? isZoomedIn(ws.vb, ws.vb0) : false };
+    // Panels zoomed by a bind_scale(), each with the selection driving it.
+    if (ws.axisZoomActive && Object.keys(ws.scaleBinds).length) payload.bound = Object.assign({}, ws.scaleBoundBy);
     if (ws.panels.length) {
       const per: Record<string, DataRange | null> = {};
       for (let i = 0; i < ws.panels.length; i++) per[ws.panels[i].name] = panelRange(i);
@@ -64,6 +66,8 @@ export function viewportFeature(
       }
     }
     ws.fx.shinyInput("zoom", payload);
+    // select_interval(bind = "scales"): the settled view is the selection.
+    ws.fx.syncScaleSelections();
     // Linked pan/zoom: broadcast the view as a fraction of our own original
     // viewBox to the group's other members. Suppressed while we are *applying* a
     // peer's view (feedback-loop guard).

@@ -1,10 +1,12 @@
 // Interval selections (select_interval()): the data-value brush and its band.
 
 import { SVGNS } from "./constants";
+import { asColumn } from "../elements";
 import { axisForEncoding, intervalKeys, intervalRangeOf, selEncodings } from "../scales";
 import type { IntervalRange } from "../scales";
 import type { WidgetFns, WidgetState } from "../state";
 import type { Bbox, PanelInfo, SelDef } from "../types";
+import { isScalesBound } from "./bindScales";
 
 export function intervalFeature(
   ws: WidgetState
@@ -17,7 +19,18 @@ export function intervalFeature(
   // pixel selection path).
   function rectIntervalSels(): SelDef[] {
     const sels = (ws.interactions && ws.interactions.selections) || [];
-    return sels.filter((s) => s.kind === "interval" && s.region !== "lasso");
+    return sels.filter((s) => s.kind === "interval" && s.region !== "lasso" && !isScalesBound(s));
+  }
+
+  // The interval entries a brush or a clear leaves alone: the scales-bound
+  // selections, which follow the view's zoom rather than the brush.
+  function scalesIntervals(): Record<string, { keys: string[]; range: IntervalRange | null }> {
+    const keep: Record<string, { keys: string[]; range: IntervalRange | null }> = {};
+    const sels = (ws.interactions && ws.interactions.selections) || [];
+    for (let i = 0; i < sels.length; i++) {
+      if (isScalesBound(sels[i]) && ws.intervals[sels[i].name]) keep[sels[i].name] = ws.intervals[sels[i].name];
+    }
+    return keep;
   }
 
   // The band a brush covers once locked to its encodings: an axis the selection
@@ -43,14 +56,19 @@ export function intervalFeature(
   // scene, a composition, a custom transform). Returns the union of members plus
   // the fields the `_brush` event carries, or null when none is declared.
   function applyIntervalBrush(rect: Bbox): { keys: string[]; band: Bbox; fields: Record<string, unknown> } | null {
-    const sels = rectIntervalSels();
-    if (!sels.length) return null;
     const p = ws.fx.panelAt((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2);
+    // In a composition a selection lives in the cells that register it: a brush
+    // in another cell (the detail view of an overview + detail) leaves it alone.
+    const sels = rectIntervalSels().filter((s) => {
+      const cells = s.cells != null ? asColumn<string>(s.cells) : [];
+      return !cells.length || !p || p.cell == null || cells.indexOf(p.cell) >= 0;
+    });
+    if (!sels.length) return null;
     // A legend- or colorbar-hidden mark is never a member; a mark hidden by this
     // selection's own filter_by() must stay eligible, or widening the brush could
     // never bring it back.
     const eligible = (k: string): boolean => !ws.hiddenKeySet[k] && !ws.colorHiddenSet[k];
-    ws.intervals = {};
+    ws.intervals = scalesIntervals();
     const union: string[] = [];
     const seen: Record<string, boolean> = {};
     const ranges: Record<string, IntervalRange | null> = {};
@@ -123,8 +141,9 @@ export function intervalFeature(
 
   // Empty every interval selection and remove its band. True if one was active.
   function clearIntervals(): boolean {
-    const had = Object.keys(ws.intervals).length > 0;
-    ws.intervals = {};
+    const keep = scalesIntervals();
+    const had = Object.keys(ws.intervals).length > Object.keys(keep).length;
+    ws.intervals = keep;
     ws.intervalBand = null;
     if (ws.intervalEl && ws.intervalEl.parentNode) ws.intervalEl.parentNode.removeChild(ws.intervalEl);
     return had;
