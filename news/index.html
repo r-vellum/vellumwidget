@@ -50,7 +50,9 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.11.0.9000" id="vellumwidget-01109000">vellumwidget 0.11.0.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-01109000"></a></h2>
-</div>
+<ul><li>
+<strong>Selection, hover and focus rings show in full on a point drawn as one element (VW-12).</strong> vellum is moving a keyed point with a solid fill and an undashed solid stroke from a fill element plus a <code>fill="none"</code> stroke twin to one element carrying both paints, halving the DOM nodes of a scatter. The ring rules painted the stroke under the fill (<code>paint-order: stroke fill</code>), which on one element hides the inner half of the ring; they now use <code>paint-order: normal</code>, so the ring looks the same on both outputs. The widget works with either: hover, selection and conditional colours act on every node of a key, and a condition recolours the fill and stroke a node actually uses.</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.11.0" id="vellumwidget-0110">vellumwidget 0.11.0<a class="anchor" aria-label="anchor" href="#vellumwidget-0110"></a></h2>
 <ul><li><p><strong>Linked widgets follow a changed <code>group</code> and are freed when removed (VW-5).</strong> After a Shiny re-render with a new <code>group</code> (or <code>crosstalk</code> group), a widget published to the new group but kept listening on the old one. It now leaves the old group and joins the new one, closing its old crosstalk handles. A widget whose element is removed from the page (a re-render, <code><a href="https://rdrr.io/pkg/shiny/man/renderUI.html" class="external-link">renderUI()</a></code>) leaves the linking bus and closes its crosstalk handles instead of lingering.</p></li>
