@@ -81,7 +81,10 @@ zoom. Glyph marks keep a constant pixel size.
 
 ## Build and test
 
-- The runtime is TypeScript in `srcts/index.ts`. Build it with
+- The runtime is TypeScript in `srcts/`. `srcts/index.ts` is the entry
+  point (the widget factory); the pure helpers live in sibling modules
+  (`geometry`, `spatial`, `scales`, `viewbox`, `ticks`, `css`,
+  `tooltip`, `dom`, `linking`, `shiny`, `types`). Build it with
   `node esbuild.js` (`npm run build`) into
   `inst/htmlwidgets/vellumwidget.js`.
 - **Always commit the rebuilt bundle with the source change.** The

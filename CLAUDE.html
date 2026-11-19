@@ -78,7 +78,7 @@
 </div>
 <div class="section level2">
 <h2 id="build-and-test">Build and test<a class="anchor" aria-label="anchor" href="#build-and-test"></a></h2>
-<ul><li>The runtime is TypeScript in <code>srcts/index.ts</code>. Build it with <code>node esbuild.js</code> (<code>npm run build</code>) into <code>inst/htmlwidgets/vellumwidget.js</code>.</li>
+<ul><li>The runtime is TypeScript in <code>srcts/</code>. <code>srcts/index.ts</code> is the entry point (the widget factory); the pure helpers live in sibling modules (<code>geometry</code>, <code>spatial</code>, <code>scales</code>, <code>viewbox</code>, <code>ticks</code>, <code>css</code>, <code>tooltip</code>, <code>dom</code>, <code>linking</code>, <code>shiny</code>, <code>types</code>). Build it with <code>node esbuild.js</code> (<code>npm run build</code>) into <code>inst/htmlwidgets/vellumwidget.js</code>.</li>
 <li>
 <strong>Always commit the rebuilt bundle with the source change.</strong> The <code>js-runtime</code> CI job rebuilds it and fails if the committed copy is stale. It also runs <code>npx tsc --noEmit</code> and <code>node tests/js/behavior.test.js</code> (jsdom).</li>
 <li>In a git worktree, <strong>copy</strong> <code>node_modules</code> from the main checkout (<code>cp -R</code>); never symlink it.</li>

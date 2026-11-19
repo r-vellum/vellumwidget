@@ -505,85 +505,231 @@
     return ((b << 1 | a) >>> 0) - 2147483648;
   }
 
-  // srcts/index.ts
-  function rectsIntersect(a, b) {
-    return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
+  // srcts/css.ts
+  var STYLE_ID = "vellumwidget-style";
+  var VELLUMWIDGET_CSS = `
+.vellumwidget-root { position: relative; display: inline-block; max-width: 100%; }
+/* The stage shrink-wraps the base svg in BOTH dimensions (inline-block sizes to
+   content), so its box equals the svg's rendered box. The absolute overlays below
+   fill THIS box, not the root's \u2014 the root can be taller AND wider than the svg
+   (htmlwidgets stamps an explicit height; a fluid layout can stretch the width),
+   and sizing the overlays to the root would letterbox their viewBox and shift
+   every ring (down if the root is taller, sideways if it is wider). */
+.vellumwidget-root .vellumwidget-stage { position: relative; display: inline-block; }
+.vellumwidget-root .vellumwidget-svg-holder svg { max-width: 100%; height: auto; display: block; }
+.vellumwidget-gesture .vellumwidget-svg-holder svg { touch-action: none; }
+.vellumwidget-root.vellumwidget-mode-pan .vellumwidget-svg-holder svg { cursor: grab; }
+.vellumwidget-root.vellumwidget-panning .vellumwidget-svg-holder svg { cursor: grabbing; }
+.vellumwidget-root [data-key] { cursor: pointer; }
+[data-key].vellumwidget-filtered { display: none; }
+/* Legend click-to-hide / -mute (independent of the crosstalk cross-filter above,
+   so the two never clobber each other). hidden removes the series' marks; muted
+   keeps them but fades them right back; legend-off dims the toggled-off swatch
+   so the legend shows which series are on. */
+[data-key].vellumwidget-legend-hidden { display: none; }
+[data-key].vellumwidget-legend-muted { opacity: 0.12; }
+[data-key].vellumwidget-legend.vellumwidget-legend-off { opacity: 0.4; }
+.vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
+.vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
+/* Conditional encoding (condition()): a non-member of an active selection with no
+   explicit if_false is dimmed to the theme's dim opacity (the spotlight). An
+   explicit if_false colour is applied inline (see applyConditions()). */
+[data-key].vellumwidget-cond-dim { opacity: var(--vellumwidget-dim-opacity, 0.28); }
+/* Large-scene hover: instead of the CSS rule above restyling every keyed node
+   (O(n) per hover), the whole plot is dimmed once via the holder's opacity and the
+   hovered marks are re-drawn crisp in this overlay (O(hovered)). See setHover(). */
+.vellumwidget-root .vellumwidget-svg-holder { transition: none; }
+/* Crisp-zoom point layer: above the base image, below the overlay rings. Never
+   intercepts hit-testing (that stays on the base svg). Hidden until zoomed in. */
+.vellumwidget-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 2; display: none;
+}
+.vellumwidget-dim-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 5; overflow: visible;
+}
+/* Continuous colorbar filter: an overlay on the gradient bar. The dim rects cover
+   the out-of-range ends; the handles are draggable. Out-of-range marks fade. */
+.vellumwidget-colorbar-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 6; overflow: visible;
+}
+.vellumwidget-cb-dim { fill: rgba(255,255,255,0.66); pointer-events: none; }
+@media (prefers-color-scheme: dark) { .vellumwidget-cb-dim { fill: rgba(17,24,39,0.66); } }
+.vellumwidget-cb-handle {
+  fill: #ffffff; stroke: #2563eb; stroke-width: 1.5px; pointer-events: auto;
+}
+.vellumwidget-root.vellumwidget-cb-v .vellumwidget-cb-handle { cursor: ns-resize; }
+.vellumwidget-root.vellumwidget-cb-h .vellumwidget-cb-handle { cursor: ew-resize; }
+[data-key].vellumwidget-colorfiltered { opacity: var(--vellumwidget-colorfilter-opacity, 0.12); }
+/* Crosshair guide rule(s) for unified hover \u2014 above the base image / canvas,
+   below the highlight rings so a highlighted mark still reads on top. */
+.vellumwidget-crosshair-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 4; overflow: visible;
+}
+/* Axis-aware zoom: re-ticked axis LABELS overlay (gridlines are drawn inside the
+   base svg's panel, under the marks). Pinned to the fixed base coordinate space. */
+.vellumwidget-retick-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 3; overflow: visible;
+}
+.vellumwidget-crosshair-line {
+  stroke: var(--vellumwidget-crosshair-stroke, rgba(75,85,99,0.85));
+  stroke-width: 1px; stroke-dasharray: 4 3;
+}
+@media (prefers-color-scheme: dark) {
+  .vellumwidget-crosshair-line { stroke: var(--vellumwidget-crosshair-stroke, rgba(209,213,219,0.85)); }
+}
+/* Raster-mode feedback rings (hover / selection), drawn on the overlay since the
+   marks are a base image with no per-element nodes. Colours reuse the same CSS
+   variables as the SVG-mode highlight/selection so theming carries over. */
+.vellumwidget-fb-hov { fill: none; stroke: var(--vellumwidget-hl-stroke, #2563eb); stroke-width: 2px; }
+.vellumwidget-fb-sel { fill: none; stroke: var(--vellumwidget-selected-stroke, #111827); stroke-width: 1.6px; }
+@media (prefers-color-scheme: dark) {
+  .vellumwidget-fb-sel { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
+}
+/* Optional hover stroke, opt-in per element (.vellumwidget-hc) or widget-wide
+   (.vellumwidget-hc-all on the root). Never applied to a mark that has no hover colour,
+   so a bordered shape is not clobbered on hover. Colour resolves from the nearest
+   --vellumwidget-hl-stroke (element var overrides the root var). */
+.vellumwidget-hc-all [data-key].vellumwidget-hl, [data-key].vellumwidget-hc.vellumwidget-hl {
+  stroke: var(--vellumwidget-hl-stroke); stroke-width: var(--vellumwidget-hl-width, 2px); paint-order: stroke fill;
+}
+[data-key].vellumwidget-selected {
+  stroke: var(--vellumwidget-selected-stroke, #111827);
+  stroke-width: var(--vellumwidget-selected-width, 1.4px); paint-order: stroke fill;
+}
+/* Keyboard focus ring on the currently-traversed mark (a11y). */
+[data-key].vellumwidget-focus {
+  stroke: var(--vellumwidget-focus-stroke, #2563eb);
+  stroke-width: var(--vellumwidget-focus-width, 2.5px); paint-order: stroke fill;
+}
+[data-key]:focus { outline: none; }
+[data-key]:focus-visible { outline: 2px solid var(--vellumwidget-focus-stroke, #2563eb); outline-offset: 1px; }
+/* Visually-hidden but exposed to assistive technology (live region + data table). */
+.vellumwidget-sr-only {
+  position: absolute !important; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden; border: 0;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+.vellumwidget-tip {
+  position: absolute; left: 0; top: 0; pointer-events: none; z-index: 20;
+  background: var(--vellumwidget-tip-bg, rgba(17,24,39,0.94)); color: var(--vellumwidget-tip-fg, #fff);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-size: var(--vellumwidget-tip-fontsize, 12px); line-height: 1.45;
+  padding: 5px 8px; border-radius: 5px; white-space: pre-wrap;
+  max-width: var(--vellumwidget-tip-maxwidth, 320px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  opacity: 0; transition: opacity 0.08s ease; will-change: transform;
+}
+.vellumwidget-tip.vellumwidget-show { opacity: 1; }
+/* Sticky tooltip: accepts pointer events so links/buttons inside it are usable. */
+.vellumwidget-tip.vellumwidget-tip-sticky { pointer-events: auto; }
+.vellumwidget-brush {
+  position: absolute; pointer-events: none; z-index: 15;
+  border: 1px solid #2563eb; background: rgba(37,99,235,0.12); display: none;
+}
+/* Overview navigator: a full-width strip below the plot (a squashed mini-render
+   of the whole scene) with a draggable/resizable window marking the visible x-range. */
+.vellumwidget-nav {
+  position: relative; width: 100%; margin-top: 4px; box-sizing: border-box;
+  border: 1px solid rgba(0,0,0,0.12); border-radius: 4px; overflow: hidden;
+  background: rgba(0,0,0,0.02); touch-action: none; user-select: none;
+}
+.vellumwidget-nav-mini { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.85; }
+.vellumwidget-nav-mini svg { width: 100%; height: 100%; display: block; }
+/* The two regions outside the window are dimmed; the window itself is clear. */
+.vellumwidget-nav-window {
+  position: absolute; top: 0; bottom: 0; z-index: 2; cursor: grab;
+  border-left: 1px solid #2563eb; border-right: 1px solid #2563eb;
+  background: rgba(37,99,235,0.10); box-shadow: 0 0 0 100vmax rgba(0,0,0,0.12);
+}
+.vellumwidget-nav-window.vellumwidget-nav-grabbing { cursor: grabbing; }
+.vellumwidget-nav-handle {
+  position: absolute; top: 0; bottom: 0; width: 8px; z-index: 3; cursor: ew-resize;
+  background: #2563eb; opacity: 0.35;
+}
+.vellumwidget-nav-handle-l { left: -1px; }
+.vellumwidget-nav-handle-r { right: -1px; }
+@media (prefers-color-scheme: dark) {
+  .vellumwidget-nav { border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.03); }
+}
+.vellumwidget-root.vellumwidget-mode-lasso .vellumwidget-svg-holder svg { cursor: crosshair; }
+.vellumwidget-lasso {
+  fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px; stroke-dasharray: 4 3;
+}
+/* The persistent band of an active interval selection (select_interval()). */
+.vellumwidget-interval {
+  fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px;
+}
+.vellumwidget-toolbar {
+  position: absolute; top: 6px; right: 6px; z-index: 25; display: flex; gap: 2px;
+  padding: 3px; border-radius: 6px; background: rgba(255,255,255,0.82);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.18); opacity: 0; transition: opacity 0.12s;
+}
+.vellumwidget-root:hover .vellumwidget-toolbar { opacity: 1; }
+.vellumwidget-toolbar button {
+  border: 0; background: transparent; cursor: pointer; border-radius: 4px;
+  font: 13px/1 system-ui, sans-serif; padding: 4px 6px; color: #111827;
+}
+.vellumwidget-toolbar button:hover { background: rgba(0,0,0,0.08); }
+.vellumwidget-toolbar button.vellumwidget-active { background: rgba(37,99,235,0.18); }
+@media (prefers-color-scheme: dark) {
+  .vellumwidget-tip { background: var(--vellumwidget-tip-bg, rgba(243,244,246,0.96)); color: var(--vellumwidget-tip-fg, #111827); }
+  [data-key].vellumwidget-selected { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
+  .vellumwidget-toolbar { background: rgba(31,41,55,0.9); }
+  .vellumwidget-toolbar button { color: #f3f4f6; }
+  .vellumwidget-toolbar button:hover { background: rgba(255,255,255,0.12); }
+}
+`;
+  function ensureStyle() {
+    if (document.getElementById(STYLE_ID)) return;
+    const s = document.createElement("style");
+    s.id = STYLE_ID;
+    s.textContent = VELLUMWIDGET_CSS;
+    document.head.appendChild(s);
   }
-  function distToBbox(x, y, b) {
-    const dx = Math.max(b.x0 - x, 0, x - b.x1);
-    const dy = Math.max(b.y0 - y, 0, y - b.y1);
-    return Math.sqrt(dx * dx + dy * dy);
+  function cssEscape(value) {
+    const anyCss = window.CSS;
+    if (anyCss && typeof anyCss.escape === "function") return anyCss.escape(value);
+    return value.replace(/["\\\]\[#.:;,()>~+*^$|=@!%&{}\/\s]/g, "\\$&");
   }
-  function hasBbox(e) {
-    return typeof e.x0 === "number" && typeof e.y0 === "number";
+
+  // srcts/dom.ts
+  function keyOf(target) {
+    const el = target;
+    if (!el || typeof el.closest !== "function") return null;
+    const hit = el.closest("[data-key]");
+    return hit ? hit.getAttribute("data-key") : null;
   }
-  function isRoundMark(mark) {
-    return mark === "point" || mark === "points" || mark === "circle" || mark === "circles";
+  function vellumIdOf(target) {
+    const el = target;
+    if (!el || typeof el.closest !== "function") return null;
+    const hit = el.closest("[data-vellum-id]");
+    return hit ? hit.getAttribute("data-vellum-id") : null;
   }
-  function distToSegment2(x, y, ax, ay, bx, by) {
-    const vx = bx - ax, vy = by - ay;
-    const len2 = vx * vx + vy * vy;
-    let t = len2 > 0 ? ((x - ax) * vx + (y - ay) * vy) / len2 : 0;
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    const dx = x - (ax + t * vx), dy = y - (ay + t * vy);
-    return dx * dx + dy * dy;
+  function sourceTable(prov, id) {
+    const name = prov.sourceOf && prov.sourceOf[id] || "plot";
+    const tbl = name !== "plot" && prov.sources ? prov.sources[name] : void 0;
+    if (!tbl) return { source: "plot", fields: prov.fields, values: prov.values };
+    const fields = Array.isArray(tbl.fields) ? tbl.fields : tbl.fields == null ? [] : [tbl.fields];
+    return { source: name, fields, values: tbl.values };
   }
-  function distToGeom(x, y, g, gx, gy, box) {
-    const at = g.at, n = g.n;
-    if (n <= 0) return Infinity;
-    if (g.kind === "point") {
-      const dx = x - gx[at], dy = y - gy[at];
-      const d = Math.sqrt(dx * dx + dy * dy);
-      const r = box ? Math.min(box.x1 - box.x0, box.y1 - box.y0) / 2 : 0;
-      return d > r ? d - r : 0;
-    }
-    if (n === 1) {
-      const dx = x - gx[at], dy = y - gy[at];
-      return Math.sqrt(dx * dx + dy * dy);
-    }
-    if (g.kind === "rect" || g.kind === "text" || g.kind === "roundrect") {
-      return distToBbox(x, y, {
-        x0: Math.min(gx[at], gx[at + 1]),
-        x1: Math.max(gx[at], gx[at + 1]),
-        y0: Math.min(gy[at], gy[at + 1]),
-        y1: Math.max(gy[at], gy[at + 1])
-      });
-    }
-    const closed = g.kind === "polygon" || g.kind === "path" || g.kind === "hexagon" || g.kind === "sector";
-    const rings = g.rings || [n];
-    let best = Infinity;
-    let cross = 0;
-    let wind = 0;
-    let ra = at;
-    for (let r = 0; r < rings.length; r++) {
-      const rn = rings[r] | 0;
-      if (rn <= 0) continue;
-      if (closed && rn >= 3) {
-        for (let i = 0, j = rn - 1; i < rn; j = i++) {
-          const xi = gx[ra + i], yi = gy[ra + i];
-          const xj = gx[ra + j], yj = gy[ra + j];
-          if (yi > y !== yj > y) {
-            if (x < (xj - xi) * (y - yi) / (yj - yi) + xi) cross++;
-            const side = (xi - xj) * (y - yj) - (x - xj) * (yi - yj);
-            if (yi > yj) {
-              if (side > 0) wind++;
-            } else if (side < 0) wind--;
-          }
-        }
-      }
-      for (let i = 1; i < rn; i++) {
-        const d2 = distToSegment2(x, y, gx[ra + i - 1], gy[ra + i - 1], gx[ra + i], gy[ra + i]);
-        if (d2 < best) best = d2;
-      }
-      if (closed && rn >= 3) {
-        const d2 = distToSegment2(x, y, gx[ra + rn - 1], gy[ra + rn - 1], gx[ra], gy[ra]);
-        if (d2 < best) best = d2;
-      }
-      ra += rn;
-    }
-    if (closed && (g.evenodd ? (cross & 1) === 1 : wind !== 0)) return 0;
-    return Math.sqrt(best);
+  function download(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
+  var DRAG_THRESHOLD = 3;
+
+  // srcts/elements.ts
   function asColumn(v) {
     if (v == null) return [];
     return Array.isArray(v) ? v : [v];
@@ -664,86 +810,124 @@
     if (raw == null) return [];
     return Array.isArray(raw) ? raw : [raw];
   }
-  function brushKeys(elems, brush) {
-    const out = [];
-    const seen = {};
+
+  // srcts/geometry.ts
+  function rectsIntersect(a, b) {
+    return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
+  }
+  function distToBbox(x, y, b) {
+    const dx = Math.max(b.x0 - x, 0, x - b.x1);
+    const dy = Math.max(b.y0 - y, 0, y - b.y1);
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  function hasBbox(e) {
+    return typeof e.x0 === "number" && typeof e.y0 === "number";
+  }
+  function isRoundMark(mark) {
+    return mark === "point" || mark === "points" || mark === "circle" || mark === "circles";
+  }
+  function distToSegment2(x, y, ax, ay, bx, by) {
+    const vx = bx - ax, vy = by - ay;
+    const len2 = vx * vx + vy * vy;
+    let t = len2 > 0 ? ((x - ax) * vx + (y - ay) * vy) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const dx = x - (ax + t * vx), dy = y - (ay + t * vy);
+    return dx * dx + dy * dy;
+  }
+  function distToGeom(x, y, g, gx, gy, box) {
+    const at = g.at, n = g.n;
+    if (n <= 0) return Infinity;
+    if (g.kind === "point") {
+      const dx = x - gx[at], dy = y - gy[at];
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const r = box ? Math.min(box.x1 - box.x0, box.y1 - box.y0) / 2 : 0;
+      return d > r ? d - r : 0;
+    }
+    if (n === 1) {
+      const dx = x - gx[at], dy = y - gy[at];
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    if (g.kind === "rect" || g.kind === "text" || g.kind === "roundrect") {
+      return distToBbox(x, y, {
+        x0: Math.min(gx[at], gx[at + 1]),
+        x1: Math.max(gx[at], gx[at + 1]),
+        y0: Math.min(gy[at], gy[at + 1]),
+        y1: Math.max(gy[at], gy[at + 1])
+      });
+    }
+    const closed = g.kind === "polygon" || g.kind === "path" || g.kind === "hexagon" || g.kind === "sector";
+    const rings = g.rings || [n];
+    let best = Infinity;
+    let cross = 0;
+    let wind = 0;
+    let ra = at;
+    for (let r = 0; r < rings.length; r++) {
+      const rn = rings[r] | 0;
+      if (rn <= 0) continue;
+      if (closed && rn >= 3) {
+        for (let i = 0, j = rn - 1; i < rn; j = i++) {
+          const xi = gx[ra + i], yi = gy[ra + i];
+          const xj = gx[ra + j], yj = gy[ra + j];
+          if (yi > y !== yj > y) {
+            if (x < (xj - xi) * (y - yi) / (yj - yi) + xi) cross++;
+            const side = (xi - xj) * (y - yj) - (x - xj) * (yi - yj);
+            if (yi > yj) {
+              if (side > 0) wind++;
+            } else if (side < 0) wind--;
+          }
+        }
+      }
+      for (let i = 1; i < rn; i++) {
+        const d2 = distToSegment2(x, y, gx[ra + i - 1], gy[ra + i - 1], gx[ra + i], gy[ra + i]);
+        if (d2 < best) best = d2;
+      }
+      if (closed && rn >= 3) {
+        const d2 = distToSegment2(x, y, gx[ra + rn - 1], gy[ra + rn - 1], gx[ra], gy[ra]);
+        if (d2 < best) best = d2;
+      }
+      ra += rn;
+    }
+    if (closed && (g.evenodd ? (cross & 1) === 1 : wind !== 0)) return 0;
+    return Math.sqrt(best);
+  }
+  function unionBbox(elems, keys) {
+    let out = null;
     for (let i = 0; i < elems.length; i++) {
       const e = elems[i];
-      if (hasBbox(e) && rectsIntersect(e, brush) && !seen[e.key]) {
-        seen[e.key] = true;
-        out.push(e.key);
+      if (!hasBbox(e) || !keys[e.key]) continue;
+      if (!out) out = { x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1 };
+      else {
+        out.x0 = Math.min(out.x0, e.x0);
+        out.y0 = Math.min(out.y0, e.y0);
+        out.x1 = Math.max(out.x1, e.x1);
+        out.y1 = Math.max(out.y1, e.y1);
       }
     }
     return out;
   }
-  function pointInPolygon(x, y, poly) {
-    let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const xi = poly[i].x, yi = poly[i].y;
-      const xj = poly[j].x, yj = poly[j].y;
-      if (yi > y !== yj > y && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
-    }
-    return inside;
+
+  // srcts/linking.ts
+  var vellumwidgetBus = {};
+  function busJoin(group, m) {
+    (vellumwidgetBus[group] = vellumwidgetBus[group] || []).push(m);
   }
-  function lassoKeys(elems, poly) {
-    const out = [];
-    const seen = {};
-    if (poly.length < 3) return out;
-    for (let i = 0; i < elems.length; i++) {
-      const e = elems[i];
-      if (!hasBbox(e) || seen[e.key]) continue;
-      if (pointInPolygon((e.x0 + e.x1) / 2, (e.y0 + e.y1) / 2, poly)) {
-        seen[e.key] = true;
-        out.push(e.key);
-      }
+  function busPublish(group, sender, keys) {
+    const members = vellumwidgetBus[group] || [];
+    for (let i = 0; i < members.length; i++) {
+      if (members[i].token !== sender) members[i].onSelect(keys);
     }
-    return out;
   }
-  function polyBounds(poly) {
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (let i = 0; i < poly.length; i++) {
-      if (poly[i].x < x0) x0 = poly[i].x;
-      if (poly[i].y < y0) y0 = poly[i].y;
-      if (poly[i].x > x1) x1 = poly[i].x;
-      if (poly[i].y > y1) y1 = poly[i].y;
+  function busPublishView(group, sender, v) {
+    const members = vellumwidgetBus[group] || [];
+    for (let i = 0; i < members.length; i++) {
+      if (members[i].token !== sender && members[i].onView) members[i].onView(v);
     }
-    return { x0, y0, x1, y1 };
   }
-  function nearestKey(elems, x, y, maxDist) {
-    let best = null;
-    let bestD = maxDist;
-    for (let i = 0; i < elems.length; i++) {
-      const e = elems[i];
-      if (!hasBbox(e)) continue;
-      const d = distToBbox(x, y, e);
-      if (d <= bestD) {
-        bestD = d;
-        best = e.key;
-      }
-    }
-    return best;
+  function getCrosstalk() {
+    return window.crosstalk || null;
   }
-  function nearestSortedIdx(sorted, target) {
-    const n = sorted.length;
-    if (!n) return -1;
-    let lo = 0;
-    let hi = n - 1;
-    while (lo < hi) {
-      const mid = lo + hi >> 1;
-      if (sorted[mid] < target) lo = mid + 1;
-      else hi = mid;
-    }
-    if (lo > 0 && Math.abs(sorted[lo - 1] - target) <= Math.abs(sorted[lo] - target)) return lo - 1;
-    return lo;
-  }
-  function columnTolerance(sorted) {
-    let minGap = Infinity;
-    for (let i = 1; i < sorted.length; i++) {
-      const g = sorted[i] - sorted[i - 1];
-      if (g > 1e-6 && g < minGap) minGap = g;
-    }
-    return isFinite(minGap) ? minGap / 2 : 1;
-  }
+
+  // srcts/scales.ts
   var INVERTIBLE = { identity: true, log10: true, sqrt: true, reverse: true };
   var GLYPH_MARKS = { point: true, circle: true, hexagon: true, sector: true };
   function canInvert(ax) {
@@ -845,38 +1029,109 @@
     }
     return out;
   }
-  function zoomViewBox(vb, factor, cx, cy) {
-    const w = vb.w / factor;
-    const h = vb.h / factor;
-    return { x: cx - (cx - vb.x) / factor, y: cy - (cy - vb.y) / factor, w, h };
+
+  // srcts/shiny.ts
+  function dispatchProxyCall(msg, findInstance) {
+    if (!msg || msg.id == null) return;
+    const inst = findInstance(msg.id);
+    if (inst && typeof inst._call === "function") inst._call(msg.method, msg.args);
   }
-  function parseViewBox(s) {
-    if (!s) return null;
-    const p = s.trim().split(/[ ,]+/).map(Number);
-    if (p.length !== 4 || p.some((n) => !isFinite(n))) return null;
-    return { x: p[0], y: p[1], w: p[2], h: p[3] };
+  var proxyHandlerRegistered = false;
+  function registerProxyHandler() {
+    if (proxyHandlerRegistered) return;
+    const sh = window.Shiny;
+    if (!sh || typeof sh.addCustomMessageHandler !== "function") return;
+    proxyHandlerRegistered = true;
+    sh.addCustomMessageHandler("vellumwidget-calls", function(msg) {
+      dispatchProxyCall(msg, function(id) {
+        return HTMLWidgets.find ? HTMLWidgets.find("#" + id) : null;
+      });
+    });
   }
-  function fmtViewBox(vb) {
-    return vb.x + " " + vb.y + " " + vb.w + " " + vb.h;
+
+  // srcts/spatial.ts
+  function brushKeys(elems, brush) {
+    const out = [];
+    const seen = {};
+    for (let i = 0; i < elems.length; i++) {
+      const e = elems[i];
+      if (hasBbox(e) && rectsIntersect(e, brush) && !seen[e.key]) {
+        seen[e.key] = true;
+        out.push(e.key);
+      }
+    }
+    return out;
   }
-  function isZoomedIn(vb, vb0) {
-    return vb.w < vb0.w * 0.999 || vb.h < vb0.h * 0.999;
+  function pointInPolygon(x, y, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x, yi = poly[i].y;
+      const xj = poly[j].x, yj = poly[j].y;
+      if (yi > y !== yj > y && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
   }
-  function userToCanvas(vb, cw, ch, x, y) {
-    return { px: (x - vb.x) / vb.w * cw, py: (y - vb.y) / vb.h * ch };
+  function lassoKeys(elems, poly) {
+    const out = [];
+    const seen = {};
+    if (poly.length < 3) return out;
+    for (let i = 0; i < elems.length; i++) {
+      const e = elems[i];
+      if (!hasBbox(e) || seen[e.key]) continue;
+      if (pointInPolygon((e.x0 + e.x1) / 2, (e.y0 + e.y1) / 2, poly)) {
+        seen[e.key] = true;
+        out.push(e.key);
+      }
+    }
+    return out;
   }
-  function viewToPan(vb, vb0) {
-    const sx = vb.w ? vb0.w / vb.w : 1;
-    const sy = vb.h ? vb0.h / vb.h : 1;
-    return { sx, sy, tx: vb0.x - vb.x * sx, ty: vb0.y - vb.y * sy };
+  function polyBounds(poly) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < poly.length; i++) {
+      if (poly[i].x < x0) x0 = poly[i].x;
+      if (poly[i].y < y0) y0 = poly[i].y;
+      if (poly[i].x > x1) x1 = poly[i].x;
+      if (poly[i].y > y1) y1 = poly[i].y;
+    }
+    return { x0, y0, x1, y1 };
   }
-  function panToView(vb, vb0, x, y) {
-    const t = viewToPan(vb, vb0);
-    return { x: t.sx ? vb.x + (x - vb0.x) / t.sx : x, y: t.sy ? vb.y + (y - vb0.y) / t.sy : y };
+  function nearestKey(elems, x, y, maxDist) {
+    let best = null;
+    let bestD = maxDist;
+    for (let i = 0; i < elems.length; i++) {
+      const e = elems[i];
+      if (!hasBbox(e)) continue;
+      const d = distToBbox(x, y, e);
+      if (d <= bestD) {
+        bestD = d;
+        best = e.key;
+      }
+    }
+    return best;
   }
-  function conjugatePan(t, ax, bx, ay, by) {
-    return { sx: t.sx, sy: t.sy, tx: ax * t.tx + bx * (1 - t.sx), ty: ay * t.ty + by * (1 - t.sy) };
+  function nearestSortedIdx(sorted, target) {
+    const n = sorted.length;
+    if (!n) return -1;
+    let lo = 0;
+    let hi = n - 1;
+    while (lo < hi) {
+      const mid = lo + hi >> 1;
+      if (sorted[mid] < target) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0 && Math.abs(sorted[lo - 1] - target) <= Math.abs(sorted[lo] - target)) return lo - 1;
+    return lo;
   }
+  function columnTolerance(sorted) {
+    let minGap = Infinity;
+    for (let i = 1; i < sorted.length; i++) {
+      const g = sorted[i] - sorted[i - 1];
+      if (g > 1e-6 && g < minGap) minGap = g;
+    }
+    return isFinite(minGap) ? minGap / 2 : 1;
+  }
+
+  // srcts/ticks.ts
   function niceTicks(lo, hi, count) {
     if (!isFinite(lo) || !isFinite(hi) || hi <= lo || count < 1) return [];
     const step0 = (hi - lo) / count;
@@ -1211,211 +1466,8 @@
     }
     return statics();
   }
-  function unionBbox(elems, keys) {
-    let out = null;
-    for (let i = 0; i < elems.length; i++) {
-      const e = elems[i];
-      if (!hasBbox(e) || !keys[e.key]) continue;
-      if (!out) out = { x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1 };
-      else {
-        out.x0 = Math.min(out.x0, e.x0);
-        out.y0 = Math.min(out.y0, e.y0);
-        out.x1 = Math.max(out.x1, e.x1);
-        out.y1 = Math.max(out.y1, e.y1);
-      }
-    }
-    return out;
-  }
-  var STYLE_ID = "vellumwidget-style";
-  var VELLUMWIDGET_CSS = `
-.vellumwidget-root { position: relative; display: inline-block; max-width: 100%; }
-/* The stage shrink-wraps the base svg in BOTH dimensions (inline-block sizes to
-   content), so its box equals the svg's rendered box. The absolute overlays below
-   fill THIS box, not the root's \u2014 the root can be taller AND wider than the svg
-   (htmlwidgets stamps an explicit height; a fluid layout can stretch the width),
-   and sizing the overlays to the root would letterbox their viewBox and shift
-   every ring (down if the root is taller, sideways if it is wider). */
-.vellumwidget-root .vellumwidget-stage { position: relative; display: inline-block; }
-.vellumwidget-root .vellumwidget-svg-holder svg { max-width: 100%; height: auto; display: block; }
-.vellumwidget-gesture .vellumwidget-svg-holder svg { touch-action: none; }
-.vellumwidget-root.vellumwidget-mode-pan .vellumwidget-svg-holder svg { cursor: grab; }
-.vellumwidget-root.vellumwidget-panning .vellumwidget-svg-holder svg { cursor: grabbing; }
-.vellumwidget-root [data-key] { cursor: pointer; }
-[data-key].vellumwidget-filtered { display: none; }
-/* Legend click-to-hide / -mute (independent of the crosstalk cross-filter above,
-   so the two never clobber each other). hidden removes the series' marks; muted
-   keeps them but fades them right back; legend-off dims the toggled-off swatch
-   so the legend shows which series are on. */
-[data-key].vellumwidget-legend-hidden { display: none; }
-[data-key].vellumwidget-legend-muted { opacity: 0.12; }
-[data-key].vellumwidget-legend.vellumwidget-legend-off { opacity: 0.4; }
-.vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
-.vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
-/* Conditional encoding (condition()): a non-member of an active selection with no
-   explicit if_false is dimmed to the theme's dim opacity (the spotlight). An
-   explicit if_false colour is applied inline (see applyConditions()). */
-[data-key].vellumwidget-cond-dim { opacity: var(--vellumwidget-dim-opacity, 0.28); }
-/* Large-scene hover: instead of the CSS rule above restyling every keyed node
-   (O(n) per hover), the whole plot is dimmed once via the holder's opacity and the
-   hovered marks are re-drawn crisp in this overlay (O(hovered)). See setHover(). */
-.vellumwidget-root .vellumwidget-svg-holder { transition: none; }
-/* Crisp-zoom point layer: above the base image, below the overlay rings. Never
-   intercepts hit-testing (that stays on the base svg). Hidden until zoomed in. */
-.vellumwidget-canvas {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  pointer-events: none; z-index: 2; display: none;
-}
-.vellumwidget-dim-layer {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  pointer-events: none; z-index: 5; overflow: visible;
-}
-/* Continuous colorbar filter: an overlay on the gradient bar. The dim rects cover
-   the out-of-range ends; the handles are draggable. Out-of-range marks fade. */
-.vellumwidget-colorbar-layer {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  pointer-events: none; z-index: 6; overflow: visible;
-}
-.vellumwidget-cb-dim { fill: rgba(255,255,255,0.66); pointer-events: none; }
-@media (prefers-color-scheme: dark) { .vellumwidget-cb-dim { fill: rgba(17,24,39,0.66); } }
-.vellumwidget-cb-handle {
-  fill: #ffffff; stroke: #2563eb; stroke-width: 1.5px; pointer-events: auto;
-}
-.vellumwidget-root.vellumwidget-cb-v .vellumwidget-cb-handle { cursor: ns-resize; }
-.vellumwidget-root.vellumwidget-cb-h .vellumwidget-cb-handle { cursor: ew-resize; }
-[data-key].vellumwidget-colorfiltered { opacity: var(--vellumwidget-colorfilter-opacity, 0.12); }
-/* Crosshair guide rule(s) for unified hover \u2014 above the base image / canvas,
-   below the highlight rings so a highlighted mark still reads on top. */
-.vellumwidget-crosshair-layer {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  pointer-events: none; z-index: 4; overflow: visible;
-}
-/* Axis-aware zoom: re-ticked axis LABELS overlay (gridlines are drawn inside the
-   base svg's panel, under the marks). Pinned to the fixed base coordinate space. */
-.vellumwidget-retick-layer {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  pointer-events: none; z-index: 3; overflow: visible;
-}
-.vellumwidget-crosshair-line {
-  stroke: var(--vellumwidget-crosshair-stroke, rgba(75,85,99,0.85));
-  stroke-width: 1px; stroke-dasharray: 4 3;
-}
-@media (prefers-color-scheme: dark) {
-  .vellumwidget-crosshair-line { stroke: var(--vellumwidget-crosshair-stroke, rgba(209,213,219,0.85)); }
-}
-/* Raster-mode feedback rings (hover / selection), drawn on the overlay since the
-   marks are a base image with no per-element nodes. Colours reuse the same CSS
-   variables as the SVG-mode highlight/selection so theming carries over. */
-.vellumwidget-fb-hov { fill: none; stroke: var(--vellumwidget-hl-stroke, #2563eb); stroke-width: 2px; }
-.vellumwidget-fb-sel { fill: none; stroke: var(--vellumwidget-selected-stroke, #111827); stroke-width: 1.6px; }
-@media (prefers-color-scheme: dark) {
-  .vellumwidget-fb-sel { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
-}
-/* Optional hover stroke, opt-in per element (.vellumwidget-hc) or widget-wide
-   (.vellumwidget-hc-all on the root). Never applied to a mark that has no hover colour,
-   so a bordered shape is not clobbered on hover. Colour resolves from the nearest
-   --vellumwidget-hl-stroke (element var overrides the root var). */
-.vellumwidget-hc-all [data-key].vellumwidget-hl, [data-key].vellumwidget-hc.vellumwidget-hl {
-  stroke: var(--vellumwidget-hl-stroke); stroke-width: var(--vellumwidget-hl-width, 2px); paint-order: stroke fill;
-}
-[data-key].vellumwidget-selected {
-  stroke: var(--vellumwidget-selected-stroke, #111827);
-  stroke-width: var(--vellumwidget-selected-width, 1.4px); paint-order: stroke fill;
-}
-/* Keyboard focus ring on the currently-traversed mark (a11y). */
-[data-key].vellumwidget-focus {
-  stroke: var(--vellumwidget-focus-stroke, #2563eb);
-  stroke-width: var(--vellumwidget-focus-width, 2.5px); paint-order: stroke fill;
-}
-[data-key]:focus { outline: none; }
-[data-key]:focus-visible { outline: 2px solid var(--vellumwidget-focus-stroke, #2563eb); outline-offset: 1px; }
-/* Visually-hidden but exposed to assistive technology (live region + data table). */
-.vellumwidget-sr-only {
-  position: absolute !important; width: 1px; height: 1px;
-  padding: 0; margin: -1px; overflow: hidden; border: 0;
-  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
-}
-.vellumwidget-tip {
-  position: absolute; left: 0; top: 0; pointer-events: none; z-index: 20;
-  background: var(--vellumwidget-tip-bg, rgba(17,24,39,0.94)); color: var(--vellumwidget-tip-fg, #fff);
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  font-size: var(--vellumwidget-tip-fontsize, 12px); line-height: 1.45;
-  padding: 5px 8px; border-radius: 5px; white-space: pre-wrap;
-  max-width: var(--vellumwidget-tip-maxwidth, 320px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-  opacity: 0; transition: opacity 0.08s ease; will-change: transform;
-}
-.vellumwidget-tip.vellumwidget-show { opacity: 1; }
-/* Sticky tooltip: accepts pointer events so links/buttons inside it are usable. */
-.vellumwidget-tip.vellumwidget-tip-sticky { pointer-events: auto; }
-.vellumwidget-brush {
-  position: absolute; pointer-events: none; z-index: 15;
-  border: 1px solid #2563eb; background: rgba(37,99,235,0.12); display: none;
-}
-/* Overview navigator: a full-width strip below the plot (a squashed mini-render
-   of the whole scene) with a draggable/resizable window marking the visible x-range. */
-.vellumwidget-nav {
-  position: relative; width: 100%; margin-top: 4px; box-sizing: border-box;
-  border: 1px solid rgba(0,0,0,0.12); border-radius: 4px; overflow: hidden;
-  background: rgba(0,0,0,0.02); touch-action: none; user-select: none;
-}
-.vellumwidget-nav-mini { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.85; }
-.vellumwidget-nav-mini svg { width: 100%; height: 100%; display: block; }
-/* The two regions outside the window are dimmed; the window itself is clear. */
-.vellumwidget-nav-window {
-  position: absolute; top: 0; bottom: 0; z-index: 2; cursor: grab;
-  border-left: 1px solid #2563eb; border-right: 1px solid #2563eb;
-  background: rgba(37,99,235,0.10); box-shadow: 0 0 0 100vmax rgba(0,0,0,0.12);
-}
-.vellumwidget-nav-window.vellumwidget-nav-grabbing { cursor: grabbing; }
-.vellumwidget-nav-handle {
-  position: absolute; top: 0; bottom: 0; width: 8px; z-index: 3; cursor: ew-resize;
-  background: #2563eb; opacity: 0.35;
-}
-.vellumwidget-nav-handle-l { left: -1px; }
-.vellumwidget-nav-handle-r { right: -1px; }
-@media (prefers-color-scheme: dark) {
-  .vellumwidget-nav { border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.03); }
-}
-.vellumwidget-root.vellumwidget-mode-lasso .vellumwidget-svg-holder svg { cursor: crosshair; }
-.vellumwidget-lasso {
-  fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px; stroke-dasharray: 4 3;
-}
-/* The persistent band of an active interval selection (select_interval()). */
-.vellumwidget-interval {
-  fill: rgba(37,99,235,0.10); stroke: #2563eb; stroke-width: 1px;
-}
-.vellumwidget-toolbar {
-  position: absolute; top: 6px; right: 6px; z-index: 25; display: flex; gap: 2px;
-  padding: 3px; border-radius: 6px; background: rgba(255,255,255,0.82);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.18); opacity: 0; transition: opacity 0.12s;
-}
-.vellumwidget-root:hover .vellumwidget-toolbar { opacity: 1; }
-.vellumwidget-toolbar button {
-  border: 0; background: transparent; cursor: pointer; border-radius: 4px;
-  font: 13px/1 system-ui, sans-serif; padding: 4px 6px; color: #111827;
-}
-.vellumwidget-toolbar button:hover { background: rgba(0,0,0,0.08); }
-.vellumwidget-toolbar button.vellumwidget-active { background: rgba(37,99,235,0.18); }
-@media (prefers-color-scheme: dark) {
-  .vellumwidget-tip { background: var(--vellumwidget-tip-bg, rgba(243,244,246,0.96)); color: var(--vellumwidget-tip-fg, #111827); }
-  [data-key].vellumwidget-selected { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
-  .vellumwidget-toolbar { background: rgba(31,41,55,0.9); }
-  .vellumwidget-toolbar button { color: #f3f4f6; }
-  .vellumwidget-toolbar button:hover { background: rgba(255,255,255,0.12); }
-}
-`;
-  function ensureStyle() {
-    if (document.getElementById(STYLE_ID)) return;
-    const s = document.createElement("style");
-    s.id = STYLE_ID;
-    s.textContent = VELLUMWIDGET_CSS;
-    document.head.appendChild(s);
-  }
-  function cssEscape(value) {
-    const anyCss = window.CSS;
-    if (anyCss && typeof anyCss.escape === "function") return anyCss.escape(value);
-    return value.replace(/["\\\]\[#.:;,()>~+*^$|=@!%&{}\/\s]/g, "\\$&");
-  }
+
+  // srcts/tooltip.ts
   var TIP_TAGS = ["b", "i", "em", "strong", "br", "span"];
   function sanitizeTip(s) {
     let out = String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -1427,55 +1479,42 @@
   function stripTags(s) {
     return String(s).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   }
-  function keyOf(target) {
-    const el = target;
-    if (!el || typeof el.closest !== "function") return null;
-    const hit = el.closest("[data-key]");
-    return hit ? hit.getAttribute("data-key") : null;
+
+  // srcts/viewbox.ts
+  function zoomViewBox(vb, factor, cx, cy) {
+    const w = vb.w / factor;
+    const h = vb.h / factor;
+    return { x: cx - (cx - vb.x) / factor, y: cy - (cy - vb.y) / factor, w, h };
   }
-  function vellumIdOf(target) {
-    const el = target;
-    if (!el || typeof el.closest !== "function") return null;
-    const hit = el.closest("[data-vellum-id]");
-    return hit ? hit.getAttribute("data-vellum-id") : null;
+  function parseViewBox(s) {
+    if (!s) return null;
+    const p = s.trim().split(/[ ,]+/).map(Number);
+    if (p.length !== 4 || p.some((n) => !isFinite(n))) return null;
+    return { x: p[0], y: p[1], w: p[2], h: p[3] };
   }
-  function sourceTable(prov, id) {
-    const name = prov.sourceOf && prov.sourceOf[id] || "plot";
-    const tbl = name !== "plot" && prov.sources ? prov.sources[name] : void 0;
-    if (!tbl) return { source: "plot", fields: prov.fields, values: prov.values };
-    const fields = Array.isArray(tbl.fields) ? tbl.fields : tbl.fields == null ? [] : [tbl.fields];
-    return { source: name, fields, values: tbl.values };
+  function fmtViewBox(vb) {
+    return vb.x + " " + vb.y + " " + vb.w + " " + vb.h;
   }
-  function download(blob, name) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+  function isZoomedIn(vb, vb0) {
+    return vb.w < vb0.w * 0.999 || vb.h < vb0.h * 0.999;
   }
-  var DRAG_THRESHOLD = 3;
-  var vellumwidgetBus = {};
-  function busJoin(group, m) {
-    (vellumwidgetBus[group] = vellumwidgetBus[group] || []).push(m);
+  function userToCanvas(vb, cw, ch, x, y) {
+    return { px: (x - vb.x) / vb.w * cw, py: (y - vb.y) / vb.h * ch };
   }
-  function busPublish(group, sender, keys) {
-    const members = vellumwidgetBus[group] || [];
-    for (let i = 0; i < members.length; i++) {
-      if (members[i].token !== sender) members[i].onSelect(keys);
-    }
+  function viewToPan(vb, vb0) {
+    const sx = vb.w ? vb0.w / vb.w : 1;
+    const sy = vb.h ? vb0.h / vb.h : 1;
+    return { sx, sy, tx: vb0.x - vb.x * sx, ty: vb0.y - vb.y * sy };
   }
-  function busPublishView(group, sender, v) {
-    const members = vellumwidgetBus[group] || [];
-    for (let i = 0; i < members.length; i++) {
-      if (members[i].token !== sender && members[i].onView) members[i].onView(v);
-    }
+  function panToView(vb, vb0, x, y) {
+    const t = viewToPan(vb, vb0);
+    return { x: t.sx ? vb.x + (x - vb0.x) / t.sx : x, y: t.sy ? vb.y + (y - vb0.y) / t.sy : y };
   }
-  function getCrosstalk() {
-    return window.crosstalk || null;
+  function conjugatePan(t, ax, bx, ay, by) {
+    return { sx: t.sx, sy: t.sy, tx: ax * t.tx + bx * (1 - t.sx), ty: ay * t.ty + by * (1 - t.sy) };
   }
+
+  // srcts/index.ts
   HTMLWidgets.widget({
     name: "vellumwidget",
     type: "output",
@@ -4410,23 +4449,6 @@
       };
     }
   });
-  function dispatchProxyCall(msg, findInstance) {
-    if (!msg || msg.id == null) return;
-    const inst = findInstance(msg.id);
-    if (inst && typeof inst._call === "function") inst._call(msg.method, msg.args);
-  }
-  var proxyHandlerRegistered = false;
-  function registerProxyHandler() {
-    if (proxyHandlerRegistered) return;
-    const sh = window.Shiny;
-    if (!sh || typeof sh.addCustomMessageHandler !== "function") return;
-    proxyHandlerRegistered = true;
-    sh.addCustomMessageHandler("vellumwidget-calls", function(msg) {
-      dispatchProxyCall(msg, function(id) {
-        return HTMLWidgets.find ? HTMLWidgets.find("#" + id) : null;
-      });
-    });
-  }
   registerProxyHandler();
   window.__vellumwidgetTest = {
     rectsIntersect,
