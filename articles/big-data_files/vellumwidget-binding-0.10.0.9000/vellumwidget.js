@@ -3887,17 +3887,73 @@
   function busJoin(group, m) {
     (vellumwidgetBus[group] = vellumwidgetBus[group] || []).push(m);
   }
-  function busPublish(group, sender, keys) {
+  function busLeave(group, token) {
+    const members = vellumwidgetBus[group];
+    if (!members) return;
+    const rest = members.filter((m) => m.token !== token);
+    if (rest.length) vellumwidgetBus[group] = rest;
+    else delete vellumwidgetBus[group];
+  }
+  function liveMembers(group) {
     const members = vellumwidgetBus[group] || [];
+    const live = [];
+    for (let i = 0; i < members.length; i++) {
+      const m = members[i];
+      if (m.el && m.el.isConnected === false) {
+        if (m.onGone) m.onGone();
+        else busLeave(group, m.token);
+        continue;
+      }
+      live.push(m);
+    }
+    return live;
+  }
+  function busPublish(group, sender, keys) {
+    const members = liveMembers(group);
     for (let i = 0; i < members.length; i++) {
       if (members[i].token !== sender) members[i].onSelect(keys);
     }
   }
   function busPublishView(group, sender, v) {
-    const members = vellumwidgetBus[group] || [];
+    const members = liveMembers(group);
     for (let i = 0; i < members.length; i++) {
       if (members[i].token !== sender && members[i].onView) members[i].onView(v);
     }
+  }
+  var watched = [];
+  var observer = null;
+  function sweepRemoved() {
+    const gone = [];
+    watched = watched.filter((w) => {
+      if (w.el.isConnected) {
+        w.seen = true;
+        return true;
+      }
+      if (!w.seen) return true;
+      gone.push(w);
+      return false;
+    });
+    if (!watched.length && observer) {
+      observer.disconnect();
+      observer = null;
+    }
+    for (let i = 0; i < gone.length; i++) gone[i].cb();
+  }
+  function watchRemoval(el, cb) {
+    const w = { el, seen: el.isConnected, cb };
+    watched.push(w);
+    const MO = typeof window !== "undefined" ? window.MutationObserver : void 0;
+    if (!observer && MO && typeof document !== "undefined" && document.documentElement) {
+      observer = new MO(sweepRemoved);
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
+    return function() {
+      watched = watched.filter((x) => x !== w);
+      if (!watched.length && observer) {
+        observer.disconnect();
+        observer = null;
+      }
+    };
   }
   function getCrosstalk() {
     return window.crosstalk || null;
@@ -3984,22 +4040,69 @@
       return keys.filter((k) => !inert(k));
     }
     function setupLinking() {
-      if (ws.joined) return;
-      ws.joined = true;
-      if (ws.group) busJoin(ws.group, { token: ws.selfToken, onSelect: applyLinkedSelection, onView: ws.fx.applyLinkedView });
+      const g = ws.group;
+      if (ws.joinedGroup !== g) {
+        if (ws.joinedGroup != null) busLeave(ws.joinedGroup, ws.selfToken);
+        if (g != null) {
+          busJoin(g, {
+            token: ws.selfToken,
+            onSelect: applyLinkedSelection,
+            onView: ws.fx.applyLinkedView,
+            el: ws.el,
+            onGone: teardownLinking
+          });
+        }
+        ws.joinedGroup = g;
+      }
       const ct = getCrosstalk();
-      if (ws.opts.crosstalk && ct) {
-        ws.ctSel = new ct.SelectionHandle(ws.opts.crosstalk);
-        ws.ctFilt = new ct.FilterHandle(ws.opts.crosstalk);
-        ws.ctSel.on("change", function(e) {
-          if (e.sender !== ws.ctSel) applyLinkedSelection(e.value || []);
-        });
-        ws.ctFilt.on("change", function(e) {
-          applyFilter(e.value);
-        });
+      const ctg = ws.opts.crosstalk && ct ? ws.opts.crosstalk : null;
+      if (ws.ctGroup !== ctg) {
+        closeCrosstalk();
+        if (ctg && ct) {
+          const sel = new ct.SelectionHandle(ctg);
+          const filt = new ct.FilterHandle(ctg);
+          ws.ctSel = sel;
+          ws.ctFilt = filt;
+          sel.on("change", function(e) {
+            if (ws.ctSel !== sel) return;
+            if (!ws.el.isConnected) {
+              teardownLinking();
+              return;
+            }
+            if (e.sender !== sel) applyLinkedSelection(e.value || []);
+          });
+          filt.on("change", function(e) {
+            if (ws.ctFilt !== filt) return;
+            if (!ws.el.isConnected) {
+              teardownLinking();
+              return;
+            }
+            applyFilter(e.value);
+          });
+        }
+        ws.ctGroup = ctg;
+      }
+      if ((ws.joinedGroup != null || ws.ctGroup != null) && !ws.unwatchRemoval) {
+        ws.unwatchRemoval = watchRemoval(ws.el, teardownLinking);
       }
     }
-    return { shinyInput, selectedKeys, toggleSelect, setSelection, clearSelection, applyFilter, inert, dropInert, setupLinking };
+    function closeCrosstalk() {
+      if (ws.ctSel && ws.ctSel.close) ws.ctSel.close();
+      if (ws.ctFilt && ws.ctFilt.close) ws.ctFilt.close();
+      ws.ctSel = null;
+      ws.ctFilt = null;
+      ws.ctGroup = null;
+    }
+    function teardownLinking() {
+      if (ws.joinedGroup != null) busLeave(ws.joinedGroup, ws.selfToken);
+      ws.joinedGroup = null;
+      closeCrosstalk();
+      if (ws.unwatchRemoval) {
+        ws.unwatchRemoval();
+        ws.unwatchRemoval = null;
+      }
+    }
+    return { shinyInput, selectedKeys, toggleSelect, setSelection, clearSelection, applyFilter, inert, dropInert, setupLinking, teardownLinking };
   }
 
   // srcts/features/source.ts
@@ -4441,7 +4544,9 @@
       selfToken: {},
       group: null,
       receivingView: false,
-      joined: false,
+      joinedGroup: null,
+      ctGroup: null,
+      unwatchRemoval: null,
       ctSel: null,
       ctFilt: null,
       tipShowTimer: 0,
@@ -4704,6 +4809,7 @@
     detectTimeFormat,
     axisTicks,
     axisRetickable,
-    sourceTable
+    sourceTable,
+    bus: vellumwidgetBus
   };
 })();
