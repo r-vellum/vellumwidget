@@ -408,6 +408,11 @@ ok(
     ch(group, kind).push(this);
     const self = this;
     this.on = function (t, cb) { self._ls.push(cb); };
+    this.closed = false;
+    this.close = function () {
+      self.closed = true; self._ls = [];
+      const arr = ch(group, kind); const i = arr.indexOf(self); if (i >= 0) arr.splice(i, 1);
+    };
     this.set = function (v) {
       ch(group, kind).forEach(function (h) {
         h._ls.forEach(function (cb) { cb({ value: v, sender: self }); });
@@ -445,6 +450,60 @@ ok(elC.querySelector('[data-key="y"]').classList.contains("vellumwidget-filtered
 ok(!elC.querySelector('[data-key="x"]').classList.contains("vellumwidget-filtered"), "crosstalk: filter keeps the matching element");
 peerFilt.set(null);
 ok(!elC.querySelector('[data-key="y"]').classList.contains("vellumwidget-filtered"), "crosstalk: null filter clears the cross-filter");
+
+// ===================== linking lifecycle: group change + removal (VW-5) =====================
+const asyncChecks = []; // run after the synchronous suite (MutationObserver callbacks are microtasks)
+{
+  const TB = window.__vellumwidgetTest;
+  const lopts = (group, ct) => {
+    const o = linkOpts();
+    o.options = Object.assign({}, o.options, { group: group, crosstalk: ct });
+    return o;
+  };
+  const mk = (group, ct) => {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e, 100, 100);
+    i.renderValue(lopts(group, ct));
+    return { el: e, inst: i };
+  };
+  const isSel = (w, k) => w.el.querySelector('[data-key="' + k + '"]').classList.contains("vellumwidget-selected");
+  const click = (w, k) => fireOn(w.el.querySelector("svg"), "click", w.el.querySelector('[data-key="' + k + '"]'));
+  const wA = mk("VW5a"), wB = mk("VW5a"), wC = mk("VW5b");
+  ok(TB.bus.VW5a.length === 2 && TB.bus.VW5b.length === 1, "linking lifecycle: widgets join their groups");
+  wB.inst.renderValue(lopts("VW5a")); // same group again: no duplicate membership
+  ok(TB.bus.VW5a.length === 2, "linking lifecycle: a re-render in the same group does not join twice");
+  wB.inst.renderValue(lopts("VW5b")); // Shiny re-render with a new group
+  ok(TB.bus.VW5a.length === 1 && TB.bus.VW5b.length === 2, "linking lifecycle: a group change leaves the old group and joins the new one");
+  click(wA, "x");
+  ok(!isSel(wB, "x"), "linking lifecycle: the old group's selections no longer reach the widget");
+  click(wC, "y");
+  ok(isSel(wB, "y"), "linking lifecycle: the new group's selections do");
+  // Crosstalk: a changed group closes the old handles and opens new ones.
+  const wX = mk(null, "VW5ct1");
+  const oldSel = window.crosstalk._ch("VW5ct1", "selection")[0];
+  wX.inst.renderValue(lopts(null, "VW5ct2"));
+  ok(oldSel.closed && window.crosstalk._ch("VW5ct1", "selection").length === 0 && window.crosstalk._ch("VW5ct2", "selection").length === 1,
+    "linking lifecycle: a crosstalk group change closes the old handles and opens new ones");
+  const peerX = new window.crosstalk.SelectionHandle("VW5ct2");
+  peerX.set(["y"]);
+  peerX.close();
+  ok(isSel(wX, "y"), "linking lifecycle: the new crosstalk group's selection is applied");
+  // Removal: the element leaves the page -> bus membership and crosstalk handles are freed.
+  wB.el.remove();
+  wX.el.remove();
+  asyncChecks.push(function () {
+    ok(TB.bus.VW5b.length === 1, "linking lifecycle: a removed widget is dropped from the bus");
+    ok(window.crosstalk._ch("VW5ct2", "selection").length === 0 && window.crosstalk._ch("VW5ct2", "filter").length === 0,
+      "linking lifecycle: a removed widget's crosstalk handles are closed");
+    click(wC, "x"); // publishing to the group still works for the remaining member
+    ok(isSel(wC, "x"), "linking lifecycle: the remaining member keeps working");
+    wA.el.remove();
+  });
+  asyncChecks.push(function () {
+    ok(TB.bus.VW5a === undefined, "linking lifecycle: an emptied group is deleted from the bus");
+  });
+}
 
 // ===================== legend interaction =====================
 const elL = mount({
@@ -3475,5 +3534,12 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
     "interval+axis_zoom facets: the band follows panel 2's zoom and is clipped to its frame");
 }
 
-console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
-process.exit(failures === 0 ? 0 : 1);
+// Checks that need the MutationObserver (removal watcher) to have run.
+setTimeout(function () {
+  asyncChecks[0]();
+  setTimeout(function () {
+    for (let i = 1; i < asyncChecks.length; i++) asyncChecks[i]();
+    console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
+    process.exit(failures === 0 ? 0 : 1);
+  }, 0);
+}, 0);

@@ -1,5 +1,12 @@
 # vellumwidget 0.10.0.9000
 
+* **Linked widgets follow a changed `group` and are freed when removed (VW-5).**
+  After a Shiny re-render with a new `group` (or `crosstalk` group), a widget
+  published to the new group but kept listening on the old one. It now leaves
+  the old group and joins the new one, closing its old crosstalk handles. A
+  widget whose element is removed from the page (a re-render, `renderUI()`)
+  leaves the linking bus and closes its crosstalk handles instead of lingering.
+
 * **Hover in open space finds the right mark when zoomed (VW-3).** The
   client-to-scene fit behind nearest-mark hover is now made per data panel, from
   that panel's own marks, and ignores legend swatches and hidden or filtered

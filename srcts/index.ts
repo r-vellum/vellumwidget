@@ -37,6 +37,7 @@ import { distToBbox, distToGeom, distToSegment2, rectsIntersect, unionBbox } fro
 import { axisForEncoding, inInterval, intervalKeys, intervalRangeOf, nativeToData, pxToDataX, pxToDataY, selEncodings } from "./scales";
 import { dispatchProxyCall, registerProxyHandler } from "./shiny";
 import { brushKeys, columnTolerance, lassoKeys, nearestKey, nearestSortedIdx, pointInPolygon, polyBounds } from "./spatial";
+import { vellumwidgetBus } from "./linking";
 import { createState } from "./state";
 import { axisRetickable, axisTicks, dataToNative, detectTimeFormat, fmtRNum, fmtTick, logTicks, niceTicks, strftimeUTC, timeTicks } from "./ticks";
 import { sanitizeTip } from "./tooltip";
@@ -249,5 +250,6 @@ registerProxyHandler();
   detectTimeFormat,
   axisTicks,
   axisRetickable,
-  sourceTable
+  sourceTable,
+  bus: vellumwidgetBus
 };

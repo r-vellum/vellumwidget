@@ -156,7 +156,9 @@ export interface WidgetState {
   selfToken: {}; // identity on the own bus
   group: string | null; // own-bus group
   receivingView: boolean; // applying a peer's linked view (suppresses re-broadcast)
-  joined: boolean; // joined the own bus already (guard re-render)
+  joinedGroup: string | null; // the own-bus group currently joined (re-joined when a render changes it)
+  ctGroup: string | null; // the crosstalk group the handles below belong to
+  unwatchRemoval: (() => void) | null; // stops the page-removal watcher for el
   ctSel: CrosstalkHandle | null; // crosstalk selection handle
   ctFilt: CrosstalkHandle | null; // crosstalk filter handle
   // --- tooltip: placement, delay, sticky (#14) ---
@@ -272,6 +274,7 @@ export interface WidgetFns {
   setupAxisZoom: () => void;
   setupInteractions: () => void;
   setupLinking: () => void;
+  teardownLinking: () => void;
   shinyInput: (event: string, value: unknown, opts?: { priority?: string }) => void;
   showHighlightOverlay: (keys: string[]) => void;
   showTip: (clientX: number, clientY: number, k: string) => void;
@@ -382,7 +385,9 @@ export function createState(el: HTMLElement): WidgetState {
     selfToken: {},
     group: null,
     receivingView: false,
-    joined: false,
+    joinedGroup: null,
+    ctGroup: null,
+    unwatchRemoval: null,
     ctSel: null,
     ctFilt: null,
     tipShowTimer: 0,
