@@ -2532,6 +2532,79 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(!p2.style.fill && !p3.style.fill, "condition: hover off reverts non-members to their true colour");
 }
 
+// ===================== VW-12: one element per point, or a fill + stroke twin =====================
+// vellum draws a keyed point with a solid fill and an undashed solid stroke as
+// ONE element carrying both paints; older vellum drew a fill element followed
+// by a fill="none" stroke twin with the same data-key. The widget must behave
+// the same on both: rings fully visible (paint-order: normal), every node of
+// the key selected/hovered, and a condition recolouring only the paints a
+// node actually uses.
+{
+  const css = document.getElementById("vellumwidget-style").textContent;
+  ok(css.indexOf("paint-order: stroke fill") < 0,
+    "VW-12: no ring rule paints the stroke under the fill (a single element would hide half the ring)");
+  ok((css.match(/paint-order: normal;/g) || []).length === 3,
+    "VW-12: hover, selection and focus rings all paint the stroke over the fill");
+
+  const fixtures = {
+    single:
+      '<circle data-key="s1" cx="10" cy="10" r="3" fill="#ff0000" stroke="#000000" stroke-width="1"/>' +
+      '<circle data-key="s2" cx="30" cy="10" r="3" fill="#00ff00" stroke="#000000" stroke-width="1"/>',
+    twin:
+      '<circle data-key="s1" cx="10" cy="10" r="3" fill="#ff0000"/>' +
+      '<circle data-key="s1" cx="10" cy="10" r="3" fill="none" stroke="#000000" stroke-width="1"/>' +
+      '<circle data-key="s2" cx="30" cy="10" r="3" fill="#00ff00"/>' +
+      '<circle data-key="s2" cx="30" cy="10" r="3" fill="none" stroke="#000000" stroke-width="1"/>'
+  };
+  Object.keys(fixtures).forEach(function (kind) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const w = widgetDef.factory(e, 200, 100);
+    w.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><g data-vellum-panel="panel-1-1">' +
+        fixtures[kind] + "</g></svg>",
+      elements: [
+        { key: "s1", tooltip: "one", cond: ["hi:color"] },
+        { key: "s2", tooltip: "two", cond: ["hi:color"] }
+      ],
+      interactions: {
+        selections: [{ name: "hi", kind: "point", on: "hover", empty: true }],
+        conditions: [{ selection: "hi", aes: "color", if_false: "#cccccc", empty: true }]
+      },
+      options: { hover: true, tooltip: true, select: true, selectMode: "multiple" }
+    });
+    const svgE = e.querySelector("svg");
+    const s1 = e.querySelectorAll('[data-key="s1"]');
+    const s2 = e.querySelectorAll('[data-key="s2"]');
+    ok(s1.length === (kind === "single" ? 1 : 2), "VW-12 " + kind + ": fixture has the expected nodes per key");
+    function fireS(type, target) {
+      const ev = new window.MouseEvent(type, { bubbles: true, clientX: 10, clientY: 10 });
+      Object.defineProperty(ev, "target", { value: target, enumerable: true });
+      svgE.dispatchEvent(ev);
+    }
+    // hover the stroke node (the last one): tooltip + whole-key highlight
+    fireS("pointermove", s1[s1.length - 1]);
+    ok(e.querySelector(".vellumwidget-tip").textContent === "one", "VW-12 " + kind + ": hover resolves the key from any of its nodes");
+    const grey = function (v) { return v === "rgb(204, 204, 204)" || v === "#cccccc"; };
+    if (kind === "single") {
+      ok(grey(s2[0].style.fill) && grey(s2[0].style.stroke),
+        "VW-12 single: a condition recolours both the fill and the stroke of the one element");
+    } else {
+      ok(grey(s2[0].style.fill) && !s2[0].style.stroke,
+        "VW-12 twin: a condition recolours the fill element's fill only");
+      ok(!s2[1].style.fill && grey(s2[1].style.stroke),
+        "VW-12 twin: a condition recolours the twin's stroke, never its fill:none");
+    }
+    ok(!s1[0].style.fill, "VW-12 " + kind + ": the hovered member keeps its colour");
+    fireS("pointerleave", svgE);
+    // click selects every node of the key
+    fireS("click", s1[0]);
+    ok(Array.prototype.every.call(s1, function (n) { return n.classList.contains("vellumwidget-selected"); }),
+      "VW-12 " + kind + ": click selects every node of the key");
+    ok(!s2[0].classList.contains("vellumwidget-selected"), "VW-12 " + kind + ": other keys stay unselected");
+  });
+}
+
 // A condition with no if_false dims non-members via the theme-dim class (the
 // default spotlight).
 {
