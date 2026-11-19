@@ -58,14 +58,18 @@ range selected on a continuous colorbar (see the interactive colorbar
 filter); \code{NULL} when the full range is shown. State input.}
 \item{\code{input$plot_zoom}}{A list \code{list(x=, y=, w=, h=, zoomed=)} — the current
 view (the SVG \code{viewBox} in device-pixel coordinates) plus a \code{zoomed} flag
-(is the view narrower/shorter than the full extent). For a single-panel
-cartesian plot it also carries \code{data = list(x=c(lo,hi), y=c(lo,hi), panel=)},
-the visible range in \strong{data} coordinates. Updates as state when a zoom/pan
+(is the view narrower/shorter than the full extent). A cartesian plot
+also carries \code{panels}, a list keyed by panel id (\code{"panel-1-1"}, ...) with
+each panel's visible range in \strong{data} coordinates,
+\code{list(x=c(lo,hi), y=c(lo,hi), panel=)}, or \code{NULL} for a panel scrolled out
+of view. Facets zoom per panel, so read \code{panels} for a faceted plot. A
+single-panel plot keeps the older \code{data} field, the same range as its one
+\code{panels} entry. Updates as state when a zoom/pan
 settles (wheel, drag-pan release, pinch, keyboard, reset, zoom-to-selection,
 or a proxy \code{\link[=vw_zoom]{vw_zoom()}}).}
 }
 
-Data-space coordinates (\code{x0d}/… and \code{zoom$data}) come from the per-panel scale
+Data-space coordinates (\code{x0d}/…, \code{zoom$data} and \code{zoom$panels}) come from the per-panel scale
 descriptors \code{vellumplot} attaches to the scene; a raw \code{vellum} scene or a
 non-cartesian coordinate system carries none, and only the device-pixel fields
 are reported. Some specifics:

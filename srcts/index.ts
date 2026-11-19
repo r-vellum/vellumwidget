@@ -39,7 +39,7 @@ import { cssEscape, cssEscapePolyfill, dispatchProxyCall, findWidgetById, idSele
 import { brushKeys, columnTolerance, lassoKeys, nearestKey, nearestSortedIdx, pointInPolygon, polyBounds } from "./spatial";
 import { vellumwidgetBus } from "./linking";
 import { createState } from "./state";
-import { axisRetickable, axisTicks, dataToNative, detectTimeFormat, fmtRNum, fmtTick, logTicks, niceTicks, strftimeUTC, timeTicks } from "./ticks";
+import { axisRetickable, axisTicks, dataToNative, detectTimeFormat, fmtRNum, fmtTick, logTicks, niceTicks, parseSecLabels, secAxisMap, secTicks, strftimeUTC, timeTicks } from "./ticks";
 import { sanitizeTip } from "./tooltip";
 import type { Bbox, ViewBox } from "./types";
 import { conjugatePan, fmtViewBox, isZoomedIn, panToView, parseViewBox, userToCanvas, viewToPan, zoomViewBox } from "./viewbox";
@@ -254,6 +254,9 @@ registerProxyHandler();
   detectTimeFormat,
   axisTicks,
   axisRetickable,
+  parseSecLabels,
+  secAxisMap,
+  secTicks,
   sourceTable,
   bus: vellumwidgetBus
 };

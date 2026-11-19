@@ -3,7 +3,7 @@
 
 import { asColumn } from "./elements";
 import { nativeToData } from "./scales";
-import type { AxisScale } from "./types";
+import type { AxisScale, SecAxisMap } from "./types";
 
 // "Nice" round tick values covering [lo, hi] (1/2/5 x 10^k steps), a handful of
 // them. The client-side re-ticker for a linear axis: vellum's own ticks span the
@@ -165,12 +165,54 @@ export const TZ_OFFSETS: number[] = (function () {
   for (let q = 1; q <= 56; q++) out.push(q * 900000, -q * 900000);
   return out;
 })();
-export interface TimeFormatInfo { fmt: string | null; off: number; }
+// `off` is the axis's UTC offset at its first break; `tz`, when set, is an IANA
+// zone that reproduces every static label, so each tick gets its own offset
+// (VW-10c: a DST change inside the view no longer shifts labels by an hour).
+export interface TimeFormatInfo { fmt: string | null; off: number; tz?: string; }
 export const timeFmtCache: WeakMap<AxisScale, TimeFormatInfo> = new WeakMap();
-// Recover the strftime format (and, for datetime, the time-zone offset) that
-// produced a date axis's static labels, by formatting its static breaks with each
-// candidate until one reproduces every label. `fmt` is null when nothing matches
-// (custom label functions) — the generator then picks a format per tick step.
+
+// UTC offset (ms) of IANA zone `tz` at instant `ms`, via Intl; null when the
+// runtime has no time-zone data for it.
+const tzFormatters: Record<string, Intl.DateTimeFormat | null> = {};
+export function zoneOffset(tz: string, ms: number): number | null {
+  let f = tzFormatters[tz];
+  if (f === undefined) {
+    try {
+      f = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, hour12: false, year: "numeric", month: "numeric", day: "numeric",
+        hour: "numeric", minute: "numeric", second: "numeric"
+      });
+    } catch (e) { f = null; }
+    tzFormatters[tz] = f;
+  }
+  if (!f || !isFinite(ms)) return null;
+  const parts = f.formatToParts(new Date(ms));
+  const get = (t: string) => { for (let i = 0; i < parts.length; i++) if (parts[i].type === t) return Number(parts[i].value); return NaN; };
+  const wall = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"), get("second"));
+  return isFinite(wall) ? wall - Math.floor(ms / 1000) * 1000 : null;
+}
+
+function browserZone(): string | null {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (e) { return null; }
+}
+
+function allZones(): string[] {
+  const I = Intl as unknown as { supportedValuesOf?: (k: string) => string[] };
+  try { return typeof I.supportedValuesOf === "function" ? I.supportedValuesOf("timeZone") : []; } catch (e) { return []; }
+}
+
+// Recover the strftime format (and, for datetime, the time zone) that produced a
+// date axis's static labels, by formatting its static breaks with each candidate
+// until one reproduces every label. `fmt` is null when nothing matches (custom
+// label functions) — the generator then picks a format per tick step.
+//
+// For a datetime axis the labels were formatted in the plot's time zone, which
+// the payload does not name. Candidates are fixed offsets (nearest UTC first) and
+// IANA zones (the viewer's own first; every zone when no fixed offset fits, or
+// when a day-level format's breaks are not all on local midnight). Among the
+// candidates that reproduce every label, the one putting the most breaks on a
+// local midnight wins (vellumplot places day-or-coarser breaks there); ties go
+// to the viewer's zone, then the fixed offset.
 export function detectTimeFormat(ax: AxisScale): TimeFormatInfo {
   const hit = timeFmtCache.get(ax);
   if (hit) return hit;
@@ -178,20 +220,84 @@ export function detectTimeFormat(ax: AxisScale): TimeFormatInfo {
   const unitMs = ax.time_unit === "second" ? 1000 : 86400000;
   let info: TimeFormatInfo = { fmt: null, off: 0 };
   if (breaks.length && breaks.length === labels.length) {
-    const offs = ax.time_unit === "second" ? TZ_OFFSETS : [0];
-    search:
-    for (let o = 0; o < offs.length; o++) {
+    const ms = breaks.map(function (b) { return Number(b) * unitMs; });
+    const lab = labels.map(function (l) { return l.trim(); });
+    if (ax.time_unit !== "second") {
       for (let f = 0; f < TIME_FORMATS.length; f++) {
         let all = true;
-        for (let i = 0; i < breaks.length && all; i++) {
-          all = strftimeUTC(TIME_FORMATS[f], Number(breaks[i]) * unitMs + offs[o]) === labels[i].trim();
-        }
-        if (all) { info = { fmt: TIME_FORMATS[f], off: offs[o] }; break search; }
+        for (let i = 0; i < ms.length && all; i++) all = strftimeUTC(TIME_FORMATS[f], ms[i]) === lab[i];
+        if (all) { info = { fmt: TIME_FORMATS[f], off: 0 }; break; }
+      }
+    } else {
+      for (let f = 0; f < TIME_FORMATS.length; f++) {
+        const r = detectZone(TIME_FORMATS[f], ms, lab);
+        if (r) { info = r; break; }
       }
     }
   }
   timeFmtCache.set(ax, info);
   return info;
+}
+
+function detectZone(fmt: string, ms: number[], lab: string[]): TimeFormatInfo | null {
+  const DAY = 86400000;
+  // Per break, the offsets (15-minute steps, which cover every zone) under
+  // which it formats to its label; a break no offset fits rules the format out.
+  const ok: Record<number, boolean>[] = [];
+  for (let i = 0; i < ms.length; i++) {
+    const set: Record<number, boolean> = {};
+    let any = false;
+    for (let o = 0; o < TZ_OFFSETS.length; o++) {
+      if (strftimeUTC(fmt, ms[i] + TZ_OFFSETS[o]) === lab[i]) { set[TZ_OFFSETS[o]] = true; any = true; }
+    }
+    if (!any) return null;
+    ok.push(set);
+  }
+  const fits = (i: number, o: number) => ok[i][o] === true;
+  // The fixed offset (nearest UTC first) that reproduces every label.
+  let fixed: number | null = null;
+  for (let o = 0; o < TZ_OFFSETS.length && fixed === null; o++) {
+    let all = true;
+    for (let i = 0; i < ms.length && all; i++) all = fits(i, TZ_OFFSETS[o]);
+    if (all) fixed = TZ_OFFSETS[o];
+  }
+  const midnights = (offs: number[]) => {
+    let c = 0;
+    for (let i = 0; i < ms.length; i++) if ((((ms[i] + offs[i]) % DAY) + DAY) % DAY === 0) c++;
+    return c;
+  };
+  const zoneOffs = (tz: string): number[] | null => {
+    const out: number[] = [];
+    for (let i = 0; i < ms.length; i++) {
+      const o = zoneOffset(tz, ms[i]);
+      if (o === null || !fits(i, o)) return null;
+      out.push(o);
+    }
+    return out;
+  };
+  let best: TimeFormatInfo | null = null, bestScore = -1;
+  const own = browserZone();
+  if (own) {
+    const zo = zoneOffs(own);
+    if (zo) { best = { fmt: fmt, off: zo[0], tz: own }; bestScore = midnights(zo); }
+  }
+  if (fixed !== null) {
+    const sc = midnights(ms.map(function () { return fixed as number; }));
+    if (sc > bestScore) { best = { fmt: fmt, off: fixed }; bestScore = sc; }
+  }
+  const dayLevel = fmtRank(fmt) >= 3;
+  if (fixed === null || (dayLevel && bestScore < ms.length)) {
+    const zones = allZones();
+    for (let z = 0; z < zones.length; z++) {
+      if (zones[z] === own) continue;
+      const zo = zoneOffs(zones[z]);
+      if (!zo) continue;
+      const sc = midnights(zo);
+      if (sc > bestScore) { best = { fmt: fmt, off: zo[0], tz: zones[z] }; bestScore = sc; }
+      if (bestScore === ms.length) break;
+    }
+  }
+  return best;
 }
 
 // Calendar tick steps, finest first: rank (see fmtRank), a nominal length in ms
@@ -222,7 +328,14 @@ export function timeTicks(ax: AxisScale, lo: number, hi: number, n: number): Tic
   const unitMs = isDate ? 86400000 : 1000;
   const info = detectTimeFormat(ax);
   const off = info.off;
-  const slo = lo * unitMs + off, shi = hi * unitMs + off; // shifted to the axis's wall clock
+  const tz = !isDate && info.tz ? info.tz : null;
+  // The axis's offset at an instant: per tick in a detected zone, else fixed.
+  const offAt = (t: number): number => {
+    if (!tz) return off;
+    const o = zoneOffset(tz, t);
+    return o === null ? off : o;
+  };
+  const slo = lo * unitMs + offAt(lo * unitMs), shi = hi * unitMs + offAt(hi * unitMs); // the axis's wall clock
   const span = shi - slo;
   let step: TimeStep | null = null;
   for (let i = 0; i < TIME_STEPS.length; i++) {
@@ -264,7 +377,14 @@ export function timeTicks(ax: AxisScale, lo: number, hi: number, n: number): Tic
     let fmt = useStatic ? info.fmt! : defFmt;
     // Sub-day steps label each midnight with its date so the day stays readable.
     if (!useStatic && step.rank <= 2 && w % 86400000 === 0) fmt = "%Y-%m-%d";
-    out.push({ n: (w - off) / unitMs, label: strftimeUTC(fmt, w) });
+    let inst = w - off;
+    if (tz) {
+      // Wall -> instant: refine once (the offset at the instant may differ from
+      // the guess near a DST change); skip a wall time the change skips over.
+      inst = w - offAt(w - offAt(w));
+      if (inst + offAt(inst) !== w) continue;
+    }
+    out.push({ n: inst / unitMs, label: strftimeUTC(fmt, w) });
   }
   return out;
 }
@@ -327,4 +447,108 @@ export function axisTicks(ax: AxisScale, lo: number, hi: number, n: number): Tic
     return ticks.map(function (d) { return { n: dataToNative(ax, d), label: fmtTick(d, step) }; });
   }
   return statics();
+}
+
+// --- secondary axes (VW-10b) ---
+// Parse a secondary axis's static labels as numbers, keeping any decoration
+// shared by every label (a unit prefix/suffix such as "$" or " km", thousands
+// commas). Null when any label is not a plain decorated number.
+export function parseSecLabels(labels: string[]): { vals: number[]; prefix: string; suffix: string; comma: boolean } | null {
+  if (labels.length < 2) return null;
+  const NUM = /[-+\u2212]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?(?:[eE][-+]?\d+)?/;
+  let prefix: string | null = null, suffix: string | null = null, comma = false;
+  const vals: number[] = [];
+  for (let i = 0; i < labels.length; i++) {
+    const t = labels[i].trim();
+    // The first run that looks like a number (with at least one digit).
+    const re = new RegExp(NUM.source, "g");
+    let m: RegExpExecArray | null = null, hit: RegExpExecArray | null = null;
+    while ((m = re.exec(t)) !== null) {
+      if (/\d/.test(m[0])) { hit = m; break; }
+      re.lastIndex = m.index + 1;
+    }
+    if (!hit) return null;
+    const pre = t.slice(0, hit.index), suf = t.slice(hit.index + hit[0].length);
+    if (/\d/.test(pre) || /\d/.test(suf)) return null;
+    if (prefix === null) { prefix = pre; suffix = suf; }
+    else if (pre !== prefix || suf !== suffix) return null;
+    if (hit[0].indexOf(",") >= 0) comma = true;
+    const v = Number(hit[0].replace(/,/g, "").replace("\u2212", "-"));
+    if (!isFinite(v)) return null;
+    vals.push(v);
+  }
+  return { vals: vals, prefix: prefix || "", suffix: suffix || "", comma: comma };
+}
+
+// Build the primary-native -> secondary-value map from matched pairs. Needs two
+// distinct positions and strictly monotone values; null otherwise.
+export function secAxisMap(native: number[], labels: string[]): SecAxisMap | null {
+  const parsed = parseSecLabels(labels);
+  if (!parsed || native.length !== parsed.vals.length) return null;
+  const idx = native.map(function (_, i) { return i; }).filter(function (i) { return isFinite(native[i]); });
+  idx.sort(function (a, b) { return native[a] - native[b]; });
+  const n = idx.map(function (i) { return native[i]; });
+  const v = idx.map(function (i) { return parsed.vals[i]; });
+  if (n.length < 2) return null;
+  const up = v[1] > v[0];
+  for (let i = 1; i < n.length; i++) {
+    if (!(n[i] > n[i - 1])) return null;
+    if (up ? !(v[i] > v[i - 1]) : !(v[i] < v[i - 1])) return null;
+  }
+  // Linear when every pair sits on the line through the end pairs.
+  const k = (v[n.length - 1] - v[0]) / (n[n.length - 1] - n[0]);
+  const span = Math.abs(v[n.length - 1] - v[0]) || 1;
+  let linear = true;
+  for (let i = 1; i < n.length - 1 && linear; i++) linear = Math.abs(v[0] + k * (n[i] - n[0]) - v[i]) <= 1e-6 * span;
+  return { n: n, v: v, linear: linear, prefix: parsed.prefix, suffix: parsed.suffix, comma: parsed.comma };
+}
+
+// Piecewise-linear interpolation through (xs, ys) (xs ascending or descending),
+// extrapolating along the end segments.
+function interp(xs: number[], ys: number[], x: number): number {
+  const m = xs.length;
+  const asc = xs[m - 1] > xs[0];
+  let j = 1;
+  while (j < m - 1 && (asc ? x > xs[j] : x < xs[j])) j++;
+  const x0 = xs[j - 1], x1 = xs[j];
+  return ys[j - 1] + (ys[j] - ys[j - 1]) * (x - x0) / (x1 - x0);
+}
+
+export function secForward(m: SecAxisMap, native: number): number {
+  if (m.linear) {
+    const L = m.n.length - 1;
+    return m.v[0] + (m.v[L] - m.v[0]) * (native - m.n[0]) / (m.n[L] - m.n[0]);
+  }
+  return interp(m.n, m.v, native);
+}
+
+export function secInverse(m: SecAxisMap, value: number): number {
+  if (m.linear) {
+    const L = m.n.length - 1;
+    return m.n[0] + (m.n[L] - m.n[0]) * (value - m.v[0]) / (m.v[L] - m.v[0]);
+  }
+  return interp(m.v, m.n, value);
+}
+
+// Ticks for a secondary axis over the visible primary-native range [lo, hi]:
+// nice steps in secondary units, placed back on the primary native scale and
+// labelled with the static labels' decoration.
+export function secTicks(m: SecAxisMap, lo: number, hi: number, count: number): Tick[] {
+  const a = secForward(m, lo), b = secForward(m, hi);
+  const vals = niceTicks(Math.min(a, b), Math.max(a, b), count);
+  if (!vals.length) return [];
+  const step = vals.length > 1 ? Math.abs(vals[1] - vals[0]) : Math.abs(vals[0]) || 1;
+  const out: Tick[] = [];
+  for (let i = 0; i < vals.length; i++) {
+    let s = fmtTick(vals[i], step);
+    if (m.comma) {
+      const neg = s.charAt(0) === "-";
+      const body = neg ? s.slice(1) : s;
+      const dot = body.indexOf(".");
+      const int = dot < 0 ? body : body.slice(0, dot);
+      s = (neg ? "-" : "") + int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (dot < 0 ? "" : body.slice(dot));
+    }
+    out.push({ n: secInverse(m, vals[i]), label: m.prefix + s + m.suffix });
+  }
+  return out;
 }

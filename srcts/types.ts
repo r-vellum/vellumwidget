@@ -255,6 +255,19 @@ export interface ViewBox {
 // static axis group vellum drew for that panel. `gap` > 0 when vellum wrapped the
 // static labels onto two lines (a long datetime label): the line spacing to reuse.
 export interface AxisAnchor { pos: number; anchor: string; baseline: string; gap: number; }
+// A secondary axis (sec_axis()/dup_axis()), read back from its static labels:
+// matched (primary native, secondary value) pairs, ascending in native, and the
+// label decoration to reuse (a shared prefix/suffix, thousands commas). The
+// re-ticker interpolates between the pairs (exact for a linear transform, which
+// is the common unit-conversion case) and extrapolates along the end segments.
+export interface SecAxisMap {
+  n: number[];
+  v: number[];
+  linear: boolean;
+  prefix: string;
+  suffix: string;
+  comma: boolean;
+}
 // One axis-zoomable panel: its scale descriptor, the pannable group T_i moves, the
 // clipped outer group (host for its re-ticked gridlines), A (reference rect ->
 // this rect), and its label anchors (null for an interior facet with no axis).
@@ -266,4 +279,10 @@ export interface AzPanel {
   ax: number; bx: number; ay: number; by: number;
   xLab: AxisAnchor | null;
   yLab: AxisAnchor | null;
+  // Secondary axes (top x / right y), when the static scene drew one with
+  // numeric labels: where their labels go and the primary -> secondary map.
+  x2Lab: AxisAnchor | null;
+  y2Lab: AxisAnchor | null;
+  x2Map: SecAxisMap | null;
+  y2Map: SecAxisMap | null;
 }
