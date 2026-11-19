@@ -1972,15 +1972,18 @@
       if (tw && box.width) ax = Math.max(tw / 2, Math.min(box.width - tw / 2, ax));
       ws.tip.style.transform = "translate(" + Math.round(ax) + "px," + Math.round(ay) + "px) " + (below ? "translate(-50%, 12px)" : "translate(-50%, calc(-100% - 12px))");
     }
+    let pendX = 0, pendY = 0;
     function revealTip(build, clientX, clientY, anchorKey) {
       if (ws.tipHideTimer) {
         clearTimeout(ws.tipHideTimer);
         ws.tipHideTimer = 0;
       }
+      pendX = clientX;
+      pendY = clientY;
       const doShow = () => {
         ws.tipShowTimer = 0;
         build();
-        placeTip(clientX, clientY, anchorKey);
+        placeTip(pendX, pendY, anchorKey);
         ws.tip.classList.add("vellumwidget-show");
       };
       const d = tipDelay();
@@ -2007,6 +2010,11 @@
         if (keys.length > TIP_MULTI_CAP) rows.push("\u2026");
         ws.tip.innerHTML = rows.join("<br>");
       }, clientX, clientY, keys[0] || null);
+    }
+    function moveTip(clientX, clientY, anchorKey) {
+      pendX = clientX;
+      pendY = clientY;
+      if (ws.tip.classList.contains("vellumwidget-show")) placeTip(clientX, clientY, anchorKey);
     }
     function hideTip() {
       if (ws.tipShowTimer) {
@@ -2035,6 +2043,9 @@
       }
     }
     function clearHover() {
+      if (!ws.hovering) return;
+      ws.hovering = false;
+      ws.hoverSig = "";
       if (ws.rasterMode) ws.fx.clearGroup(ws.hovGroup);
       if (ws.largeDim) hideHighlightOverlay();
       ws.el.classList.remove("vellumwidget-hovering");
@@ -2047,7 +2058,7 @@
         ws.fx.reevaluateInteractions();
       }
     }
-    return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, clearHover };
+    return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover };
   }
 
   // srcts/features/interval.ts
@@ -3097,27 +3108,27 @@
         ws.fx.clearHover();
         return;
       }
-      ws.fx.shinyInput("hover", k);
       const hm = ws.opts.hoverMode || "closest";
-      if (hm === "x" || hm === "y") {
-        const keys = ws.fx.dropInert(ws.fx.columnKeys(k, hm));
-        if (!keys.length) {
-          ws.fx.clearHover();
-          return;
-        }
-        ws.fx.setHoverKeys(keys);
-        if (ws.opts.crosshair) ws.fx.drawCrosshair(k, hm);
-        if (ws.opts.tooltip) ws.fx.showTipMulti(clientX, clientY, keys);
-      } else {
-        const keys = ws.fx.dropInert(ws.fx.linkedKeys(k));
-        if (!keys.length) {
-          ws.fx.clearHover();
-          return;
-        }
-        ws.fx.setHoverKeys(keys);
-        if (ws.opts.crosshair) ws.fx.drawCrosshair(k, "closest");
-        if (ws.opts.tooltip) ws.fx.showTip(clientX, clientY, k);
+      const unified = hm === "x" || hm === "y";
+      const keys = ws.fx.dropInert(unified ? ws.fx.columnKeys(k, hm) : ws.fx.linkedKeys(k));
+      if (!keys.length) {
+        ws.fx.clearHover();
+        return;
       }
+      const sig = hm + "" + k + "" + keys.join("");
+      if (sig === ws.hoverSig) {
+        if (ws.opts.tooltip) ws.fx.moveTip(clientX, clientY, k);
+        return;
+      }
+      ws.fx.shinyInput("hover", k);
+      ws.hovering = true;
+      ws.fx.setHoverKeys(keys);
+      if (ws.opts.crosshair) ws.fx.drawCrosshair(k, unified ? hm : "closest");
+      if (ws.opts.tooltip) {
+        if (unified) ws.fx.showTipMulti(clientX, clientY, keys);
+        else ws.fx.showTip(clientX, clientY, k);
+      }
+      ws.hoverSig = sig;
     }
     function onHoverMove(ev) {
       if (ws.down || ws.pinchDist > 0) return;
@@ -3564,7 +3575,9 @@
       }
     }
     function setHoverKeys(keys) {
+      ws.hoverSig = "";
       if (!ws.opts.hover) return;
+      ws.hovering = true;
       if (ws.rasterMode) {
         drawHovFeedback(keys);
         return;
@@ -3667,6 +3680,7 @@
       ws.filtSelElems = {};
       ws.joinOf = {};
       ws.lastHoverKeys = [];
+      ws.hoverSig = "";
       ws.meta = {};
       ws.groups = {};
       ws.incidentEdges = {};
@@ -4200,6 +4214,7 @@
       if (ws.colorbarLayer) ws.colorbarLayer.setAttribute("preserveAspectRatio", par);
     }
     function applyViewBox() {
+      ws.hoverSig = "";
       if (ws.xZoom && ws.vb && ws.vb0) {
         ws.vb.y = ws.vb0.y;
         ws.vb.h = ws.vb0.h;
@@ -4272,6 +4287,8 @@
       filtSelElems: {},
       joinOf: {},
       lastHoverKeys: [],
+      hoverSig: "",
+      hovering: false,
       colorRange: null,
       colorHiddenSet: {},
       meta: {},
