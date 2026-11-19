@@ -1,7 +1,7 @@
 // Selection: Shiny read-back, select / toggle / clear, linked selection and
 // cross-filtering, and joining the linking bus / crosstalk.
 
-import { busJoin, busPublish, getCrosstalk } from "../linking";
+import { busJoin, busLeave, busPublish, getCrosstalk, watchRemoval } from "../linking";
 import type { WidgetFns, WidgetState } from "../state";
 
 export function selectionFeature(
@@ -9,7 +9,7 @@ export function selectionFeature(
 ): Pick<
   WidgetFns,
   "shinyInput" | "selectedKeys" | "toggleSelect" | "setSelection" | "clearSelection"
-  | "applyFilter" | "inert" | "dropInert" | "setupLinking"
+  | "applyFilter" | "inert" | "dropInert" | "setupLinking" | "teardownLinking"
 > {
   // --- Shiny read-back ---
   // Push an interaction to a Shiny input (`input$<outputId>_<event>`). A no-op
@@ -125,23 +125,66 @@ export function selectionFeature(
     return keys.filter((k) => !inert(k));
   }
 
-  // Join the linking channels for this widget's groups (once).
+  // Join the linking channels for this widget's groups. Called on every render:
+  // a render that changes `group` or `crosstalk` leaves the old channel before
+  // joining the new one, so the widget never publishes to one group while still
+  // listening on another (VW-5).
   function setupLinking(): void {
-    if (ws.joined) return;
-    ws.joined = true;
-    if (ws.group) busJoin(ws.group, { token: ws.selfToken, onSelect: applyLinkedSelection, onView: ws.fx.applyLinkedView });
+    const g = ws.group;
+    if (ws.joinedGroup !== g) {
+      if (ws.joinedGroup != null) busLeave(ws.joinedGroup, ws.selfToken);
+      if (g != null) {
+        busJoin(g, {
+          token: ws.selfToken, onSelect: applyLinkedSelection, onView: ws.fx.applyLinkedView,
+          el: ws.el, onGone: teardownLinking
+        });
+      }
+      ws.joinedGroup = g;
+    }
     const ct = getCrosstalk();
-    if (ws.opts.crosstalk && ct) {
-      ws.ctSel = new ct.SelectionHandle(ws.opts.crosstalk);
-      ws.ctFilt = new ct.FilterHandle(ws.opts.crosstalk);
-      ws.ctSel.on("change", function (e) {
-        if (e.sender !== ws.ctSel) applyLinkedSelection(e.value || []);
-      });
-      ws.ctFilt.on("change", function (e) {
-        applyFilter(e.value);
-      });
+    const ctg = ws.opts.crosstalk && ct ? ws.opts.crosstalk : null;
+    if (ws.ctGroup !== ctg) {
+      closeCrosstalk();
+      if (ctg && ct) {
+        const sel = new ct.SelectionHandle(ctg);
+        const filt = new ct.FilterHandle(ctg);
+        ws.ctSel = sel;
+        ws.ctFilt = filt;
+        sel.on("change", function (e) {
+          if (ws.ctSel !== sel) return; // a closed handle (crosstalk without close())
+          if (!ws.el.isConnected) { teardownLinking(); return; }
+          if (e.sender !== sel) applyLinkedSelection(e.value || []);
+        });
+        filt.on("change", function (e) {
+          if (ws.ctFilt !== filt) return;
+          if (!ws.el.isConnected) { teardownLinking(); return; }
+          applyFilter(e.value);
+        });
+      }
+      ws.ctGroup = ctg;
+    }
+    // Free the widget's channels once its element leaves the page.
+    if ((ws.joinedGroup != null || ws.ctGroup != null) && !ws.unwatchRemoval) {
+      ws.unwatchRemoval = watchRemoval(ws.el, teardownLinking);
     }
   }
 
-  return { shinyInput, selectedKeys, toggleSelect, setSelection, clearSelection, applyFilter, inert, dropInert, setupLinking };
+  function closeCrosstalk(): void {
+    if (ws.ctSel && ws.ctSel.close) ws.ctSel.close();
+    if (ws.ctFilt && ws.ctFilt.close) ws.ctFilt.close();
+    ws.ctSel = null;
+    ws.ctFilt = null;
+    ws.ctGroup = null;
+  }
+
+  // Leave every linking channel (the element was removed from the page). A later
+  // render of the same element joins again.
+  function teardownLinking(): void {
+    if (ws.joinedGroup != null) busLeave(ws.joinedGroup, ws.selfToken);
+    ws.joinedGroup = null;
+    closeCrosstalk();
+    if (ws.unwatchRemoval) { ws.unwatchRemoval(); ws.unwatchRemoval = null; }
+  }
+
+  return { shinyInput, selectedKeys, toggleSelect, setSelection, clearSelection, applyFilter, inert, dropInert, setupLinking, teardownLinking };
 }
