@@ -49,6 +49,10 @@ export interface WidgetState {
   // True while any hover feedback may be on screen; clearHover is a no-op when
   // false, so moving through empty space doesn't re-clear an idle plot.
   hovering: boolean;
+  // Hover calibration cache (VW-3): one client->scene fit per data panel, in
+  // svg-local px, valid for the svg box size it was measured at. Dropped on a
+  // render, a view change, a resize, or a legend/filter change.
+  calib: CalibCache | null;
   colorRange: { a: number; b: number } | null;
   colorHiddenSet: Record<string, boolean>;
   meta: Record<string, ElemMeta>;
@@ -169,6 +173,19 @@ export interface WidgetState {
   sourcePopover: HTMLElement | null;
 }
 
+// A per-axis linear map from svg-local px to scene (device-px) coordinates.
+export interface CalibFit { sx: number; ox: number; sy: number; oy: number }
+
+// One calibration group: a data panel (or the whole scene when the payload has
+// no panels) and its fit, null when its marks could not be measured.
+export interface CalibGroup {
+  panel: PanelInfo | null;
+  az: AzPanel | null;
+  fit: CalibFit | null;
+}
+
+export interface CalibCache { w: number; h: number; groups: CalibGroup[] }
+
 export interface WidgetFns {
   a11yLabel: (k: string) => string;
   addClassForKeys: (keys: string[], cls: string) => void;
@@ -192,7 +209,8 @@ export interface WidgetFns {
   buildNavigator: () => void;
   buildSpatialIndex: () => void;
   buildToolbar: () => void;
-  calibrateXform: () => { sx: number; ox: number; sy: number; oy: number } | null;
+  calibrateXform: (clientX: number, clientY: number) => CalibFit | null;
+  sceneToClient: (x: number, y: number) => { x: number; y: number } | null;
   clearClass: (cls: string) => void;
   clearCrosshair: () => void;
   clearGroup: (g: SVGGElement | null) => void;
@@ -289,6 +307,7 @@ export function createState(el: HTMLElement): WidgetState {
     lastHoverKeys: [],
     hoverSig: "",
     hovering: false,
+    calib: null,
     colorRange: null,
     colorHiddenSet: {},
     meta: {},
