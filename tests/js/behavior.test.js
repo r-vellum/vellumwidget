@@ -1646,6 +1646,82 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   window.Shiny = savedShiny; window.HTMLWidgets.shinyMode = savedMode;
 }
 
+// _zoom reports every panel's visible data range, keyed by panel id (VW-10a).
+{
+  const captured = {};
+  const savedShiny = window.Shiny, savedMode = window.HTMLWidgets.shinyMode;
+  window.HTMLWidgets.shinyMode = true;
+  window.Shiny = { setInputValue: function (id, v) { captured[id] = v; } };
+  const lin = (hi) => ({ type: "continuous", transform: "identity", data_lo: 0, data_hi: hi, native_lo: 0, native_hi: hi });
+  const facetSvgZ =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"><path data-key="a" d="M99 49h2v2z"/></g></g>' +
+    '<g data-vellum-panel="panel-1-2"><g data-vellum-pan="panel-1-2"><path data-key="b" d="M299 49h2v2z"/></g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g></svg>';
+  const panelsZ = [
+    { name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90, x: lin(100), y: lin(50) },
+    { name: "panel-1-2", px0: 220, py0: 10, px1: 380, py1: 90, x: lin(200), y: lin(50) } // free x scale
+  ];
+  const mk = (id, axisZoom) => {
+    const e = document.createElement("div");
+    e.id = id;
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e, 400, 100);
+    i.renderValue({
+      svg: facetSvgZ,
+      elements: { key: ["a", "b"], mark: ["point", "point"], x0: [99, 299], y0: [49, 49], x1: [101, 301], y1: [51, 51] },
+      panels: panelsZ,
+      options: { axisZoom: axisZoom, hover: true, zoom: true }
+    });
+    return i;
+  };
+  const near2 = (r, lo, hi) => r && Math.abs(r[0] - lo) < 1e-9 && Math.abs(r[1] - hi) < 1e-9;
+  const iA = mk("zf", true);
+  ok(iA._test.axisZoomActive() === true, "_zoom panels: the facet fixture is axis-zoomable");
+  iA._test.setView({ x: 50, y: 25, w: 200, h: 50 }); // 2x about panel 1's centre
+  const zA = captured["zf_zoom"];
+  ok(zA && zA.panels && Object.keys(zA.panels).join() === "panel-1-1,panel-1-2", "_zoom panels: one entry per panel, keyed by panel id");
+  ok(near2(zA.panels["panel-1-1"].x, 25, 75) && near2(zA.panels["panel-1-2"].x, 50, 150),
+    "_zoom panels: each facet reports its own zoomed x range");
+  ok(near2(zA.panels["panel-1-1"].y, 12.5, 37.5) && zA.panels["panel-1-2"].panel === "panel-1-2",
+    "_zoom panels: y ranges and panel names per facet");
+  ok(zA.data === undefined, "_zoom panels: no single `data` range for a faceted plot");
+  // Plain viewBox zoom: each panel reports the part of it inside the view.
+  const iB = mk("zg", false);
+  iB._test.setView({ x: 0, y: 0, w: 200, h: 100 });
+  const zB = captured["zg_zoom"];
+  ok(zB && near2(zB.panels["panel-1-1"].x, 0, 100) && zB.panels["panel-1-2"] === null,
+    "_zoom panels: viewBox zoom clips to each panel; a panel out of view reports NULL");
+  window.Shiny = savedShiny; window.HTMLWidgets.shinyMode = savedMode;
+}
+{
+  // Single panel: `data` keeps its shape and `panels` carries the same range.
+  const captured = {};
+  const savedShiny = window.Shiny, savedMode = window.HTMLWidgets.shinyMode;
+  window.HTMLWidgets.shinyMode = true;
+  window.Shiny = { setInputValue: function (id, v) { captured[id] = v; } };
+  const e = document.createElement("div");
+  e.id = "zs";
+  document.body.appendChild(e);
+  const i = widgetDef.factory(e);
+  i.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="420" viewBox="0 0 600 420"><path data-key="a" d="M300 210h4v4z"/></svg>',
+    elements: { key: ["a"], x0: [300], y0: [210], x1: [304], y1: [214] },
+    panels: {
+      name: "panel-1-1", px0: 100, py0: 10, px1: 500, py1: 410,
+      x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+      y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+    },
+    options: { hover: true, zoom: true }
+  });
+  i._call("resetZoom");
+  const z = captured["zs_zoom"];
+  ok(z && z.data && z.data.x[0] === -25 && z.panels && JSON.stringify(z.panels["panel-1-1"]) === JSON.stringify(z.data),
+    "_zoom panels: a single-panel plot keeps `data` and mirrors it in `panels`");
+  window.Shiny = savedShiny; window.HTMLWidgets.shinyMode = savedMode;
+}
+
 // ===================== hardening: non-identity mappings + decline (B1/N1) =====================
 {
   // A log10 x-axis with 5% expansion + a real (non-identity) y range, exercising
@@ -2135,6 +2211,28 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   const zt = T.axisTicks(zrhAx, 1577833200, 1577833200 + 21600, 5);
   ok(zt.length === 3 && zt[1].n === 1577833200 + 10800 && zt[1].label === "2020-01-01 03:00:00",
     "datetime ticks: hour ticks land on the axis's own (UTC+1) wall clock");
+  // A Central-European datetime axis whose static breaks straddle DST: one fixed
+  // offset cannot reproduce them all, so a zone is detected and every tick gets
+  // its own offset (VW-10c).
+  const cetAx = {
+    type: "datetime", transform: "identity", time_unit: "second",
+    breaks: [1577833200, 1585692000, 1593554400], labels: ["2020-01-01", "2020-04-01", "2020-07-01"]
+  };
+  const ci = T.detectTimeFormat(cetAx);
+  ok(ci.fmt === "%Y-%m-%d" && !!ci.tz && ci.off === 3600000,
+    "detectTimeFormat: breaks on local midnights across DST recover a time zone (" + ci.tz + ")");
+  const dst = T.axisTicks(cetAx, 1585436400, 1585458000, 5); // 2020-03-29 00:00 CET .. 07:00 CEST
+  ok(JSON.stringify(labelsOf(dst)) === JSON.stringify(["2020-03-29", "03:00", "06:00"]) &&
+    dst[0].n === 1585436400 && dst[1].n === 1585443600 && dst[2].n === 1585454400,
+    "datetime ticks: across the spring DST change each tick uses its own offset (03:00 CEST = 01:00 UTC)");
+  const gap = labelsOf(T.axisTicks(cetAx, 1585436400, 1585450800, 5));
+  ok(gap.indexOf("02:00") < 0 && gap.indexOf("03:00") >= 0 && gap.indexOf("01:00") >= 0,
+    "datetime ticks: the wall time skipped by the DST change gets no tick");
+  ok(T.detectTimeFormat(utcAx).tz === undefined || T.detectTimeFormat(utcAx).off === 0,
+    "detectTimeFormat: a UTC axis keeps a zero offset");
+  ok(JSON.stringify(labelsOf(T.axisTicks(utcAx, 1585436400, 1585458000, 5))) === JSON.stringify(["03:00", "06:00"]) ||
+    JSON.stringify(labelsOf(T.axisTicks(utcAx, 1585436400, 1585458000, 5))) === JSON.stringify(["2020-03-29", "03:00"]),
+    "datetime ticks: a UTC axis is not shifted by the viewer's zone");
 
   // --- discrete / binned / custom transform: static breaks re-positioned, kept in view
   const discAx = { type: "discrete", transform: "identity", breaks: [1, 2, 3, 4], labels: ["a", "b", "c", "d"] };
@@ -2696,6 +2794,68 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   svgCalE.dispatchEvent(evC);
   const hlC = Array.from(eCal.querySelectorAll(".vellumwidget-hl")).map((n) => n.getAttribute("data-key"));
   ok(hlC.length === 1 && hlC[0] === "b2", "calibration: zoomed facet hover picks the mark under the cursor");
+}
+
+// --- axis_zoom re-ticks a secondary axis through its transform (VW-10b) ----
+{
+  const TS = window.__vellumwidgetTest;
+  const pl = TS.parseSecLabels(["$1,000", "$2,500", "$4,000"]);
+  ok(pl && pl.prefix === "$" && pl.comma && pl.vals.join() === "1000,2500,4000", "sec axis: decorated labels parse (prefix, commas)");
+  ok(TS.parseSecLabels(["low", "high"]) === null && TS.parseSecLabels(["1 a", "2 b"]) === null,
+    "sec axis: non-numeric or inconsistently decorated labels decline");
+  const lm = TS.secAxisMap([0, 10, 20], ["32", "50", "68"]);
+  ok(lm && lm.linear, "sec axis: collinear pairs give an exact linear map");
+  const lt = TS.secTicks(lm, 0, 100, 5).map((t) => t.label + "@" + Math.round(t.n * 1000) / 1000);
+  ok(lt[0] === "50@10" && lt.indexOf("200@93.333") >= 0, "sec axis: linear ticks extrapolate past the static breaks");
+  const ct = TS.secTicks(TS.secAxisMap([0, 1], ["$0", "$1,000"]), 0, 10, 4).map((t) => t.label);
+  ok(ct.indexOf("$4,000") >= 0 && ct.indexOf("$10,000") >= 0, "sec axis: labels keep the prefix and thousands commas");
+  const nm = TS.secAxisMap([0, 1, 2], ["1", "10", "100"]);
+  ok(nm && !nm.linear && Math.abs(TS.secTicks(nm, 0, 2, 4).filter((t) => t.label === "60")[0].n - (1 + 50 / 90)) < 1e-9,
+    "sec axis: a non-linear transform interpolates between the static pairs");
+  ok(TS.secAxisMap([0, 1, 2], ["1", "3", "2"]) === null, "sec axis: non-monotone labels decline");
+
+  const secSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"><path data-key="a" d="M99 49h2v2z"/></g></g>' +
+    '<g data-vellum-panel="axis-x-1"><text x="20" y="4" transform="matrix(1 0 0 1 0 90)" text-anchor="middle" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="16" y="90" text-anchor="end" font-size="12">0</text></g>' +
+    // right axis, sec = 2 * y with a unit suffix: native 10..40 sit at y = 74, 58, 42, 26
+    '<g data-vellum-panel="axis-y2-1">' +
+    '<text x="184" y="74" text-anchor="start" dominant-baseline="central" font-size="12">20 km</text>' +
+    '<text x="184" y="58" text-anchor="start" dominant-baseline="central" font-size="12">40 km</text>' +
+    '<text x="184" y="42" text-anchor="start" dominant-baseline="central" font-size="12">60 km</text>' +
+    '<text x="184" y="26" text-anchor="start" dominant-baseline="central" font-size="12">80 km</text></g>' +
+    // top axis, sec = x / 10: native 25, 50, 75 at x = 60, 100, 140
+    '<g data-vellum-panel="axis-x2-1">' +
+    '<text x="60" y="6" text-anchor="middle" font-size="12">2.5</text>' +
+    '<text x="100" y="6" text-anchor="middle" font-size="12">5.0</text>' +
+    '<text x="140" y="6" text-anchor="middle" font-size="12">7.5</text></g></svg>';
+  const eS = document.createElement("div");
+  document.body.appendChild(eS);
+  const iS = widgetDef.factory(eS, 200, 100);
+  iS.renderValue({
+    svg: secSvg,
+    elements: { key: ["a"], mark: ["point"], x0: [99], y0: [49], x1: [101], y1: [51] },
+    panels: [{
+      name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90,
+      x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+      y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+    }],
+    options: { axisZoom: true, hover: true, zoom: true }
+  });
+  ok(iS._test.axisZoomActive() === true, "sec axis: the fixture is axis-zoomable");
+  const labsAt = (pred) => iS._test.retickLabels().filter(pred);
+  ok(labsAt((l) => / km$/.test(l.text)).length > 0 && labsAt((l) => l.x === 184).every((l) => / km$/.test(l.text)),
+    "sec axis: unzoomed, the right axis is re-drawn with its unit");
+  ok(labsAt((l) => l.text === "0").length >= 1 && labsAt((l) => / km$/.test(l.text) && l.x !== 184).length === 0,
+    "sec axis: secondary labels never replace the primary ones");
+  iS._test.setView({ x: 50, y: 25, w: 100, h: 50 }); // 2x about the centre: y native 12.5..37.5, x 25..75
+  const km = labsAt((l) => / km$/.test(l.text)).map((l) => l.text + "@" + l.y);
+  ok(km.indexOf("50 km@50") >= 0 && km.indexOf("30 km@82") >= 0 && km.indexOf("70 km@18") >= 0 && km.indexOf("20 km@98") < 0,
+    "sec axis: zoomed, the right axis re-ticks in its own units at the right height");
+  const top = labsAt((l) => l.y === 6).map((l) => l.text + "@" + l.x);
+  ok(top.indexOf("5@100") >= 0 && top.indexOf("3@36") >= 0 && top.indexOf("7@164") >= 0,
+    "sec axis: zoomed, the top axis re-ticks through x / 10");
 }
 
 // --- graph neighbour highlighting (select_neighbours preset) ---------------

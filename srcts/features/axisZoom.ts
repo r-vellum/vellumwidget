@@ -5,7 +5,7 @@ import { cssEscape } from "../css";
 import { SVGNS } from "./constants";
 import { GLYPH_MARKS } from "../scales";
 import type { WidgetFns, WidgetState } from "../state";
-import { axisRetickable, axisTicks } from "../ticks";
+import { axisRetickable, axisTicks, secAxisMap, secTicks } from "../ticks";
 import type { AxisAnchor, AzPanel } from "../types";
 import { fmtViewBox } from "../viewbox";
 import type { PanTransform } from "../viewbox";
@@ -62,7 +62,7 @@ export function axisZoomFeature(
       found.push({
         p: p, pan: pan as SVGGElement, outer: outer as SVGGElement, grid: null,
         ax: ax, bx: p.px0 - ax * ref.px0, ay: ay, by: p.py0 - ay * ref.py0,
-        xLab: null, yLab: null
+        xLab: null, yLab: null, x2Lab: null, y2Lab: null, x2Map: null, y2Map: null
       });
     }
     ws.azPanels = found;
@@ -219,15 +219,22 @@ export function axisZoomFeature(
     if (!ws.svgEl) return;
     const groups = ws.svgEl.querySelectorAll('[data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
     for (let g = 0; g < groups.length; g++) {
-      const isX = /^axis-x/.test(groups[g].getAttribute("data-vellum-panel") || "");
+      const gname = groups[g].getAttribute("data-vellum-panel") || "";
+      const isX = /^axis-x/.test(gname);
+      // A secondary axis (vellumplot names it axis-x2-* / axis-y2-*): re-ticked
+      // through the transform its own static labels imply (VW-10b).
+      const isSec = /^axis-[xy]2-/.test(gname);
       const texts = groups[g].querySelectorAll("text");
       if (!texts.length) continue;
       let sx = 0, sy = 0, n = 0, gap = 0;
       let first: { x: number; y: number } | null = null;
+      const along: number[] = [], labs: string[] = [];
       for (let i = 0; i < texts.length; i++) {
         const tr = transTranslate(texts[i]);
         const x = tr.tx + (parseFloat(texts[i].getAttribute("x") || "") || 0);
         const y = tr.ty + (parseFloat(texts[i].getAttribute("y") || "") || 0);
+        along.push(isX ? x : y);
+        labs.push(texts[i].textContent || "");
         if (!first) first = { x: x, y: y };
         else if (isX && !gap && y - first.y > 1) gap = y - first.y; // a wrapped second line
         sx += x; sy += y; n++;
@@ -262,7 +269,23 @@ export function axisZoomFeature(
         baseline: t0.getAttribute("dominant-baseline") || (isX ? "text-before-edge" : "central"),
         gap: gap
       };
-      // First group wins (the primary axis; a secondary axis is hidden with it).
+      if (isSec) {
+        // Read the secondary transform back off the static labels: each label sits
+        // at its break's primary position, so (primary native, label value) pairs
+        // sample the transform. Needs a tick-centred label (x) and numeric text.
+        const p = best.p;
+        const sc = isX ? p.x : p.y;
+        if (!sc || (isX && (t0.getAttribute("text-anchor") || "middle") !== "middle")) continue;
+        const k = isX ? (sc.native_hi - sc.native_lo) / (p.px1 - p.px0) : (sc.native_hi - sc.native_lo) / (p.py1 - p.py0);
+        if (!isFinite(k) || !k) continue;
+        const native = along.map(function (v) { return isX ? sc.native_lo + (v - p.px0) * k : sc.native_hi - (v - p.py0) * k; });
+        const map = secAxisMap(native, labs);
+        if (!map) continue; // not a plain numeric axis: leave it hidden, as before
+        if (isX && !best.x2Lab) { best.x2Lab = anchor; best.x2Map = map; }
+        if (!isX && !best.y2Lab) { best.y2Lab = anchor; best.y2Map = map; }
+        continue;
+      }
+      // First primary group wins.
       if (isX && !best.xLab) best.xLab = anchor;
       if (!isX && !best.yLab) best.yLab = anchor;
     }
@@ -348,6 +371,14 @@ export function axisZoomFeature(
           layer.appendChild(lab);
         }
       }
+      if (a.x2Lab && a.x2Map) {
+        const st = secTicks(a.x2Map, Math.min(nA, nB), Math.max(nA, nB), 5);
+        for (let i = 0; i < st.length; i++) {
+          const sx = t.sx * (p.px0 + (st[i].n - ax.native_lo) / k) + t.tx;
+          if (!isFinite(sx) || sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
+          layer.appendChild(axisLabel(st[i].label, sx, a.x2Lab.pos, a.x2Lab.anchor, a.x2Lab.baseline));
+        }
+      }
     }
     if (p.y && p.py1 !== p.py0) {
       const ay = p.y;
@@ -363,6 +394,14 @@ export function axisZoomFeature(
         grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
         if (a.yLab) {
           layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline));
+        }
+      }
+      if (a.y2Lab && a.y2Map) {
+        const st = secTicks(a.y2Map, Math.min(nA, nB), Math.max(nA, nB), 5);
+        for (let i = 0; i < st.length; i++) {
+          const sy = t.sy * (p.py0 + (ay.native_hi - st[i].n) / k) + t.ty;
+          if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
+          layer.appendChild(axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline));
         }
       }
     }

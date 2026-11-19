@@ -14,28 +14,54 @@ export function viewportFeature(
 > {
   // --- viewBox pan/zoom ---
   // Report the current view to Shiny as `input$<id>_zoom` (a deduped state input):
-  // the current viewBox in device-px (`x`/`y`/`w`/`h`) + a `zoomed` flag, and —
-  // when the scene carries a single cartesian panel's scale descriptor — the
-  // visible range in `data` coordinates (`data.x`/`data.y`/`data.panel`).
+  // the current viewBox in device-px (`x`/`y`/`w`/`h`) + a `zoomed` flag; when the
+  // scene carries cartesian panel scale descriptors, `panels` gives each panel's
+  // visible data range keyed by panel id (VW-10a: facets zoom per panel), and a
+  // single-panel scene keeps the older `data` field (`data.x`/`data.y`/`data.panel`).
+  type DataRange = { x?: number[]; y?: number[]; panel: string };
+  function panelRange(i: number): DataRange | null {
+    if (!ws.vb) return null;
+    const p = ws.panels[i];
+    if (ws.axisZoomActive && ws.vb0) {
+      // Only the data region scales: invert the panel's fixed rect through its own T_i.
+      let a: { x: number; y: number }, b: { x: number; y: number };
+      const az = ws.azPanels.filter(function (q) { return q.p.name === p.name; })[0];
+      if (az) {
+        const t = ws.fx.azT(az);
+        if (!t.sx || !t.sy) return null;
+        a = { x: (p.px0 - t.tx) / t.sx, y: (p.py0 - t.ty) / t.sy };
+        b = { x: (p.px1 - t.tx) / t.sx, y: (p.py1 - t.ty) / t.sy };
+      } else {
+        a = panToView(ws.vb, ws.vb0, p.px0, p.py0);
+        b = panToView(ws.vb, ws.vb0, p.px1, p.py1);
+      }
+      return ws.fx.dataRangeOf(p, a.x, a.y, b.x, b.y);
+    }
+    // Plain viewBox zoom: the part of the panel inside the view. One panel keeps
+    // the whole view (the original contract, which may run past the panel edge).
+    let x0 = ws.vb.x, y0 = ws.vb.y, x1 = ws.vb.x + ws.vb.w, y1 = ws.vb.y + ws.vb.h;
+    if (ws.panels.length > 1) {
+      x0 = Math.max(x0, p.px0); y0 = Math.max(y0, p.py0);
+      x1 = Math.min(x1, p.px1); y1 = Math.min(y1, p.py1);
+      if (x1 <= x0 || y1 <= y0) return null; // panel scrolled out of view
+    }
+    return ws.fx.dataRangeOf(p, x0, y0, x1, y1);
+  }
+
   function reportView(): void {
     if (!ws.vb) return;
     const payload: {
       x: number; y: number; w: number; h: number; zoomed: boolean;
-      data?: { x?: number[]; y?: number[]; panel: string };
+      data?: DataRange; panels?: Record<string, DataRange | null>;
     } = { x: ws.vb.x, y: ws.vb.y, w: ws.vb.w, h: ws.vb.h, zoomed: ws.vb0 ? isZoomedIn(ws.vb, ws.vb0) : false };
-    if (ws.panels.length === 1) {
-      // Visible data range: over the whole view normally; over the panel's own
-      // (T-inverted) corners under axis_zoom, where only the data region scales.
-      let d;
-      if (ws.axisZoomActive && ws.vb0) {
-        const p = ws.panels[0];
-        const a = panToView(ws.vb, ws.vb0, p.px0, p.py0);
-        const b = panToView(ws.vb, ws.vb0, p.px1, p.py1);
-        d = ws.fx.dataRangeOf(p, a.x, a.y, b.x, b.y);
-      } else {
-        d = ws.fx.dataRangeOf(ws.panels[0], ws.vb.x, ws.vb.y, ws.vb.x + ws.vb.w, ws.vb.y + ws.vb.h);
+    if (ws.panels.length) {
+      const per: Record<string, DataRange | null> = {};
+      for (let i = 0; i < ws.panels.length; i++) per[ws.panels[i].name] = panelRange(i);
+      payload.panels = per;
+      if (ws.panels.length === 1) {
+        const d = per[ws.panels[0].name];
+        if (d) payload.data = d;
       }
-      if (d) payload.data = d;
     }
     ws.fx.shinyInput("zoom", payload);
     // Linked pan/zoom: broadcast the view as a fraction of our own original
