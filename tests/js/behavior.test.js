@@ -802,6 +802,31 @@ function mountShiny(id, calls) {
   ok(!dThrew, "dispatchProxyCall: a null / id-less message is a safe no-op");
 }
 
+// The proxy finds its widget by an escaped id selector (VW-7): Shiny module ids
+// carry "." or ":"; a bare "#"+id selector would miss them (or throw).
+{
+  const P = T.cssEscapePolyfill;
+  ok(P("plot") === "plot" && P("mod.plot") === "mod\\.plot" && P("a:b") === "a\\:b",
+    "cssEscape fallback: escapes '.' and ':'");
+  ok(P("1x") === "\\31 x" && P("-1") === "-\\31 " && P("-") === "\\-" && P("a b#c") === "a\\ b\\#c" && P("\u0000") === "�",
+    "cssEscape fallback: leading digits, a lone hyphen, spaces and NUL follow the CSSOM algorithm");
+  const hadCSS = window.CSS;
+  window.CSS = undefined; // jsdom may or may not ship CSS.escape: exercise the fallback path
+  ok(T.idSelector("mod-a.plot:1") === "#mod-a\\.plot\\:1", "idSelector: falls back when CSS.escape is unavailable");
+  window.CSS = { escape: (v) => "ESC(" + v + ")" };
+  ok(T.idSelector("x.y") === "#ESC(x.y)", "idSelector: uses CSS.escape when available");
+  window.CSS = hadCSS;
+  const host = document.createElement("div");
+  host.id = "mod-a.plot:1";
+  document.body.appendChild(host);
+  const seenP = [];
+  HTMLWidgets.find = (sel) => (document.querySelector(sel) === host ? { _call: (m, a) => seenP.push([m, a]) } : null);
+  T.dispatchProxyCall({ id: "mod-a.plot:1", method: "select", args: ["k"] }, T.findWidgetById);
+  ok(seenP.length === 1 && seenP[0][0] === "select", "proxy: a widget whose id has '.' and ':' is found and driven");
+  delete HTMLWidgets.find;
+  host.remove();
+}
+
 // The "vellumwidget-calls" handler is registered once when Shiny is present.
 {
   const handlers = {};

@@ -3660,6 +3660,44 @@
     const inst = findInstance(msg.id);
     if (inst && typeof inst._call === "function") inst._call(msg.method, msg.args);
   }
+  function cssEscape2(value) {
+    const C = typeof window !== "undefined" ? window.CSS : void 0;
+    if (C && typeof C.escape === "function") return C.escape(value);
+    return cssEscapePolyfill(value);
+  }
+  function cssEscapePolyfill(value) {
+    const s = String(value);
+    const n = s.length;
+    let out = "";
+    const first = n ? s.charCodeAt(0) : 0;
+    for (let i = 0; i < n; i++) {
+      const c = s.charCodeAt(i);
+      if (c === 0) {
+        out += "\uFFFD";
+        continue;
+      }
+      if (c >= 1 && c <= 31 || c === 127 || i === 0 && c >= 48 && c <= 57 || i === 1 && c >= 48 && c <= 57 && first === 45) {
+        out += "\\" + c.toString(16) + " ";
+        continue;
+      }
+      if (i === 0 && n === 1 && c === 45) {
+        out += "\\" + s.charAt(i);
+        continue;
+      }
+      if (c >= 128 || c === 45 || c === 95 || c >= 48 && c <= 57 || c >= 65 && c <= 90 || c >= 97 && c <= 122) {
+        out += s.charAt(i);
+        continue;
+      }
+      out += "\\" + s.charAt(i);
+    }
+    return out;
+  }
+  function idSelector(id) {
+    return "#" + cssEscape2(String(id));
+  }
+  function findWidgetById(id) {
+    return HTMLWidgets.find ? HTMLWidgets.find(idSelector(id)) : null;
+  }
   var proxyHandlerRegistered = false;
   function registerProxyHandler() {
     if (proxyHandlerRegistered) return;
@@ -3667,9 +3705,7 @@
     if (!sh || typeof sh.addCustomMessageHandler !== "function") return;
     proxyHandlerRegistered = true;
     sh.addCustomMessageHandler("vellumwidget-calls", function(msg) {
-      dispatchProxyCall(msg, function(id) {
-        return HTMLWidgets.find ? HTMLWidgets.find("#" + id) : null;
-      });
+      dispatchProxyCall(msg, findWidgetById);
     });
   }
 
@@ -4779,6 +4815,10 @@
     unionBbox,
     sanitizeTip,
     dispatchProxyCall,
+    cssEscape: cssEscape2,
+    cssEscapePolyfill,
+    idSelector,
+    findWidgetById,
     normalizeElements,
     isZoomedIn,
     userToCanvas,
