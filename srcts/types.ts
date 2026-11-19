@@ -1,0 +1,269 @@
+// Shared type declarations for the vellumwidget runtime: the payload shapes the R
+// side ships and the small structural types the helpers and the factory share.
+
+import type { GeometryPayload } from "./geometry";
+
+// The subset of the object a widget's factory returns that the proxy needs: the
+// `_call` seam that routes a server-driven command onto the instance.
+export interface WidgetInstance {
+  _call?: (method: string, args: unknown) => void;
+}
+
+// A server->client proxy command (from vellumwidget_proxy()): which widget, which
+// action, and its keys. Delivered via Shiny's "vellumwidget-calls" custom message.
+export interface ProxyMessage {
+  id: string;
+  method: string;
+  args?: unknown;
+}
+
+export interface Bbox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export interface ElemMeta extends Partial<Bbox> {
+  key: string;
+  mark?: string; // mark kind (point/circle/rect/segment/...); drives constant-size glyphs on zoom
+  tooltip?: string;
+  hover_group?: string;
+  hover_color?: string; // per-element hover outline (Option 2; overrides the theme)
+  selected_color?: string; // per-element selected outline (Option 2)
+  legend?: string[] | string; // series this mark belongs to ("<aes>:<value>")
+  legend_for?: string; // a legend swatch: the series it highlights/selects
+  filter_value?: number; // value on a continuous colour scale (for the colorbar filter)
+  cond?: string[]; // conditional-encoding tags ("<sel>:<aes>") this element participates in
+  filt?: string[]; // filter selection names whose filter_by() targets this element's view
+  join?: string; // cross-view identity (a composition cell's original id, keys being per-cell unique)
+  source?: string; // graph edge: key of the endpoint node it starts at
+  target?: string; // graph edge: key of the endpoint node it ends at
+  // Interval-selection data values (select_interval()): the element's value on
+  // the x / y channel -- numeric (`ix`, with `ixh` the upper end when a series
+  // spans a range), or the category label on a discrete axis (`ixd`).
+  ix?: number;
+  ixh?: number;
+  ixd?: string;
+  iy?: number;
+  iyh?: number;
+  iyd?: string;
+}
+
+// The interactive colorbar descriptor (continuous colour scale): the gradient
+// bar's device-px rectangle + its value domain/orientation (from vellumplot).
+export interface ColorbarInfo {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  lo: number;
+  hi: number;
+  orientation: string; // "v" | "h"
+  reverse?: boolean;
+}
+
+// Declarative interactivity, read off the compiled plot spec (vellumplot's
+// interaction_model()). Selections are named gestures; conditions style an
+// aesthetic by selection membership; filters/binds are enacted in later stages.
+// The whole block is optional — absent means "no declared interaction".
+export interface SelDef {
+  name: string;
+  kind: string; // "point" | "interval"
+  on: string; // "click" | "hover" | "xy" | "x" | "y"
+  type?: string; // same as kind (the spec-level name)
+  // Interval: the position channels the brush constrains ("x" / "y"). A
+  // length-1 vector may arrive auto-unboxed to a scalar.
+  encodings?: string[] | string;
+  region?: string; // "rect" | "lasso"
+  fields?: string[] | string | null;
+  toggle?: boolean;
+  empty?: boolean;
+  // A projection that expands a raw gesture to a related set before applying it.
+  // From select_neighbours(): a graph node gesture -> its neighbourhood.
+  expand?: { mode: string; degree?: number; edges?: boolean } | null;
+}
+export interface CondDef {
+  selection: string;
+  aes: string; // "color" | "fill" | ...
+  if_false?: string | null; // a constant style for non-members, or null = theme dim
+  empty?: boolean;
+}
+export interface InteractionSpec {
+  selections?: SelDef[];
+  conditions?: CondDef[];
+  filters?: { selection: string }[];
+  binds?: { selection: string; aes: string }[];
+}
+
+export interface Options {
+  tooltip: boolean;
+  hover: boolean;
+  select: boolean;
+  brush: boolean;
+  lasso: boolean; // freehand lasso-select mode (a third toolbar mode alongside brush/pan)
+  zoom: boolean;
+  toolbar: boolean;
+  nearest: boolean;
+  // Hover aggregation. "closest" (default): the single nearest mark. "x"/"y":
+  // a *unified* hover — every mark sharing the hovered x (or y) is highlighted
+  // and its tooltip listed in one combined box, the shared readout line/time-
+  // series charts expect. The mark x/y positions come straight from the element
+  // index, so this needs no axis/scale metadata.
+  hoverMode?: "closest" | "x" | "y";
+  crosshair?: boolean; // draw a guide rule at the hovered position (see hoverMode)
+  // What a click on a discrete-legend swatch does. "select" (default): select the
+  // swatch's series (unchanged behaviour). "hide": toggle the series' visibility
+  // (single click) / isolate it (double click). "mute": same, but dim rather than
+  // remove. Hover always highlights the series regardless of this policy.
+  legendClick?: "select" | "hide" | "mute";
+  navigator?: boolean; // show an overview x-range navigator strip below the plot
+  navigatorHeight?: number; // strip height in px (default 56)
+  axisZoom?: boolean; // axis-aware zoom: scale the data region + re-tick the axes, keeping the frame fixed (linear cartesian panels; SVG only)
+  zoomMarks?: "fixed" | "scale"; // under axis_zoom, keep glyph marks a constant pixel size ("fixed", default) or let them scale ("scale")
+  tooltipDelay?: number; // ms to wait before showing the tooltip on hover (default 0)
+  tooltipFollow?: boolean; // true (default): tip tracks the cursor; false: anchor above the mark
+  tooltipSticky?: boolean; // true: tip accepts pointer events + lingers so links are clickable
+  raster?: boolean; // the marks are a single base image; interaction is index-driven (no per-element DOM nodes)
+  a11y: boolean; // screen-reader + keyboard accessibility (focusable marks, live region, data table)
+  alt?: string | null; // accessible label for the whole chart (falls back to the SVG's <title>/<desc>)
+  selectMode: "single" | "multiple";
+  style?: StyleOpts;
+  group?: string | null; // own cross-widget linking group (vellumwidget <-> vellumwidget)
+  crosstalk?: string | null; // crosstalk group (interop + filter_* controls)
+  export?: { filename?: string; scale?: number }; // export filename base + PNG resolution scale
+}
+
+// Widget-wide interaction theme (Option 1). Each maps to a CSS variable on the
+// widget root; unset falls back to the built-in default. Per-element grammar
+// styling (Option 2, carried in ElemMeta) overrides these via the same variables.
+export interface StyleOpts {
+  hoverColor?: string | null; // outline colour for the hovered element(s)
+  selectedColor?: string | null; // outline colour for selected elements
+  dimOpacity?: number | null; // opacity of non-hovered elements while hovering
+  tipBg?: string | null; // tooltip background colour
+  tipFg?: string | null; // tooltip text colour
+  tipFontSize?: string | null; // tooltip font size (any CSS length)
+  tipMaxWidth?: string | null; // tooltip max width (any CSS length)
+}
+
+// Element metadata arrives from R in a columnar form (one array per field,
+// aligned by index) — far cheaper to serialise to JSON at large N than one object
+// per element. `key` and the bbox are always present; optional meta columns are
+// present only when some element carries them, with `null` where a given element
+// lacks the field. `legend` is ragged (a mark can belong to several series) so it
+// is a list-column (each entry a string, a string[], or absent). A length-1
+// column is auto-unboxed by htmlwidgets to a scalar, so every column is read
+// through `asArray`. A legacy per-record array (`ElemMeta[]`) is still accepted.
+export interface ColumnElements {
+  key: string[] | string;
+  mark?: (string | null)[] | string;
+  x0?: (number | null)[] | number;
+  y0?: (number | null)[] | number;
+  x1?: (number | null)[] | number;
+  y1?: (number | null)[] | number;
+  tooltip?: (string | null)[] | string;
+  hover_group?: (string | null)[] | string;
+  hover_color?: (string | null)[] | string;
+  selected_color?: (string | null)[] | string;
+  legend_for?: (string | null)[] | string;
+  legend?: (string[] | string | null)[] | string[] | string;
+  filter_value?: (number | null)[] | number;
+  cond?: (string[] | string | null)[] | string[] | string;
+  filt?: (string[] | string | null)[] | string[] | string;
+  join?: (string | null)[] | string;
+  source?: (string | null)[] | string;
+  target?: (string | null)[] | string;
+  ix?: (number | null)[] | number;
+  ixh?: (number | null)[] | number;
+  ixd?: (string | null)[] | string;
+  iy?: (number | null)[] | number;
+  iyh?: (number | null)[] | number;
+  iyd?: (string | null)[] | string;
+}
+
+// Per-axis scale descriptor (from vellumplot's `scales` panel meta): the data and
+// native (transformed, expanded) domains + the transform, enough to invert a
+// device pixel back to a data value. See `.vellumwidget_panels()` on the R side.
+export interface AxisScale {
+  type: string; // continuous | log10 | discrete | binned | date | datetime
+  transform: string; // identity | log10 | sqrt | reverse (native -> data)
+  data_lo: number;
+  data_hi: number;
+  native_lo: number;
+  native_hi: number;
+  time_unit?: string; // "day" | "second" for date/datetime axes
+  aes?: string; // the aesthetic this axis shows ("x" | "y"; swapped under coord_flip)
+  levels?: string[] | string; // discrete axis: the levels in position order (level i at native i)
+  breaks?: number[] | number; // static tick positions (native units), as vellumplot drew them
+  labels?: string[] | string; // their formatted strings (htmlwidgets may unbox length-1)
+}
+// A cartesian data panel: its device-px rectangle (from vellum's resolved layout)
+// plus each axis's scale descriptor. The px rect + native domain give the affine
+// device px <-> native; the transform closes native <-> data.
+export interface PanelInfo {
+  name: string;
+  px0: number;
+  py0: number;
+  px1: number;
+  py1: number;
+  x?: AxisScale;
+  y?: AxisScale;
+}
+
+export interface Payload {
+  svg: string;
+  elements: ElemMeta[] | ColumnElements;
+  geometry?: GeometryPayload; // true vertices per keyed element, for exact picking
+  panels?: PanelInfo[] | PanelInfo; // cartesian data panels (htmlwidgets may unbox a length-1 list)
+  colorbar?: ColorbarInfo; // interactive continuous-colour colorbar (optional)
+  interactions?: InteractionSpec; // declarative interactivity (from the plot spec)
+  provenance?: Provenance; // click-to-source rows per element (from inspect_source())
+  options: Options;
+}
+
+// Click-to-source payload (from vellumplot::inspect_source()): the source data
+// rows behind each drawn grob, keyed by its `data-vellum-id` (the id the SVG
+// already carries). `values` is present only when inspect_source(values=TRUE).
+// Rows index the element's own source table: the plot data (top-level
+// fields/values) unless `sourceOf` names another table -- a layer drawn from its
+// own `data =` -- whose fields/values are in `sources`. An older payload has
+// neither, and every element reads the plot data.
+export interface Provenance {
+  on: string; // "click" | "hover"
+  byId: Record<string, number[]>; // data-vellum-id -> 1-based source row indices
+  fields: string[]; // plot-data column names
+  values?: Record<string, unknown>[]; // plot-data rows (optional; heavier)
+  sourceOf?: Record<string, string>; // data-vellum-id -> source name; absent = "plot"
+  sources?: Record<string, ProvenanceSource>; // non-plot source tables, by name
+}
+
+export interface ProvenanceSource {
+  fields: string[] | string; // a one-column table may arrive auto-unboxed
+  values?: Record<string, unknown>[];
+}
+
+export interface ViewBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+// Where an axis's re-ticked labels go for one panel: the label line (baseline y
+// for an x axis, anchor x for a y axis) and the text alignment, scraped from the
+// static axis group vellum drew for that panel. `gap` > 0 when vellum wrapped the
+// static labels onto two lines (a long datetime label): the line spacing to reuse.
+export interface AxisAnchor { pos: number; anchor: string; baseline: string; gap: number; }
+// One axis-zoomable panel: its scale descriptor, the pannable group T_i moves, the
+// clipped outer group (host for its re-ticked gridlines), A (reference rect ->
+// this rect), and its label anchors (null for an interior facet with no axis).
+export interface AzPanel {
+  p: PanelInfo;
+  pan: SVGGElement;
+  outer: SVGGElement;
+  grid: SVGGElement | null;
+  ax: number; bx: number; ay: number; by: number;
+  xLab: AxisAnchor | null;
+  yLab: AxisAnchor | null;
+}
