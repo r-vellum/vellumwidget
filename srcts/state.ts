@@ -120,6 +120,14 @@ export interface WidgetState {
   // The raster mark tier (VW-16): the mark PNG ("overview"), the exact canvas
   // ("mid") or real keyed SVG nodes for the visible marks ("detail").
   markTier: "overview" | "mid" | "detail";
+  // Per-mark style state for the node-less raster tiers (VW-22,
+  // features/markState.ts), indexed by display-list key id.
+  msFlags: Uint8Array | null;
+  msColor: Uint16Array | null;
+  msCond: Uint16Array | null;
+  msPalette: string[];
+  msActive: boolean; // any mark dimmed, recoloured, muted or hidden
+  msDimAlpha: number;
   detailGroups: SVGGElement[]; // the detail tier's node groups (one per pan group)
   detailKeys: string[]; // the keys materialised in the detail tier
   selGroup: SVGGElement | null; // persistent selection rings
@@ -259,7 +267,11 @@ export interface WidgetFns {
   dataRangeOf: (p: PanelInfo, dx0: number, dy0: number, dx1: number, dy1: number) => { x?: number[]; y?: number[]; panel: string } | null;
   distToElem: (x: number, y: number, e: ElemMeta) => number;
   drawCrosshair: (k: string, hm: "closest" | "x" | "y") => void;
-  drawPoints: () => void;
+  drawPoints: (stateOnly?: boolean) => void;
+  condStatesBegin: () => boolean;
+  condStateSet: (tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, color: string | null | undefined) => void;
+  updateMarkStates: () => void;
+  keyIds: (keys: string[]) => Int32Array;
   drawSelFeedback: () => void;
   refreshSelected: () => void;
   showMarksLayer: (on: boolean) => void;
@@ -387,6 +399,12 @@ export function createState(el: HTMLElement): WidgetState {
     marksLayer: null,
     dl: null,
     markTier: "overview",
+    msFlags: null,
+    msColor: null,
+    msCond: null,
+    msPalette: [],
+    msActive: false,
+    msDimAlpha: 0.28,
     detailGroups: [],
     detailKeys: [],
     selGroup: null,
