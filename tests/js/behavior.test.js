@@ -2116,6 +2116,58 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(voidAZ.inst._test.retickLabels().length === 0,
     "axis_zoom: a void panel invents no re-ticked axes");
 
+  // VW-17: vellumplot's panel furniture -- an opaque background rect first in the
+  // pan group, gridlines, then inward tick marks -- and theme_classic's axis line
+  // in the axis group. The background leaves the pan group (so it neither covers
+  // the re-ticked grid nor scales with T), the static ticks are hidden and
+  // re-drawn at the new breaks, and the axis line stays.
+  {
+    const furnSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<g data-vellum-panel="panel-1-1" clip-path="url(#c0)">' +
+      '<g data-vellum-pan="panel-1-1">' +
+      '<path class="bg" d="M20 10 L180 10 L180 90 L20 90 Z" fill="#ebebeb"/>' +
+      '<g role="grid"><path d="M100 90 L100 10" stroke="#ffffff" stroke-width="1"/></g>' +
+      '<g role="presentation"><path class="xt" d="M52 90 L52 85 M100 90 L100 85" stroke="#333333" stroke-width="1.5"/></g>' +
+      '<g role="presentation"><path class="yt" d="M20 50 L25 50" stroke="#333333" stroke-width="1.5"/></g>' +
+      '<g data-vellum-id="layer-1-point-g1" role="presentation"><path data-key="a" d="M100 50h2v2z"/></g></g></g>' +
+      '<g data-vellum-panel="axis-x-3"><path class="xl" d="M20 90 L180 90" stroke="#000000"/>' +
+      '<text x="20" y="4" transform="matrix(1 0 0 1 20 90)" fill="#333333" font-family="sans-serif" font-size="12">50</text></g>' +
+      '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" fill="#333333" font-family="sans-serif" font-size="12">25</text></g>' +
+      '<g data-vellum-panel="axis-title-x"><text>wt</text></g></svg>';
+    const fz = mountAZ({ axisZoom: true }, furnSvg);
+    ok(fz.inst._test.axisZoomActive() === true, "VW-17: the furnished panel is axis-zoomable");
+    const outer = fz.el.querySelector('[data-vellum-panel="panel-1-1"]');
+    const order = Array.prototype.map.call(outer.children, (c) =>
+      c.getAttribute("class") || (c.hasAttribute("data-vellum-pan") ? "pan" : c.tagName));
+    ok(JSON.stringify(order) === JSON.stringify(["bg", "vellumwidget-retick-grid", "pan"]),
+      "VW-17: panel order is background, re-ticked grid, pan group (got " + order.join(",") + ")");
+    const xt = fz.el.querySelector(".xt").parentNode, yt = fz.el.querySelector(".yt").parentNode;
+    ok(xt.style.display === "none" && yt.style.display === "none",
+      "VW-17: the static tick marks are hidden with the static labels");
+    ok(fz.el.querySelector('[data-vellum-id="layer-1-point-g1"]').style.display !== "none",
+      "VW-17: the first mark layer is left alone");
+    const xl = fz.el.querySelector(".xl");
+    ok(xl.style.display !== "none" && xl.parentNode.style.display !== "none" &&
+      xl.parentNode.querySelector("text").style.display === "none",
+      "VW-17: an axis line stays visible while its labels hide");
+    ok(fz.inst._test.staticAxesHidden() === true, "VW-17: staticAxesHidden counts a kept axis line as hidden axes");
+    fz.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 });
+    const grid = outer.querySelector(".vellumwidget-retick-grid");
+    const ticks = grid.querySelectorAll("line.vellumwidget-retick-tick");
+    ok(ticks.length > 0 && fz.inst._test.retickGridCount() > 0,
+      "VW-17: re-ticked tick marks are drawn beside the re-ticked gridlines");
+    const xTicks = Array.prototype.filter.call(ticks, (l) => l.getAttribute("x1") === l.getAttribute("x2"));
+    ok(xTicks.length > 0 && xTicks.every((l) => +l.getAttribute("y1") === 90 && +l.getAttribute("y2") === 85 &&
+      l.getAttribute("stroke") === "#333333" && l.getAttribute("stroke-width") === "1.5"),
+      "VW-17: x ticks grow 5px up from the bottom edge in the static stroke");
+    const kids = Array.prototype.slice.call(grid.children);
+    ok(kids.findIndex((l) => l.classList.contains("vellumwidget-retick-tick")) >
+      kids.length - 1 - ticks.length, "VW-17: tick marks sit on top of every gridline");
+    ok(!fz.el.querySelector(".bg").closest("[data-vellum-pan]"),
+      "VW-17: the background is outside the pan group, so a zoom does not scale it");
+  }
+
   // navigator + axis_zoom cooperate: the navigator's x-only zoom is rendered THROUGH
   // axis_zoom (fixed frame, re-ticked x-axis) rather than the stretch fallback.
   const nz = mountAZ({ axisZoom: true, navigator: true });

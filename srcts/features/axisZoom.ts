@@ -6,7 +6,7 @@ import { SVGNS } from "./constants";
 import { GLYPH_MARKS } from "../scales";
 import type { WidgetFns, WidgetState } from "../state";
 import { axisRetickable, axisTicks, secAxisMap, secTicks } from "../ticks";
-import type { AxisAnchor, AzPanel } from "../types";
+import type { AxisAnchor, AzPanel, TickStyle } from "../types";
 import { fmtViewBox } from "../viewbox";
 import type { PanTransform } from "../viewbox";
 
@@ -62,7 +62,8 @@ export function axisZoomFeature(
       found.push({
         p: p, pan: pan as SVGGElement, outer: outer as SVGGElement, grid: null,
         ax: ax, bx: p.px0 - ax * ref.px0, ay: ay, by: p.py0 - ay * ref.py0,
-        xLab: null, yLab: null, x2Lab: null, y2Lab: null, x2Map: null, y2Map: null
+        xLab: null, yLab: null, x2Lab: null, y2Lab: null, x2Map: null, y2Map: null,
+        xTick: null, yTick: null
       });
     }
     ws.azPanels = found;
@@ -73,8 +74,13 @@ export function axisZoomFeature(
     hideStaticAxes();
     // Re-ticked gridlines: a group inside each clipped panel, before its pan group,
     // so they render under the marks and are clipped to the panel (like vellum's).
+    // The panel background leaves the pan group first (adoptFurniture), so the
+    // order is background, re-ticked grid, marks -- inserted before the pan group
+    // alone, the grid would sit under an opaque background that also scales with
+    // T (VW-17).
     for (let i = 0; i < ws.azPanels.length; i++) {
       const a = ws.azPanels[i];
+      adoptFurniture(a);
       const g = document.createElementNS(SVGNS, "g") as SVGGElement;
       g.setAttribute("class", "vellumwidget-retick-grid");
       a.outer.insertBefore(g, a.pan);
@@ -293,12 +299,123 @@ export function axisZoomFeature(
 
   // Hide vellum's gridlines (role="grid", inside the pan group -> would stretch
   // with T) and its axis tick-label groups (axis-x-*/axis-y-*, outside the panel
-  // -> would go stale). Axis TITLES (axis-title-*) are left visible.
+  // -> would go stale). Axis TITLES (axis-title-*) are left visible, and so is an
+  // axis line (theme_classic draws it in the axis group as one straight segment
+  // along the panel edge, which no zoom moves).
   function hideStaticAxes(): void {
     if (!ws.svgEl) return;
-    const hide = ws.svgEl.querySelectorAll(
-      '[role="grid"], [data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
-    for (let i = 0; i < hide.length; i++) (hide[i] as SVGElement).style.display = "none";
+    const grids = ws.svgEl.querySelectorAll('[role="grid"]');
+    for (let i = 0; i < grids.length; i++) (grids[i] as SVGElement).style.display = "none";
+    const axes = ws.svgEl.querySelectorAll('[data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
+    for (let i = 0; i < axes.length; i++) {
+      const kids = axes[i].children;
+      let line = false;
+      for (let j = 0; j < kids.length; j++) if (isAxisLine(kids[j])) line = true;
+      if (!line) { (axes[i] as SVGElement).style.display = "none"; continue; }
+      for (let j = 0; j < kids.length; j++) {
+        if (!isAxisLine(kids[j])) (kids[j] as SVGElement).style.display = "none";
+      }
+    }
+  }
+
+  // One straight horizontal or vertical segment ("M x y L x y"): an axis line.
+  function isAxisLine(n: Element): boolean {
+    if (n.tagName.toLowerCase() !== "path") return false;
+    const s = pathSegments(n.getAttribute("d") || "");
+    return s !== null && s.length === 1 && (s[0][0] === s[0][2] || s[0][1] === s[0][3]);
+  }
+
+  // A path of plain "M x y L x y" segments -> [[x1, y1, x2, y2], ...]; null for
+  // anything else (curves, closed shapes, relative commands).
+  function pathSegments(d: string): number[][] | null {
+    const re = /M\s*([-\d.eE]+)[\s,]+([-\d.eE]+)\s*L\s*([-\d.eE]+)[\s,]+([-\d.eE]+)\s*/g;
+    const out: number[][] = [];
+    let m: RegExpExecArray | null, end = 0;
+    const t = d.trim();
+    while ((m = re.exec(t)) !== null) {
+      if (m.index !== end) return null;
+      const v = [+m[1], +m[2], +m[3], +m[4]];
+      if (!v.every(isFinite)) return null;
+      out.push(v);
+      end = re.lastIndex;
+    }
+    return end === t.length && out.length ? out : null;
+  }
+
+  // The panel furniture vellumplot draws at the start of each pan group, before
+  // the first mark: an un-roled background rect, role="grid" gridlines (hidden by
+  // hideStaticAxes) and role="presentation" tick marks growing inward from the
+  // panel edges. Inside the pan group all three would stretch with T. Move the
+  // background out (just before the pan group, still inside the clipped panel)
+  // so it stays fixed and the re-ticked grid can sit on top of it; hide the ticks
+  // and remember their look, so retickPanel re-draws them at the new breaks.
+  function adoptFurniture(a: AzPanel): void {
+    const p = a.p;
+    const kids = Array.prototype.slice.call(a.pan.children) as Element[];
+    const near = function (v: number, w: number): boolean { return Math.abs(v - w) < 0.5; };
+    for (let i = 0; i < kids.length; i++) {
+      const c = kids[i];
+      if (c.hasAttribute("data-vellum-id") || c.hasAttribute("data-key")) break; // first mark
+      const role = c.getAttribute("role");
+      if (role === "grid") continue;
+      const tag = c.tagName.toLowerCase();
+      if (i === 0 && !role && (tag === "path" || tag === "rect")) {
+        c.setAttribute("data-vw-panel-bg", "");
+        a.outer.insertBefore(c, a.pan);
+        continue;
+      }
+      if (role !== "presentation" || tag !== "g") break;
+      // A tick group: every child a path of axis-aligned segments, each with one
+      // end on a panel edge. Anything else (an annotation, say) ends the scan.
+      const paths = c.children;
+      let tick: TickStyle | null = null, isX = false;
+      for (let j = 0; j < paths.length && paths.length; j++) {
+        const segs = pathSegments(paths[j].getAttribute("d") || "");
+        if (!segs) { tick = null; break; }
+        for (let k = 0; k < segs.length; k++) {
+          const s = segs[k];
+          let edge: TickStyle["edge"] | null = null, len = 0, vx = false;
+          if (s[0] === s[2]) {
+            vx = true; len = Math.abs(s[3] - s[1]);
+            edge = near(s[1], p.py1) || near(s[3], p.py1) ? "bottom" : near(s[1], p.py0) || near(s[3], p.py0) ? "top" : null;
+          } else if (s[1] === s[3]) {
+            len = Math.abs(s[2] - s[0]);
+            edge = near(s[0], p.px0) || near(s[2], p.px0) ? "left" : near(s[0], p.px1) || near(s[2], p.px1) ? "right" : null;
+          }
+          if (!edge || !(len > 0) || (tick && (tick.edge !== edge))) { tick = null; break; }
+          if (!tick) {
+            isX = vx;
+            tick = {
+              stroke: paths[j].getAttribute("stroke") || ws.axisStyle.textFill,
+              width: parseFloat(paths[j].getAttribute("stroke-width") || "") || 1,
+              len: len, edge: edge
+            };
+          } else if (len > tick.len) tick.len = len;
+        }
+        if (!tick) break;
+      }
+      if (!tick) break;
+      (c as SVGElement).style.display = "none";
+      // Minor / log ticks are shorter than the major ones: keep the longest.
+      if (isX) { if (!a.xTick || tick.len > a.xTick.len) a.xTick = tick; }
+      else if (!a.yTick || tick.len > a.yTick.len) a.yTick = tick;
+    }
+  }
+
+  // A re-ticked tick mark at a break, growing inward from the panel edge.
+  function tickLine(ts: TickStyle, at: number, p: AzPanel["p"]): SVGLineElement {
+    const l = document.createElementNS(SVGNS, "line") as SVGLineElement;
+    let x1 = at, x2 = at, y1 = at, y2 = at;
+    if (ts.edge === "bottom") { y1 = p.py1; y2 = p.py1 - ts.len; }
+    else if (ts.edge === "top") { y1 = p.py0; y2 = p.py0 + ts.len; }
+    else if (ts.edge === "left") { x1 = p.px0; x2 = p.px0 + ts.len; }
+    else { x1 = p.px1; x2 = p.px1 - ts.len; }
+    l.setAttribute("x1", String(x1)); l.setAttribute("y1", String(y1));
+    l.setAttribute("x2", String(x2)); l.setAttribute("y2", String(y2));
+    l.setAttribute("stroke", ts.stroke);
+    l.setAttribute("stroke-width", String(ts.width));
+    l.setAttribute("class", "vellumwidget-retick-tick");
+    return l;
   }
 
   // A gridline / an axis label, styled to match the scraped theme.
@@ -352,6 +469,7 @@ export function axisZoomFeature(
     if (!grid || !layer) return;
     while (grid.firstChild) grid.removeChild(grid.firstChild);
     const t = ws.fx.azT(a);
+    const ticks_: SVGLineElement[] = []; // tick marks go on top of every gridline
     // Visible native range: invert the panel's fixed screen rect through T_i to
     // the device px now sitting there, then px -> native via the panel affine.
     if (p.x && p.px1 !== p.px0) {
@@ -365,6 +483,7 @@ export function axisZoomFeature(
         const sx = t.sx * px + t.tx; // screen device-px
         if (!isFinite(sx) || sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
         grid.appendChild(gridLine(sx, p.py0, sx, p.py1));
+        if (a.xTick) ticks_.push(tickLine(a.xTick, sx, p));
         if (a.xLab) {
           const lab = axisLabel(ticks[i].label, sx, a.xLab.pos, a.xLab.anchor, a.xLab.baseline);
           if (a.xLab.gap > 0) wrapLabel(lab, ticks[i].label, sx, a.xLab.gap);
@@ -392,6 +511,7 @@ export function axisZoomFeature(
         const sy = t.sy * py + t.ty;
         if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
         grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
+        if (a.yTick) ticks_.push(tickLine(a.yTick, sy, p));
         if (a.yLab) {
           layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline));
         }
@@ -405,6 +525,7 @@ export function axisZoomFeature(
         }
       }
     }
+    for (let i = 0; i < ticks_.length; i++) grid.appendChild(ticks_[i]);
   }
 
   return { setupAxisZoom, applyPanTransforms, retick };
