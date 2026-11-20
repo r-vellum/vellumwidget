@@ -1,7 +1,7 @@
 // Toolbar: interaction modes, export (SVG / PNG / clipboard), fullscreen.
 
 import { download } from "../dom";
-import { MODE_ICON, MODE_LABEL } from "./constants";
+import { MODE_ICON, MODE_LABEL, SVGNS } from "./constants";
 import { unionBbox } from "../geometry";
 import type { WidgetFns, WidgetState } from "../state";
 
@@ -57,9 +57,27 @@ export function toolbarFeature(
     return s && s > 0 ? s : 1;
   }
 
+  // The current view as one SVG document. The base svg carries the furniture
+  // and (split render, VW-14) the mark-layer image; under axis zoom the
+  // re-ticked axis labels live in their own overlay in the same vb0 frame, so
+  // they are folded in, or the export would show a zoomed plot with no tick
+  // labels. The canvas-only "marks hidden" state is dropped: the exported image
+  // shows the mark layer itself.
+  function exportSvgString(): string {
+    const svg = ws.svgEl!.cloneNode(true) as SVGSVGElement;
+    svg.classList.remove("vellumwidget-marks-off");
+    if (ws.axisZoomActive && ws.retickLayer) {
+      const g = document.createElementNS(SVGNS, "g");
+      g.setAttribute("class", "vellumwidget-retick-export");
+      for (let c = ws.retickLayer.firstChild; c; c = c.nextSibling) g.appendChild(c.cloneNode(true));
+      svg.appendChild(g);
+    }
+    return new XMLSerializer().serializeToString(svg);
+  }
+
   function saveSvg(): void {
     if (!ws.svgEl) return;
-    const s = new XMLSerializer().serializeToString(ws.svgEl);
+    const s = exportSvgString();
     download(new Blob([s], { type: "image/svg+xml;charset=utf-8" }), exportName() + ".svg");
   }
 
@@ -67,7 +85,7 @@ export function toolbarFeature(
   // if the canvas is tainted/unsupported. Shared by savePng + copyPng.
   function toCanvas(then: (c: HTMLCanvasElement) => void, fail: () => void): void {
     if (!ws.svgEl) return fail();
-    const s = new XMLSerializer().serializeToString(ws.svgEl);
+    const s = exportSvgString();
     const url = URL.createObjectURL(new Blob([s], { type: "image/svg+xml;charset=utf-8" }));
     const img = new Image();
     img.onload = function () {

@@ -110,6 +110,10 @@ export interface WidgetState {
   // DOM nodes. Hover/click/brush resolve against the spatial index and draw
   // feedback rings into two overlay groups instead of toggling classes on marks.
   rasterMode: boolean;
+  // Split render (VW-14): where the mark-layer image went -- "pans" (one <use>
+  // per panel pan group, so axis zoom carries it), "root" (one image over the
+  // whole scene), or null (no split: the base image carries marks and furniture).
+  marksLayer: "pans" | "root" | null;
   selGroup: SVGGElement | null; // persistent selection rings
   hovGroup: SVGGElement | null; // transient hover ring(s)
   // Crisp-zoom canvas (Phase 6): when the view is zoomed in, the base image would
@@ -123,6 +127,7 @@ export interface WidgetState {
   ptRad: Float64Array | null; // sampled point radii (viewBox units)
   ptRGB: Uint8Array | null; // packed [r,g,b, r,g,b, …] per sampled point
   ptN: number; // number of sampled (drawable) points
+  ptAllRound: boolean; // every sampled point is a round mark (the canvas draws it exactly)
   opts: Options;
   // --- accessibility state ---
   liveRegion: HTMLElement | null; // aria-live announcer
@@ -248,6 +253,7 @@ export interface WidgetFns {
   drawCrosshair: (k: string, hm: "closest" | "x" | "y") => void;
   drawPoints: () => void;
   drawSelFeedback: () => void;
+  azOverlayWrap: (node: Element, key: string) => Element;
   dropInert: (keys: string[]) => string[];
   elementsForKey: (k: string) => Element[];
   emitSource: (target: EventTarget | null) => void;
@@ -364,6 +370,7 @@ export function createState(el: HTMLElement): WidgetState {
     tolX: 1,
     tolY: 1,
     rasterMode: false,
+    marksLayer: null,
     selGroup: null,
     hovGroup: null,
     canvasEl: null,
@@ -373,6 +380,7 @@ export function createState(el: HTMLElement): WidgetState {
     ptRad: null,
     ptRGB: null,
     ptN: 0,
+    ptAllRound: false,
     opts: {
     tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true,
     toolbar: true, nearest: true, a11y: true, selectMode: "multiple",

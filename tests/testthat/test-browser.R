@@ -117,3 +117,29 @@ test_that("VW-13: a raster widget decodes the compact index (click selects a poi
   )$result$value
   expect_identical(rings, 1L)
 })
+
+test_that("VW-14: a split-render raster widget zooms by axis and re-ticks", {
+  skip_browser()
+  skip_if_not(.split_render_supported(), "vellum without the split render")
+  set.seed(1)
+  n <- 25000L
+  df <- data.frame(x = rnorm(n), y = rnorm(n), g = sample(letters[1:4], n, TRUE), id = seq_len(n))
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id) |>
+    as_widget()
+  expect_true(w$x$options$raster)
+  b <- open_widget(w)
+  r <- panel_rect(b)
+  ev <- function(js) b$Runtime$evaluate(js)$result$value
+  expect_identical(ev("document.querySelectorAll('[data-vellum-pan] use.vellumwidget-marks').length"), 1L)
+  wheel_in(b, r)
+  # the pan group carries the zoom; the frame (viewBox) and the axes stay SVG
+  sx <- ev("parseFloat(/matrix\\(([-\\d.eE]+)/.exec(document.querySelector('[data-vellum-pan]').getAttribute('transform'))[1])")
+  expect_gt(sx, 1.2)
+  expect_gt(ev("document.querySelectorAll('.vellumwidget-retick-layer text').length"), 2L)
+  # the crisp canvas redraws the points, and the scaled mark image is hidden
+  expect_identical(ev("getComputedStyle(document.querySelector('.vellumwidget-canvas')).display"), "block")
+  expect_true(ev("!!document.querySelector('svg.vellumwidget-marks-off')"))
+  # theme_grey: re-ticked white gridlines show through
+  expect_gt(white_share(b, r), 0.0005)
+})

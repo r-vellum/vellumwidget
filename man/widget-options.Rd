@@ -59,10 +59,15 @@ the per-element SVG; \code{"raster"} always uses the image. In raster mode the
 marks are drawn once as a base image and all interaction (hover, click,
 brush, pan/zoom) is driven client-side from the element index (geometry +
 boxes + keys), so a very large scatter (100k+ points) stays navigable with a
-tiny DOM and a small payload. The trade-offs of raster mode: per-element
+tiny DOM and a small payload. With a vellum that has the split render
+(\verb{layer =} on \code{\link[vellum:scene_svg]{vellum::scene_svg()}}), only the keyed marks are an image: the
+axes, gridlines, legend and text stay SVG, so axis-aware zoom re-ticks the
+real axes, and the navigator and \code{vellumplot::bind_scale()} work as in SVG
+mode. An older vellum draws the whole scene as one image, and zoom then
+magnifies it. The trade-offs of raster mode: per-element
 grammar colours, per-mark screen-reader focus, and display-tier
 cross-filtering do not apply (there are no per-element DOM nodes), and a
-zoomed-in view is a scaled raster until re-rendered.}
+zoomed-in view shows the marks redrawn as plain dots.}
 
 \item{raster_threshold}{Keyed-element count above which \code{mode = "auto"}
 switches to the raster image (default \code{20000}).}
@@ -72,8 +77,9 @@ switches to the raster image (default \code{20000}).}
 smaller when the page has the font, post-processable, and better for
 accessibility and LLMs; \code{"outline"} emits glyph outlines that are
 pixel-faithful and font-independent but not selectable. Applies to the
-per-element SVG path only; in raster mode text is baked into the base image
-and this argument is ignored (with a warning if set explicitly).}
+SVG, including raster mode's SVG furniture under the split render; with an
+older vellum, raster mode bakes text into the base image and this argument
+is ignored (with a warning if set explicitly).}
 }
 \value{
 An object of class \code{vellumwidget_tooltip_options},

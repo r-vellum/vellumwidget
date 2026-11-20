@@ -4124,6 +4124,116 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
     "VW-20: no OS-scheme rule restyles the selection any more");
 }
 
+// ============ VW-14: split render in raster mode ============
+// Raster mode with vellum's split render ships SVG furniture plus a PNG of the
+// keyed marks (`marks`), which the runtime places in each panel's pan group so
+// axis zoom (and the navigator, and binds) work as in SVG mode.
+{
+  const PNG1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+  const panel = (name, px0, px1) => ({
+    name: name, px0: px0, py0: 10, px1: px1, py1: 90,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+  });
+  // Furniture only (layer = "unkeyed"): the pan groups hold no keyed marks.
+  const furn = (names) =>
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">' +
+    '<defs><clipPath id="c0"><rect x="0" y="0" width="400" height="100"/></clipPath></defs>' +
+    names.map((n) => '<g data-vellum-panel="' + n + '" clip-path="url(#c0)"><g data-vellum-pan="' + n + '">' +
+      '<g role="grid"><path d="M0 0 L0 80" stroke="#ffffff"/></g></g></g>').join("") +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">50</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">25</text></g></svg>';
+  function mountSplit(names, panels, marksPanels, opts) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e, 400, 100);
+    i.renderValue({
+      svg: furn(names),
+      elements: { key: ["a", "b"], mark: { levels: "point", codes: [0, 0] },
+        x0: [100, 300], y0: [50, 50], x1: [102, 302], y1: [52, 52] },
+      panels: panels,
+      marks: { href: PNG1, width: 400, height: 100, panels: marksPanels },
+      options: Object.assign({ raster: true, hover: true, select: true, zoom: true, selectMode: "multiple" }, opts || {})
+    });
+    return { el: e, inst: i };
+  }
+
+  // one panel: a <use> in the pan group, the image defined once, axis zoom on.
+  const one = mountSplit(["panel-1-1"], [panel("panel-1-1", 20, 180)], "panel-1-1");
+  const pan1 = one.el.querySelector('[data-vellum-pan="panel-1-1"]');
+  const use1 = pan1.querySelector("use.vellumwidget-marks");
+  const def1 = one.el.querySelector("defs.vellumwidget-marks-defs image.vellumwidget-marks");
+  ok(!!use1 && !!def1, "split: the mark image is defined once and drawn by a <use> in the pan group");
+  ok(use1.getAttribute("href") === "#" + def1.getAttribute("id"), "split: the <use> references the image definition");
+  ok(pan1.lastChild === use1, "split: the marks sit above the panel's unkeyed content");
+  ok(one.inst._test.rasterMode() === true && one.inst._test.axisZoomActive() === true,
+    "split: raster mode with the mark layer in the pan groups zooms by axis");
+  const lab0 = one.inst._test.retickLabels().map((l) => l.text).join(",");
+  one.inst._test.setView({ x: 50, y: 25, w: 200, h: 50 });
+  const tm = /matrix\(([-\d.eE]+)/.exec(one.inst._test.panTransform());
+  ok(tm && Math.abs(parseFloat(tm[1]) - 2) < 1e-6, "split: zooming scales the pan group (and the marks in it) 2x");
+  ok(one.el.querySelector("svg").getAttribute("viewBox") === "0 0 400 100", "split: the frame stays at vb0 under axis zoom");
+  const lab1 = one.inst._test.retickLabels().map((l) => l.text).join(",");
+  ok(lab0.length > 0 && lab1.length > 0 && lab0 !== lab1, "split: the real axes re-tick in raster mode");
+
+  // export: one SVG document with the mark layer and the re-ticked labels folded in.
+  {
+    let captured = null;
+    const saved = { Blob: global.Blob, XS: global.XMLSerializer, cou: URL.createObjectURL, rou: URL.revokeObjectURL };
+    global.Blob = function (parts) { captured = parts.join(""); };
+    global.XMLSerializer = window.XMLSerializer;
+    URL.createObjectURL = function () { return "blob:x"; };
+    URL.revokeObjectURL = function () {};
+    const aClick = window.HTMLAnchorElement.prototype.click;
+    window.HTMLAnchorElement.prototype.click = function () {}; // no jsdom navigation
+    one.el.querySelector('[data-act="svg"]').click();
+    window.HTMLAnchorElement.prototype.click = aClick;
+    global.Blob = saved.Blob; global.XMLSerializer = saved.XS;
+    URL.createObjectURL = saved.cou; URL.revokeObjectURL = saved.rou;
+    ok(captured && /<use[^>]*class="vellumwidget-marks"/.test(captured) && /<image[^>]*class="vellumwidget-marks"/.test(captured),
+      "split export: the SVG carries the mark layer (furniture + marks in one image)");
+    ok(captured && captured.indexOf("vellumwidget-retick-export") >= 0 && captured.indexOf(">" + one.inst._test.retickLabels()[0].text + "<") >= 0,
+      "split export: the re-ticked axis labels are folded into the exported SVG");
+  }
+
+  // facets: one <use> per panel, one definition; ids are page-unique.
+  const two = mountSplit(["panel-1-1", "panel-1-2"], [panel("panel-1-1", 20, 180), panel("panel-1-2", 220, 380)],
+    ["panel-1-1", "panel-1-2"]);
+  ok(two.el.querySelectorAll("use.vellumwidget-marks").length === 2 &&
+     two.el.querySelectorAll("image.vellumwidget-marks").length === 1, "split: facets get a <use> each of one image");
+  ok(two.el.querySelector("image.vellumwidget-marks").getAttribute("id") !== def1.getAttribute("id"),
+    "split: the image id is unique per widget");
+  ok(two.inst._test.axisZoomActive() === true, "split: facets zoom by axis in raster mode");
+
+  // a listed panel without a pan group: one image over the whole scene, viewBox zoom.
+  const root = mountSplit(["panel-1-1"], [panel("panel-1-1", 20, 180)], ["panel-1-1", "panel-9"]);
+  const rootImg = root.el.querySelector("svg > image.vellumwidget-marks");
+  ok(!!rootImg && !root.el.querySelector("use.vellumwidget-marks"), "split: a missing pan group falls back to one root image");
+  ok(root.inst._test.axisZoomActive() === false, "split: the root fallback keeps viewBox zoom");
+
+  // no marks layer (older vellum: one base image) keeps today's behaviour.
+  const e0 = document.createElement("div");
+  document.body.appendChild(e0);
+  const i0 = widgetDef.factory(e0, 400, 100);
+  i0.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100"><image width="400" height="100" href="' + PNG1 + '"/></svg>',
+    elements: { key: ["a"], x0: [100], y0: [50], x1: [102], y1: [52] },
+    panels: [panel("panel-1-1", 20, 180)],
+    options: { raster: true, zoom: true }
+  });
+  ok(i0._test.axisZoomActive() === false && !e0.querySelector(".vellumwidget-marks"),
+    "split: without a marks layer raster mode is unchanged (viewBox zoom)");
+
+  // navigator: available in split raster mode; its clone keeps one <use>, no defs.
+  const nav = mountSplit(["panel-1-1", "panel-1-2"], [panel("panel-1-1", 20, 180), panel("panel-1-2", 220, 380)],
+    ["panel-1-1", "panel-1-2"], { navigator: true });
+  const mini = nav.el.querySelector(".vellumwidget-nav-mini svg");
+  ok(!!mini, "split: the navigator is built in raster mode");
+  ok(mini && mini.querySelectorAll("use.vellumwidget-marks").length === 1 && !mini.querySelector("defs"),
+    "split: the navigator clone keeps one mark <use> and drops every defs");
+  ok(nav.inst._test.axisZoomActive() === true, "split: navigator + axis zoom in raster mode");
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();

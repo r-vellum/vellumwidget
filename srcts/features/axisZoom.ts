@@ -32,7 +32,9 @@ export function axisZoomFeature(
     }
     ws.azPanels = []; ws.panGroup = null; ws.axisZoomActive = false; ws.anchorPanel = null;
     if (ws.retickLayer) { ws.retickLayer.remove(); ws.retickLayer = null; }
-    if (!ws.opts.axisZoom || ws.rasterMode || !ws.svgEl || !ws.vb0 || !ws.stage || !ws.panels.length) return;
+    // Raster mode zooms by axis only with the split render's mark layer inside
+    // the pan groups (VW-14); a single base image bakes the axes in.
+    if (!ws.opts.axisZoom || (ws.rasterMode && ws.marksLayer !== "pans") || !ws.svgEl || !ws.vb0 || !ws.stage || !ws.panels.length) return;
     for (let i = 0; i < ws.panels.length; i++) {
       if (!axisRetickable(ws.panels[i].x) || !axisRetickable(ws.panels[i].y)) return;
     }

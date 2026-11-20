@@ -106,6 +106,7 @@ test_that("old flat arguments still work, with a deprecation warning", {
   expect_false(w$x$options$navigator)
 
   # the old `text` still warns in raster mode when set explicitly
+  local_single_raster()
   expect_warning(
     expect_warning(
       as_widget(s, mode = "raster", text = "outline"),

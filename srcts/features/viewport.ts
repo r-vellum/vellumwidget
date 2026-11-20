@@ -142,6 +142,9 @@ export function viewportFeature(
     if (ws.dimLayer && overlayVb) ws.dimLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
     if (ws.crosshairLayer && overlayVb) ws.crosshairLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
     ws.fx.placeIntervalBand(); // an active interval band follows the per-panel zoom
+    // Raster selection rings are placed per panel (azOverlayWrap) when several
+    // panels zoom independently: re-place them for the new transforms.
+    if (ws.rasterMode && ws.fx.azMulti()) ws.fx.drawSelFeedback();
     if (ws.colorbarLayer && (ws.vb || ws.vb0)) {
       ws.colorbarLayer.setAttribute("viewBox", fmtViewBox(ws.axisZoomActive && ws.vb0 ? ws.vb0 : ws.vb!));
     }

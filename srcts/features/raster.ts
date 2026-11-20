@@ -2,7 +2,7 @@
 // stand in for per-node selection / hover classes.
 
 import { OVERLAY_MARK_CAP, SVGNS } from "./constants";
-import { hasBbox } from "../geometry";
+import { hasBbox, isRoundMark } from "../geometry";
 import type { WidgetFns, WidgetState } from "../state";
 import { isZoomedIn, userToCanvas } from "../viewbox";
 
@@ -32,7 +32,9 @@ export function rasterFeature(
     ws.ptCx = ws.ptCy = ws.ptRad = null;
     ws.ptRGB = null;
     ws.ptN = 0;
+    ws.ptAllRound = false;
     if (ws.canvasEl) ws.canvasEl.style.display = "none";
+    showMarksLayer(true);
   }
 
   // Sample each keyed element's colour from the rendered base raster (its centre
@@ -42,7 +44,9 @@ export function rasterFeature(
   function sampleBaseRaster(): void {
     clearPointData();
     if (!ws.rasterMode || !ws.svgEl || !ws.vb0) return;
-    const imgNode = ws.svgEl.querySelector("image");
+    // The split render's mark layer when there is one (furniture may carry its
+    // own images), else the single base image.
+    const imgNode = ws.svgEl.querySelector("image.vellumwidget-marks") || ws.svgEl.querySelector("image");
     const href = imgNode && (imgNode.getAttribute("href") || imgNode.getAttribute("xlink:href"));
     if (!href) return;
     const off = document.createElement("canvas");
@@ -66,6 +70,7 @@ export function rasterFeature(
         return; // tainted canvas (shouldn't happen for a same-origin data: URI)
       }
       const cx: number[] = [], cy: number[] = [], rad: number[] = [], rgb: number[] = [];
+      let allRound = true;
       for (let i = 0; i < els.length; i++) {
         const e = els[i];
         if (!hasBbox(e)) continue;
@@ -74,6 +79,7 @@ export function rasterFeature(
         const sy = Math.min(ih - 1, Math.max(0, Math.round(my)));
         const o = (sy * iw + sx) * 4;
         if (data[o + 3] < 8) continue; // transparent -> background, not a drawn mark
+        if (!isRoundMark(e.mark)) allRound = false;
         cx.push(mx);
         cy.push(my);
         rad.push(Math.max(e.x1 - e.x0, e.y1 - e.y0) / 2 + 0.5);
@@ -84,6 +90,7 @@ export function rasterFeature(
       ws.ptCy = Float64Array.from(cy);
       ws.ptRad = Float64Array.from(rad);
       ws.ptRGB = Uint8Array.from(rgb);
+      ws.ptAllRound = allRound && cx.length > 0;
       drawPoints(); // in case the view is already zoomed
     };
     img.onerror = function () {};
@@ -93,10 +100,19 @@ export function rasterFeature(
   // Redraw the crisp point layer for the current view. Engages only when zoomed in
   // (otherwise the faithful base image shows and the canvas is hidden). Points
   // outside the view are culled, so a deep zoom draws only a handful.
+  //
+  // Under axis zoom (split render, VW-14) the svg frame stays at vb0 and each
+  // panel's marks move by their own T_i, so the points are drawn per panel:
+  // through that panel's T and clipped to its fixed rect, never over the axes.
   function drawPoints(): void {
     if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
-    if (!isZoomedIn(ws.vb, ws.vb0) || !ws.ptCx || !ws.ptCy || !ws.ptRad || !ws.ptRGB || !ws.ptN) {
+    const az = ws.axisZoomActive && ws.azPanels.length > 0;
+    const zoomed = az
+      ? ws.azPanels.some(function (a) { const t = ws.fx.azT(a); return t.sx > 1.0001 || t.sy > 1.0001; })
+      : isZoomedIn(ws.vb, ws.vb0);
+    if (!zoomed || !ws.ptCx || !ws.ptCy || !ws.ptRad || !ws.ptRGB || !ws.ptN) {
       ws.canvasEl.style.display = "none";
+      showMarksLayer(true);
       return;
     }
     const rect = (ws.svgEl || ws.el).getBoundingClientRect();
@@ -110,8 +126,44 @@ export function rasterFeature(
     ws.canvasEl.style.width = cw + "px";
     ws.canvasEl.style.height = ch + "px";
     ws.canvasEl.style.display = "block";
+    const ctx = ws.ctx;
     const W = ws.canvasEl.width, H = ws.canvasEl.height;
-    ws.ctx.clearRect(0, 0, W, H);
+    ctx.clearRect(0, 0, W, H);
+    const cx = ws.ptCx, cy = ws.ptCy, rad = ws.ptRad, rgb = ws.ptRGB, n = ws.ptN;
+    const dot = function (px: number, py: number, r: number, i: number): void {
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(0.75, r), 0, 6.283185307179586);
+      ctx.fillStyle = "rgb(" + rgb[i * 3] + "," + rgb[i * 3 + 1] + "," + rgb[i * 3 + 2] + ")";
+      ctx.fill();
+    };
+    if (az) {
+      // The canvas redraws every panel's points, so when they are all round
+      // (what it draws exactly) the mark image -- scaled up and blurred by T
+      // -- is hidden rather than left showing through under the crisp dots.
+      showMarksLayer(!ws.ptAllRound);
+      const view = ws.vb0;
+      const base = Math.min(W / view.w, H / view.h);
+      for (let k = 0; k < ws.azPanels.length; k++) {
+        const a = ws.azPanels[k], p = a.p, t = ws.fx.azT(a);
+        const c0 = userToCanvas(view, W, H, p.px0, p.py0), c1 = userToCanvas(view, W, H, p.px1, p.py1);
+        // "fixed" (default) keeps the full-view pixel size; "scale" grows with T.
+        const rs = ws.opts.zoomMarks === "scale" ? base * Math.min(t.sx, t.sy) : base;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(c0.px, c0.py, c1.px - c0.px, c1.py - c0.py);
+        ctx.clip();
+        for (let i = 0; i < n; i++) {
+          const px = cx[i], py = cy[i];
+          if (px < p.px0 || px > p.px1 || py < p.py0 || py > p.py1) continue; // another panel's
+          const bx = t.sx * px + t.tx, by = t.sy * py + t.ty;
+          if (bx < p.px0 || bx > p.px1 || by < p.py0 || by > p.py1) continue; // panned out of view
+          const q = userToCanvas(view, W, H, bx, by);
+          dot(q.px, q.py, rad[i] * rs, i);
+        }
+        ctx.restore();
+      }
+      return;
+    }
     // "fixed" (default): draw each point at its full-view pixel size (scale from
     // vb0), so zooming re-maps positions without growing the dots — parity with
     // the SVG axis_zoom constant-size glyphs. "scale": grow with the view (vb).
@@ -119,15 +171,17 @@ export function rasterFeature(
       ? Math.min(W / ws.vb.w, H / ws.vb.h)
       : Math.min(W / ws.vb0.w, H / ws.vb0.h);
     const x0 = ws.vb.x, y0 = ws.vb.y, x1 = ws.vb.x + ws.vb.w, y1 = ws.vb.y + ws.vb.h;
-    for (let i = 0; i < ws.ptN; i++) {
-      const px = ws.ptCx[i], py = ws.ptCy[i];
+    for (let i = 0; i < n; i++) {
+      const px = cx[i], py = cy[i];
       if (px < x0 || px > x1 || py < y0 || py > y1) continue; // cull off-view
-      const p = userToCanvas(ws.vb, W, H, px, py);
-      ws.ctx.beginPath();
-      ws.ctx.arc(p.px, p.py, Math.max(0.75, ws.ptRad[i] * rScale), 0, 6.283185307179586);
-      ws.ctx.fillStyle = "rgb(" + ws.ptRGB[i * 3] + "," + ws.ptRGB[i * 3 + 1] + "," + ws.ptRGB[i * 3 + 2] + ")";
-      ws.ctx.fill();
+      const q = userToCanvas(ws.vb, W, H, px, py);
+      dot(q.px, q.py, rad[i] * rScale, i);
     }
+  }
+
+  // Show or hide the split render's mark-layer image (all its panel copies).
+  function showMarksLayer(on: boolean): void {
+    if (ws.svgEl && ws.marksLayer) ws.svgEl.classList.toggle("vellumwidget-marks-off", !on);
   }
 
   // A ring marking element `k`'s bbox, or null if it has no geometry. Drawn in the
@@ -160,7 +214,7 @@ export function rasterFeature(
     if (keys.length > OVERLAY_MARK_CAP) return;
     for (let i = 0; i < keys.length; i++) {
       const c = ringFor(keys[i], "vellumwidget-fb-sel");
-      if (c) ws.selGroup.appendChild(c);
+      if (c) ws.selGroup.appendChild(ws.fx.azOverlayWrap(c, keys[i]));
     }
   }
 
@@ -169,7 +223,7 @@ export function rasterFeature(
     if (!ws.hovGroup) return;
     for (let i = 0; i < keys.length; i++) {
       const c = ringFor(keys[i], "vellumwidget-fb-hov");
-      if (c) ws.hovGroup.appendChild(c);
+      if (c) ws.hovGroup.appendChild(ws.fx.azOverlayWrap(c, keys[i]));
     }
   }
 

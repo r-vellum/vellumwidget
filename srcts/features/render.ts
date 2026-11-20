@@ -4,13 +4,58 @@
 import { asColumn, normalizeElements, normalizePanels } from "../elements";
 import { isScalesBound } from "./bindScales";
 import { DIM_OVERLAY_MIN, SVGNS } from "./constants";
+import { cssEscape } from "../css";
 import { isDarkBg, sceneBackgrounds } from "../ink";
 import { registerProxyHandler } from "../shiny";
 import type { WidgetFns, WidgetState } from "../state";
-import type { Payload } from "../types";
+import type { MarksLayer, Payload } from "../types";
 import { fmtViewBox, parseViewBox } from "../viewbox";
 
+// Page-unique ids for the split render's mark image (several widgets per page).
+let marksSeq = 0;
+
 export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | "resize"> {
+  // Split render (VW-14): place the keyed-mark PNG under the SVG furniture. The
+  // image is defined once and drawn by a <use> in each listed panel's pan group,
+  // so axis zoom moves it with that panel's T and the panel's clip trims it to
+  // the panel; the furniture (axes, gridlines, legend, text) stays real SVG.
+  // When a listed panel has no pan group (or none are listed: a raw vellum
+  // scene), one image goes over the whole scene instead, like the old base image.
+  function placeMarks(svg: SVGSVGElement, m: MarksLayer): "pans" | "root" {
+    const img = document.createElementNS(SVGNS, "image");
+    img.setAttribute("class", "vellumwidget-marks");
+    img.setAttribute("x", "0");
+    img.setAttribute("y", "0");
+    img.setAttribute("width", String(m.width));
+    img.setAttribute("height", String(m.height));
+    img.setAttribute("preserveAspectRatio", "none");
+    img.setAttribute("href", m.href);
+    const names = asColumn(m.panels);
+    const pans: Element[] = [];
+    for (let i = 0; i < names.length; i++) {
+      const g = svg.querySelector('[data-vellum-pan="' + cssEscape(names[i]) + '"]');
+      if (!g) { pans.length = 0; break; }
+      pans.push(g);
+    }
+    if (!pans.length) {
+      svg.appendChild(img);
+      return "root";
+    }
+    const id = "vw-marks-" + (++marksSeq);
+    img.setAttribute("id", id);
+    const defs = document.createElementNS(SVGNS, "defs");
+    defs.setAttribute("class", "vellumwidget-marks-defs");
+    defs.appendChild(img);
+    svg.insertBefore(defs, svg.firstChild);
+    for (let i = 0; i < pans.length; i++) {
+      const u = document.createElementNS(SVGNS, "use");
+      u.setAttribute("class", "vellumwidget-marks");
+      u.setAttribute("href", "#" + id);
+      pans[i].appendChild(u);
+    }
+    return "pans";
+  }
+
   // Apply the interaction styling: the widget-wide theme (Option 1) as CSS
   // variables on the root, and per-element grammar colours (Option 2) as CSS
   // variables on the elements themselves — which override the root by
@@ -203,6 +248,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     }
     ws.holder.innerHTML = x.svg;
     ws.svgEl = ws.holder.querySelector("svg");
+    ws.marksLayer = ws.svgEl && x.marks && x.options && x.options.raster ? placeMarks(ws.svgEl, x.marks) : null;
     // Cache key -> nodes once (the SVG is static after injection), so hover/
     // select highlighting avoids a `querySelectorAll` per key.
     ws.nodesByKey = {};
@@ -260,7 +306,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       // The range navigator drives an x-only zoom (the full y-range stays on
       // screen). Rendered through axis_zoom when it's active (fixed frame, crisp
       // re-ticked x-axis), else via a non-uniform stretch fallback. SVG only.
-      ws.xZoom = !!ws.opts.navigator && !ws.rasterMode;
+      ws.xZoom = !!ws.opts.navigator && (!ws.rasterMode || ws.marksLayer === "pans");
       ws.fx.applyAspect();
       ws.fx.setMode(defaultMode()); // first enabled mode, or pan for a scales-bound view
       ws.tip.classList.toggle("vellumwidget-tip-sticky", !!ws.opts.tooltipSticky);
