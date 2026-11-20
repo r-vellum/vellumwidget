@@ -232,6 +232,7 @@ export interface Payload {
   marks?: MarksLayer; // split-render mark layer (raster mode, VW-14)
   displayList?: DLPayload; // marks-only display list (raster mode, VW-15)
   above?: string | null; // furniture painted after the marks, as SVG (raster mode, VW-21)
+  flagged?: FlaggedLayer | null; // per-run rasters of the flagged keyed marks (raster mode, VW-30)
   interactions?: InteractionSpec; // declarative interactivity (from the plot spec)
   provenance?: Provenance; // click-to-source rows per element (from inspect_source())
   options: Options;
@@ -241,6 +242,14 @@ export interface Payload {
 // transparent PNG of the keyed marks alone, at the scene's device-px size, placed
 // inside each listed panel's pan group (or over the whole scene when `panels` is
 // absent) under SVG furniture. See `.raster_marks()` on the R side.
+// The flagged keyed marks (vellum's `layer = "keyed_flagged"`), one raster per
+// run of the display list, in the scene px frame `width` x `height` (VW-30).
+export interface FlaggedLayer {
+  runs: string[] | string;
+  width: number;
+  height: number;
+}
+
 export interface MarksLayer {
   href: string;
   width: number;

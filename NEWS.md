@@ -1,5 +1,20 @@
 # vellumwidget 0.13.1.9000
 
+* **Raster mode: one mark the display list can't draw no longer keeps every
+  mark on the PNG (VW-30).** Masked marks (`clip_to()` / `set_mask()`),
+  effects, hatches, patterns, repeating gradients, gradient strokes and keyed
+  text used to keep the whole plot on the mark image: zoomed in, every mark
+  stayed blurry and there was no detail tier. With a vellum that renders those
+  marks as their own layer (`scene_png(layer = "keyed_flagged")`,
+  feature-detected), the widget ships one small PNG per run of them in paint
+  order and draws the rest exactly, compositing each run where it falls. So
+  the other marks reach the crisp canvas and the SVG detail tier, and a label
+  drawn after the points stays on top of them. The flagged marks themselves
+  stay images: they are as sharp as the mark PNG and keep their own colours
+  under `condition()` and dimming, though they still take the pointer and show
+  a selection outline in the detail tier. Marks under a blend mode, more than
+  8 runs, or an older vellum: unchanged.
+
 * **The navigator's mini-map draws gridlines, ticks and reference lines
   visibly (VW-31).** It squashes the whole plot into a short strip, and the
   strokes squashed with it, so horizontal gridlines and thin rules shrank to

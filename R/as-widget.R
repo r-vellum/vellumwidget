@@ -259,6 +259,7 @@ as_widget <- function(
   marks <- NULL
   dlist <- NULL
   above <- NULL
+  flagged <- NULL
   if (use_raster && .split_render_supported()) {
     # Split render (VW-14, vellum >= 0.9.0.9000): the furniture (axes, gridlines,
     # legend, text) stays real SVG, so axis zoom can re-tick it, and only the heavy
@@ -288,6 +289,9 @@ as_widget <- function(
     dims <- .svg_dims(svg)
     marks <- .raster_marks(scene, panel_names)
     dlist <- .raster_display_list(scene, model, panel_names, render$max_marks)
+    # The mixed tier (VW-30): the marks the display list flags, as one PNG per
+    # run in paint order, so the runtime draws the rest exactly around them.
+    flagged <- .raster_flagged(scene, panel_names, dlist, marks)
   } else if (use_raster) {
     # Raster mode bakes the marks (text included) into a single PNG, so the SVG
     # `text` control has nothing to act on. Flag it only when the caller asked
@@ -326,6 +330,8 @@ as_widget <- function(
     displayList = dlist,
     # The furniture painted after the marks (raster mode, VW-21), or NULL.
     above = above,
+    # The flagged keyed marks, one PNG per run (raster mode, VW-30), or NULL.
+    flagged = flagged,
     interactions = interactions,
     options = list(
       raster = use_raster,
@@ -1391,6 +1397,59 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 .display_list_v2_supported <- function() {
   .display_list_supported() &&
     "version" %in% names(formals(getExportedValue("vellum", "scene_display_list")))
+}
+
+# Does the installed vellum render the display list's flagged marks as their
+# own layer, run by run (`layer = "keyed_flagged"`, `run =`, VW-30)?
+.flagged_layer_supported <- function() {
+  "keyed_flagged" %in% eval(formals(vellum::scene_png)$layer) &&
+    "run" %in% names(formals(vellum::scene_png))
+}
+
+# More runs than this (flagged marks interleaved with exact ones many times)
+# keep today's behaviour: every mark stays on the PNG.
+.MAX_FLAGGED_RUNS <- 8L
+
+# The flagged keyed marks for the mixed tier (VW-30): when the display list
+# flags some marks (masks, blend modes, effects, hatches, patterns, repeating
+# gradients, gradient strokes, text) and numbers them into runs, one PNG of
+# each run at `.RASTER_SCALE`, in the mark layer's frame. The runtime draws
+# the exact marks itself and composites each run where it falls in paint
+# order. NULL with no flagged mark, an older vellum, a list without runs, or
+# more than `.MAX_FLAGGED_RUNS` runs.
+.raster_flagged <- function(scene, panels, dl, marks) {
+  if (is.null(dl) || is.null(marks) || !.flagged_layer_supported()) {
+    return(NULL)
+  }
+  runs <- dl$runs
+  if (
+    is.null(runs) ||
+      is.null(dl$record$run) ||
+      runs < 1L ||
+      runs > .MAX_FLAGGED_RUNS
+  ) {
+    return(NULL)
+  }
+  # A mark under a blend mode (flag 32) mixes with the marks beneath it,
+  # which its run, rendered on its own, cannot: keep the PNG path.
+  if (any(bitwAnd(as.integer(.dl_col(dl$record$flags)), 32L) > 0L)) {
+    return(NULL)
+  }
+  hrefs <- vapply(
+    seq_len(runs),
+    function(k) {
+      png <- vellum::scene_png(
+        scene,
+        scale = .RASTER_SCALE,
+        layer = "keyed_flagged",
+        panels = panels,
+        run = k
+      )
+      paste0("data:image/png;base64,", base64enc::base64encode(png))
+    },
+    character(1)
+  )
+  list(runs = I(hrefs), width = marks$width, height = marks$height)
 }
 
 # The marks-only display list for raster mode (VW-15): each keyed mark of the
