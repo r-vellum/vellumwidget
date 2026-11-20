@@ -51,8 +51,7 @@
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 6; overflow: visible;
 }
-.vellumwidget-cb-dim { fill: rgba(255,255,255,0.66); pointer-events: none; }
-@media (prefers-color-scheme: dark) { .vellumwidget-cb-dim { fill: rgba(17,24,39,0.66); } }
+.vellumwidget-cb-dim { fill: var(--vellumwidget-wash, rgba(255,255,255,0.66)); pointer-events: none; }
 .vellumwidget-cb-handle {
   fill: #ffffff; stroke: #2563eb; stroke-width: 1.5px; pointer-events: auto;
 }
@@ -72,20 +71,14 @@
   pointer-events: none; z-index: 3; overflow: visible;
 }
 .vellumwidget-crosshair-line {
-  stroke: var(--vellumwidget-crosshair-stroke, rgba(75,85,99,0.85));
+  stroke: var(--vellumwidget-crosshair-stroke, var(--vellumwidget-ink-soft, rgba(75,85,99,0.85)));
   stroke-width: 1px; stroke-dasharray: 4 3;
-}
-@media (prefers-color-scheme: dark) {
-  .vellumwidget-crosshair-line { stroke: var(--vellumwidget-crosshair-stroke, rgba(209,213,219,0.85)); }
 }
 /* Raster-mode feedback rings (hover / selection), drawn on the overlay since the
    marks are a base image with no per-element nodes. Colours reuse the same CSS
    variables as the SVG-mode highlight/selection so theming carries over. */
 .vellumwidget-fb-hov { fill: none; stroke: var(--vellumwidget-hl-stroke, #2563eb); stroke-width: 2px; }
-.vellumwidget-fb-sel { fill: none; stroke: var(--vellumwidget-selected-stroke, #111827); stroke-width: 1.6px; }
-@media (prefers-color-scheme: dark) {
-  .vellumwidget-fb-sel { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
-}
+.vellumwidget-fb-sel { fill: none; stroke: var(--vellumwidget-selected-stroke, var(--vellumwidget-ink, #111827)); stroke-width: 1.6px; }
 /* Optional hover stroke, opt-in per element (.vellumwidget-hc) or widget-wide
    (.vellumwidget-hc-all on the root). Never applied to a mark that has no hover colour,
    so a bordered shape is not clobbered on hover. Colour resolves from the nearest
@@ -98,8 +91,10 @@
 .vellumwidget-hc-all [data-key].vellumwidget-hl, [data-key].vellumwidget-hc.vellumwidget-hl {
   stroke: var(--vellumwidget-hl-stroke); stroke-width: var(--vellumwidget-hl-width, 2px); paint-order: normal;
 }
+/* Selection / crosshair ink (--vellumwidget-ink*) is set on the root from the
+   plot's own background, not the OS colour scheme (VW-20). */
 [data-key].vellumwidget-selected {
-  stroke: var(--vellumwidget-selected-stroke, #111827);
+  stroke: var(--vellumwidget-selected-stroke, var(--vellumwidget-ink, #111827));
   stroke-width: var(--vellumwidget-selected-width, 1.4px); paint-order: normal;
 }
 /* Keyboard focus ring on the currently-traversed mark (a11y). */
@@ -179,7 +174,6 @@
 .vellumwidget-toolbar button.vellumwidget-active { background: rgba(37,99,235,0.18); }
 @media (prefers-color-scheme: dark) {
   .vellumwidget-tip { background: var(--vellumwidget-tip-bg, rgba(243,244,246,0.96)); color: var(--vellumwidget-tip-fg, #111827); }
-  [data-key].vellumwidget-selected { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
   .vellumwidget-toolbar { background: rgba(31,41,55,0.9); }
   .vellumwidget-toolbar button { color: #f3f4f6; }
   .vellumwidget-toolbar button:hover { background: rgba(255,255,255,0.12); }
@@ -4337,6 +4331,63 @@
     return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover };
   }
 
+  // srcts/ink.ts
+  function parseColor(s) {
+    if (!s) return null;
+    const t = s.trim().toLowerCase();
+    if (t === "white") return [255, 255, 255, 1];
+    if (t === "black") return [0, 0, 0, 1];
+    let m = /^#([0-9a-f]{3})$/.exec(t);
+    if (m) return [0, 1, 2].map((i) => parseInt(m[1][i] + m[1][i], 16)).concat(1);
+    m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/.exec(t);
+    if (m) {
+      const v = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+      return v.concat(m[2] ? parseInt(m[2], 16) / 255 : 1);
+    }
+    m = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+%?))?\s*\)$/.exec(t);
+    if (m) {
+      let a = 1;
+      if (m[4] != null) a = /%$/.test(m[4]) ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
+      const v = [+m[1], +m[2], +m[3], a];
+      return v.every(isFinite) ? v : null;
+    }
+    return null;
+  }
+  function luminance(c) {
+    const lin = c.slice(0, 3).map((v) => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+  }
+  function isDarkBg(c) {
+    return luminance(c) < 0.25;
+  }
+  function opaqueFill(n) {
+    if (!n) return null;
+    const c = parseColor(n.getAttribute("fill"));
+    if (!c || c[3] < 0.5) return null;
+    const fo = parseFloat(n.getAttribute("fill-opacity") || "1");
+    if (isFinite(fo) && fo < 0.5) return null;
+    return c;
+  }
+  function sceneBackgrounds(svg) {
+    let panel = opaqueFill(svg.querySelector("[data-vw-panel-bg]"));
+    if (!panel) {
+      const pan = svg.querySelector("[data-vellum-pan]");
+      const first = pan ? pan.firstElementChild : null;
+      if (first && !first.getAttribute("role") && /^(path|rect)$/i.test(first.tagName)) panel = opaqueFill(first);
+    }
+    let plot = opaqueFill(svg.querySelector('[data-vellum-panel="plot-background"] path, [data-vellum-panel="plot-background"] rect'));
+    if (!plot) {
+      for (let i = 0; i < svg.children.length && !plot; i++) {
+        const c = svg.children[i];
+        if (c.tagName.toLowerCase() === "rect") plot = opaqueFill(c);
+      }
+    }
+    return { panel, plot };
+  }
+
   // srcts/shiny.ts
   function dispatchProxyCall(msg, findInstance) {
     if (!msg || msg.id == null) return;
@@ -4406,6 +4457,13 @@
       setRoot("--vellumwidget-tip-fg", s.tipFg);
       setRoot("--vellumwidget-tip-fontsize", s.tipFontSize);
       setRoot("--vellumwidget-tip-maxwidth", s.tipMaxWidth);
+      const bg = ws.svgEl ? sceneBackgrounds(ws.svgEl) : { panel: null, plot: null };
+      const panelBg = bg.panel || bg.plot, plotBg = bg.plot || bg.panel;
+      const darkPanel = !!panelBg && isDarkBg(panelBg);
+      ws.el.style.setProperty("--vellumwidget-ink", darkPanel ? "#f9fafb" : "#111827");
+      ws.el.style.setProperty("--vellumwidget-ink-soft", darkPanel ? "rgba(209,213,219,0.85)" : "rgba(75,85,99,0.85)");
+      ws.el.style.setProperty("--vellumwidget-wash", plotBg && isDarkBg(plotBg) ? "rgba(17,24,39,0.66)" : "rgba(255,255,255,0.66)");
+      ws.el.classList.toggle("vellumwidget-dark-panel", darkPanel);
       if (s.hoverColor != null && s.hoverColor !== "") {
         ws.el.style.setProperty("--vellumwidget-hl-stroke", s.hoverColor);
         ws.el.classList.add("vellumwidget-hc-all");
@@ -5555,6 +5613,10 @@
     distToSegment2,
     distToGeom,
     brushKeys,
+    parseColor,
+    luminance,
+    isDarkBg,
+    sceneBackgrounds,
     dropPartialSeries,
     isSeriesElem,
     nearestKey,
