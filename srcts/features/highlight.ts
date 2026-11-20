@@ -18,7 +18,10 @@ export function highlightFeature(
   function elementsForKey(k: string): Element[] {
     const cached = ws.nodesByKey[k];
     if (cached) return cached;
-    if (!ws.holder) return [];
+    // Raster mode's svg has no keyed mark nodes beyond those already indexed
+    // (legend swatches, detail-tier nodes): never scan it per key, which over
+    // a big plot's 100k+ keys would freeze a condition pass for seconds.
+    if (!ws.holder || ws.rasterMode) return [];
     return Array.prototype.slice.call(ws.holder.querySelectorAll('[data-key="' + cssEscape(k) + '"]'));
   }
 

@@ -8,7 +8,7 @@ export function selectionFeature(
   ws: WidgetState
 ): Pick<
   WidgetFns,
-  "shinyInput" | "selectedKeys" | "toggleSelect" | "setSelection" | "clearSelection"
+  "refreshSelected" | "shinyInput" | "selectedKeys" | "toggleSelect" | "setSelection" | "clearSelection"
   | "applyFilter" | "inert" | "dropInert" | "setupLinking" | "teardownLinking"
 > {
   // --- Shiny read-back ---
@@ -30,7 +30,7 @@ export function selectionFeature(
 
   // --- selection (+ linking) ---
   function refreshSelected(): void {
-    if (ws.rasterMode) {
+    if (ws.fx.ringMode()) {
       ws.fx.drawSelFeedback();
       // Conditions and filters are SVG-only, but scale binds work in raster
       // mode under the split render's axis zoom (VW-14).
@@ -189,5 +189,5 @@ export function selectionFeature(
     if (ws.unwatchRemoval) { ws.unwatchRemoval(); ws.unwatchRemoval = null; }
   }
 
-  return { shinyInput, selectedKeys, toggleSelect, setSelection, clearSelection, applyFilter, inert, dropInert, setupLinking, teardownLinking };
+  return { refreshSelected, shinyInput, selectedKeys, toggleSelect, setSelection, clearSelection, applyFilter, inert, dropInert, setupLinking, teardownLinking };
 }

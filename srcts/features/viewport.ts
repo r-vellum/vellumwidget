@@ -150,6 +150,7 @@ export function viewportFeature(
     }
     // Redraw the crisp point layer for the new view (no-op unless raster + zoomed in).
     ws.fx.drawPoints();
+    ws.fx.scheduleTier(); // the raster detail tier is decided once the view settles (VW-16)
     ws.fx.updateNav(); // keep the navigator window in sync with the view
     // Report on settle: a continuous pan/pinch reports once on release (from
     // onDragUp), not per frame; discrete zooms (wheel, keys, reset, zoom-to) land

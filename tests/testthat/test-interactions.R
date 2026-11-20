@@ -20,7 +20,7 @@ test_that("as_widget() carries a plot's interaction_model in the payload", {
   expect_identical(ix$selections[[1]]$on, "hover")
   expect_length(ix$conditions, 1L)
   expect_identical(ix$conditions[[1]]$aes, "color")
-  expect_identical(ix$conditions[[1]]$if_false, "grey80")
+  expect_identical(ix$conditions[[1]]$if_false, "#cccccc") # normalised to CSS
 })
 
 test_that("condition membership tags reach the element metadata", {
@@ -172,4 +172,16 @@ test_that("an overview + detail composition ships per-cell panels and scoped bin
   js <- as.character(htmlwidgets:::toJSON(w$x$interactions))
   expect_match(js, '"cells":["cell-1"]', fixed = TRUE)
   expect_match(w$x$svg, 'data-vellum-pan="cell-2-panel-1-1"', fixed = TRUE)
+})
+
+test_that("a condition's if_false colour ships as CSS (VW-16)", {
+  df <- data.frame(x = 1:10, y = 1:10, g = rep(c("a", "b"), 5))
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(
+      x = x,
+      y = y,
+      color = vellumplot::condition("hi", g, "grey80")
+    ) |>
+    vellumplot::select_point("hi", on = "hover")
+  expect_identical(as_widget(p)$x$interactions$conditions[[1]]$if_false, "#cccccc")
 })

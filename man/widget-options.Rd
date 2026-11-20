@@ -18,7 +18,8 @@ render_options(
   mode = c("auto", "svg", "raster"),
   raster_threshold = 20000L,
   text = c("native", "outline"),
-  max_marks = 500000L
+  max_marks = 500000L,
+  detail_marks = 3000L
 )
 }
 \arguments{
@@ -90,6 +91,13 @@ with their own shape, colour, stroke and alpha. Above it, the widget ships
 only a bounding-box index, draws zoomed-in marks as plain dots, and says
 so with a message: a plot that big is better drawn as density, with
 \code{vellumplot::mark_datashade()} or \code{vellumplot::mark_hex()}.}
+
+\item{detail_marks}{In raster mode with the display list, once a zoom
+settles with fewer than this many marks in view (default \code{3000}), the
+visible marks become real SVG nodes (the detail tier): hover, selection,
+\code{condition()} and \code{filter_by()} styling and keyboard focus then work on
+them as in SVG mode. Zooming back out past 1.5 times this many returns to
+the canvas. \code{0} turns the detail tier off.}
 }
 \value{
 An object of class \code{vellumwidget_tooltip_options},

@@ -252,6 +252,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       ws.tip.addEventListener("pointerleave", function () { ws.fx.hideTip(); });
     }
     ws.holder.innerHTML = x.svg;
+    ws.markTier = "overview"; ws.detailGroups = []; ws.detailKeys = []; // the new svg has no detail nodes
     ws.svgEl = ws.holder.querySelector("svg");
     ws.marksLayer = ws.svgEl && x.marks && x.options && x.options.raster ? placeMarks(ws.svgEl, x.marks) : null;
     // Cache key -> nodes once (the SVG is static after injection), so hover/

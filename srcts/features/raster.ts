@@ -13,7 +13,7 @@ export function rasterFeature(
 ): Pick<
   WidgetFns,
   "ensureCanvas" | "clearPointData" | "sampleBaseRaster" | "drawPoints" | "clearGroup"
-  | "drawSelFeedback" | "setHoverKeys" | "setHover"
+  | "drawSelFeedback" | "setHoverKeys" | "setHover" | "showMarksLayer"
 > {
   // --- crisp-zoom canvas point layer (raster mode, Phase 6) ---
   // Create the canvas once (sits above the base image, below the overlay rings).
@@ -111,7 +111,12 @@ export function rasterFeature(
   // through that panel's T and clipped to its fixed rect, never over the axes.
   function drawPoints(): void {
     if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
-    if (ws.dl) { drawList(ws.dl); return; }
+    if (ws.dl) {
+      // The detail tier's SVG nodes stand in for the canvas and the image.
+      if (ws.markTier === "detail") { ws.canvasEl.style.display = "none"; showMarksLayer(false); return; }
+      drawList(ws.dl);
+      return;
+    }
     const az = ws.axisZoomActive && ws.azPanels.length > 0;
     const zoomed = az
       ? ws.azPanels.some(function (a) { const t = ws.fx.azT(a); return t.sx > 1.0001 || t.sy > 1.0001; })
@@ -399,8 +404,9 @@ export function rasterFeature(
     ws.hoverSig = ""; // the pointer fast path must redraw after any other hover
     if (!ws.opts.hover) return;
     ws.hovering = true;
-    // Raster mode: no per-element nodes — draw a hover ring on the overlay.
-    if (ws.rasterMode) {
+    // Raster mode: no per-element nodes — draw a hover ring on the overlay
+    // (except in the detail tier, whose visible marks are real nodes).
+    if (ws.fx.ringMode()) {
       drawHovFeedback(keys);
       return;
     }
@@ -418,5 +424,5 @@ export function rasterFeature(
     setHoverKeys(ws.fx.linkedKeys(k));
   }
 
-  return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover };
+  return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover, showMarksLayer };
 }

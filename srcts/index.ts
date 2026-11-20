@@ -17,6 +17,7 @@ import { decodeKeys, normalizeElements, normalizePanels } from "./elements";
 import { decodeDisplayList, fillBboxes, tracePoint, traceShape } from "./dlist";
 import { a11yFeature } from "./features/a11y";
 import { axisZoomFeature } from "./features/axisZoom";
+import { detailFeature } from "./features/detail";
 import { bindScalesFeature } from "./features/bindScales";
 import { colorbarFeature } from "./features/colorbar";
 import { coordsFeature } from "./features/coords";
@@ -75,7 +76,8 @@ HTMLWidgets.widget({
       sourceFeature(ws),
       toolbarFeature(ws),
       renderFeature(ws),
-      a11yFeature(ws)
+      a11yFeature(ws),
+      detailFeature(ws)
     );
 
     ensureStyle();
@@ -113,6 +115,10 @@ HTMLWidgets.widget({
         rasterMode: function () { return ws.rasterMode; },
         hasCanvas: function () { return !!ws.canvasEl; },
         displayListSize: function () { return ws.dl ? ws.dl.n : 0; },
+        markTier: function () { return ws.markTier; },
+        condTags: function () { return Object.keys(ws.condTagElems).map(function (k) { return k + "=" + ws.condTagElems[k].length; }).join(","); },
+        selectedKeys: ws.fx.selectedKeys,
+        evalTier: ws.fx.evalTier,
         bboxOf: function (k: string) { const m = ws.meta[k]; return m ? [m.x0, m.y0, m.x1, m.y1] : null; },
         pointCount: function () { return ws.ptN; },
         hoverMode: function () { return ws.opts.hoverMode || "closest"; },

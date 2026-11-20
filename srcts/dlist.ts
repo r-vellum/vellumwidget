@@ -249,6 +249,12 @@ const MARKER: Record<number, number[]> = {
   })()
 };
 
+// A marker shape's ring offsets (units of r), or undefined for the circle and
+// the line glyphs.
+export function markerRing(shape: number): number[] | undefined {
+  return MARKER[shape];
+}
+
 // Is a marker shape a stroke-only line glyph (plus / cross)?
 export function isLineGlyph(shape: number): boolean {
   return shape === 4 || shape === 5;

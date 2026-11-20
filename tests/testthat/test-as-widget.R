@@ -944,6 +944,16 @@ test_that("covered bboxes are dropped only for exactly listed marks (VW-15)", {
   expect_identical(.drop_listed_bboxes(cols, NULL), cols)
 })
 
+test_that("render_options(detail_marks) reaches the runtime (VW-16)", {
+  expect_equal(render_options()$detail_marks, 3000)
+  expect_error(render_options(detail_marks = -1), "at least 0")
+  expect_error(render_options(detail_marks = NA), "detail_marks")
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, key = "a"))
+  w <- as_widget(scene, render = render_options(mode = "raster", detail_marks = 500))
+  expect_equal(w$x$options$detailMarks, 500)
+})
+
 test_that("render_options() validates max_marks", {
   expect_equal(render_options()$max_marks, 5e5)
   expect_error(render_options(max_marks = -1), "at least 0")

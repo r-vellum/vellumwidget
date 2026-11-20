@@ -313,6 +313,8 @@ as_widget <- function(
     interactions = interactions,
     options = list(
       raster = use_raster,
+      # Raster detail tier threshold (VW-16): SVG nodes below this many visible marks.
+      detailMarks = render$detail_marks,
       # Hover tooltip, highlight, click-select, brush, lasso, pan/zoom, and
       # axis-aware zoom are on by default (interactive-by-default): the runtime
       # supplies the defaults, so they no longer need per-widget flags. Per-mark
@@ -511,7 +513,20 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     return(NULL)
   }
   im <- getExportedValue("vellumplot", "interaction_model")
-  tryCatch(im(x), error = function(e) NULL)
+  ix <- tryCatch(im(x), error = function(e) NULL)
+  # A condition's `if_false` is an R colour ("grey80"), which the runtime sets
+  # as a CSS fill/stroke: normalise it to hex, or the browser drops it. A value
+  # R does not know (a CSS-only name) passes through.
+  if (!is.null(ix) && length(ix$conditions)) {
+    ix$conditions <- lapply(ix$conditions, function(c) {
+      v <- c$if_false
+      if (is.character(v) && length(v) == 1L && !is.na(v)) {
+        c$if_false <- tryCatch(.css_color(v), error = function(e) v) %||% v
+      }
+      c
+    })
+  }
+  ix
 }
 
 # Build the click-to-source payload for the JS runtime: source rows per grob id

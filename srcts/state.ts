@@ -117,6 +117,11 @@ export interface WidgetState {
   marksLayer: "pans" | "root" | null;
   // The decoded marks-only display list (VW-15), or null when none shipped.
   dl: DisplayList | null;
+  // The raster mark tier (VW-16): the mark PNG ("overview"), the exact canvas
+  // ("mid") or real keyed SVG nodes for the visible marks ("detail").
+  markTier: "overview" | "mid" | "detail";
+  detailGroups: SVGGElement[]; // the detail tier's node groups (one per pan group)
+  detailKeys: string[]; // the keys materialised in the detail tier
   selGroup: SVGGElement | null; // persistent selection rings
   hovGroup: SVGGElement | null; // transient hover ring(s)
   // Crisp-zoom canvas (Phase 6): when the view is zoomed in, the base image would
@@ -256,6 +261,12 @@ export interface WidgetFns {
   drawCrosshair: (k: string, hm: "closest" | "x" | "y") => void;
   drawPoints: () => void;
   drawSelFeedback: () => void;
+  refreshSelected: () => void;
+  showMarksLayer: (on: boolean) => void;
+  scheduleTier: () => void;
+  evalTier: () => void;
+  ringMode: () => boolean;
+  leaveDetail: () => void;
   azOverlayWrap: (node: Element, key: string) => Element;
   dropInert: (keys: string[]) => string[];
   elementsForKey: (k: string) => Element[];
@@ -375,6 +386,9 @@ export function createState(el: HTMLElement): WidgetState {
     rasterMode: false,
     marksLayer: null,
     dl: null,
+    markTier: "overview",
+    detailGroups: [],
+    detailKeys: [],
     selGroup: null,
     hovGroup: null,
     canvasEl: null,
