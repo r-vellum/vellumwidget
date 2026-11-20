@@ -388,3 +388,48 @@ test_that("VW-21: a reference line added after the points is drawn over them", {
   }, 0))
   expect_gt(best, 0.95)
 })
+
+test_that("VW-25: the toolbar export draws the marks as shown (condition, zoom)", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .display_list_supported(), "vellum without the display list")
+  set.seed(6)
+  n <- 25000L
+  df <- data.frame(x = runif(n), y = runif(n), g = sample(letters[1:4], n, TRUE), id = seq_len(n))
+  members <- jsonlite::toJSON(as.character(df$id[df$x < 0.33]))
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id, color = vellumplot::condition("pick", g, "grey80")) |>
+    vellumplot::select_point("pick", on = "click")
+  w <- as_widget(p, elementId = "w1")
+  b <- open_widget(w)
+  ev <- function(js) b$Runtime$evaluate(js)$result$value
+  pn <- w$x$panels[[1]]
+  export_png <- function() {
+    ev("(function(){ window.__png = null; HTMLAnchorElement.prototype.click = function(){ var a = this; if (/\\.png$/.test(a.download)) fetch(a.href).then(function(r){ return r.blob(); }).then(function(bl){ var fr = new FileReader(); fr.onload = function(){ window.__png = fr.result; }; fr.readAsDataURL(bl); }); }; document.querySelector('[data-act=\"png\"]').click(); return 1; })()")
+    Sys.sleep(1.5)
+    png64 <- ev("window.__png")
+    expect_type(png64, "character")
+    png::readPNG(jsonlite::base64_dec(sub("^data:image/png;base64,", "", png64)))
+  }
+  # share of grey80 pixels in a band of the exported panel (scene px = export px)
+  grey_share <- function(img, fx0, fx1) {
+    cols <- round(pn$px0 + fx0 * (pn$px1 - pn$px0)):round(pn$px0 + fx1 * (pn$px1 - pn$px0))
+    rows <- round(pn$py0 + 10):round(pn$py1 - 10)
+    r <- img[rows, cols, 1]; g <- img[rows, cols, 2]; bl <- img[rows, cols, 3]
+    mean(abs(r - 0.8) < 0.02 & abs(g - 0.8) < 0.02 & abs(bl - 0.8) < 0.02)
+  }
+  ev(sprintf("HTMLWidgets.find('#w1')._call('select', %s)", members))
+  Sys.sleep(0.3)
+  img <- export_png()
+  expect_gt(grey_share(img, 0.5, 0.95), 0.5) # non-members exported in the condition colour
+  expect_lt(grey_share(img, 0.02, 0.3), 0.05) # members keep their own colour
+  # zoomed (mid tier): the export is the exact redraw, so the condition holds
+  ev(sprintf(
+    "HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f})",
+    pn$px0 + 0.2 * (pn$px1 - pn$px0), pn$py0 + 0.2 * (pn$py1 - pn$py0),
+    0.5 * (pn$px1 - pn$px0), 0.5 * (pn$py1 - pn$py0)
+  ))
+  Sys.sleep(0.5)
+  expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), "mid")
+  img <- export_png()
+  expect_gt(grey_share(img, 0.5, 0.95), 0.4)
+})

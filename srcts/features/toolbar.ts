@@ -65,11 +65,38 @@ export function toolbarFeature(
   // shows the mark layer itself. The furniture painted after the marks
   // (VW-21) is its own overlay in the same frame, with pan groups carrying the
   // same transforms, so it is folded in over the marks as it is on screen.
-  function exportSvgString(): string {
+  //
+  // Raster mode with an exact display list (VW-25): the marks are exported as
+  // currently drawn, not as the mark PNG -- the list is redrawn at export
+  // resolution with the per-key state (conditions, dimming, filters) into one
+  // image over the current frame, so a zoomed export is sharp and styled. It
+  // replaces the PNG copies and the detail tier's nodes (the same marks) and
+  // sits over the base furniture, where the canvas sits on screen. Without an
+  // exact list the PNG is kept.
+  //
+  // `strokeK` (the PNG path's resolution scale): a non-scaling stroke keeps
+  // its width in device px, so when the image is rasterised at k x it would
+  // come out k times too thin; its width and dashes are scaled by k instead.
+  function exportSvgString(strokeK?: number): string {
     const svg = ws.svgEl!.cloneNode(true) as SVGSVGElement;
     svg.classList.remove("vellumwidget-marks-off");
-    const drawn = svg.querySelectorAll(".vellumwidget-marks");
-    for (let i = 0; i < drawn.length; i++) (drawn[i] as SVGElement).style.visibility = "";
+    const listed = ws.rasterMode ? ws.fx.exportMarksImage(exportScale()) : null;
+    if (listed) {
+      const old = svg.querySelectorAll(".vellumwidget-marks, .vellumwidget-marks-defs, .vellumwidget-detail");
+      for (let i = 0; i < old.length; i++) old[i].remove();
+      const img = document.createElementNS(SVGNS, "image");
+      img.setAttribute("class", "vellumwidget-marks-export");
+      img.setAttribute("x", String(listed.x));
+      img.setAttribute("y", String(listed.y));
+      img.setAttribute("width", String(listed.w));
+      img.setAttribute("height", String(listed.h));
+      img.setAttribute("preserveAspectRatio", "none");
+      img.setAttribute("href", listed.href);
+      svg.appendChild(img);
+    } else {
+      const drawn = svg.querySelectorAll(".vellumwidget-marks");
+      for (let i = 0; i < drawn.length; i++) (drawn[i] as SVGElement).style.visibility = "";
+    }
     if (ws.aboveEl) {
       const g = document.createElementNS(SVGNS, "g");
       g.setAttribute("class", "vellumwidget-above-export");
@@ -81,6 +108,17 @@ export function toolbarFeature(
       g.setAttribute("class", "vellumwidget-retick-export");
       for (let c = ws.retickLayer.firstChild; c; c = c.nextSibling) g.appendChild(c.cloneNode(true));
       svg.appendChild(g);
+    }
+    if (strokeK && strokeK !== 1) {
+      const ns = svg.querySelectorAll('[vector-effect="non-scaling-stroke"]');
+      for (let i = 0; i < ns.length; i++) {
+        const w = parseFloat(ns[i].getAttribute("stroke-width") || "1");
+        ns[i].setAttribute("stroke-width", String((isFinite(w) ? w : 1) * strokeK));
+        const d = ns[i].getAttribute("stroke-dasharray");
+        if (d && d !== "none") {
+          ns[i].setAttribute("stroke-dasharray", d.split(/[\s,]+/).filter(Boolean).map((v) => String(parseFloat(v) * strokeK)).join(" "));
+        }
+      }
     }
     return new XMLSerializer().serializeToString(svg);
   }
@@ -95,7 +133,7 @@ export function toolbarFeature(
   // if the canvas is tainted/unsupported. Shared by savePng + copyPng.
   function toCanvas(then: (c: HTMLCanvasElement) => void, fail: () => void): void {
     if (!ws.svgEl) return fail();
-    const s = exportSvgString();
+    const s = exportSvgString(exportScale());
     const url = URL.createObjectURL(new Blob([s], { type: "image/svg+xml;charset=utf-8" }));
     const img = new Image();
     img.onload = function () {
