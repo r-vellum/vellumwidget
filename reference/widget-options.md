@@ -86,11 +86,18 @@ render_options(
   [`vellumplot::bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html)
   work as in SVG mode. An older vellum draws the whole scene as one
   image, and zoom then magnifies it. The trade-offs of raster mode:
-  per-element grammar colours, per-mark screen-reader focus, and
-  display-tier cross-filtering do not apply (there are no per-element
-  DOM nodes). Zoomed in, the marks are redrawn exactly from vellum's
-  marks-only display list (see `max_marks`), or as plain dots with an
-  older vellum.
+  there are no per-element DOM nodes until the detail tier (see
+  `detail_marks`), so hover and selection show as rings and per-mark
+  screen-reader focus is off. Zoomed in, the marks are redrawn exactly
+  from vellum's marks-only display list (see `max_marks`), or as plain
+  dots with an older vellum. With the display list,
+  [`vellumplot::condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+  colours and dimming,
+  [`vellumplot::filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html),
+  cross-filters and legend hide/mute show at every zoom: the marks are
+  then drawn on a canvas from the list. Without it (an older vellum, or
+  more marks than `max_marks`), and for marks the list cannot reproduce
+  (gradients, grouped marks), these show only in the detail tier.
 
 - raster_threshold:
 

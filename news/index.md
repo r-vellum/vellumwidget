@@ -2,6 +2,22 @@
 
 ## vellumwidget 0.12.0.9000
 
+- **[`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html),
+  [`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)
+  and selection dimming show at every zoom in raster mode (VW-22).**
+  They used to take effect only once the detail tier’s SVG nodes
+  existed; the overview image and the zoomed canvas drew every mark
+  unchanged. The canvas now draws each mark from the display list with
+  its key’s state: dimmed, in the condition’s `if_false` colour, or not
+  at all when filtered out (also cross-filters and legend hide/mute).
+  While any such state is active at the overview zoom, the canvas
+  replaces the mark image. With more than 50,000 marks in view the
+  redraw waits until the change settles (about 170 ms once for 200,000
+  points). Without a display list (an older vellum, or above
+  `render_options(max_marks = )`), or when the list has marks it cannot
+  reproduce, the image is shown unchanged and these states still apply
+  only in the detail tier.
+
 - **Zoom in far enough on a big plot and its marks become real,
   interactive SVG (VW-16).** In raster mode with the display list, once
   a zoom settles with fewer than `render_options(detail_marks = )` marks
