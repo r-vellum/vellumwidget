@@ -1,4 +1,4 @@
-# vellumwidget 0.13.1.9000
+# vellumwidget 0.14.0
 
 * **Raster mode: one mark the display list can't draw no longer keeps every
   mark on the PNG (VW-30).** Masked marks (`clip_to()` / `set_mask()`),
