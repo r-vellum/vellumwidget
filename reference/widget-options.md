@@ -17,7 +17,8 @@ render_options(
   mode = c("auto", "svg", "raster"),
   raster_threshold = 20000L,
   text = c("native", "outline"),
-  max_marks = 500000L
+  max_marks = 500000L,
+  detail_marks = 3000L
 )
 ```
 
@@ -122,6 +123,18 @@ render_options(
   or
   [`vellumplot::mark_hex()`](https://r-vellum.github.io/vellumplot/reference/mark_tile.html).
 
+- detail_marks:
+
+  In raster mode with the display list, once a zoom settles with fewer
+  than this many marks in view (default `3000`), the visible marks
+  become real SVG nodes (the detail tier): hover, selection,
+  [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+  and
+  [`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)
+  styling and keyboard focus then work on them as in SVG mode. Zooming
+  back out past 1.5 times this many returns to the canvas. `0` turns the
+  detail tier off.
+
 ## Value
 
 An object of class `vellumwidget_tooltip_options`,
@@ -169,6 +182,7 @@ render_options(mode = "raster")
 #>   raster_threshold: 20000
 #>   text: native
 #>   max_marks: 5e+05
+#>   detail_marks: 3000
 
 if (FALSE) { # \dontrun{
 library(vellumplot)

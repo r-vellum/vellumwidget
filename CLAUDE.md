@@ -20,7 +20,7 @@ helpers (R-13), each validated by its constructor:
 - `tooltip = tooltip_options(delay, follow, sticky, style)`
 - `export = export_options(filename, scale)`
 - `navigator = TRUE/FALSE` or `navigator_options(height)`
-- `render = render_options(mode, raster_threshold, text, max_marks)`
+- `render = render_options(mode, raster_threshold, text, max_marks, detail_marks)`
 
 The old flat names (`tooltip_delay`, `tooltip_follow`, `tooltip_sticky`,
 `tooltip_style`, `export_filename`, `export_scale`, `navigator_height`,
@@ -114,6 +114,14 @@ render (VW-14): the furniture is SVG and the keyed-mark PNG
 vellum (one base image), raster mode, void panels (graphs, `theme_void`)
 and panels the re-ticker can’t follow (e.g. polar) fall back to
 whole-scene viewBox zoom. Glyph marks keep a constant pixel size.
+
+Raster mode has three mark tiers (`ws.markTier`): `"overview"` (the mark
+PNG), `"mid"` (the exact canvas drawn from vellum’s display list,
+`ws.dl`, `srcts/dlist.ts`, `features/raster.ts` `drawList`) and
+`"detail"` (keyed SVG nodes for the visible marks,
+`features/detail.ts`), decided when the view settles. Raster feedback is
+drawn as rings only while `ws.fx.ringMode()` (every raster tier but
+detail); in detail the nodes take classes as in SVG mode.
 
 ## Build and test
 

@@ -59,7 +59,7 @@
 <li>
 <code>navigator = TRUE/FALSE</code> or <code>navigator_options(height)</code>
 </li>
-<li><code>render = render_options(mode, raster_threshold, text, max_marks)</code></li>
+<li><code>render = render_options(mode, raster_threshold, text, max_marks, detail_marks)</code></li>
 </ul><p>The old flat names (<code>tooltip_delay</code>, <code>tooltip_follow</code>, <code>tooltip_sticky</code>, <code>tooltip_style</code>, <code>export_filename</code>, <code>export_scale</code>, <code>navigator_height</code>, <code>mode</code>, <code>raster_threshold</code>, <code>text</code>) are soft-deprecated: they arrive through <code>...</code>, are folded into the option objects by <code>.fold_deprecated()</code> (<code>R/options.R</code>), and warn once per session (honouring <code>lifecycle_verbosity</code>). Do not use them in new code, docs or tests. A new setting that belongs to one of these families goes into its helper, not into <code><a href="reference/as_widget.html">as_widget()</a></code>. Argument checks live in <code>R/validate.R</code> (<code>.check_bool()</code>, <code>.check_number()</code>, <code>.check_string()</code>, <code>.check_choice()</code>, …); every argument is validated, so do the same for anything you add.</p>
 <p><strong>Before adding another interaction/behaviour argument, stop and consider whether the behaviour belongs in the <code>vellumplot</code> <em>spec</em> instead</strong>, declared as part of the plot rather than as one more imperative widget flag.</p>
 <p>Why this matters:</p>
@@ -80,6 +80,7 @@
 <div class="section level2">
 <h2 id="axis-aware-zoom">Axis-aware zoom<a class="anchor" aria-label="anchor" href="#axis-aware-zoom"></a></h2>
 <p>On by default in SVG mode (no flag). Zoom scales only the data region and re-ticks the axes; the frame (axes, titles, legend) stays put. It re-ticks linear, reverse, sqrt, log10 and date/datetime axes, and re-positions the static breaks of discrete/binned axes. Facets zoom per panel (#51). Raster mode zooms by axis too when vellum has the split render (VW-14): the furniture is SVG and the keyed-mark PNG (<code>payload$marks</code>) is drawn by a <code>&lt;use&gt;</code> in each pan group; with an older vellum (one base image), raster mode, void panels (graphs, <code>theme_void</code>) and panels the re-ticker can’t follow (e.g. polar) fall back to whole-scene viewBox zoom. Glyph marks keep a constant pixel size.</p>
+<p>Raster mode has three mark tiers (<code>ws.markTier</code>): <code>"overview"</code> (the mark PNG), <code>"mid"</code> (the exact canvas drawn from vellum’s display list, <code>ws.dl</code>, <code>srcts/dlist.ts</code>, <code>features/raster.ts</code> <code>drawList</code>) and <code>"detail"</code> (keyed SVG nodes for the visible marks, <code>features/detail.ts</code>), decided when the view settles. Raster feedback is drawn as rings only while <code>ws.fx.ringMode()</code> (every raster tier but detail); in detail the nodes take classes as in SVG mode.</p>
 </div>
 <div class="section level2">
 <h2 id="build-and-test">Build and test<a class="anchor" aria-label="anchor" href="#build-and-test"></a></h2>

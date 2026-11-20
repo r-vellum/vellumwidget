@@ -560,6 +560,9 @@
       return o;
     }()
   };
+  function markerRing(shape) {
+    return MARKER[shape];
+  }
   function isLineGlyph(shape) {
     return shape === 4 || shape === 5;
   }
@@ -721,7 +724,8 @@
         buildDataTable();
         return;
       }
-      if (ws.rasterMode) {
+      if (ws.fx.ringMode()) {
+        ws.svgEl.removeAttribute("aria-roledescription");
         ws.svgEl.setAttribute("role", "img");
         if (ws.opts.alt) {
           ws.svgEl.removeAttribute("aria-labelledby");
@@ -749,8 +753,9 @@
         ws.liveRegion.textContent = "";
       }
       const seen = {};
-      for (let i = 0; i < ws.elements.length; i++) {
-        const k = ws.elements[i].key;
+      const keys = ws.rasterMode ? ws.detailKeys : ws.elements.map((e) => e.key);
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
         if (seen[k]) continue;
         const nodes = ws.nodesByKey[k];
         if (!nodes || !nodes.length) continue;
@@ -764,7 +769,12 @@
         ws.focusables.push({ key: k, node });
       }
       if (ws.focusables.length) ws.focusables[0].node.setAttribute("tabindex", "0");
-      buildDataTable();
+      if (ws.rasterMode) {
+        if (ws.tableEl) {
+          ws.tableEl.remove();
+          ws.tableEl = null;
+        }
+      } else buildDataTable();
     }
     return { a11yLabel, announce, focusRoving, markFocused, setupA11y };
   }
@@ -1957,6 +1967,235 @@
     return { setupAxisZoom, applyPanTransforms, retick };
   }
 
+  // srcts/features/detail.ts
+  var DETAIL_DEFAULT = 3e3;
+  function detailFeature(ws) {
+    let timer = 0;
+    function ringMode() {
+      return ws.rasterMode && ws.markTier !== "detail";
+    }
+    function enterAt() {
+      const v = ws.opts.detailMarks;
+      return v == null ? DETAIL_DEFAULT : v;
+    }
+    function scheduleTier() {
+      if (timer) clearTimeout(timer);
+      timer = 0;
+      if (!ws.rasterMode || !ws.dl) return;
+      timer = window.setTimeout(function() {
+        timer = 0;
+        evalTier();
+      }, SETTLE_MS);
+    }
+    function zoomed() {
+      if (!ws.vb || !ws.vb0) return false;
+      if (ws.axisZoomActive && ws.azPanels.length) {
+        return ws.azPanels.some(function(a) {
+          const t = ws.fx.azT(a);
+          return t.sx > 1.0001 || t.sy > 1.0001;
+        });
+      }
+      return isZoomedIn(ws.vb, ws.vb0);
+    }
+    function visibleRecords(dl, cap) {
+      const out = [];
+      const np = dl.panels.length;
+      const T = [null];
+      for (let p = 1; p <= np; p++) {
+        const a = ws.axisZoomActive ? ws.azPanels.filter((q) => q.p.name === dl.panels[p - 1])[0] : null;
+        if (a) {
+          const t = ws.fx.azT(a);
+          T.push({ sx: t.sx, sy: t.sy, tx: t.tx, ty: t.ty, r: [a.p.px0, a.p.py0, a.p.px1, a.p.py1] });
+        } else T.push(null);
+      }
+      const vb = ws.vb;
+      for (let i = 0; i < dl.n; i++) {
+        let x = (dl.bx0[i] + dl.bx1[i]) / 2, y = (dl.by0[i] + dl.by1[i]) / 2;
+        const t = dl.panel[i] <= np ? T[dl.panel[i]] : null;
+        if (t) {
+          x = t.sx * x + t.tx;
+          y = t.sy * y + t.ty;
+          if (x < t.r[0] || x > t.r[2] || y < t.r[1] || y > t.r[3]) continue;
+        } else if (ws.axisZoomActive) {
+          if (x < ws.vb0.x || x > ws.vb0.x + ws.vb0.w || y < ws.vb0.y || y > ws.vb0.y + ws.vb0.h) continue;
+        } else if (x < vb.x || x > vb.x + vb.w || y < vb.y || y > vb.y + vb.h) continue;
+        out.push(i);
+        if (out.length > cap) return null;
+      }
+      return out;
+    }
+    function evalTier() {
+      const dl = ws.dl;
+      const enter = enterAt();
+      if (!ws.rasterMode || !dl || !dl.exact || !(enter > 0) || !ws.svgEl) {
+        if (ws.markTier === "detail") leaveDetail();
+        if (ws.rasterMode) ws.markTier = zoomed() ? "mid" : "overview";
+        return;
+      }
+      if (!zoomed()) {
+        if (ws.markTier === "detail") leaveDetail();
+        ws.markTier = "overview";
+        return;
+      }
+      const exit = Math.round(enter * 1.5);
+      const vis = visibleRecords(dl, ws.markTier === "detail" ? exit : enter - 1);
+      if (vis == null) {
+        if (ws.markTier === "detail") leaveDetail();
+        ws.markTier = "mid";
+        return;
+      }
+      buildDetail(dl, vis);
+    }
+    function splitHex(c) {
+      if (/^#[0-9a-fA-F]{8}$/.test(c)) {
+        const a = parseInt(c.slice(7, 9), 16) / 255;
+        return [c.slice(0, 7), a >= 1 ? null : String(Math.round(a * 1e3) / 1e3)];
+      }
+      return [c, null];
+    }
+    function nodeFor(dl, i) {
+      const j = dl.row[i], kd = dl.kind[i];
+      let n;
+      let glyph = false;
+      if (kd === DL_POINT) {
+        const sh = dl.shape[j], cx = dl.cx[j], cy = dl.cy[j], r = dl.r[j];
+        glyph = true;
+        if (sh === 0 || !isLineGlyph(sh) && !markerRing(sh)) {
+          n = document.createElementNS(SVGNS, "circle");
+          n.setAttribute("cx", String(cx));
+          n.setAttribute("cy", String(cy));
+          n.setAttribute("r", String(r));
+        } else {
+          n = document.createElementNS(SVGNS, "path");
+          let d = "";
+          if (sh === 4) d = "M" + cx + " " + (cy - r) + "V" + (cy + r) + "M" + (cx - r) + " " + cy + "H" + (cx + r);
+          else if (sh === 5) {
+            const q = r * Math.SQRT1_2;
+            d = "M" + (cx - q) + " " + (cy - q) + "L" + (cx + q) + " " + (cy + q) + "M" + (cx - q) + " " + (cy + q) + "L" + (cx + q) + " " + (cy - q);
+          } else {
+            const m = markerRing(sh);
+            for (let k = 0; k < m.length; k += 2) d += (k ? "L" : "M") + (cx + m[k] * r) + " " + (cy + m[k + 1] * r);
+            d += "Z";
+          }
+          n.setAttribute("d", d);
+        }
+      } else if (kd === DL_RECT) {
+        n = document.createElementNS(SVGNS, "rect");
+        const x = dl.rx[j], y = dl.ry[j], w = dl.rw[j], h = dl.rh[j];
+        n.setAttribute("x", String(Math.min(x, x + w)));
+        n.setAttribute("y", String(Math.min(y, y + h)));
+        n.setAttribute("width", String(Math.abs(w)));
+        n.setAttribute("height", String(Math.abs(h)));
+      } else {
+        n = document.createElementNS(SVGNS, "path");
+        let d = "";
+        const closed = dl.closed[j] === 1;
+        for (let run = dl.pathOff[j]; run < dl.pathOff[j + 1]; run++) {
+          for (let v = dl.runOff[run]; v < dl.runOff[run + 1]; v++) {
+            d += (v === dl.runOff[run] ? "M" : "L") + dl.xy[2 * v] + " " + dl.xy[2 * v + 1];
+          }
+          if (closed) d += "Z";
+        }
+        n.setAttribute("d", d);
+        if (dl.evenodd[j] === 1) n.setAttribute("fill-rule", "evenodd");
+      }
+      const pt = dl.paints[dl.paint[i]];
+      const fillable = kd !== 2 || dl.closed[j] === 1;
+      if (pt.fill && fillable && !(kd === DL_POINT && isLineGlyph(dl.shape[j]))) {
+        const f = splitHex(pt.fill);
+        n.setAttribute("fill", f[0]);
+        if (f[1] != null) n.setAttribute("fill-opacity", f[1]);
+      } else n.setAttribute("fill", "none");
+      if (pt.stroke && pt.width > 0) {
+        const s = splitHex(pt.stroke);
+        n.setAttribute("stroke", s[0]);
+        if (s[1] != null) n.setAttribute("stroke-opacity", s[1]);
+        n.setAttribute("stroke-width", String(pt.width));
+        if (pt.dash) n.setAttribute("stroke-dasharray", pt.dash.join(" "));
+        n.setAttribute("stroke-linecap", pt.cap);
+        n.setAttribute("stroke-linejoin", pt.join);
+      }
+      n.setAttribute("data-key", dl.keys[dl.key[i]]);
+      if (ws.axisZoomActive) {
+        if (glyph && ws.opts.zoomMarks !== "scale") {
+          n.style.setProperty("transform-box", "fill-box");
+          n.style.setProperty("transform-origin", "center");
+          n.style.setProperty("transform", "scale(var(--vw-ix,1),var(--vw-iy,1))");
+        } else n.setAttribute("vector-effect", "non-scaling-stroke");
+      }
+      return n;
+    }
+    function dropNodes() {
+      for (let i = 0; i < ws.detailGroups.length; i++) ws.detailGroups[i].remove();
+      ws.detailGroups = [];
+      for (let i = 0; i < ws.detailKeys.length; i++) {
+        const k = ws.detailKeys[i], nodes = ws.nodesByKey[k];
+        if (!nodes) continue;
+        const keep = nodes.filter((n) => !n.closest || !n.closest(".vellumwidget-detail"));
+        if (keep.length) ws.nodesByKey[k] = keep;
+        else delete ws.nodesByKey[k];
+      }
+      ws.detailKeys = [];
+    }
+    function buildDetail(dl, vis) {
+      const svg = ws.svgEl;
+      dropNodes();
+      const groups = {};
+      const groupFor = function(p) {
+        if (groups[p]) return groups[p];
+        const g = document.createElementNS(SVGNS, "g");
+        g.setAttribute("class", "vellumwidget-detail");
+        const name = p > 0 ? dl.panels[p - 1] : null;
+        const host = name && svg.querySelector('[data-vellum-pan="' + cssEscape(name) + '"]') || svg;
+        host.appendChild(g);
+        ws.detailGroups.push(g);
+        groups[p] = g;
+        return g;
+      };
+      const seen = {};
+      for (let v = 0; v < vis.length; v++) {
+        const i = vis[v];
+        const n = nodeFor(dl, i);
+        groupFor(dl.panel[i] <= dl.panels.length ? dl.panel[i] : 0).appendChild(n);
+        const k = dl.keys[dl.key[i]];
+        (ws.nodesByKey[k] = ws.nodesByKey[k] || []).push(n);
+        if (!seen[k]) {
+          seen[k] = true;
+          ws.detailKeys.push(k);
+        }
+      }
+      const was = ws.markTier;
+      ws.markTier = "detail";
+      ws.calib = null;
+      ws.hoverSig = "";
+      if (ws.canvasEl) ws.canvasEl.style.display = "none";
+      ws.fx.showMarksLayer(false);
+      ws.fx.clearGroup(ws.selGroup);
+      ws.fx.clearGroup(ws.hovGroup);
+      ws.fx.refreshSelected();
+      ws.fx.applyLegend();
+      for (let i = 0; i < ws.detailKeys.length; i++) {
+        if (ws.filteredKeySet[ws.detailKeys[i]]) ws.fx.addClassForKeys([ws.detailKeys[i]], "vellumwidget-filtered");
+      }
+      if (ws.hovering && ws.lastHoverKeys.length) ws.fx.addClassForKeys(ws.lastHoverKeys, "vellumwidget-hl");
+      ws.fx.setupA11y();
+      if (was !== "detail") ws.fx.announce(ws.detailKeys.length + " marks in view");
+    }
+    function leaveDetail() {
+      if (ws.markTier !== "detail") return;
+      dropNodes();
+      ws.markTier = "mid";
+      ws.calib = null;
+      ws.hoverSig = "";
+      ws.el.classList.remove("vellumwidget-hovering");
+      ws.fx.refreshSelected();
+      ws.fx.setupA11y();
+      ws.fx.showMarksLayer(true);
+      ws.fx.drawPoints();
+    }
+    return { scheduleTier, evalTier, ringMode, leaveDetail };
+  }
+
   // srcts/binds.ts
   var UNIT_SECONDS = { day: 86400, second: 1 };
   function channelToNative(ch, src, dst) {
@@ -2709,7 +2948,7 @@
       if (n.style.stroke) n.style.stroke = "";
     }
     function applyConditions() {
-      if (ws.rasterMode || !ws.interactions || !ws.interactions.conditions) return;
+      if (ws.fx.ringMode() || !ws.interactions || !ws.interactions.conditions) return;
       const selByName = {};
       (ws.interactions.selections || []).forEach((s) => selByName[s.name] = s);
       for (let ci = 0; ci < ws.interactions.conditions.length; ci++) {
@@ -2736,7 +2975,7 @@
     }
     function applyFilters() {
       const ix = ws.interactions;
-      if (ws.rasterMode || !ix || !ix.filters || !ix.filters.length) return;
+      if (ws.fx.ringMode() || !ix || !ix.filters || !ix.filters.length) return;
       const filters = ix.filters;
       const selByName = {};
       (ix.selections || []).forEach((s) => selByName[s.name] = s);
@@ -2780,7 +3019,7 @@
     function elementsForKey(k) {
       const cached = ws.nodesByKey[k];
       if (cached) return cached;
-      if (!ws.holder) return [];
+      if (!ws.holder || ws.rasterMode) return [];
       return Array.prototype.slice.call(ws.holder.querySelectorAll('[data-key="' + cssEscape(k) + '"]'));
     }
     function addClassForKeys(keys, cls) {
@@ -4562,6 +4801,11 @@
     function drawPoints() {
       if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
       if (ws.dl) {
+        if (ws.markTier === "detail") {
+          ws.canvasEl.style.display = "none";
+          showMarksLayer(false);
+          return;
+        }
         drawList(ws.dl);
         return;
       }
@@ -4842,7 +5086,7 @@
       ws.hoverSig = "";
       if (!ws.opts.hover) return;
       ws.hovering = true;
-      if (ws.rasterMode) {
+      if (ws.fx.ringMode()) {
         drawHovFeedback(keys);
         return;
       }
@@ -4856,7 +5100,7 @@
     function setHover(k) {
       setHoverKeys(ws.fx.linkedKeys(k));
     }
-    return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover };
+    return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover, showMarksLayer };
   }
 
   // srcts/ink.ts
@@ -5168,6 +5412,9 @@
         });
       }
       ws.holder.innerHTML = x.svg;
+      ws.markTier = "overview";
+      ws.detailGroups = [];
+      ws.detailKeys = [];
       ws.svgEl = ws.holder.querySelector("svg");
       ws.marksLayer = ws.svgEl && x.marks && x.options && x.options.raster ? placeMarks(ws.svgEl, x.marks) : null;
       ws.nodesByKey = {};
@@ -5323,7 +5570,7 @@
       }
     }
     function refreshSelected() {
-      if (ws.rasterMode) {
+      if (ws.fx.ringMode()) {
         ws.fx.drawSelFeedback();
         ws.fx.reevaluateInteractions();
         return;
@@ -5457,7 +5704,7 @@
         ws.unwatchRemoval = null;
       }
     }
-    return { shinyInput, selectedKeys, toggleSelect, setSelection, clearSelection, applyFilter, inert, dropInert, setupLinking, teardownLinking };
+    return { refreshSelected, shinyInput, selectedKeys, toggleSelect, setSelection, clearSelection, applyFilter, inert, dropInert, setupLinking, teardownLinking };
   }
 
   // srcts/features/source.ts
@@ -5804,6 +6051,7 @@
         ws.colorbarLayer.setAttribute("viewBox", fmtViewBox(ws.axisZoomActive && ws.vb0 ? ws.vb0 : ws.vb));
       }
       ws.fx.drawPoints();
+      ws.fx.scheduleTier();
       ws.fx.updateNav();
       if (ws.dragging !== "pan" && ws.pinchDist === 0) reportView();
     }
@@ -5898,6 +6146,9 @@
       rasterMode: false,
       marksLayer: null,
       dl: null,
+      markTier: "overview",
+      detailGroups: [],
+      detailKeys: [],
       selGroup: null,
       hovGroup: null,
       canvasEl: null,
@@ -6001,7 +6252,8 @@
         sourceFeature(ws),
         toolbarFeature(ws),
         renderFeature(ws),
-        a11yFeature(ws)
+        a11yFeature(ws),
+        detailFeature(ws)
       );
       ensureStyle();
       el.classList.add("vellumwidget-root");
@@ -6049,6 +6301,16 @@
           displayListSize: function() {
             return ws.dl ? ws.dl.n : 0;
           },
+          markTier: function() {
+            return ws.markTier;
+          },
+          condTags: function() {
+            return Object.keys(ws.condTagElems).map(function(k) {
+              return k + "=" + ws.condTagElems[k].length;
+            }).join(",");
+          },
+          selectedKeys: ws.fx.selectedKeys,
+          evalTier: ws.fx.evalTier,
           bboxOf: function(k) {
             const m = ws.meta[k];
             return m ? [m.x0, m.y0, m.x1, m.y1] : null;
