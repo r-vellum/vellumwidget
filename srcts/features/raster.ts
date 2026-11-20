@@ -3,7 +3,7 @@
 
 import { LIVE_DRAW_MAX, OVERLAY_MARK_CAP, SETTLE_MS, SVGNS } from "./constants";
 import { hasBbox, isRoundMark } from "../geometry";
-import { DL_POINT, DL_RECT, tracePoint, traceShape } from "../dlist";
+import { DL_POINT, DL_RECT, fillGradient, traceClipPath, tracePoint, traceShape } from "../dlist";
 import { MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
 import type { Affine, DisplayList } from "../dlist";
 import type { WidgetFns, WidgetState } from "../state";
@@ -304,28 +304,75 @@ export function rasterFeature(
     ctx.clearRect(0, 0, W, H);
     const flags = styled ? ws.msFlags! : null, recol = styled ? ws.msColor! : null, pal = ws.msPalette;
     const dimA = ws.msDimAlpha;
+    // Opacity groups (display list v2, VW-23): a group's records are drawn
+    // into a layer of their own, composited onto its parent at the group's
+    // alpha when the group ends, as the engine composites an isolated group.
+    // `tgt` is where records currently draw: the canvas or the open layer.
+    let tgt = ctx;
+    const open_: { g: number; c: HTMLCanvasElement; x: CanvasRenderingContext2D }[] = [];
     // The current paint's fill/stroke (with a condition colour standing in).
-    let curFill: string | null = null, curStroke: string | null = null;
+    let curFill: string | null = null, curStroke: string | null = null, curGrad = 0;
     let curState = -1, curPaint = -1, curOv = 0, curAlpha = 1, open = false, batch = false;
+    let curA: Affine = aff[0];
     const flush = function (): void {
       if (!open) return;
       const pt = dl.paints[curPaint];
-      if (curFill) { ctx.fillStyle = curFill; ctx.fill(); }
-      if (curStroke && pt.width > 0) ctx.stroke();
+      if (curGrad > 0) fillGradient(tgt, dl.gradients[curGrad - 1], curA, "nonzero");
+      else if (curFill) { tgt.fillStyle = curFill; tgt.fill(); }
+      if (curStroke && pt.width > 0) tgt.stroke();
       open = false;
     };
     const setPaint = function (pi: number, ov: number): void {
       const pt = dl.paints[pi];
-      ctx.lineWidth = pt.width * base;
-      ctx.setLineDash(pt.dash ? pt.dash.map((d) => d * base) : []);
-      ctx.lineCap = pt.cap;
-      ctx.lineJoin = pt.join;
+      tgt.lineWidth = pt.width * base;
+      tgt.setLineDash(pt.dash ? pt.dash.map((d) => d * base) : []);
+      tgt.lineCap = pt.cap;
+      tgt.lineJoin = pt.join;
       const oc = ov ? pal[ov - 1] : null;
-      curFill = pt.fill && oc ? withAlphaOf(oc, pt.fill) : pt.fill;
+      // A condition colour replaces a gradient fill outright.
+      curGrad = pt.grad > 0 && !oc ? pt.grad : 0;
+      curFill = pt.grad > 0 ? (oc || null) : pt.fill && oc ? withAlphaOf(oc, pt.fill) : pt.fill;
       curStroke = pt.stroke && oc ? withAlphaOf(oc, pt.stroke) : pt.stroke;
-      if (curStroke) ctx.strokeStyle = curStroke;
+      if (curStroke) tgt.strokeStyle = curStroke;
     };
-    ctx.save();
+    // Close layers down to the first `keep`, compositing each onto its parent.
+    const closeTo = function (keep: number): void {
+      while (open_.length > keep) {
+        const lay = open_.pop()!;
+        const dst = open_.length ? open_[open_.length - 1].x : ctx;
+        dst.save();
+        dst.setTransform(1, 0, 0, 1, 0, 0);
+        dst.globalAlpha = dl.groups[lay.g - 1].alpha;
+        dst.drawImage(lay.c, 0, 0);
+        dst.restore();
+        layerPool.push(lay.c);
+      }
+    };
+    // Make record group `g`'s chain of layers the open one.
+    const enterGroup = function (g: number): void {
+      const want: number[] = [];
+      for (let q = g; q > 0 && want.length < 64; q = dl.groups[q - 1] ? dl.groups[q - 1].parent : 0) want.unshift(q);
+      let k = 0;
+      while (k < open_.length && k < want.length && open_[k].g === want[k]) k++;
+      if (k === open_.length && k === want.length) return;
+      flush();
+      tgt.restore();
+      closeTo(k);
+      while (open_.length < want.length) {
+        const c = layerPool.pop() || document.createElement("canvas");
+        if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+        const x = typeof c.getContext === "function" ? c.getContext("2d") : null;
+        if (!x) break; // no layer: draw into the parent (alpha lost), as before
+        x.setTransform(1, 0, 0, 1, 0, 0);
+        x.clearRect(0, 0, W, H);
+        open_.push({ g: want[open_.length], c: c, x: x });
+      }
+      tgt = open_.length ? open_[open_.length - 1].x : ctx;
+      tgt.save();
+      curState = -1; curPaint = -1; curAlpha = 1; tgt.globalAlpha = 1;
+    };
+    let curGroup = 0;
+    tgt.save();
     for (let i = 0; i < dl.n; i++) {
       if (dl.flags[i]) continue; // not reproducible here: the image draws it
       let ov = 0, alpha = 1;
@@ -349,51 +396,65 @@ export function rasterFeature(
       const pc = pclip[p];
       if (x1 < 0 || y1 < 0 || x0 > W || y0 > H) continue;
       if (pc && (x1 < pc[0] || x0 > pc[2] || y1 < pc[1] || y0 > pc[3])) continue;
-      // Clip state: the panel's fixed rect and the record's own clip rect.
+      if (dl.group[i] !== curGroup) { enterGroup(dl.group[i]); curGroup = dl.group[i]; }
+      // Clip state: the panel's fixed rect and the record's own clip (its
+      // rect, and with list v2 its clip paths).
       const st = p * 65536 + dl.clip[i];
       if (st !== curState) {
         flush();
-        ctx.restore(); ctx.save();
-        if (pc) { ctx.beginPath(); ctx.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]); ctx.clip(); }
+        tgt.restore(); tgt.save();
+        if (pc) { tgt.beginPath(); tgt.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]); tgt.clip(); }
         const cr = dl.clip[i] > 0 ? dl.clips[dl.clip[i] - 1] : null;
         if (cr) {
           const cx0 = A.ax * cr.x0 + A.bx, cy0 = A.ay * cr.y0 + A.by;
-          ctx.beginPath(); ctx.rect(cx0, cy0, A.ax * (cr.x1 - cr.x0), A.ay * (cr.y1 - cr.y0)); ctx.clip();
+          tgt.beginPath(); tgt.rect(cx0, cy0, A.ax * (cr.x1 - cr.x0), A.ay * (cr.y1 - cr.y0)); tgt.clip();
+          for (let q = 0; q < cr.pn; q++) {
+            tgt.beginPath();
+            traceClipPath(tgt, dl, cr.ps + q, A);
+            tgt.clip(dl.cpEvenodd[cr.ps + q] === 1 ? "evenodd" : "nonzero");
+          }
         }
-        curState = st; curPaint = -1; curAlpha = 1;
+        curState = st; curPaint = -1; curAlpha = 1; tgt.globalAlpha = 1;
       }
       const pi = dl.paint[i], pt = dl.paints[pi];
       // Batch only what composites identically when merged into one path: an
       // opaque paint whose fill and stroke cannot overlap differently.
       // A condition colour paints fill and stroke alike; a dimmed mark is
-      // drawn alone so overlapping dimmed marks compound as SVG nodes do.
-      const canBatch = kd !== 2 && pt.opaque && alpha === 1 && (ov ? isOpaqueHex(pal[ov - 1]) : (!pt.fill || !pt.stroke || pt.fill === pt.stroke));
+      // drawn alone so overlapping dimmed marks compound as SVG nodes do. A
+      // gradient is placed per record, so never batched.
+      const canBatch = kd !== 2 && !pt.grad && pt.opaque && alpha === 1 && (ov ? isOpaqueHex(pal[ov - 1]) : (!pt.fill || !pt.stroke || pt.fill === pt.stroke));
       if (!(open && batch && canBatch && pi === curPaint && ov === curOv)) {
         flush();
         if (pi !== curPaint || ov !== curOv) { setPaint(pi, ov); curPaint = pi; curOv = ov; }
-        if (alpha !== curAlpha) { ctx.globalAlpha = alpha; curAlpha = alpha; }
-        ctx.beginPath();
+        if (alpha !== curAlpha) { tgt.globalAlpha = alpha; curAlpha = alpha; }
+        tgt.beginPath();
         open = true;
         batch = canBatch;
       }
+      curA = A;
       if (kd === DL_POINT) {
         const j = dl.row[i], sh = dl.shape[j];
-        tracePoint(ctx, sh, A.ax * dl.cx[j] + A.bx, A.ay * dl.cy[j] + A.by, dl.r[j] * gs[p]);
+        tracePoint(tgt, sh, A.ax * dl.cx[j] + A.bx, A.ay * dl.cy[j] + A.by, dl.r[j] * gs[p]);
       } else if (kd === DL_RECT) {
-        traceShape(ctx, dl, i, A);
+        traceShape(tgt, dl, i, A);
       } else {
-        traceShape(ctx, dl, i, A);
-        const pf = curFill;
-        if (pf && dl.closed[dl.row[i]] === 1) { ctx.fillStyle = pf; ctx.fill(dl.evenodd[dl.row[i]] === 1 ? "evenodd" : "nonzero"); }
-        if (curStroke && pt.width > 0) ctx.stroke();
+        traceShape(tgt, dl, i, A);
+        if (dl.closed[dl.row[i]] === 1) {
+          const rule: CanvasFillRule = dl.evenodd[dl.row[i]] === 1 ? "evenodd" : "nonzero";
+          if (curGrad > 0) fillGradient(tgt, dl.gradients[curGrad - 1], A, rule);
+          else if (curFill) { tgt.fillStyle = curFill; tgt.fill(rule); }
+        }
+        if (curStroke && pt.width > 0) tgt.stroke();
         open = false;
       }
       if (!batch) flush();
     }
     flush();
-    ctx.restore();
+    tgt.restore();
+    if (open_.length) closeTo(0);
     ctx.globalAlpha = 1;
   }
+  const layerPool: HTMLCanvasElement[] = [];
 
   // The marks as currently drawn, for export (VW-25): the display list
   // redrawn at export resolution over the svg's current frame, with the
