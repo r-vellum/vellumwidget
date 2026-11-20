@@ -155,6 +155,10 @@ export interface WidgetState {
   scaleBinds: Record<string, BoundDomain>;
   scaleBoundBy: Record<string, string>;
   bindGuard: boolean;
+  // Per-cell zoom (VW-18): with binds in a composition each cell keeps its own
+  // view. `vb` is the active cell's; the others park theirs here by cell id.
+  cellViews: Record<string, ViewBox>;
+  activeCell: string | null;
   intervalEl: SVGRectElement | null; // the persistent brush band (in crosshairLayer)
   intervalBand: Bbox | null; // that band in scene (device-px) coords
   lassoPts: Pt[]; // in-progress lasso path (user/viewBox coords)
@@ -205,6 +209,10 @@ export interface WidgetFns {
   applyLegend: () => void;
   applyScaleBinds: () => void;
   boundT: (a: AzPanel, t: PanTransform) => PanTransform;
+  viewFor: (a: AzPanel) => ViewBox | null;
+  focusCell: (cell: string | null | undefined) => void;
+  focusCellAt: (clientX: number, clientY: number) => void;
+  anyCellZoomed: () => boolean;
   syncScaleSelections: () => void;
   applyLinkedView: (v: ViewFraction) => void;
   applyPanTransforms: () => void;
@@ -391,6 +399,8 @@ export function createState(el: HTMLElement): WidgetState {
     scaleBinds: {},
     scaleBoundBy: {},
     bindGuard: false,
+    cellViews: {},
+    activeCell: null,
     intervalEl: null,
     intervalBand: null,
     lassoPts: [],

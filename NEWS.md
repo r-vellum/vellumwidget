@@ -1,5 +1,16 @@
 # vellumwidget 0.11.0.9000
 
+* **Linked views zoom per cell (VW-18).** In a composition with a
+  `bind_scale()` or a `select_interval(bind = "scales")`, every cell used to
+  share one zoom: a wheel on the overview also moved the detail's unbound axis,
+  and a pan on the bound detail moved the overview. Each cell now keeps its own
+  view. A wheel, pan or zoom-to-selection moves only the cell it starts in, a
+  bound axis follows its selection, and reset returns every cell to its full
+  view. `input$<id>_zoom` reports the last-zoomed cell's view in `x`..`h`, and
+  `zoomed` is `TRUE` while any cell is zoomed. Facets, and compositions without
+  binds, still zoom together. Binds remain SVG-only: a raster render ignores
+  them.
+
 * **Overview + detail: `vellumplot::bind_scale()` is enacted (F-15).** Brushing
   an overview view zooms every panel bound to the brush to the brushed range on
   the bound axis, re-ticking its axes; clearing the brush resets it. The view

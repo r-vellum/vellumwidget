@@ -9,7 +9,7 @@ import { asColumn } from "../elements";
 import { axisForEncoding, intervalKeys, intervalRangeOf, selEncodings } from "../scales";
 import type { IntervalChannel } from "../scales";
 import type { WidgetFns, WidgetState } from "../state";
-import type { AzPanel, PanelInfo, SelDef } from "../types";
+import type { AzPanel, PanelInfo, SelDef, ViewBox } from "../types";
 import { isZoomedIn, panToView } from "../viewbox";
 import type { PanTransform } from "../viewbox";
 
@@ -23,7 +23,78 @@ export function bindScalesFeature(
 ): Pick<
   WidgetFns,
   "applyScaleBinds" | "syncScaleSelections" | "boundT"
+  | "viewFor" | "focusCell" | "focusCellAt" | "anyCellZoomed"
 > {
+  // --- per-cell zoom (VW-18) ---
+  // One shared view zooms every panel together, which is right for facets and an
+  // unbound composition but wrong once binds link the cells: a wheel on the
+  // overview would also move the detail's unbound axis. So when a composition
+  // carries a bind (or a scales-bound selection) each cell keeps its own view.
+  // `ws.vb` stays the view every gesture edits; it belongs to the active cell, and
+  // a gesture in another cell first parks it (ws.cellViews) and takes that cell's.
+  function cellZoom(): boolean {
+    const ix = ws.interactions;
+    if (!ws.axisZoomActive || !ix) return false;
+    const binds = ix.binds ? asColumn(ix.binds) : [];
+    const sels = ix.selections ? asColumn(ix.selections).filter(isScalesBound) : [];
+    if (!binds.length && !sels.length) return false;
+    let first: string | null | undefined;
+    for (let i = 0; i < ws.azPanels.length; i++) {
+      const c = ws.azPanels[i].p.cell;
+      if (c == null) return false;
+      if (first === undefined) first = c;
+      else if (c !== first) return true;
+    }
+    return false;
+  }
+
+  // The cell `ws.vb` belongs to: the last one a gesture touched, else the first.
+  function activeCell(): string | null {
+    if (ws.activeCell != null) return ws.activeCell;
+    const c = ws.azPanels.length ? ws.azPanels[0].p.cell : null;
+    return c == null ? null : c;
+  }
+
+  // The view panel `a` is drawn at: the shared `vb`, or its cell's own view.
+  function viewFor(a: AzPanel): ViewBox | null {
+    const c = a.p.cell;
+    if (c == null || c === activeCell() || !cellZoom()) return ws.vb;
+    return ws.cellViews[c] || ws.vb0;
+  }
+
+  function copyVb(v: ViewBox): ViewBox { return { x: v.x, y: v.y, w: v.w, h: v.h }; }
+
+  // Hand `ws.vb` to `cell` (no redraw: what is on screen does not change).
+  function focusCell(cell: string | null | undefined): void {
+    if (cell == null || !cellZoom()) return;
+    const cur = activeCell();
+    if (cell === cur || !ws.vb0) return;
+    if (cur != null && ws.vb) ws.cellViews[cur] = copyVb(ws.vb);
+    const next = ws.cellViews[cell];
+    ws.vb = next ? copyVb(next) : copyVb(ws.vb0);
+    delete ws.cellViews[cell];
+    ws.activeCell = cell;
+  }
+
+  function focusCellAt(clientX: number, clientY: number): void {
+    if (!cellZoom()) return;
+    const u = ws.fx.toUser(clientX, clientY);
+    const a = ws.fx.azNearest(u.x, u.y);
+    if (a) focusCell(a.p.cell);
+  }
+
+  function anyCellZoomed(): boolean {
+    if (!ws.vb0) return false;
+    for (const c in ws.cellViews) if (isZoomedIn(ws.cellViews[c], ws.vb0)) return true;
+    return false;
+  }
+
+  // The view a (non-axis-zoom-indexed) panel is drawn at.
+  function viewOfPanel(p: PanelInfo): ViewBox | null {
+    const az = ws.azPanels.filter((q) => q.p.name === p.name)[0];
+    return az ? viewFor(az) : ws.vb;
+  }
+
   // The panels a bind (or a selection's source) addresses: those of its cell,
   // or every panel when it names none (a lone plot, or an older vellumplot).
   function inCells(p: PanelInfo, cells: string[] | null): boolean {
@@ -112,7 +183,6 @@ export function bindScalesFeature(
     if (!ix || !ix.selections || ws.bindGuard) return;
     const sels = asColumn(ix.selections).filter(isScalesBound);
     if (!sels.length) return;
-    const zoomed = !!ws.vb && !!ws.vb0 && isZoomedIn(ws.vb, ws.vb0);
     let changed = false;
     for (let i = 0; i < sels.length; i++) {
       const sel = sels[i];
@@ -123,6 +193,9 @@ export function bindScalesFeature(
         if (inCells(p, cells) && ws.scaleBoundBy[p.name] !== sel.name) src = p;
       }
       const prev = ws.intervals[sel.name];
+      // Zoomed = the source's own (cell's) view is zoomed in (VW-18).
+      const v = src ? viewOfPanel(src) : null;
+      const zoomed = !!v && !!ws.vb0 && isZoomedIn(v, ws.vb0);
       const rect = zoomed && src ? visibleRect(src) : null;
       const r = rect && src ? intervalRangeOf(src, rect, selEncodings(sel)) : null;
       if (!r) {
@@ -137,5 +210,5 @@ export function bindScalesFeature(
     if (changed) ws.fx.reevaluateInteractions();
   }
 
-  return { applyScaleBinds, syncScaleSelections, boundT };
+  return { applyScaleBinds, syncScaleSelections, boundT, viewFor, focusCell, focusCellAt, anyCellZoomed };
 }

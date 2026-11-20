@@ -87,8 +87,9 @@ export function coordsFeature(
   // T_i for a panel at the current view.
   // A panel bound to an interval selection (bind_scale()) shows the selection's
   // range on its bound axis instead (ws.fx.boundT).
+  // With per-cell zoom (VW-18) a panel follows its own cell's view (ws.fx.viewFor).
   function azT(a: AzPanel): PanTransform {
-    return ws.fx.boundT(a, conjugatePan(viewToPan(ws.vb || ws.vb0!, ws.vb0!), a.ax, a.bx, a.ay, a.by));
+    return ws.fx.boundT(a, conjugatePan(viewToPan(ws.fx.viewFor(a) || ws.vb0!, ws.vb0!), a.ax, a.bx, a.ay, a.by));
   }
 
   // A point in the fixed base (vb0) space -> the scene (device-px) point drawn

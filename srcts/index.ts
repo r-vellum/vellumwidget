@@ -191,6 +191,9 @@ HTMLWidgets.widget({
           if (!nodes.length) return null;
           return Array.prototype.every.call(nodes, function (n: Element) { return (n as SVGElement).style.display === "none"; });
         },
+        focusCell: ws.fx.focusCell,
+        resetZoom: ws.fx.resetZoom,
+        activeCell: function () { return ws.activeCell; },
         setView: function (nvb: ViewBox) { ws.vb = { x: nvb.x, y: nvb.y, w: nvb.w, h: nvb.h }; ws.fx.applyViewBox(); },
         toView: ws.fx.toView,
         // Graph neighbour highlighting: the projection a hover/click acts on, and

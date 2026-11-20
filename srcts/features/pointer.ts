@@ -201,6 +201,8 @@ export function pointerFeature(
     }
     // Pin the press's panel so a pan that drifts across a facet keeps one frame.
     if (ws.axisZoomActive) { const pu = ws.fx.toUser(ev.clientX, ev.clientY); ws.anchorPanel = ws.fx.azNearest(pu.x, pu.y); }
+    // With per-cell zoom the press's cell takes the gesture (VW-18).
+    if (ws.anchorPanel) ws.fx.focusCell(ws.anchorPanel.p.cell);
     const u = ws.fx.toAnchor(ev.clientX, ev.clientY);
     ws.down = { cx: ev.clientX, cy: ev.clientY, ux: u.x, uy: u.y };
     ws.dragging = "";
@@ -320,6 +322,7 @@ export function pointerFeature(
   function onWheel(ev: WheelEvent): void {
     if (!ws.opts.zoom || !ws.vb) return;
     ev.preventDefault();
+    ws.fx.focusCellAt(ev.clientX, ev.clientY); // per-cell zoom: the wheel's cell (VW-18)
     const u = ws.fx.toAnchor(ev.clientX, ev.clientY);
     const factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
     ws.vb = zoomViewBox(ws.vb, factor, u.x, u.y);

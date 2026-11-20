@@ -210,6 +210,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
         if (w && h) ws.vb0 = { x: 0, y: 0, w: w, h: h };
       }
       ws.vb = ws.vb0 ? { x: ws.vb0.x, y: ws.vb0.y, w: ws.vb0.w, h: ws.vb0.h } : null;
+      ws.cellViews = {}; ws.activeCell = null; // per-cell zoom starts over (VW-18)
       // Reset any dim/feedback left by a prior render, then arm this render's
       // hover path and (re)build the spatial index over the new elements.
       ws.fx.hideHighlightOverlay(); // also empties the overlay (removes old feedback groups)

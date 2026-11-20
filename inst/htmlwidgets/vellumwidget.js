@@ -1602,6 +1602,59 @@
     return sel.kind === "interval" && sel.bind === "scales";
   }
   function bindScalesFeature(ws) {
+    function cellZoom() {
+      const ix = ws.interactions;
+      if (!ws.axisZoomActive || !ix) return false;
+      const binds = ix.binds ? asColumn(ix.binds) : [];
+      const sels = ix.selections ? asColumn(ix.selections).filter(isScalesBound) : [];
+      if (!binds.length && !sels.length) return false;
+      let first;
+      for (let i = 0; i < ws.azPanels.length; i++) {
+        const c = ws.azPanels[i].p.cell;
+        if (c == null) return false;
+        if (first === void 0) first = c;
+        else if (c !== first) return true;
+      }
+      return false;
+    }
+    function activeCell() {
+      if (ws.activeCell != null) return ws.activeCell;
+      const c = ws.azPanels.length ? ws.azPanels[0].p.cell : null;
+      return c == null ? null : c;
+    }
+    function viewFor(a) {
+      const c = a.p.cell;
+      if (c == null || c === activeCell() || !cellZoom()) return ws.vb;
+      return ws.cellViews[c] || ws.vb0;
+    }
+    function copyVb(v) {
+      return { x: v.x, y: v.y, w: v.w, h: v.h };
+    }
+    function focusCell(cell) {
+      if (cell == null || !cellZoom()) return;
+      const cur = activeCell();
+      if (cell === cur || !ws.vb0) return;
+      if (cur != null && ws.vb) ws.cellViews[cur] = copyVb(ws.vb);
+      const next = ws.cellViews[cell];
+      ws.vb = next ? copyVb(next) : copyVb(ws.vb0);
+      delete ws.cellViews[cell];
+      ws.activeCell = cell;
+    }
+    function focusCellAt(clientX, clientY) {
+      if (!cellZoom()) return;
+      const u = ws.fx.toUser(clientX, clientY);
+      const a = ws.fx.azNearest(u.x, u.y);
+      if (a) focusCell(a.p.cell);
+    }
+    function anyCellZoomed() {
+      if (!ws.vb0) return false;
+      for (const c in ws.cellViews) if (isZoomedIn(ws.cellViews[c], ws.vb0)) return true;
+      return false;
+    }
+    function viewOfPanel(p) {
+      const az = ws.azPanels.filter((q) => q.p.name === p.name)[0];
+      return az ? viewFor(az) : ws.vb;
+    }
     function inCells(p, cells) {
       if (!cells || !cells.length) return true;
       return p.cell != null && cells.indexOf(p.cell) >= 0;
@@ -1673,7 +1726,6 @@
       if (!ix || !ix.selections || ws.bindGuard) return;
       const sels = asColumn(ix.selections).filter(isScalesBound);
       if (!sels.length) return;
-      const zoomed = !!ws.vb && !!ws.vb0 && isZoomedIn(ws.vb, ws.vb0);
       let changed = false;
       for (let i = 0; i < sels.length; i++) {
         const sel = sels[i];
@@ -1684,6 +1736,8 @@
           if (inCells(p, cells) && ws.scaleBoundBy[p.name] !== sel.name) src = p;
         }
         const prev = ws.intervals[sel.name];
+        const v = src ? viewOfPanel(src) : null;
+        const zoomed = !!v && !!ws.vb0 && isZoomedIn(v, ws.vb0);
         const rect = zoomed && src ? visibleRect(src) : null;
         const r = rect && src ? intervalRangeOf(src, rect, selEncodings(sel)) : null;
         if (!r) {
@@ -1700,7 +1754,7 @@
       }
       if (changed) ws.fx.reevaluateInteractions();
     }
-    return { applyScaleBinds, syncScaleSelections, boundT };
+    return { applyScaleBinds, syncScaleSelections, boundT, viewFor, focusCell, focusCellAt, anyCellZoomed };
   }
 
   // srcts/features/colorbar.ts
@@ -1986,7 +2040,7 @@
       return best;
     }
     function azT(a) {
-      return ws.fx.boundT(a, conjugatePan(viewToPan(ws.vb || ws.vb0, ws.vb0), a.ax, a.bx, a.ay, a.by));
+      return ws.fx.boundT(a, conjugatePan(viewToPan(ws.fx.viewFor(a) || ws.vb0, ws.vb0), a.ax, a.bx, a.ay, a.by));
     }
     function azBaseToScene(x, y) {
       const a = azNearest(x, y);
@@ -3748,6 +3802,7 @@
         const pu = ws.fx.toUser(ev.clientX, ev.clientY);
         ws.anchorPanel = ws.fx.azNearest(pu.x, pu.y);
       }
+      if (ws.anchorPanel) ws.fx.focusCell(ws.anchorPanel.p.cell);
       const u = ws.fx.toAnchor(ev.clientX, ev.clientY);
       ws.down = { cx: ev.clientX, cy: ev.clientY, ux: u.x, uy: u.y };
       ws.dragging = "";
@@ -3843,6 +3898,7 @@
     function onWheel(ev) {
       if (!ws.opts.zoom || !ws.vb) return;
       ev.preventDefault();
+      ws.fx.focusCellAt(ev.clientX, ev.clientY);
       const u = ws.fx.toAnchor(ev.clientX, ev.clientY);
       const factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
       ws.vb = zoomViewBox(ws.vb, factor, u.x, u.y);
@@ -4342,6 +4398,8 @@
           if (w && h) ws.vb0 = { x: 0, y: 0, w, h };
         }
         ws.vb = ws.vb0 ? { x: ws.vb0.x, y: ws.vb0.y, w: ws.vb0.w, h: ws.vb0.h } : null;
+        ws.cellViews = {};
+        ws.activeCell = null;
         ws.fx.hideHighlightOverlay();
         ws.rasterMode = !!ws.opts.raster;
         ws.largeDim = !ws.rasterMode && ws.elements.length > DIM_OVERLAY_MIN;
@@ -4870,7 +4928,14 @@
     }
     function reportView() {
       if (!ws.vb) return;
-      const payload = { x: ws.vb.x, y: ws.vb.y, w: ws.vb.w, h: ws.vb.h, zoomed: ws.vb0 ? isZoomedIn(ws.vb, ws.vb0) : false };
+      const payload = {
+        x: ws.vb.x,
+        y: ws.vb.y,
+        w: ws.vb.w,
+        h: ws.vb.h,
+        // Per-cell zoom (VW-18): `x`..`h` are the active cell's view; zoomed if any cell is.
+        zoomed: ws.vb0 ? isZoomedIn(ws.vb, ws.vb0) || ws.fx.anyCellZoomed() : false
+      };
       if (ws.axisZoomActive && Object.keys(ws.scaleBinds).length) payload.bound = Object.assign({}, ws.scaleBoundBy);
       if (ws.panels.length) {
         const per = {};
@@ -4941,6 +5006,7 @@
     }
     function resetZoom() {
       if (ws.vb0) {
+        ws.cellViews = {};
         ws.vb = { x: ws.vb0.x, y: ws.vb0.y, w: ws.vb0.w, h: ws.vb0.h };
         applyViewBox();
       }
@@ -4950,6 +5016,7 @@
       if (ws.fx.azMulti()) {
         const a = ws.fx.azNearest((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2);
         if (a) {
+          ws.fx.focusCell(a.p.cell);
           rect = {
             x0: (rect.x0 - a.bx) / a.ax,
             x1: (rect.x1 - a.bx) / a.ax,
@@ -5076,6 +5143,8 @@
       scaleBinds: {},
       scaleBoundBy: {},
       bindGuard: false,
+      cellViews: {},
+      activeCell: null,
       intervalEl: null,
       intervalBand: null,
       lassoPts: [],
@@ -5288,6 +5357,11 @@
             return Array.prototype.every.call(nodes, function(n) {
               return n.style.display === "none";
             });
+          },
+          focusCell: ws.fx.focusCell,
+          resetZoom: ws.fx.resetZoom,
+          activeCell: function() {
+            return ws.activeCell;
           },
           setView: function(nvb) {
             ws.vb = { x: nvb.x, y: nvb.y, w: nvb.w, h: nvb.h };
