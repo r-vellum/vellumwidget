@@ -229,6 +229,30 @@
     if (v == null) return [];
     return Array.isArray(v) ? v : [v];
   }
+  function decodeColumn(v, n) {
+    if (v == null) return null;
+    if (typeof v === "object" && !Array.isArray(v)) {
+      const o = v;
+      if (o.at !== void 0 && o.v !== void 0) {
+        const at = asColumn(o.at);
+        const vals = asColumn(o.v);
+        const out = new Array(n).fill(null);
+        for (let i = 0; i < at.length; i++) out[at[i]] = vals[i];
+        return out;
+      }
+      if (o.levels !== void 0 && o.codes !== void 0) {
+        const levels = asColumn(o.levels);
+        const codes = asColumn(o.codes);
+        const out = new Array(codes.length);
+        for (let i = 0; i < codes.length; i++) {
+          const c = codes[i];
+          out[i] = c == null ? null : levels[c];
+        }
+        return out;
+      }
+    }
+    return asColumn(v);
+  }
   function normalizeElements(raw) {
     if (raw == null) return [];
     if (Array.isArray(raw)) return raw;
@@ -240,24 +264,25 @@
     const y0 = asColumn(c.y0);
     const x1 = asColumn(c.x1);
     const y1 = asColumn(c.y1);
-    const mark = c.mark != null ? asColumn(c.mark) : null;
-    const tooltip = c.tooltip != null ? asColumn(c.tooltip) : null;
-    const hoverGroup = c.hover_group != null ? asColumn(c.hover_group) : null;
-    const hoverColor = c.hover_color != null ? asColumn(c.hover_color) : null;
-    const selectedColor = c.selected_color != null ? asColumn(c.selected_color) : null;
-    const legendFor = c.legend_for != null ? asColumn(c.legend_for) : null;
-    const legend = c.legend != null ? asColumn(c.legend) : null;
-    const filterValue = c.filter_value != null ? asColumn(c.filter_value) : null;
-    const cond = c.cond != null ? asColumn(c.cond) : null;
-    const filt = c.filt != null ? asColumn(c.filt) : null;
-    const join = c.join != null ? asColumn(c.join) : null;
-    const source = c.source != null ? asColumn(c.source) : null;
-    const target = c.target != null ? asColumn(c.target) : null;
+    const col = (f) => decodeColumn(c[f], n);
+    const mark = col("mark");
+    const tooltip = col("tooltip");
+    const hoverGroup = col("hover_group");
+    const hoverColor = col("hover_color");
+    const selectedColor = col("selected_color");
+    const legendFor = col("legend_for");
+    const legend = col("legend");
+    const filterValue = col("filter_value");
+    const cond = col("cond");
+    const filt = col("filt");
+    const join = col("join");
+    const source = col("source");
+    const target = col("target");
     const ivNum = ["ix", "ixh", "iy", "iyh"].map(
-      (f) => [f, c[f] != null ? asColumn(c[f]) : null]
+      (f) => [f, col(f)]
     );
-    const ixd = c.ixd != null ? asColumn(c.ixd) : null;
-    const iyd = c.iyd != null ? asColumn(c.iyd) : null;
+    const ixd = col("ixd");
+    const iyd = col("iyd");
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       const e = { key: String(key[i]) };
@@ -292,8 +317,8 @@
       if (source && source[i] != null) e.source = String(source[i]);
       if (target && target[i] != null) e.target = String(target[i]);
       for (let f = 0; f < ivNum.length; f++) {
-        const col = ivNum[f][1];
-        if (col && typeof col[i] === "number") e[ivNum[f][0]] = col[i];
+        const col2 = ivNum[f][1];
+        if (col2 && typeof col2[i] === "number") e[ivNum[f][0]] = col2[i];
       }
       if (ixd && ixd[i] != null) e.ixd = String(ixd[i]);
       if (iyd && iyd[i] != null) e.iyd = String(iyd[i]);
