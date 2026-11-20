@@ -5049,6 +5049,84 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     "VW-28 export: with no selection the nodes export unstyled");
 }
 
+// ============ VW-29: one glyph-size rule for the mid and detail tiers ============
+{
+  const b64 = (Arr, xs) => Buffer.from(new Arr(xs).buffer).toString("base64");
+  const f32 = (xs) => ({ type: "f32", n: xs.length, data: b64(Float32Array, xs) });
+  function recCtx() {
+    const log = [];
+    let arcs = [];
+    return {
+      log: log, fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1, _stack: [],
+      save() {}, restore() {}, setTransform() {}, clearRect() { log.length = 0; }, rect() {}, clip() {},
+      moveTo() {}, lineTo() {}, closePath() {}, setLineDash() {},
+      beginPath() { arcs = []; }, arc(x, y, r) { arcs.push(r); },
+      fill() { log.push({ op: "fill", rs: arcs.slice() }); },
+      stroke() { log.push({ op: "stroke", rs: arcs.slice(), lw: this.lineWidth }); }
+    };
+  }
+  // A raw scene: no panels (so no axis zoom), two stroked discs of radius 3.
+  const dl = {
+    format: "vellum-display-list", version: 1, width: 200, height: 100, n: 2,
+    record: { kind: { type: "u8", n: 2, const: 0 }, paint: { type: "u8", n: 2, const: 0 }, key: { type: "u32", n: 2, seq: [0, 1] },
+      flags: { type: "u8", n: 2, const: 0 }, clip: { type: "u8", n: 2, const: 0 }, panel: { type: "u8", n: 2, const: 0 } },
+    point: { cx: f32([60, 140]), cy: { type: "f32", n: 2, const: 50 }, r: { type: "f32", n: 2, const: 3 }, shape: { type: "u8", n: 2, const: 0 } },
+    rect: { x: f32([]), y: f32([]), w: f32([]), h: f32([]) },
+    path: { xy: { type: "f32", n: 0, data: "" }, run_offset: { type: "u8", n: 1, const: 0 }, path_offset: { type: "u8", n: 1, const: 0 },
+      closed: { type: "u8", n: 0, data: "" }, evenodd: { type: "u8", n: 0, data: "" } },
+    paints: { fill: ["#ff0000ff"], stroke: ["#000000ff"], stroke_width: [1], dash: [null], linecap: ["round"], linejoin: ["round"] },
+    clips: null, keys: ["p1", "p2"], panels: ""
+  };
+  const proto = window.HTMLCanvasElement.prototype;
+  const ctx = recCtx();
+  const orig = proto.getContext;
+  proto.getContext = function () { return ctx; };
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const inst = widgetDef.factory(e, 200, 100);
+  inst.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><rect width="200" height="100" fill="#fff"/></svg>',
+    elements: { key: ["p1", "p2"], mark: ["point", "point"], x0: [57, 137], y0: [47, 47], x1: [63, 143], y1: [53, 53] },
+    marks: { href: "data:image/png;base64,ORIGINAL", width: 400, height: 200 },
+    displayList: dl,
+    options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple", detailMarks: 1 }
+  });
+  const radii = () => ctx.log.filter((r) => r.op === "fill").flatMap((r) => r.rs);
+  const widths = () => ctx.log.filter((r) => r.op === "stroke").map((r) => r.lw);
+  inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); inst._test.evalTier();
+  ok(inst._test.markTier() === "mid", "VW-29 setup: a 2x viewBox zoom with two marks in view is the mid tier");
+  ok(radii().length === 2 && radii().every((r) => Math.abs(r - 6) < 1e-6),
+    "VW-29: under viewBox zoom the canvas draws a disc at 2x its radius, as the zoomed SVG node is");
+  ok(widths().length > 0 && widths().every((w) => Math.abs(w - 2) < 1e-6),
+    "VW-29: under viewBox zoom the canvas stroke scales with the view too");
+  inst._test.setView({ x: 0, y: 0, w: 200, h: 100 }); inst._test.evalTier();
+  inst._test.setView({ x: 25, y: 37.5, w: 150, h: 25 }); inst._test.evalTier();
+  ok(radii().length === 2 && radii().every((r) => Math.abs(r - 3 * 200 / 150) < 1e-6),
+    "VW-29: a disc follows the viewBox's fit scale (min of the two axes, as SVG's meet does)");
+  // the detail tier's node for the same record: an unscaled circle in the zoomed viewBox
+  const d = mountDetailNoPanel();
+  function mountDetailNoPanel() {
+    proto.getContext = function () { return recCtx(); };
+    const e2 = document.createElement("div");
+    document.body.appendChild(e2);
+    const i2 = widgetDef.factory(e2, 200, 100);
+    i2.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><rect width="200" height="100" fill="#fff"/></svg>',
+      elements: { key: ["p1", "p2"], mark: ["point", "point"], x0: [57, 137], y0: [47, 47], x1: [63, 143], y1: [53, 53] },
+      marks: { href: "data:image/png;base64,ORIGINAL", width: 400, height: 200 },
+      displayList: dl,
+      options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple", detailMarks: 100 }
+    });
+    i2.inst = i2;
+    return { el: e2, inst: i2 };
+  }
+  d.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); d.inst._test.evalTier();
+  const node = d.el.querySelector('.vellumwidget-detail [data-key="p1"]');
+  ok(d.inst._test.markTier() === "detail" && node && !/scale\(var/.test(node.style.transform || "") && !node.hasAttribute("vector-effect"),
+    "VW-29: the detail node is not counter-scaled under viewBox zoom (it grows with the view, as the canvas now does)");
+  proto.getContext = orig;
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();
