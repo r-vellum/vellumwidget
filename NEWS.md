@@ -1,4 +1,4 @@
-# vellumwidget 0.12.0.9000
+# vellumwidget 0.13.0
 
 * **Building a big widget is faster (VR-16).** The element table's meta
   columns (`tooltip`, `legend`, `cond`, ...) are read column-wise from one
