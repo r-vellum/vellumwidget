@@ -1,5 +1,14 @@
 # vellumwidget 0.11.0.9000
 
+* **Selection rings contrast with the plot, not the OS colour scheme (VW-20).**
+  The selection stroke, crosshair and colorbar wash switched to their light
+  variants whenever the page was viewed in a dark colour scheme. On a white plot
+  that made the ring near-white, and on a `theme_dark()` plot in light mode it
+  stayed dark. The widget now reads the scene's panel background (and the plot
+  background for the colorbar wash) and picks dark ink for light backgrounds and
+  light ink for dark ones (`theme_dark()`, `theme_cyberpunk()`), whatever the OS
+  scheme. A selection colour set by the user (a mark's `selected_color`) still wins.
+
 * **A brush no longer blanks out a line it only partly covers (VW-19).** A
   line, path or area drawn as one keyed element spans a whole series. A brush
   over part of it (a `select_interval()` brush, a plain brush or a lasso) used

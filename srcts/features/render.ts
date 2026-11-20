@@ -4,6 +4,7 @@
 import { asColumn, normalizeElements, normalizePanels } from "../elements";
 import { isScalesBound } from "./bindScales";
 import { DIM_OVERLAY_MIN, SVGNS } from "./constants";
+import { isDarkBg, sceneBackgrounds } from "../ink";
 import { registerProxyHandler } from "../shiny";
 import type { WidgetFns, WidgetState } from "../state";
 import type { Payload } from "../types";
@@ -28,6 +29,16 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     setRoot("--vellumwidget-tip-fg", s.tipFg);
     setRoot("--vellumwidget-tip-fontsize", s.tipFontSize);
     setRoot("--vellumwidget-tip-maxwidth", s.tipMaxWidth);
+    // Feedback ink from the plot's own background, whatever the OS scheme
+    // (VW-20): dark ink on a light panel, light ink on a dark one (theme_dark).
+    // A user selectedColor / crosshair colour still wins (it sets the outer var).
+    const bg = ws.svgEl ? sceneBackgrounds(ws.svgEl) : { panel: null, plot: null };
+    const panelBg = bg.panel || bg.plot, plotBg = bg.plot || bg.panel;
+    const darkPanel = !!panelBg && isDarkBg(panelBg);
+    ws.el.style.setProperty("--vellumwidget-ink", darkPanel ? "#f9fafb" : "#111827");
+    ws.el.style.setProperty("--vellumwidget-ink-soft", darkPanel ? "rgba(209,213,219,0.85)" : "rgba(75,85,99,0.85)");
+    ws.el.style.setProperty("--vellumwidget-wash", plotBg && isDarkBg(plotBg) ? "rgba(17,24,39,0.66)" : "rgba(255,255,255,0.66)");
+    ws.el.classList.toggle("vellumwidget-dark-panel", darkPanel);
     if (s.hoverColor != null && s.hoverColor !== "") {
       ws.el.style.setProperty("--vellumwidget-hl-stroke", s.hoverColor);
       ws.el.classList.add("vellumwidget-hc-all");

@@ -38,6 +38,7 @@ import { distToBbox, distToGeom, distToSegment2, rectsIntersect, unionBbox } fro
 import { boundPan, channelToNative } from "./binds";
 import { axisForEncoding, inInterval, intervalKeys, intervalRangeOf, nativeToData, pxToDataX, pxToDataY, selEncodings } from "./scales";
 import { cssEscape, cssEscapePolyfill, dispatchProxyCall, findWidgetById, idSelector, registerProxyHandler } from "./shiny";
+import { isDarkBg, luminance, parseColor, sceneBackgrounds } from "./ink";
 import { brushKeys, columnTolerance, dropPartialSeries, isSeriesElem, lassoKeys, nearestKey, nearestSortedIdx, pointInPolygon, polyBounds } from "./spatial";
 import { vellumwidgetBus } from "./linking";
 import { createState } from "./state";
@@ -229,6 +230,10 @@ registerProxyHandler();
   distToSegment2,
   distToGeom,
   brushKeys,
+  parseColor,
+  luminance,
+  isDarkBg,
+  sceneBackgrounds,
   dropPartialSeries,
   isSeriesElem,
   nearestKey,

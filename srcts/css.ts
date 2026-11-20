@@ -52,8 +52,7 @@ export const VELLUMWIDGET_CSS = `
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 6; overflow: visible;
 }
-.vellumwidget-cb-dim { fill: rgba(255,255,255,0.66); pointer-events: none; }
-@media (prefers-color-scheme: dark) { .vellumwidget-cb-dim { fill: rgba(17,24,39,0.66); } }
+.vellumwidget-cb-dim { fill: var(--vellumwidget-wash, rgba(255,255,255,0.66)); pointer-events: none; }
 .vellumwidget-cb-handle {
   fill: #ffffff; stroke: #2563eb; stroke-width: 1.5px; pointer-events: auto;
 }
@@ -73,20 +72,14 @@ export const VELLUMWIDGET_CSS = `
   pointer-events: none; z-index: 3; overflow: visible;
 }
 .vellumwidget-crosshair-line {
-  stroke: var(--vellumwidget-crosshair-stroke, rgba(75,85,99,0.85));
+  stroke: var(--vellumwidget-crosshair-stroke, var(--vellumwidget-ink-soft, rgba(75,85,99,0.85)));
   stroke-width: 1px; stroke-dasharray: 4 3;
-}
-@media (prefers-color-scheme: dark) {
-  .vellumwidget-crosshair-line { stroke: var(--vellumwidget-crosshair-stroke, rgba(209,213,219,0.85)); }
 }
 /* Raster-mode feedback rings (hover / selection), drawn on the overlay since the
    marks are a base image with no per-element nodes. Colours reuse the same CSS
    variables as the SVG-mode highlight/selection so theming carries over. */
 .vellumwidget-fb-hov { fill: none; stroke: var(--vellumwidget-hl-stroke, #2563eb); stroke-width: 2px; }
-.vellumwidget-fb-sel { fill: none; stroke: var(--vellumwidget-selected-stroke, #111827); stroke-width: 1.6px; }
-@media (prefers-color-scheme: dark) {
-  .vellumwidget-fb-sel { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
-}
+.vellumwidget-fb-sel { fill: none; stroke: var(--vellumwidget-selected-stroke, var(--vellumwidget-ink, #111827)); stroke-width: 1.6px; }
 /* Optional hover stroke, opt-in per element (.vellumwidget-hc) or widget-wide
    (.vellumwidget-hc-all on the root). Never applied to a mark that has no hover colour,
    so a bordered shape is not clobbered on hover. Colour resolves from the nearest
@@ -99,8 +92,10 @@ export const VELLUMWIDGET_CSS = `
 .vellumwidget-hc-all [data-key].vellumwidget-hl, [data-key].vellumwidget-hc.vellumwidget-hl {
   stroke: var(--vellumwidget-hl-stroke); stroke-width: var(--vellumwidget-hl-width, 2px); paint-order: normal;
 }
+/* Selection / crosshair ink (--vellumwidget-ink*) is set on the root from the
+   plot's own background, not the OS colour scheme (VW-20). */
 [data-key].vellumwidget-selected {
-  stroke: var(--vellumwidget-selected-stroke, #111827);
+  stroke: var(--vellumwidget-selected-stroke, var(--vellumwidget-ink, #111827));
   stroke-width: var(--vellumwidget-selected-width, 1.4px); paint-order: normal;
 }
 /* Keyboard focus ring on the currently-traversed mark (a11y). */
@@ -180,7 +175,6 @@ export const VELLUMWIDGET_CSS = `
 .vellumwidget-toolbar button.vellumwidget-active { background: rgba(37,99,235,0.18); }
 @media (prefers-color-scheme: dark) {
   .vellumwidget-tip { background: var(--vellumwidget-tip-bg, rgba(243,244,246,0.96)); color: var(--vellumwidget-tip-fg, #111827); }
-  [data-key].vellumwidget-selected { stroke: var(--vellumwidget-selected-stroke, #f9fafb); }
   .vellumwidget-toolbar { background: rgba(31,41,55,0.9); }
   .vellumwidget-toolbar button { color: #f3f4f6; }
   .vellumwidget-toolbar button:hover { background: rgba(255,255,255,0.12); }
