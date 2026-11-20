@@ -1,4 +1,4 @@
-# vellumwidget 0.11.0.9000
+# vellumwidget 0.12.0
 
 * **Selection rings contrast with the plot, not the OS colour scheme (VW-20).**
   The selection stroke, crosshair and colorbar wash switched to their light
