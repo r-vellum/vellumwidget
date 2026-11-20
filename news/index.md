@@ -2,6 +2,18 @@
 
 ## vellumwidget 0.11.0.9000
 
+- **Linked views zoom per cell (VW-18).** In a composition with a
+  [`bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html)
+  or a `select_interval(bind = "scales")`, every cell used to share one
+  zoom: a wheel on the overview also moved the detail’s unbound axis,
+  and a pan on the bound detail moved the overview. Each cell now keeps
+  its own view. A wheel, pan or zoom-to-selection moves only the cell it
+  starts in, a bound axis follows its selection, and reset returns every
+  cell to its full view. `input$<id>_zoom` reports the last-zoomed
+  cell’s view in `x`..`h`, and `zoomed` is `TRUE` while any cell is
+  zoomed. Facets, and compositions without binds, still zoom together.
+  Binds remain SVG-only: a raster render ignores them.
+
 - **Zoomed axes show their gridlines and tick marks (VW-17).** Under
   axis-aware zoom the re-ticked gridlines went in under vellumplot’s
   opaque panel background, so a zoomed panel showed none, and the static

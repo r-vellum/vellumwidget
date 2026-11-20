@@ -97,8 +97,14 @@ id. All values are the element **data keys** (the `data_id` a
   [`vellumplot::bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html)
   zooms a panel to an interval selection, the panel's entry is its bound
   range and `bound` maps each bound panel id to the selection driving
-  it. Updates as state when a zoom/pan settles (wheel, drag-pan release,
-  pinch, keyboard, reset, zoom-to-selection, a proxy
+  it. With binds in a composition each cell zooms on its own (a wheel or
+  pan moves only the cell under the pointer, and a bound axis follows
+  its selection), so `x`..`h` are the last-zoomed cell's view and
+  `zoomed` is `TRUE` while any cell is zoomed in. Binds are enacted in
+  SVG mode only: a raster render (`render_options(mode = "raster")`, or
+  `"auto"` above the threshold) ignores them for now. Updates as state
+  when a zoom/pan settles (wheel, drag-pan release, pinch, keyboard,
+  reset, zoom-to-selection, a proxy
   [`vw_zoom()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md),
   or a brush that moves a bound panel).
 
