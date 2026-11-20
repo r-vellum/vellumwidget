@@ -2,6 +2,23 @@
 
 ## vellumwidget 0.12.0.9000
 
+- **Raster mode keeps real axes, so axis zoom, the navigator and linked
+  zoom work on big plots (VW-14).** With a vellum that has the split
+  render (`scene_svg(layer =)` / `scene_png(layer =)`), raster mode no
+  longer draws the whole scene as one image. The axes, gridlines, legend
+  and text stay SVG, and only the keyed marks are a PNG, placed inside
+  each panel’s zoomable group. Zooming re-ticks the real axes, facets
+  zoom per panel, the range navigator is available, and
+  [`bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html)
+  / `select_interval(bind = "scales")` linked zoom now works in raster
+  mode. Once zoomed in, the crisp point layer is drawn per panel and
+  clipped to it, and the scaled mark image is hidden beneath it.
+  `render_options(text =)` now applies to the furniture, so it no longer
+  warns. SVG and PNG export give one image: furniture, the mark layer
+  and the re-ticked axis labels (which an axis-zoomed export used to
+  drop, in SVG mode too). With an older vellum (0.9.0) raster mode is
+  unchanged.
+
 - **A raster-mode widget ships less than half the data (VW-13).** In
   raster mode (more than `raster_threshold` keyed marks) the element
   index, not the image, is most of the payload. It now ships in a

@@ -76,10 +76,18 @@ render_options(
   interaction (hover, click, brush, pan/zoom) is driven client-side from
   the element index (geometry + boxes + keys), so a very large scatter
   (100k+ points) stays navigable with a tiny DOM and a small payload.
-  The trade-offs of raster mode: per-element grammar colours, per-mark
-  screen-reader focus, and display-tier cross-filtering do not apply
-  (there are no per-element DOM nodes), and a zoomed-in view is a scaled
-  raster until re-rendered.
+  With a vellum that has the split render (`layer =` on
+  [`vellum::scene_svg()`](https://r-vellum.github.io/vellum/reference/scene_svg.html)),
+  only the keyed marks are an image: the axes, gridlines, legend and
+  text stay SVG, so axis-aware zoom re-ticks the real axes, and the
+  navigator and
+  [`vellumplot::bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html)
+  work as in SVG mode. An older vellum draws the whole scene as one
+  image, and zoom then magnifies it. The trade-offs of raster mode:
+  per-element grammar colours, per-mark screen-reader focus, and
+  display-tier cross-filtering do not apply (there are no per-element
+  DOM nodes), and a zoomed-in view shows the marks redrawn as plain
+  dots.
 
 - raster_threshold:
 
@@ -94,9 +102,10 @@ render_options(
   fonts — smaller when the page has the font, post-processable, and
   better for accessibility and LLMs; `"outline"` emits glyph outlines
   that are pixel-faithful and font-independent but not selectable.
-  Applies to the per-element SVG path only; in raster mode text is baked
-  into the base image and this argument is ignored (with a warning if
-  set explicitly).
+  Applies to the SVG, including raster mode's SVG furniture under the
+  split render; with an older vellum, raster mode bakes text into the
+  base image and this argument is ignored (with a warning if set
+  explicitly).
 
 ## Value
 

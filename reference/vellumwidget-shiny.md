@@ -101,8 +101,9 @@ id. All values are the element **data keys** (the `data_id` a
   pan moves only the cell under the pointer, and a bound axis follows
   its selection), so `x`..`h` are the last-zoomed cell's view and
   `zoomed` is `TRUE` while any cell is zoomed in. Binds are enacted in
-  SVG mode only: a raster render (`render_options(mode = "raster")`, or
-  `"auto"` above the threshold) ignores them for now. Updates as state
+  SVG mode, and in raster mode with a vellum that has the split render
+  (`render_options(mode = "raster")`, or `"auto"` above the threshold);
+  with an older vellum a raster render ignores them. Updates as state
   when a zoom/pan settles (wheel, drag-pan release, pinch, keyboard,
   reset, zoom-to-selection, a proxy
   [`vw_zoom()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md),

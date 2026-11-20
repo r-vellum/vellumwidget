@@ -108,9 +108,12 @@ On by default in SVG mode (no flag). Zoom scales only the data region
 and re-ticks the axes; the frame (axes, titles, legend) stays put. It
 re-ticks linear, reverse, sqrt, log10 and date/datetime axes, and
 re-positions the static breaks of discrete/binned axes. Facets zoom per
-panel (#51). Raster mode, void panels (graphs, `theme_void`) and panels
-the re-ticker can’t follow (e.g. polar) fall back to whole-scene viewBox
-zoom. Glyph marks keep a constant pixel size.
+panel (#51). Raster mode zooms by axis too when vellum has the split
+render (VW-14): the furniture is SVG and the keyed-mark PNG
+(`payload$marks`) is drawn by a `<use>` in each pan group; with an older
+vellum (one base image), raster mode, void panels (graphs, `theme_void`)
+and panels the re-ticker can’t follow (e.g. polar) fall back to
+whole-scene viewBox zoom. Glyph marks keep a constant pixel size.
 
 ## Build and test
 

@@ -41,6 +41,9 @@
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 2; display: none;
 }
+/* Split render (VW-14): the mark-layer image is hidden while the crisp canvas
+   redraws its points under axis zoom. */
+.vellumwidget-marks-off .vellumwidget-marks { visibility: hidden; }
 .vellumwidget-dim-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;
@@ -1225,7 +1228,7 @@
         ws.retickLayer.remove();
         ws.retickLayer = null;
       }
-      if (!ws.opts.axisZoom || ws.rasterMode || !ws.svgEl || !ws.vb0 || !ws.stage || !ws.panels.length) return;
+      if (!ws.opts.axisZoom || ws.rasterMode && ws.marksLayer !== "pans" || !ws.svgEl || !ws.vb0 || !ws.stage || !ws.panels.length) return;
       for (let i = 0; i < ws.panels.length; i++) {
         if (!axisRetickable(ws.panels[i].x) || !axisRetickable(ws.panels[i].y)) return;
       }
@@ -2765,7 +2768,7 @@
         ws.fx.reevaluateInteractions();
       }
     }
-    return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover };
+    return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover, azOverlayWrap };
   }
 
   // srcts/features/interval.ts
@@ -2967,8 +2970,10 @@
       clone.setAttribute("preserveAspectRatio", "none");
       clone.removeAttribute("width");
       clone.removeAttribute("height");
-      const defs = clone.querySelector("defs");
-      if (defs) defs.remove();
+      const defs = clone.querySelectorAll("defs");
+      for (let i = 0; i < defs.length; i++) defs[i].remove();
+      const uses = clone.querySelectorAll("use.vellumwidget-marks");
+      for (let i = 1; i < uses.length; i++) uses[i].remove();
       const clipped = clone.querySelectorAll("[clip-path]");
       for (let i = 0; i < clipped.length; i++) clipped[i].removeAttribute("clip-path");
       const keyed = clone.querySelectorAll("[data-key],[tabindex],[role]");
@@ -4217,12 +4222,14 @@
       ws.ptCx = ws.ptCy = ws.ptRad = null;
       ws.ptRGB = null;
       ws.ptN = 0;
+      ws.ptAllRound = false;
       if (ws.canvasEl) ws.canvasEl.style.display = "none";
+      showMarksLayer(true);
     }
     function sampleBaseRaster() {
       clearPointData();
       if (!ws.rasterMode || !ws.svgEl || !ws.vb0) return;
-      const imgNode = ws.svgEl.querySelector("image");
+      const imgNode = ws.svgEl.querySelector("image.vellumwidget-marks") || ws.svgEl.querySelector("image");
       const href = imgNode && (imgNode.getAttribute("href") || imgNode.getAttribute("xlink:href"));
       if (!href) return;
       const off = document.createElement("canvas");
@@ -4245,6 +4252,7 @@
           return;
         }
         const cx = [], cy = [], rad = [], rgb = [];
+        let allRound = true;
         for (let i = 0; i < els.length; i++) {
           const e = els[i];
           if (!hasBbox(e)) continue;
@@ -4253,6 +4261,7 @@
           const sy = Math.min(ih - 1, Math.max(0, Math.round(my)));
           const o = (sy * iw + sx) * 4;
           if (data[o + 3] < 8) continue;
+          if (!isRoundMark(e.mark)) allRound = false;
           cx.push(mx);
           cy.push(my);
           rad.push(Math.max(e.x1 - e.x0, e.y1 - e.y0) / 2 + 0.5);
@@ -4263,6 +4272,7 @@
         ws.ptCy = Float64Array.from(cy);
         ws.ptRad = Float64Array.from(rad);
         ws.ptRGB = Uint8Array.from(rgb);
+        ws.ptAllRound = allRound && cx.length > 0;
         drawPoints();
       };
       img.onerror = function() {
@@ -4271,8 +4281,14 @@
     }
     function drawPoints() {
       if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
-      if (!isZoomedIn(ws.vb, ws.vb0) || !ws.ptCx || !ws.ptCy || !ws.ptRad || !ws.ptRGB || !ws.ptN) {
+      const az = ws.axisZoomActive && ws.azPanels.length > 0;
+      const zoomed = az ? ws.azPanels.some(function(a) {
+        const t = ws.fx.azT(a);
+        return t.sx > 1.0001 || t.sy > 1.0001;
+      }) : isZoomedIn(ws.vb, ws.vb0);
+      if (!zoomed || !ws.ptCx || !ws.ptCy || !ws.ptRad || !ws.ptRGB || !ws.ptN) {
         ws.canvasEl.style.display = "none";
+        showMarksLayer(true);
         return;
       }
       const rect = (ws.svgEl || ws.el).getBoundingClientRect();
@@ -4286,19 +4302,51 @@
       ws.canvasEl.style.width = cw + "px";
       ws.canvasEl.style.height = ch + "px";
       ws.canvasEl.style.display = "block";
+      const ctx = ws.ctx;
       const W = ws.canvasEl.width, H = ws.canvasEl.height;
-      ws.ctx.clearRect(0, 0, W, H);
+      ctx.clearRect(0, 0, W, H);
+      const cx = ws.ptCx, cy = ws.ptCy, rad = ws.ptRad, rgb = ws.ptRGB, n = ws.ptN;
+      const dot = function(px, py, r, i) {
+        ctx.beginPath();
+        ctx.arc(px, py, Math.max(0.75, r), 0, 6.283185307179586);
+        ctx.fillStyle = "rgb(" + rgb[i * 3] + "," + rgb[i * 3 + 1] + "," + rgb[i * 3 + 2] + ")";
+        ctx.fill();
+      };
+      if (az) {
+        showMarksLayer(!ws.ptAllRound);
+        const view = ws.vb0;
+        const base = Math.min(W / view.w, H / view.h);
+        for (let k = 0; k < ws.azPanels.length; k++) {
+          const a = ws.azPanels[k], p = a.p, t = ws.fx.azT(a);
+          const c0 = userToCanvas(view, W, H, p.px0, p.py0), c1 = userToCanvas(view, W, H, p.px1, p.py1);
+          const rs = ws.opts.zoomMarks === "scale" ? base * Math.min(t.sx, t.sy) : base;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(c0.px, c0.py, c1.px - c0.px, c1.py - c0.py);
+          ctx.clip();
+          for (let i = 0; i < n; i++) {
+            const px = cx[i], py = cy[i];
+            if (px < p.px0 || px > p.px1 || py < p.py0 || py > p.py1) continue;
+            const bx = t.sx * px + t.tx, by = t.sy * py + t.ty;
+            if (bx < p.px0 || bx > p.px1 || by < p.py0 || by > p.py1) continue;
+            const q = userToCanvas(view, W, H, bx, by);
+            dot(q.px, q.py, rad[i] * rs, i);
+          }
+          ctx.restore();
+        }
+        return;
+      }
       const rScale = ws.opts.zoomMarks === "scale" ? Math.min(W / ws.vb.w, H / ws.vb.h) : Math.min(W / ws.vb0.w, H / ws.vb0.h);
       const x0 = ws.vb.x, y0 = ws.vb.y, x1 = ws.vb.x + ws.vb.w, y1 = ws.vb.y + ws.vb.h;
-      for (let i = 0; i < ws.ptN; i++) {
-        const px = ws.ptCx[i], py = ws.ptCy[i];
+      for (let i = 0; i < n; i++) {
+        const px = cx[i], py = cy[i];
         if (px < x0 || px > x1 || py < y0 || py > y1) continue;
-        const p = userToCanvas(ws.vb, W, H, px, py);
-        ws.ctx.beginPath();
-        ws.ctx.arc(p.px, p.py, Math.max(0.75, ws.ptRad[i] * rScale), 0, 6.283185307179586);
-        ws.ctx.fillStyle = "rgb(" + ws.ptRGB[i * 3] + "," + ws.ptRGB[i * 3 + 1] + "," + ws.ptRGB[i * 3 + 2] + ")";
-        ws.ctx.fill();
+        const q = userToCanvas(ws.vb, W, H, px, py);
+        dot(q.px, q.py, rad[i] * rScale, i);
       }
+    }
+    function showMarksLayer(on) {
+      if (ws.svgEl && ws.marksLayer) ws.svgEl.classList.toggle("vellumwidget-marks-off", !on);
     }
     function ringFor(k, cls) {
       const m = ws.meta[k];
@@ -4324,7 +4372,7 @@
       if (keys.length > OVERLAY_MARK_CAP) return;
       for (let i = 0; i < keys.length; i++) {
         const c = ringFor(keys[i], "vellumwidget-fb-sel");
-        if (c) ws.selGroup.appendChild(c);
+        if (c) ws.selGroup.appendChild(ws.fx.azOverlayWrap(c, keys[i]));
       }
     }
     function drawHovFeedback(keys) {
@@ -4332,7 +4380,7 @@
       if (!ws.hovGroup) return;
       for (let i = 0; i < keys.length; i++) {
         const c = ringFor(keys[i], "vellumwidget-fb-hov");
-        if (c) ws.hovGroup.appendChild(c);
+        if (c) ws.hovGroup.appendChild(ws.fx.azOverlayWrap(c, keys[i]));
       }
     }
     function setHoverKeys(keys) {
@@ -4469,7 +4517,45 @@
   }
 
   // srcts/features/render.ts
+  var marksSeq = 0;
   function renderFeature(ws) {
+    function placeMarks(svg, m) {
+      const img = document.createElementNS(SVGNS, "image");
+      img.setAttribute("class", "vellumwidget-marks");
+      img.setAttribute("x", "0");
+      img.setAttribute("y", "0");
+      img.setAttribute("width", String(m.width));
+      img.setAttribute("height", String(m.height));
+      img.setAttribute("preserveAspectRatio", "none");
+      img.setAttribute("href", m.href);
+      const names = asColumn(m.panels);
+      const pans = [];
+      for (let i = 0; i < names.length; i++) {
+        const g = svg.querySelector('[data-vellum-pan="' + cssEscape(names[i]) + '"]');
+        if (!g) {
+          pans.length = 0;
+          break;
+        }
+        pans.push(g);
+      }
+      if (!pans.length) {
+        svg.appendChild(img);
+        return "root";
+      }
+      const id = "vw-marks-" + ++marksSeq;
+      img.setAttribute("id", id);
+      const defs = document.createElementNS(SVGNS, "defs");
+      defs.setAttribute("class", "vellumwidget-marks-defs");
+      defs.appendChild(img);
+      svg.insertBefore(defs, svg.firstChild);
+      for (let i = 0; i < pans.length; i++) {
+        const u = document.createElementNS(SVGNS, "use");
+        u.setAttribute("class", "vellumwidget-marks");
+        u.setAttribute("href", "#" + id);
+        pans[i].appendChild(u);
+      }
+      return "pans";
+    }
     function applyStyling() {
       const s = ws.opts.style || {};
       const setRoot = (name, v) => {
@@ -4626,6 +4712,7 @@
       }
       ws.holder.innerHTML = x.svg;
       ws.svgEl = ws.holder.querySelector("svg");
+      ws.marksLayer = ws.svgEl && x.marks && x.options && x.options.raster ? placeMarks(ws.svgEl, x.marks) : null;
       ws.nodesByKey = {};
       if (ws.holder) {
         const keyed = ws.holder.querySelectorAll("[data-key]");
@@ -4673,7 +4760,7 @@
         ws.fx.buildColorbar();
         ws.fx.setupInteractions();
         ws.fx.setupAxisZoom();
-        ws.xZoom = !!ws.opts.navigator && !ws.rasterMode;
+        ws.xZoom = !!ws.opts.navigator && (!ws.rasterMode || ws.marksLayer === "pans");
         ws.fx.applyAspect();
         ws.fx.setMode(defaultMode());
         ws.tip.classList.toggle("vellumwidget-tip-sticky", !!ws.opts.tooltipSticky);
@@ -4781,6 +4868,7 @@
     function refreshSelected() {
       if (ws.rasterMode) {
         ws.fx.drawSelFeedback();
+        ws.fx.reevaluateInteractions();
         return;
       }
       ws.fx.clearClass("vellumwidget-selected");
@@ -5031,14 +5119,25 @@
       const s = ws.opts.export && ws.opts.export.scale;
       return s && s > 0 ? s : 1;
     }
+    function exportSvgString() {
+      const svg = ws.svgEl.cloneNode(true);
+      svg.classList.remove("vellumwidget-marks-off");
+      if (ws.axisZoomActive && ws.retickLayer) {
+        const g = document.createElementNS(SVGNS, "g");
+        g.setAttribute("class", "vellumwidget-retick-export");
+        for (let c = ws.retickLayer.firstChild; c; c = c.nextSibling) g.appendChild(c.cloneNode(true));
+        svg.appendChild(g);
+      }
+      return new XMLSerializer().serializeToString(svg);
+    }
     function saveSvg() {
       if (!ws.svgEl) return;
-      const s = new XMLSerializer().serializeToString(ws.svgEl);
+      const s = exportSvgString();
       download(new Blob([s], { type: "image/svg+xml;charset=utf-8" }), exportName() + ".svg");
     }
     function toCanvas(then, fail) {
       if (!ws.svgEl) return fail();
-      const s = new XMLSerializer().serializeToString(ws.svgEl);
+      const s = exportSvgString();
       const url = URL.createObjectURL(new Blob([s], { type: "image/svg+xml;charset=utf-8" }));
       const img = new Image();
       img.onload = function() {
@@ -5241,6 +5340,7 @@
       if (ws.dimLayer && overlayVb) ws.dimLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
       if (ws.crosshairLayer && overlayVb) ws.crosshairLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
       ws.fx.placeIntervalBand();
+      if (ws.rasterMode && ws.fx.azMulti()) ws.fx.drawSelFeedback();
       if (ws.colorbarLayer && (ws.vb || ws.vb0)) {
         ws.colorbarLayer.setAttribute("viewBox", fmtViewBox(ws.axisZoomActive && ws.vb0 ? ws.vb0 : ws.vb));
       }
@@ -5337,6 +5437,7 @@
       tolX: 1,
       tolY: 1,
       rasterMode: false,
+      marksLayer: null,
       selGroup: null,
       hovGroup: null,
       canvasEl: null,
@@ -5346,6 +5447,7 @@
       ptRad: null,
       ptRGB: null,
       ptN: 0,
+      ptAllRound: false,
       opts: {
         tooltip: true,
         hover: true,
