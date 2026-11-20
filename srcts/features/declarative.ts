@@ -103,9 +103,13 @@ export function declarativeFeature(
   // Re-evaluate every conditional encoding against the current selection state:
   // members keep `if_true` (already drawn), non-members get `if_false`. With an
   // empty selection and `empty !== false`, the whole plot stays `if_true`
-  // (spotlight semantics — matches the static render). SVG mode only.
+  // (spotlight semantics — matches the static render). In the node-less
+  // raster tiers the outcome goes to the per-key mark state the canvas draws
+  // from instead (VW-22, features/markState.ts).
   function applyConditions(): void {
-    if (ws.fx.ringMode() || !ws.interactions || !ws.interactions.conditions) return;
+    if (!ws.interactions || !ws.interactions.conditions) return;
+    const ring = ws.fx.ringMode();
+    if (ring && !ws.fx.condStatesBegin()) return; // no display list: the image stays as drawn
     const selByName: Record<string, SelDef> = {};
     (ws.interactions.selections || []).forEach((s) => (selByName[s.name] = s));
     for (let ci = 0; ci < ws.interactions.conditions.length; ci++) {
@@ -115,6 +119,7 @@ export function declarativeFeature(
       const sel = selByName[c.selection];
       const members = sel ? selectionMembers(sel) : {};
       const active = Object.keys(members).length > 0 || c.empty === false;
+      if (ring) { ws.fx.condStateSet(tag, tagged, members, active, c.if_false); continue; }
       for (let i = 0; i < tagged.length; i++) {
         const nodes = ws.fx.elementsForKey(tagged[i]);
         const member = !!members[tagged[i]];
@@ -140,9 +145,14 @@ export function declarativeFeature(
     return js;
   }
 
-  function applyFilters(): void {
+  // Returns whether it applied (or cleared) a filter. In raster mode the
+  // hidden set reaches the canvas through applyFilter() -> updateMarkStates().
+  function applyFilters(): boolean {
     const ix = ws.interactions;
-    if (ws.fx.ringMode() || !ix || !ix.filters || !ix.filters.length) return;
+    if (!ix || !ix.filters || !ix.filters.length) return false;
+    // No display list (older vellum, or above max_marks): the image can't hide
+    // them, so they stay visible and pickable, as before VW-22.
+    if (ws.fx.ringMode() && !ws.dl) return false;
     const filters = ix.filters;
     const selByName: Record<string, SelDef> = {};
     (ix.selections || []).forEach((s) => (selByName[s.name] = s));
@@ -169,7 +179,7 @@ export function declarativeFeature(
     }
     if (!restrict) {
       ws.fx.applyFilter(null);
-      return;
+      return true;
     }
     // Translate the hide set into the show set applyFilter() expects (keys unique,
     // so hiding a target-cell key never touches the source cell).
@@ -178,6 +188,7 @@ export function declarativeFeature(
       if (!hide[ws.elements[i].key]) show.push(ws.elements[i].key);
     }
     ws.fx.applyFilter(show);
+    return true;
   }
 
   // The single re-evaluation hook: called whenever a selection's member set can
@@ -185,7 +196,9 @@ export function declarativeFeature(
   // scale binds add their reaction here in a later stage.
   function reevaluateInteractions(): void {
     applyConditions();
-    applyFilters();
+    // applyFilter() refreshes the raster mark state itself; without a filter
+    // the condition state still has to reach the canvas.
+    if (!applyFilters() && ws.rasterMode) ws.fx.updateMarkStates();
     ws.fx.applyScaleBinds(); // bind_scale(): bound panels follow their selection
   }
 

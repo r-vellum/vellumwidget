@@ -59,7 +59,8 @@ enacts:
   hit-testing when the scale can't be inverted (#50);
 - `condition()`: styles an aesthetic by selection membership;
 - `add_selection()` + `filter_by()`: cross-filtering. The filtered view hides
-  non-members and the source view stays whole. SVG mode only.
+  non-members and the source view stays whole. In raster mode it needs the
+  display list (VW-22).
 
 - `bind_scale()`: overview + detail. The panels of the bind's composition
   `cell` (every panel but the brushed one when it names none) zoom to the
@@ -104,6 +105,11 @@ Raster mode has three mark tiers (`ws.markTier`): `"overview"` (the mark PNG),
 nodes for the visible marks, `features/detail.ts`), decided when the view
 settles. Raster feedback is drawn as rings only while `ws.fx.ringMode()`
 (every raster tier but detail); in detail the nodes take classes as in SVG mode.
+Conditions, filters, cross-filters and legend hide/mute reach the node-less
+tiers as per-key state (`features/markState.ts`: `ws.msFlags`/`msColor`,
+indexed by display-list key id, never by DOM lookup), which `drawList` applies;
+while any is active the canvas also replaces the mark PNG at the overview zoom
+(VW-22).
 
 ## Build and test
 
