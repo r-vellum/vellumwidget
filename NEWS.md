@@ -1,5 +1,16 @@
 # vellumwidget 0.12.0.9000
 
+* **A raster-mode widget ships less than half the data (VW-13).** In raster mode
+  (more than `raster_threshold` keyed marks) the element index, not the image, is
+  most of the payload. It now ships in a compact encoding: a column with few
+  distinct values (`mark`, a mark's legend series) sends each value once plus a
+  small integer code per mark, a column that only a handful of marks carry (the
+  legend swatches' tooltips) sends just those marks, and the bounding boxes are
+  rounded outward to 1/100 px. A 20,000-point keyed scatter drops from 2.45 MB to
+  1.09 MB (gzip 0.90 to 0.48 MB), a 200,000-point one from 21.9 MB to 8.3 MB.
+  The runtime decodes it back to the same per-mark records, and SVG mode is
+  unchanged.
+
 # vellumwidget 0.12.0
 
 * **Selection rings contrast with the plot, not the OS colour scheme (VW-20).**

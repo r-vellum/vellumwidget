@@ -562,6 +562,51 @@ test_that("mode = 'raster' ships a base image with the element index (no per-ele
   expect_true(is.numeric(w$width) && w$width > 0)
 })
 
+test_that("raster mode ships the element index in the compact encoding (VW-13)", {
+  encode <- getFromNamespace(".encode_elements", "vellumwidget")
+  n <- 40L
+  cols <- list(
+    key = as.character(seq_len(n)),
+    mark = rep("point", n),
+    x0 = rep(1.234, n),
+    y0 = rep(2.345, n),
+    x1 = rep(3.456, n),
+    y1 = rep(4.567, n),
+    tooltip = c("a", rep(NA, n - 1L)),
+    hover_group = rep(NA_character_, n),
+    legend = c(rep(list("color:a"), n - 1L), list(character(0))),
+    cond = c(list(c("s:color", "t:color")), rep(list(character(0)), n - 1L)),
+    join = as.character(seq_len(n))
+  )
+  e <- encode(cols)
+  # dictionary: each level once + 0-based codes
+  expect_identical(e$mark, list(levels = "point", codes = rep(0L, n)))
+  # a one-value list-column is flattened, then dictionary-encoded (NA for empty)
+  expect_identical(e$legend$levels, "color:a")
+  expect_identical(e$legend$codes, c(rep(0L, n - 1L), NA))
+  # sparse: 0-based indices + values; an all-NA column is dropped
+  expect_identical(e$tooltip, list(at = 0L, v = "a"))
+  expect_null(e$hover_group)
+  # a ragged multi-value list-column that is mostly empty goes sparse
+  expect_identical(e$cond$at, 0L)
+  # high-cardinality strings stay plain
+  expect_identical(e$join, cols$join)
+  # bboxes rounded outward to 1/100 px
+  expect_equal(e$x0[[1]], 1.23)
+  expect_equal(e$y0[[1]], 2.34)
+  expect_equal(e$x1[[1]], 3.46)
+  expect_equal(e$y1[[1]], 4.57)
+
+  # end to end: a raster widget carries the encoded mark column, SVG mode the plain one
+  df <- data.frame(x = 1:30, y = 1:30, id = 1:30)
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id)
+  wr <- as_widget(p, render = render_options(mode = "raster"))
+  expect_identical(wr$x$elements$mark$levels, "point")
+  ws <- as_widget(p, render = render_options(mode = "svg"))
+  expect_true(all(ws$x$elements$mark == "point"))
+})
+
 # --- WI-3: true geometry in the payload ---------------------------------------
 
 test_that("the payload carries each keyed element's true geometry", {

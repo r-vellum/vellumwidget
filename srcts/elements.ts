@@ -10,6 +10,48 @@ export function asColumn<T>(v: T[] | T | null | undefined): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
+// A column in the compact wire encoding (raster mode, `.encode_elements()` in R):
+// a sparse `{at, v}` (0-based indices that carry a value, and the values) or a
+// dictionary `{levels, codes}` (each level once, a 0-based code per element,
+// `null` for none).
+interface SparseColumn<T> {
+  at: number[] | number;
+  v: T[] | T;
+}
+interface DictColumn<T> {
+  levels: T[] | T;
+  codes: (number | null)[] | number | null;
+}
+export type EncodedColumn<T> = T[] | T | SparseColumn<T> | DictColumn<T> | null | undefined;
+
+// Decode one payload column to a plain length-`n` array (`null` where unset):
+// expands the sparse / dictionary encodings, and otherwise behaves as `asColumn`.
+// Returns `null` when the column is absent.
+export function decodeColumn<T>(v: EncodedColumn<T>, n: number): (T | null)[] | null {
+  if (v == null) return null;
+  if (typeof v === "object" && !Array.isArray(v)) {
+    const o = v as Partial<SparseColumn<T> & DictColumn<T>>;
+    if (o.at !== undefined && o.v !== undefined) {
+      const at = asColumn<number>(o.at);
+      const vals = asColumn<T>(o.v as T[] | T);
+      const out: (T | null)[] = new Array(n).fill(null);
+      for (let i = 0; i < at.length; i++) out[at[i]] = vals[i];
+      return out;
+    }
+    if (o.levels !== undefined && o.codes !== undefined) {
+      const levels = asColumn<T>(o.levels as T[] | T);
+      const codes = asColumn<number | null>(o.codes);
+      const out: (T | null)[] = new Array(codes.length);
+      for (let i = 0; i < codes.length; i++) {
+        const c = codes[i];
+        out[i] = c == null ? null : levels[c];
+      }
+      return out;
+    }
+  }
+  return asColumn<T>(v as T[] | T);
+}
+
 // Reconstruct the per-element `ElemMeta[]` view the runtime uses from whichever
 // shape R sent: a columnar `ColumnElements` (the current wire format) or a legacy
 // `ElemMeta[]` (also what the empty case `[]` and the test harness use). Purely a
@@ -26,24 +68,27 @@ export function normalizeElements(raw: ElemMeta[] | ColumnElements | null | unde
   const y0 = asColumn<number | null>(c.y0);
   const x1 = asColumn<number | null>(c.x1);
   const y1 = asColumn<number | null>(c.y1);
-  const mark = c.mark != null ? asColumn<string | null>(c.mark) : null;
-  const tooltip = c.tooltip != null ? asColumn<string | null>(c.tooltip) : null;
-  const hoverGroup = c.hover_group != null ? asColumn<string | null>(c.hover_group) : null;
-  const hoverColor = c.hover_color != null ? asColumn<string | null>(c.hover_color) : null;
-  const selectedColor = c.selected_color != null ? asColumn<string | null>(c.selected_color) : null;
-  const legendFor = c.legend_for != null ? asColumn<string | null>(c.legend_for) : null;
-  const legend = c.legend != null ? asColumn<string[] | string | null>(c.legend) : null;
-  const filterValue = c.filter_value != null ? asColumn<number | null>(c.filter_value) : null;
-  const cond = c.cond != null ? asColumn<string[] | string | null>(c.cond) : null;
-  const filt = c.filt != null ? asColumn<string[] | string | null>(c.filt) : null;
-  const join = c.join != null ? asColumn<string | null>(c.join) : null;
-  const source = c.source != null ? asColumn<string | null>(c.source) : null;
-  const target = c.target != null ? asColumn<string | null>(c.target) : null;
+  // Every non-key column may arrive in the compact encoding (see decodeColumn).
+  const col = <T>(f: keyof ColumnElements): (T | null)[] | null =>
+    decodeColumn<T>((c as unknown as Record<string, EncodedColumn<T>>)[f as string], n);
+  const mark = col<string>("mark");
+  const tooltip = col<string>("tooltip");
+  const hoverGroup = col<string>("hover_group");
+  const hoverColor = col<string>("hover_color");
+  const selectedColor = col<string>("selected_color");
+  const legendFor = col<string>("legend_for");
+  const legend = col<string[] | string>("legend");
+  const filterValue = col<number>("filter_value");
+  const cond = col<string[] | string>("cond");
+  const filt = col<string[] | string>("filt");
+  const join = col<string>("join");
+  const source = col<string>("source");
+  const target = col<string>("target");
   const ivNum: [keyof ElemMeta, (number | null)[] | null][] = (["ix", "ixh", "iy", "iyh"] as const).map(
-    (f) => [f, c[f] != null ? asColumn<number | null>(c[f]) : null] as [keyof ElemMeta, (number | null)[] | null]
+    (f) => [f, col<number>(f)] as [keyof ElemMeta, (number | null)[] | null]
   );
-  const ixd = c.ixd != null ? asColumn<string | null>(c.ixd) : null;
-  const iyd = c.iyd != null ? asColumn<string | null>(c.iyd) : null;
+  const ixd = col<string>("ixd");
+  const iyd = col<string>("iyd");
   const out: ElemMeta[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const e: ElemMeta = { key: String(key[i]) };

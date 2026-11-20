@@ -278,7 +278,13 @@ as_widget <- function(
 
   payload <- list(
     svg = svg,
-    elements = .vellumwidget_elements(model),
+    # Raster mode is the big-N path, where the element index is most of the
+    # payload: ship it in the compact wire encoding (`.encode_elements()`).
+    elements = if (use_raster) {
+      .encode_elements(.vellumwidget_elements(model))
+    } else {
+      .vellumwidget_elements(model)
+    },
     geometry = .vellumwidget_geometry(scene),
     panels = .vellumwidget_panels(model),
     colorbar = .vellumwidget_colorbar(model),
@@ -741,6 +747,78 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 
   # Drop the omitted (NULL) meta columns; the always-present key/bbox columns stay.
   cols[!vapply(cols, is.null, logical(1))]
+}
+
+# Compact wire encoding of the columnar element table, used in raster mode where
+# the index (not the PNG) is the bulk of the payload. It is a pure wire-format
+# step: the runtime's `normalizeElements()` decodes it back to the same
+# per-element records. Per column:
+#
+# - **sparse** `{at, v}`: a column set on under 10% of elements (e.g. `tooltip` /
+#   `legend_for`, carried only by the legend swatches of a big scatter) ships just
+#   the 0-based indices that carry a value and those values. Absent elsewhere.
+# - **dictionary** `{levels, codes}`: a string column with few distinct values
+#   (`mark`, a one-series `legend`, `hover_group`, ...) ships each level once and
+#   a 0-based integer code per element (`null` for `NA`).
+# - the bbox columns are rounded outward to 1/100 px (a 0.01 px larger box is
+#   invisible to brush / nearest hit-testing, and it halves their JSON).
+#
+# A ragged list-column (`legend`, `cond`, `filt`) whose entries all hold at most
+# one value is first flattened to a character column (`NA` for empty), which the
+# runtime already reads as "one value" / "none"; one with several values somewhere
+# can still go sparse.
+.encode_elements <- function(cols) {
+  n <- length(cols$key)
+  if (!n) {
+    return(cols)
+  }
+  for (f in c("x0", "y0", "x1", "y1")) {
+    v <- cols[[f]]
+    if (is.null(v)) {
+      next
+    }
+    cols[[f]] <- if (f %in% c("x0", "y0")) {
+      floor(v * 100) / 100
+    } else {
+      ceiling(v * 100) / 100
+    }
+  }
+  bbox <- c("key", "x0", "y0", "x1", "y1")
+  for (f in setdiff(names(cols), bbox)) {
+    v <- cols[[f]]
+    if (is.list(v)) {
+      if (all(lengths(v) <= 1L)) {
+        v <- vapply(
+          v,
+          function(e) if (length(e)) as.character(e) else NA_character_,
+          character(1)
+        )
+      } else {
+        # Ragged with several values somewhere: only the sparse form applies.
+        set <- lengths(v) > 0L
+        if (sum(set) < 0.1 * n) {
+          cols[[f]] <- list(at = which(set) - 1L, v = v[set])
+        }
+        next
+      }
+    }
+    set <- !is.na(v)
+    if (!any(set)) {
+      cols[[f]] <- NULL
+      next
+    }
+    if (sum(set) < 0.1 * n) {
+      cols[[f]] <- list(at = which(set) - 1L, v = v[set])
+      next
+    }
+    if (is.character(v)) {
+      lv <- unique(v[set])
+      if (length(lv) <= n / 4) {
+        cols[[f]] <- list(levels = lv, codes = match(v, lv) - 1L)
+      }
+    }
+  }
+  cols
 }
 
 # One numeric meta field across all elements (NA where absent), or NULL when no
