@@ -4053,6 +4053,54 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(q("L").classList.contains("vellumwidget-selected"), "VW-19: a brush covering the whole line still selects it");
 }
 
+// ============ VW-20: feedback ink follows the plot background ============
+// The selection ring / crosshair / colorbar wash contrast with the background the
+// scene was drawn on, not the OS colour scheme; a user selectedColor still wins.
+{
+  const T = window.__vellumwidgetTest;
+  ok(JSON.stringify(T.parseColor("#EBEBEB")) === "[235,235,235,1]" && JSON.stringify(T.parseColor("#fff")) === "[255,255,255,1]",
+    "VW-20: parseColor reads #rrggbb and #rgb");
+  ok(JSON.stringify(T.parseColor("rgba(10, 20, 30, 0.5)")) === "[10,20,30,0.5]" && T.parseColor("none") === null,
+    "VW-20: parseColor reads rgba() and declines none");
+  ok(Math.abs(T.luminance([255, 255, 255]) - 1) < 1e-9 && T.luminance([0, 0, 0]) === 0, "VW-20: luminance spans 0..1");
+  ok(!T.isDarkBg([235, 235, 235]) && !T.isDarkBg([255, 255, 255]), "VW-20: theme_grey / white panels are light");
+  ok(T.isDarkBg([127, 127, 127]) && T.isDarkBg([13, 17, 33]), "VW-20: theme_dark's grey50 and a cyberpunk ink are dark");
+
+  const mk = (panelFill, plotFill, style) => {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<rect width="200" height="100" fill="#ffffff"/>' +
+      '<g data-vellum-panel="plot-background"><g role="presentation"><path d="M0 0 L200 0 L200 100 L0 100 Z" fill="' + plotFill + '"/></g></g>' +
+      '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1">' +
+      '<path d="M20 10 L180 10 L180 90 L20 90 Z" fill="' + panelFill + '"/>' +
+      '<path data-key="a" d="M100 50h2v2z"/></g></g></svg>';
+    const i = widgetDef.factory(e, 200, 100);
+    i.renderValue({ svg: svg, elements: { key: ["a"], x0: [100], y0: [50], x1: [102], y1: [52] },
+      options: { hover: true, select: true, style: style || {} } });
+    return e;
+  };
+  const ink = (e, v) => e.style.getPropertyValue(v || "--vellumwidget-ink");
+  const light = mk("#ebebeb", "#ffffff");
+  ok(ink(light) === "#111827" && ink(light, "--vellumwidget-wash") === "rgba(255,255,255,0.66)",
+    "VW-20: a light panel gets dark selection ink and a light wash");
+  const dark = mk("#7f7f7f", "#ffffff");
+  ok(ink(dark) === "#f9fafb" && ink(dark, "--vellumwidget-wash") === "rgba(255,255,255,0.66)",
+    "VW-20: theme_dark (grey50 panel on a white plot) gets light ink; the legend wash follows the white plot");
+  const cyber = mk("#0d1121", "#0d1121");
+  ok(ink(cyber) === "#f9fafb" && ink(cyber, "--vellumwidget-wash") === "rgba(17,24,39,0.66)",
+    "VW-20: a dark plot gets light ink and a dark wash");
+  const user = mk("#0d1121", "#0d1121", { selectedColor: "#ff0000" });
+  ok(user.style.getPropertyValue("--vellumwidget-selected-stroke") === "#ff0000",
+    "VW-20: a user selectedColor is kept (it overrides the derived ink)");
+  const css = Array.prototype.map.call(document.querySelectorAll("style"), (n) => n.textContent).join("\n");
+  ok(/vellumwidget-selected \{\s*stroke: var\(--vellumwidget-selected-stroke, var\(--vellumwidget-ink,/.test(css),
+    "VW-20: the selected stroke resolves user colour, then derived ink");
+  ok(!/prefers-color-scheme: dark\)\s*\{[^}]*vellumwidget-selected/.test(css),
+    "VW-20: no OS-scheme rule restyles the selection any more");
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();
