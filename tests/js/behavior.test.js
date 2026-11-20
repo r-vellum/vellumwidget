@@ -4611,6 +4611,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
      mPan.style.getPropertyValue("--vw-ix") === "0.5",
     "above: the overlay's pan group zooms with the panel's");
   ok(lay.getAttribute("viewBox") === t.el.querySelector(".vellumwidget-svg-holder svg").getAttribute("viewBox"), "above: the overlay shares the base frame");
+  ok(lay.querySelector("path.ref").getAttribute("vector-effect") === "non-scaling-stroke", "above: the overlay's rule keeps its stroke width under zoom (VW-26)");
   // export: furniture, marks, then the above layer (with its zoomed pan group)
   {
     let captured = null;
@@ -4649,6 +4650,60 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(nav.el.querySelectorAll("path.ref").length === 2, "navigator: the live overlay keeps its own line");
   const navNone = mountAbove(false, { navigator: true });
   ok(!navNone.el.querySelector(".vellumwidget-nav-above"), "navigator: no above layer -> nothing folded in");
+}
+
+// ============ VW-26: unkeyed panel furniture keeps its size under axis zoom ============
+{
+  const panel = {
+    name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+  };
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1">' +
+    '<path d="M20 10 L180 10 L180 90 L20 90 Z" fill="#ebebeb"/>' +
+    '<g role="grid"><path class="grid" d="M20 50 L180 50" stroke="#fff"/></g>' +
+    '<g data-vellum-id="layer-1-point-g1" role="presentation"><circle data-key="a" cx="60" cy="50" r="3"/></g>' +
+    '<g data-vellum-id="layer-2-rule-g2" role="presentation"><path class="rule" d="M20 30 L180 30" stroke="#f00" stroke-width="2"/></g>' +
+    '<g data-vellum-id="layer-3-text-g3" role="presentation"><text class="note" x="40" y="20" transform="matrix(1 0 0 1 20 10)" font-size="10">note</text>' +
+    '<text class="rot" x="0" y="0" transform="rotate(-90 50 50)">r</text></g>' +
+    '<g data-vellum-id="layer-4-point-g4" role="presentation"><circle class="up" cx="100" cy="60" r="5"/></g>' +
+    '</g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">50</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">25</text></g></svg>';
+  function mountFurn(opts) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    inst.renderValue({
+      svg: svg,
+      elements: { key: ["a"], mark: ["point"], x0: [57], y0: [47], x1: [63], y1: [53] },
+      panels: [panel],
+      options: Object.assign({ hover: true, select: true, zoom: true }, opts || {})
+    });
+    return { el: e, inst: inst, q: (sel) => e.querySelector(sel) };
+  }
+  const f = mountFurn();
+  ok(f.inst._test.axisZoomActive(), "furniture: axis zoom is active");
+  ok(f.q("path.rule").getAttribute("vector-effect") === "non-scaling-stroke", "furniture: an unkeyed rule keeps its stroke width (non-scaling)");
+  const note = f.q("text.note");
+  ok(note.style.transformBox === "view-box" && /^translate\(60px, ?30px\) scale\(var\(--vw-ix/.test(note.style.transform) &&
+     /translate\(-60px, ?-30px\) matrix\(1, ?0, ?0, ?1, ?20, ?10\)$/.test(note.style.transform),
+    "furniture: annotation text counter-scales about its anchor and keeps its placement");
+  ok(!f.q("text.rot").style.transform, "furniture: text with a transform it can't restate (rotate) is left alone");
+  const up = f.q("circle.up");
+  ok(/scale\(var\(--vw-ix/.test(up.style.transform) && up.style.transformBox === "fill-box" && !up.hasAttribute("vector-effect"),
+    "furniture: an unkeyed glyph layer keeps its pixel size");
+  ok(/scale\(var\(--vw-ix/.test(f.q('[data-key="a"]').style.transform), "furniture: keyed glyphs keep their own counter-scale");
+  ok(!f.q("path.grid").hasAttribute("vector-effect"), "furniture: the hidden static gridlines are not touched");
+  const bg = f.q("[data-vw-panel-bg]");
+  ok(bg && !bg.closest("[data-vellum-pan]") && !bg.hasAttribute("vector-effect"), "furniture: the panel background still leaves the pan group untouched");
+  f.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 });
+  ok(f.q(".vellumwidget-retick-grid line") && f.q(".vellumwidget-retick-layer text"), "furniture: the re-tick still draws gridlines and labels");
+  const sc = mountFurn({ zoomMarks: "scale" });
+  ok(!sc.q("path.rule").hasAttribute("vector-effect") && !sc.q("text.note").style.transform, "furniture: zoom_marks = \"scale\" keeps the old scaling");
+  const noaz = mountFurn({ axisZoom: false });
+  ok(!noaz.q("path.rule").hasAttribute("vector-effect") && !noaz.q("text.note").style.transform, "furniture: no axis zoom, nothing changes");
 }
 
 // Checks that need the MutationObserver (removal watcher) to have run.

@@ -1589,6 +1589,7 @@
       ws.stage.appendChild(ws.retickLayer);
       applyPanTransforms();
       setupConstantMarks();
+      setupConstantFurniture();
       retick();
     }
     function applyPanTransforms() {
@@ -1634,6 +1635,69 @@
           }
         }
       }
+    }
+    function setupConstantFurniture() {
+      if (!ws.axisZoomActive || ws.opts.zoomMarks === "scale") return;
+      for (let i = 0; i < ws.azPanels.length; i++) {
+        const a = ws.azPanels[i];
+        constantFurnitureIn(a.pan);
+        if (a.mirror) constantFurnitureIn(a.mirror);
+      }
+    }
+    const SHAPES = { path: true, line: true, polyline: true, polygon: true, rect: true, circle: true, ellipse: true };
+    function constantFurnitureIn(pan) {
+      const all = pan.querySelectorAll("*");
+      for (let i = 0; i < all.length; i++) {
+        const n = all[i];
+        const tag = n.tagName.toLowerCase();
+        if (tag === "text") {
+          constantText(n);
+          continue;
+        }
+        if (!SHAPES[tag]) continue;
+        if (n.closest('.vellumwidget-detail, [role="grid"]')) continue;
+        if (n.style.getPropertyValue("transform")) continue;
+        if (!n.closest("[data-key]") && inGlyphLayer(n)) {
+          n.style.setProperty("transform-box", "fill-box");
+          n.style.setProperty("transform-origin", "center");
+          const place = transAsCss(n);
+          n.style.setProperty("transform", (place ? place + " " : "") + "scale(var(--vw-ix,1),var(--vw-iy,1))");
+        } else {
+          n.setAttribute("vector-effect", "non-scaling-stroke");
+        }
+      }
+    }
+    function inGlyphLayer(n) {
+      const g = n.closest("[data-vellum-id]");
+      const m = g ? /^layer-\d+-([a-z0-9_]+)-g\d+/.exec(g.getAttribute("data-vellum-id") || "") : null;
+      return !!m && GLYPH_MARKS[m[1]] === true;
+    }
+    function constantText(n) {
+      if (n.style.getPropertyValue("transform")) return;
+      const own = (n.getAttribute("transform") || "").trim();
+      const place = transAsCss(n);
+      if (own && !place) return;
+      const x = parseFloat(n.getAttribute("x") || "") || 0, y = parseFloat(n.getAttribute("y") || "") || 0;
+      let X = x, Y = y;
+      const m = /matrix\(([^)]*)\)/.exec(place);
+      if (m) {
+        const v = m[1].split(",").map(Number);
+        X = v[0] * x + v[2] * y + v[4];
+        Y = v[1] * x + v[3] * y + v[5];
+      } else {
+        const t = /translate\(([-+\d.eE]+)px,([-+\d.eE]+)px\)/.exec(place);
+        if (t) {
+          X = x + Number(t[1]);
+          Y = y + Number(t[2]);
+        }
+      }
+      if (!isFinite(X) || !isFinite(Y)) return;
+      n.style.setProperty("transform-box", "view-box");
+      n.style.setProperty("transform-origin", "0px 0px");
+      n.style.setProperty(
+        "transform",
+        "translate(" + X + "px," + Y + "px) scale(var(--vw-ix,1),var(--vw-iy,1)) translate(" + -X + "px," + -Y + "px)" + (place ? " " + place : "")
+      );
     }
     function transAsCss(node) {
       const t = (node.getAttribute("transform") || "").trim();
