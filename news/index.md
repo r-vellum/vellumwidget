@@ -2,6 +2,15 @@
 
 ## vellumwidget 0.12.0.9000
 
+- **Building a big widget is faster (VR-16).** The element table’s meta
+  columns (`tooltip`, `legend`, `cond`, …) are read column-wise from one
+  flattened index instead of scanning every element’s record once per
+  field. At 200k keyed points this step drops from about 1.5 s to 0.4 s.
+  With the matching vellum and vellumplot changes,
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  on a 200k-point keyed scatter takes about 1.6 s instead of 7 s. The
+  payload is unchanged.
+
 - **In raster mode, a reference line or annotation added after the
   points is drawn over them again (VW-21).** The split render put all
   the furniture under the marks image, so
