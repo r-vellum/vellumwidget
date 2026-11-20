@@ -98,6 +98,9 @@ the keyed-mark PNG (`payload$marks`) is drawn by a `<use>` in each pan group;
 with an older vellum (one base image), raster mode, void
 panels (graphs, `theme_void`) and panels the re-ticker can't follow (e.g. polar)
 fall back to whole-scene viewBox zoom. Glyph marks keep a constant pixel size.
+Unkeyed panel furniture in the pan groups (and their above-overlay mirrors)
+keeps its size too (VW-26, `setupConstantFurniture()`): non-scaling strokes,
+unkeyed glyph layers counter-scaled, text counter-scaled about its anchor.
 
 With a vellum that splits the furniture by paint order (VW-21,
 `.paint_order_supported()`), `payload$svg` is `layer = "unkeyed_below"` and
