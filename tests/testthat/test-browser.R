@@ -83,3 +83,37 @@ test_that("VW-17: zoomed re-ticked gridlines paint over the panel background", {
   expect_identical(parts[2], "0") # no static tick mark left in the pan group
   expect_gt(as.integer(parts[3]), 0) # re-drawn at the new breaks
 })
+
+test_that("VW-13: a raster widget decodes the compact index (click selects a point)", {
+  skip_browser()
+  set.seed(1)
+  n <- 25000L
+  df <- data.frame(x = rnorm(n), y = rnorm(n), g = sample(letters[1:4], n, TRUE), id = seq_len(n))
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id) |>
+    as_widget()
+  el <- w$x$elements
+  expect_true(w$x$options$raster)
+  expect_identical(el$mark$levels, "point")
+  # the right-most data point (not a legend swatch): isolated, so a click on its centre picks it alone
+  i <- which.max(ifelse(startsWith(el$key, "legend:"), -Inf, el$x1))
+  cx <- (el$x0[i] + el$x1[i]) / 2
+  cy <- (el$y0[i] + el$y1[i]) / 2
+  b <- open_widget(w)
+  xy <- b$Runtime$evaluate(sprintf("(function(){
+    var s = document.querySelector('.vellumwidget svg'), p = s.createSVGPoint();
+    p.x = %f; p.y = %f; var q = p.matrixTransform(s.getScreenCTM());
+    return q.x + ',' + q.y; })()", cx, cy))$result$value
+  xy <- as.numeric(strsplit(xy, ",")[[1]])
+  for (type in c("mouseMoved", "mousePressed", "mouseReleased")) {
+    b$Input$dispatchMouseEvent(
+      type = type, x = xy[1], y = xy[2], button = "left", clickCount = 1
+    )
+    Sys.sleep(0.1)
+  }
+  Sys.sleep(0.3)
+  rings <- b$Runtime$evaluate(
+    "document.querySelectorAll('.vellumwidget-fb-sel').length"
+  )$result$value
+  expect_identical(rings, 1L)
+})

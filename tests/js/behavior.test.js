@@ -984,6 +984,29 @@ function mountShiny(id, calls) {
   ok(many[2].legend === undefined, "columnar: an empty ([]) legend entry is treated as absent");
   ok(T2.brushKeys(many, { x0: -1, y0: -1, x1: 6, y1: 6 }).length === 1,
     "columnar: expanded elements carry usable bboxes for hit-testing");
+
+  // VW-13 compact encoding (raster mode): dictionary {levels, codes} + sparse {at, v}.
+  const enc = T2.normalizeElements({
+    key: ["a", "b", "c", "d"],
+    x0: [0, 10, 20, 30], y0: [0, 0, 0, 0], x1: [5, 15, 25, 35], y1: [5, 5, 5, 5],
+    mark: { levels: "point", codes: [0, 0, 0, 0] },
+    legend: { levels: ["color:s", "color:t"], codes: [0, 1, null, 0] },
+    tooltip: { at: 3, v: "D" },
+    legend_for: { at: [1, 2], v: ["legend:x", "legend:y"] },
+    filter_value: { at: [0], v: [2.5] },
+    cond: { levels: ["s:color"], codes: [0, null, 0, null] }
+  });
+  ok(enc.every((e) => e.mark === "point"), "encoded: a one-level (unboxed) dictionary column decodes for every element");
+  ok(enc[0].legend === "color:s" && enc[1].legend === "color:t" && enc[2].legend === undefined,
+    "encoded: dictionary codes map to levels, a null code is absent");
+  ok(enc[3].tooltip === "D" && enc[0].tooltip === undefined && enc[2].tooltip === undefined,
+    "encoded: a sparse column (unboxed index) sets only the listed element");
+  ok(enc[1].legend_for === "legend:x" && enc[2].legend_for === "legend:y" && enc[0].legend_for === undefined,
+    "encoded: a sparse column with several indices");
+  ok(enc[0].filter_value === 2.5 && enc[1].filter_value === undefined, "encoded: a sparse numeric column");
+  ok(Array.isArray(enc[0].cond) && enc[0].cond[0] === "s:color" && enc[1].cond === undefined,
+    "encoded: a flattened one-value cond column is re-wrapped as an array");
+  ok(T2.brushKeys(enc, { x0: -1, y0: -1, x1: 16, y1: 6 }).length === 2, "encoded: bboxes still hit-test");
   ok(T2.normalizeElements([{ key: "z" }]).length === 1, "columnar: a legacy record array is still accepted");
   ok(T2.normalizeElements([]).length === 0 && T2.normalizeElements(null).length === 0,
     "columnar: empty / null payloads yield no elements");
