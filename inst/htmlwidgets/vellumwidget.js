@@ -199,6 +199,50 @@
     if (anyCss && typeof anyCss.escape === "function") return anyCss.escape(value);
     return value.replace(/["\\\]\[#.:;,()>~+*^$|=@!%&{}\/\s]/g, "\\$&");
   }
+  var STATE_SEL = [
+    "vellumwidget-cond-dim",
+    "vellumwidget-colorfiltered",
+    "vellumwidget-legend-muted",
+    "vellumwidget-legend-off",
+    "vellumwidget-selected",
+    "vellumwidget-filtered",
+    "vellumwidget-legend-hidden"
+  ].map((c) => "[data-key]." + c).join(", ");
+  function cssVar(cs, name, fallback) {
+    const v = cs ? cs.getPropertyValue(name).trim() : "";
+    return v || fallback;
+  }
+  function inlineStateStyles(live, clone) {
+    const a = live.querySelectorAll(STATE_SEL);
+    const b = clone.querySelectorAll(STATE_SEL);
+    if (a.length !== b.length) return;
+    for (let i = 0; i < a.length; i++) {
+      const n = a[i], c = b[i], cl = n.classList;
+      if (cl.contains("vellumwidget-filtered") || cl.contains("vellumwidget-legend-hidden")) {
+        c.style.display = "none";
+        continue;
+      }
+      let cs = null;
+      try {
+        cs = window.getComputedStyle(n);
+      } catch (e) {
+        cs = null;
+      }
+      if (!n.style.opacity) {
+        let op = "";
+        if (cl.contains("vellumwidget-legend-off") && cl.contains("vellumwidget-legend")) op = "0.4";
+        else if (cl.contains("vellumwidget-colorfiltered")) op = cssVar(cs, "--vellumwidget-colorfilter-opacity", "0.12");
+        else if (cl.contains("vellumwidget-cond-dim")) op = cssVar(cs, "--vellumwidget-dim-opacity", "0.28");
+        else if (cl.contains("vellumwidget-legend-muted")) op = "0.12";
+        if (op) c.style.opacity = op;
+      }
+      if (cl.contains("vellumwidget-selected")) {
+        c.style.stroke = cssVar(cs, "--vellumwidget-selected-stroke", cssVar(cs, "--vellumwidget-ink", "#111827"));
+        c.style.strokeWidth = cssVar(cs, "--vellumwidget-selected-width", "1.4px");
+        c.style.setProperty("paint-order", "normal");
+      }
+    }
+  }
 
   // srcts/dom.ts
   function keyOf(target) {
@@ -6406,6 +6450,7 @@
     }
     function exportSvgString(strokeK) {
       const svg = ws.svgEl.cloneNode(true);
+      inlineStateStyles(ws.svgEl, svg);
       svg.classList.remove("vellumwidget-marks-off");
       const listed = ws.rasterMode ? ws.fx.exportMarksImage(exportScale()) : null;
       if (listed) {
