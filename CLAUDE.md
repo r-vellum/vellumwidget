@@ -139,16 +139,30 @@ filters, cross-filters and legend hide/mute reach the node-less tiers as
 per-key state (`features/markState.ts`: `ws.msFlags`/`msColor`, indexed
 by display-list key id, never by DOM lookup), which `drawList` applies;
 while any is active the canvas also replaces the mark PNG at the
-overview zoom (VW-22). Exports (`exportSvgString()`) redraw an exact
-display list at export resolution with that state (`exportMarksImage()`,
-raster.ts `paintList`, the painter shared with the canvas) instead of
-embedding the mark PNG (VW-25). With a vellum that has display list
-version 2 (`.display_list_v2_supported()`, VW-23) the list also carries
-gradient fills, clip paths and opacity groups: `paintList` draws a
-group’s records into a pooled offscreen layer and composites it at the
-group’s alpha; the detail tier builds `<defs>` gradients, chained
-`<clipPath>`s and `<g opacity>` wrappers. The decoder (`srcts/dlist.ts`)
-accepts versions 1 and 2 and feature-detects the tables.
+overview zoom (VW-22).
+
+The mixed tier (VW-30): marks the display list still flags (masks,
+effects, hatches, patterns, repeating gradients, gradient strokes, text)
+arrive with a vellum that has
+`scene_png(layer = "keyed_flagged", run = )` as one PNG per *run*
+(`payload$flagged`, `.raster_flagged()`): a run is a stretch of flagged
+marks in paint order (`record$run`). Once the images load
+(`attachRuns()`), the list counts as exact: `paintList` draws each run’s
+image where it starts, and the detail tier places a `<use>` of it there,
+with a transparent stand-in node per flagged mark (pointer + selection
+outline). The runs’ own styling is baked in. Blend modes (flag 32), a
+flagged record outside every run, more than `.MAX_FLAGGED_RUNS` runs or
+an older vellum keep the old behaviour. Exports (`exportSvgString()`)
+redraw an exact display list at export resolution with that state
+(`exportMarksImage()`, raster.ts `paintList`, the painter shared with
+the canvas) instead of embedding the mark PNG (VW-25). With a vellum
+that has display list version 2 (`.display_list_v2_supported()`, VW-23)
+the list also carries gradient fills, clip paths and opacity groups:
+`paintList` draws a group’s records into a pooled offscreen layer and
+composites it at the group’s alpha; the detail tier builds `<defs>`
+gradients, chained `<clipPath>`s and `<g opacity>` wrappers. The decoder
+(`srcts/dlist.ts`) accepts versions 1 and 2 and feature-detects the
+tables.
 
 ## Build and test
 
