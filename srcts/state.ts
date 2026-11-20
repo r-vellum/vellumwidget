@@ -115,6 +115,10 @@ export interface WidgetState {
   // per panel pan group, so axis zoom carries it), "root" (one image over the
   // whole scene), or null (no split: the base image carries marks and furniture).
   marksLayer: "pans" | "root" | null;
+  // Paint-order split (VW-21): the furniture vellum painted after the marks,
+  // an overlay svg above the marks canvas (pointer-events: none). Its pan
+  // groups mirror the base svg's transforms; null when nothing is above.
+  aboveEl: SVGSVGElement | null;
   // The decoded marks-only display list (VW-15), or null when none shipped.
   dl: DisplayList | null;
   // The raster mark tier (VW-16): the mark PNG ("overview"), the exact canvas
@@ -397,6 +401,7 @@ export function createState(el: HTMLElement): WidgetState {
     tolY: 1,
     rasterMode: false,
     marksLayer: null,
+    aboveEl: null,
     dl: null,
     markTier: "overview",
     msFlags: null,

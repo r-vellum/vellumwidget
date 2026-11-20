@@ -4548,6 +4548,89 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   }));
 }
 
+// ============ VW-21: furniture painted after the marks stays above them ============
+{
+  const PNG1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+  const panel = {
+    name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+  };
+  // Both layers come from one scene, so they share vellum's id prefix ("vl1-").
+  const below = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100" role="img" aria-labelledby="vl1-t"><title id="vl1-t">T</title>' +
+    '<defs><clipPath id="vl1-c0"><rect x="20" y="10" width="160" height="80"/></clipPath></defs>' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1" clip-path="url(#vl1-c0)"><g role="grid"><path d="M20 50 L180 50" stroke="#fff"/></g></g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">50</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">25</text></g></svg>';
+  const above = '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100" role="img" aria-labelledby="vl1-t vl1-d"><title id="vl1-t">T</title><desc id="vl1-d">D</desc>' +
+    '<defs><clipPath id="vl1-c0"><rect x="20" y="10" width="160" height="80"/></clipPath></defs>' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1" clip-path="url(#vl1-c0)">' +
+    '<g data-vellum-id="layer-2-rule" role="presentation"><path class="ref" d="M20 30 L180 30" stroke="#ff0000" stroke-width="2"/></g></g></g>' +
+    '<g data-vellum-panel="axis-x-3"></g><text class="title" x="5" y="5">T</text></svg>';
+  function mountAbove(withAbove) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    const payload = (ab) => ({
+      svg: below,
+      elements: { key: ["a", "b"], mark: { levels: "point", codes: [0, 0] }, x0: [60, 120], y0: [50, 50], x1: [62, 122], y1: [52, 52] },
+      panels: [panel],
+      marks: { href: PNG1, width: 200, height: 100, panels: "panel-1-1" },
+      above: ab ? above : null,
+      options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple" }
+    });
+    inst.renderValue(payload(withAbove));
+    return { el: e, inst: inst, payload: payload };
+  }
+  const t = mountAbove(true);
+  const lay = t.el.querySelector("svg.vellumwidget-above-layer");
+  ok(!!lay && lay.querySelector("path.ref") && lay.getAttribute("aria-hidden") === "true" && !lay.querySelector("title, desc") && !lay.hasAttribute("role"),
+    "above: the furniture painted after the marks is an aria-hidden overlay");
+  const kids = Array.prototype.slice.call(t.el.querySelector(".vellumwidget-stage").children);
+  const canvas = t.el.querySelector("canvas.vellumwidget-canvas");
+  ok(!canvas || kids.indexOf(lay) > kids.indexOf(canvas), "above: the overlay stacks after (over) the marks canvas");
+  const css = Array.prototype.map.call(document.querySelectorAll("style"), (n) => n.textContent).join("\n");
+  ok(/\.vellumwidget-above-layer \{[^}]*pointer-events: none/.test(css), "above: the overlay is never a pointer target (picking reaches the marks)");
+  const clip = lay.querySelector("clipPath");
+  const mPan = lay.querySelector('[data-vellum-pan="panel-1-1"]');
+  ok(clip.id !== "vl1-c0" && mPan.parentNode.getAttribute("clip-path") === "url(#" + clip.id + ")" && document.querySelectorAll("#" + clip.id).length === 1,
+    "above: its ids are page-unique and its references follow");
+  ok(!mPan.hasAttribute("clip-path"), "above: the panel clip moves off the zoomed pan group onto the panel group");
+  ok(t.inst._test.axisZoomActive(), "above: axis zoom stays on with the overlay");
+  t.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 });
+  const basePan = t.el.querySelector('.vellumwidget-svg-holder [data-vellum-pan="panel-1-1"]');
+  ok(/matrix\(2 /.test(mPan.getAttribute("transform") || "") && mPan.getAttribute("transform") === basePan.getAttribute("transform") &&
+     mPan.style.getPropertyValue("--vw-ix") === "0.5",
+    "above: the overlay's pan group zooms with the panel's");
+  ok(lay.getAttribute("viewBox") === t.el.querySelector(".vellumwidget-svg-holder svg").getAttribute("viewBox"), "above: the overlay shares the base frame");
+  // export: furniture, marks, then the above layer (with its zoomed pan group)
+  {
+    let captured = null;
+    const saved = { Blob: global.Blob, XS: global.XMLSerializer, cou: URL.createObjectURL, rou: URL.revokeObjectURL };
+    global.Blob = function (parts) { captured = parts.join(""); };
+    global.XMLSerializer = window.XMLSerializer;
+    URL.createObjectURL = function () { return "blob:x"; };
+    URL.revokeObjectURL = function () {};
+    const aClick = window.HTMLAnchorElement.prototype.click;
+    window.HTMLAnchorElement.prototype.click = function () {};
+    t.el.querySelector('[data-act="svg"]').click();
+    window.HTMLAnchorElement.prototype.click = aClick;
+    global.Blob = saved.Blob; global.XMLSerializer = saved.XS;
+    URL.createObjectURL = saved.cou; URL.revokeObjectURL = saved.rou;
+    const iUse = captured ? captured.search(/<use[^>]*vellumwidget-marks/) : -1;
+    const iAbove = captured ? captured.indexOf("vellumwidget-above-export") : -1;
+    const iRef = captured ? captured.indexOf('class="ref"') : -1;
+    ok(iUse >= 0 && iAbove > iUse && iRef > iAbove, "above export: the above layer is folded in after the marks");
+    ok(captured && /vellumwidget-above-export[\s\S]*data-vellum-pan="panel-1-1"[^>]*transform="matrix\(2 /.test(captured),
+      "above export: it carries the zoomed pan transform");
+  }
+  // a re-render without the layer drops the overlay
+  t.inst.renderValue(t.payload(false));
+  ok(!t.el.querySelector(".vellumwidget-above-layer"), "above: a render without the layer leaves no overlay");
+  const none = mountAbove(false);
+  ok(!none.el.querySelector(".vellumwidget-above-layer"), "above: no layer shipped (older vellum) -> no overlay, as before");
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();

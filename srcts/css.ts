@@ -42,6 +42,14 @@ export const VELLUMWIDGET_CSS = `
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 2; display: none;
 }
+/* Paint-order split (VW-21): the furniture drawn after the marks (a reference
+   line or annotation added after the points), over the marks canvas and under
+   the re-ticked labels and rings. Never a pointer target, so picking still
+   reaches the marks beneath. */
+.vellumwidget-above-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 2; overflow: hidden;
+}
 .vellumwidget-dim-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;

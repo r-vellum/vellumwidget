@@ -338,3 +338,53 @@ test_that("VW-22: a condition and filter_by() show in the overview and mid tiers
   expect_gt(inked(pn$px0 + 4, pn$px0 + 0.3 * (pn$px1 - pn$px0)), 1000L)
   expect_identical(right, 0L)
 })
+
+test_that("VW-21: a reference line added after the points is drawn over them", {
+  skip_browser()
+  skip_if_not(.paint_order_supported(), "vellum without the paint-order split")
+  set.seed(7)
+  n <- 25000L
+  df <- data.frame(x = runif(n), y = runif(n), g = sample(letters[1:4], n, TRUE), id = seq_len(n))
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id) |>
+    vellumplot::mark_rule(yintercept = 0.5, color = "red", linewidth = 2) |>
+    as_widget(elementId = "w1")
+  expect_true(w$x$options$raster)
+  b <- open_widget(w)
+  ev <- function(js) b$Runtime$evaluate(js)$result$value
+  pn <- w$x$panels[[1]]
+  # Share of pure-red pixels along the rule, across the inner panel width.
+  red_share <- function() {
+    # the line's on-screen extent, clipped to the panel (its fixed rect)
+    q <- as.numeric(strsplit(ev(sprintf("(function(){var s=document.querySelector('.vellumwidget-svg-holder svg'),k=s.getBoundingClientRect().width/s.viewBox.baseVal.width,o=s.getBoundingClientRect(),r=document.querySelector('.vellumwidget-above-layer path[stroke=\"#ff0000\"]').getBoundingClientRect();return [o.left+k*%f,o.left+k*%f,r.top+r.height/2].join(',')})()", pn$px0, pn$px1)), ",")[[1]])
+    shot <- b$Page$captureScreenshot(format = "png", clip = list(x = q[1] + 10, y = round(q[3]) - 3, width = q[2] - q[1] - 20, height = 7, scale = 1))
+    img <- png::readPNG(jsonlite::base64_dec(shot$data))
+    # the best row of the band (the line's centre row)
+    max(vapply(seq_len(dim(img)[1]), function(i) {
+      mean(img[i, , 1] > 0.85 & img[i, , 2] < 0.25 & img[i, , 3] < 0.25)
+    }, 0))
+  }
+  expect_gt(red_share(), 0.95) # overview: over the mark image
+  ev(sprintf(
+    "HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f})",
+    pn$px0 + 0.25 * (pn$px1 - pn$px0), pn$py0 + 0.25 * (pn$py1 - pn$py0),
+    0.5 * (pn$px1 - pn$px0), 0.5 * (pn$py1 - pn$py0)
+  ))
+  Sys.sleep(0.5)
+  expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), "mid")
+  expect_gt(red_share(), 0.95) # zoomed: over the marks canvas, moved with the panel
+  # the layer never takes the pointer: a point under it is still the target
+  expect_identical(ev("getComputedStyle(document.querySelector('.vellumwidget-above-layer')).pointerEvents"), "none")
+  # the toolbar's PNG export draws the line over the marks too
+  ev("(function(){ window.__png = null; HTMLAnchorElement.prototype.click = function(){ var a = this; if (/\\.png$/.test(a.download)) fetch(a.href).then(function(r){ return r.blob(); }).then(function(bl){ var fr = new FileReader(); fr.onload = function(){ window.__png = fr.result; }; fr.readAsDataURL(bl); }); }; document.querySelector('[data-act=\"png\"]').click(); return 1; })()")
+  Sys.sleep(1.5)
+  png64 <- ev("window.__png")
+  expect_type(png64, "character")
+  img <- png::readPNG(jsonlite::base64_dec(sub("^data:image/png;base64,", "", png64)))
+  ry <- round(ev("(function(){var s=document.querySelector('.vellumwidget-svg-holder svg'),p=document.querySelector('.vellumwidget-above-layer path[stroke=\"#ff0000\"]'),b=p.getBoundingClientRect(),q=s.getBoundingClientRect();return (b.top+b.height/2-q.top)/q.height*s.viewBox.baseVal.height})()"))
+  cols <- round(pn$px0 + 10):round(pn$px1 - 10)
+  best <- max(vapply((ry - 3):(ry + 3), function(i) {
+    mean(img[i, cols, 1] > 0.85 & img[i, cols, 2] < 0.25 & img[i, cols, 3] < 0.25)
+  }, 0))
+  expect_gt(best, 0.95)
+})
