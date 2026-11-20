@@ -5263,7 +5263,7 @@
         }
         return;
       }
-      const rScale = ws.opts.zoomMarks === "scale" ? Math.min(W / ws.vb.w, H / ws.vb.h) : Math.min(W / ws.vb0.w, H / ws.vb0.h);
+      const rScale = Math.min(W / ws.vb.w, H / ws.vb.h);
       const x0 = ws.vb.x, y0 = ws.vb.y, x1 = ws.vb.x + ws.vb.w, y1 = ws.vb.y + ws.vb.h;
       for (let i = 0; i < n; i++) {
         const px = cx[i], py = cy[i];
@@ -5348,7 +5348,7 @@
       const aff = [], gs = [], pclip = [];
       const ident = { ax: kx, bx: q0.px, ay: ky, by: q0.py };
       for (let p = 0; p <= np; p++) {
-        let A = ident, g = scaleMarks ? kx : base, c = null;
+        let A = ident, g = az && !scaleMarks ? base : kx, c = null;
         const a = az && p > 0 ? ws.azPanels.filter((q) => q.p.name === dl.panels[p - 1])[0] : null;
         if (a) {
           const t = ws.fx.azT(a);
@@ -5360,7 +5360,7 @@
         gs.push(g);
         pclip.push(c);
       }
-      return { aff, gs, pclip, base };
+      return { aff, gs, pclip, base: az ? base : kx };
     }
     function paintList(ctx, dl, W, H, L, styled) {
       const aff = L.aff, gs = L.gs, pclip = L.pclip, base = L.base, np = dl.panels.length;
