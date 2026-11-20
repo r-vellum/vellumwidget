@@ -595,6 +595,25 @@ test_that("raster mode ships the element index in the compact encoding (VW-13)",
   expect_identical(k$at, 2L)
   expect_identical(k$v, "legend:a")
   expect_identical(encode(list(key = c("a", "b", "c")))$key, c("a", "b", "c"))
+  # prefixed integer keys (vellumplot default keys, VP-55): prefixes as runs
+  pk <- c(
+    paste0("p1-1:l1:", 1:30),
+    "legend:color:a",
+    paste0("p1-1:l2:", 1:30)
+  )
+  k <- encode(list(key = pk))$key
+  expect_identical(k$delta, c(1, rep(1, 29), -29, rep(1, 29)))
+  expect_identical(k$at, 30L)
+  expect_identical(k$pre$levels, c("p1-1:l1:", "p1-1:l2:"))
+  expect_identical(k$pre$rv, 0:1)
+  expect_identical(k$pre$rl, c(30L, 30L))
+  expect_identical(.decode_keys_r(k), pk)
+  # integer-suffixed keys are recovered exactly (leading zeros stay in the prefix)
+  odd <- c("x007", "y0", "z12", paste0("k", 1:40))
+  expect_identical(.decode_keys_r(encode(list(key = odd))$key), odd)
+  # fragmented prefixes (no runs) stay plain
+  frag <- paste0(c("a", "b"), 1:40)
+  expect_identical(encode(list(key = frag))$key, frag)
   # sparse: 0-based indices + values; an all-NA column is dropped
   expect_identical(e$tooltip, list(at = 0L, v = "a"))
   expect_null(e$hover_group)

@@ -18,6 +18,10 @@ local_single_raster <- function(env = parent.frame()) {
   out <- character(n)
   other <- key$at + 1L
   out[other] <- key$v
-  out[setdiff(seq_len(n), other)] <- format(cumsum(key$delta), scientific = FALSE, trim = TRUE)
+  num <- format(cumsum(key$delta), scientific = FALSE, trim = TRUE)
+  if (!is.null(key$pre)) {
+    num <- paste0(rep(key$pre$levels[key$pre$rv + 1L], key$pre$rl), num)
+  }
+  out[setdiff(seq_len(n), other)] <- num
   out
 }

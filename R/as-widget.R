@@ -849,22 +849,39 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   cols
 }
 
-# The key column, compactly when most keys are plain integers (a `data_id` of
-# row numbers, the usual big-scatter case): `{delta, at, v}` -- the integer keys
-# as a first value plus successive differences (mostly one or two digits), and
-# the other keys (legend swatches, say) sparse at their 0-based positions.
-# Otherwise the plain character vector.
+# The key column, compactly when most keys end in an integer (row-numbered
+# keys, the usual big-scatter case): `{delta, at, v}` -- the integer suffixes as
+# a first value plus successive differences (mostly one or two digits), and the
+# other keys (legend swatches, say) sparse at their 0-based positions. When the
+# integers carry a text prefix -- vellumplot's default keys, "p1-1:l2:7" (VP-55)
+# -- the prefixes ride along as runs in `pre` (`{levels, rv, rl}`, one entry per
+# integer key), so a layer's keys cost one level plus its deltas. Otherwise the
+# plain character vector.
 .encode_keys <- function(key) {
-  int <- grepl("^(0|[1-9][0-9]{0,14})$", key)
-  if (length(key) < 2L || sum(int) < 0.9 * length(key)) {
+  n <- length(key)
+  pos <- regexpr("(0|[1-9][0-9]{0,14})$", key)
+  int <- !is.na(key) & pos > 0L
+  if (n < 2L || sum(int) < 0.9 * n) {
     return(key)
   }
-  v <- as.numeric(key[int])
-  list(
+  ki <- key[int]
+  at_num <- pos[int]
+  v <- as.numeric(substring(ki, at_num))
+  out <- list(
     delta = c(v[[1]], diff(v)),
     at = which(!int) - 1L,
     v = key[!int]
   )
+  pre <- substr(ki, 1L, at_num - 1L)
+  if (any(nzchar(pre))) {
+    lv <- unique(pre)
+    r <- rle(match(pre, lv) - 1L)
+    if (length(r$lengths) >= length(pre) / 10) {
+      return(key)
+    }
+    out$pre <- list(levels = lv, rv = r$values, rl = r$lengths)
+  }
+  out
 }
 
 # Per-element meta fields, read column-wise. `meta` is a list with one record

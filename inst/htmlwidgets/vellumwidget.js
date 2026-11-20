@@ -276,6 +276,7 @@
     if (v != null && typeof v === "object" && !Array.isArray(v) && "delta" in v) {
       const o = v;
       const delta = asColumn(o.delta), at = asColumn(o.at), other = asColumn(o.v);
+      const pre = o.pre != null ? decodeColumn(o.pre, delta.length) : null;
       const n = delta.length + at.length;
       const out = new Array(n);
       let j = 0, a = 0, run = 0;
@@ -284,8 +285,9 @@
           out[i] = String(other[a++]);
           continue;
         }
+        const p = pre ? pre[j] : null;
         run += delta[j++];
-        out[i] = String(run);
+        out[i] = (p == null ? "" : p) + String(run);
       }
       return out;
     }

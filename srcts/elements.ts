@@ -66,19 +66,26 @@ export function decodeColumn<T>(v: EncodedColumn<T>, n: number): (T | null)[] | 
 }
 
 // The key column: plain strings, or (raster mode, `.encode_keys()` in R) mostly
-// integer keys as `{delta, at, v}` -- a running sum of `delta` for the integer
-// keys, with the other keys `v` at their 0-based positions `at`.
+// integer-suffixed keys as `{delta, at, v, pre?}` -- a running sum of `delta`
+// for the integer suffixes, each after its text prefix from `pre` (runs, one
+// per integer key; "" when absent), with the other keys `v` at their 0-based
+// positions `at`.
 export function decodeKeys(v: unknown): string[] {
   if (v != null && typeof v === "object" && !Array.isArray(v) && "delta" in (v as object)) {
-    const o = v as { delta: number[] | number; at?: number[] | number; v?: string[] | string };
+    const o = v as {
+      delta: number[] | number; at?: number[] | number; v?: string[] | string;
+      pre?: EncodedColumn<string>;
+    };
     const delta = asColumn(o.delta), at = asColumn(o.at), other = asColumn(o.v);
+    const pre = o.pre != null ? decodeColumn<string>(o.pre, delta.length) : null;
     const n = delta.length + at.length;
     const out: string[] = new Array(n);
     let j = 0, a = 0, run = 0;
     for (let i = 0; i < n; i++) {
       if (a < at.length && at[a] === i) { out[i] = String(other[a++]); continue; }
+      const p = pre ? pre[j] : null;
       run += delta[j++];
-      out[i] = String(run);
+      out[i] = (p == null ? "" : p) + String(run);
     }
     return out;
   }
