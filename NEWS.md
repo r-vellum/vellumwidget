@@ -1,5 +1,12 @@
 # vellumwidget 0.12.0.9000
 
+* **Building a big widget is faster (VR-16).** The element table's meta
+  columns (`tooltip`, `legend`, `cond`, ...) are read column-wise from one
+  flattened index instead of scanning every element's record once per field.
+  At 200k keyed points this step drops from about 1.5 s to 0.4 s. With the
+  matching vellum and vellumplot changes, `as_widget()` on a 200k-point keyed
+  scatter takes about 1.6 s instead of 7 s. The payload is unchanged.
+
 * **`condition()`, `filter_by()` and selection dimming show at every zoom in
   raster mode (VW-22).** They used to take effect only once the detail tier's
   SVG nodes existed; the overview image and the zoomed canvas drew every mark
