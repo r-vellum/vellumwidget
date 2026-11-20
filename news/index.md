@@ -1,5 +1,7 @@
 # Changelog
 
+## vellumwidget 0.12.0.9000
+
 ## vellumwidget 0.12.0
 
 - **Selection rings contrast with the plot, not the OS colour scheme

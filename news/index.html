@@ -13,7 +13,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.12.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.12.0.9000</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -48,6 +48,9 @@
       <small>Source: <a href="https://github.com/r-vellum/vellumwidget/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="0.12.0.9000" id="vellumwidget-01209000">vellumwidget 0.12.0.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-01209000"></a></h2>
+</div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.12.0" id="vellumwidget-0120">vellumwidget 0.12.0<a class="anchor" aria-label="anchor" href="#vellumwidget-0120"></a></h2>
 <ul><li><p><strong>Selection rings contrast with the plot, not the OS colour scheme (VW-20).</strong> The selection stroke, crosshair and colorbar wash switched to their light variants whenever the page was viewed in a dark colour scheme. On a white plot that made the ring near-white, and on a <code><a href="https://r-vellum.github.io/vellumplot/reference/theme_gray.html" class="external-link">theme_dark()</a></code> plot in light mode it stayed dark. The widget now reads the scene’s panel background (and the plot background for the colorbar wash) and picks dark ink for light backgrounds and light ink for dark ones (<code><a href="https://r-vellum.github.io/vellumplot/reference/theme_gray.html" class="external-link">theme_dark()</a></code>, <code><a href="https://r-vellum.github.io/vellumplot/reference/theme_gray.html" class="external-link">theme_cyberpunk()</a></code>), whatever the OS scheme. A selection colour set by the user (a mark’s <code>selected_color</code>) still wins.</p></li>
