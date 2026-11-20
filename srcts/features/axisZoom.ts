@@ -99,6 +99,7 @@ export function axisZoomFeature(
     // current view, so the pan groups are transform-ready before the first gesture.
     applyPanTransforms();
     setupConstantMarks(); // fixed-size glyphs (default) + crisp strokes
+    setupConstantFurniture(); // the same for the unkeyed panel elements (VW-26)
     retick();
   }
 
@@ -163,6 +164,85 @@ export function axisZoomFeature(
         }
       }
     }
+  }
+
+  // Once per render, after setupConstantMarks: the unkeyed elements of every
+  // pan group (a reference rule, an annotation, an unkeyed layer), in the base
+  // svg and in the above-marks overlay (VW-21), get the constant-size treatment
+  // the keyed marks have. Strokes stop thickening (non-scaling-stroke on each
+  // shape: vector-effect is not inherited), an unkeyed glyph layer keeps its
+  // pixel size, and text keeps its size anchored at its own position, so a
+  // label stays beside the point it annotates. Text marks with a key get the
+  // same, since text never reads well stretched. The gridlines and tick marks
+  // are hidden and re-drawn by the re-tick, and the background has left the
+  // pan group (adoptFurniture), so neither is affected.
+  function setupConstantFurniture(): void {
+    if (!ws.axisZoomActive || ws.opts.zoomMarks === "scale") return;
+    for (let i = 0; i < ws.azPanels.length; i++) {
+      const a = ws.azPanels[i];
+      constantFurnitureIn(a.pan);
+      if (a.mirror) constantFurnitureIn(a.mirror);
+    }
+  }
+
+  const SHAPES: Record<string, boolean> = { path: true, line: true, polyline: true, polygon: true, rect: true, circle: true, ellipse: true };
+
+  function constantFurnitureIn(pan: Element): void {
+    const all = pan.querySelectorAll("*");
+    for (let i = 0; i < all.length; i++) {
+      const n = all[i] as SVGElement;
+      const tag = n.tagName.toLowerCase();
+      if (tag === "text") { constantText(n); continue; }
+      if (!SHAPES[tag]) continue;
+      if (n.closest(".vellumwidget-detail, [role=\"grid\"]")) continue;
+      // A keyed glyph already counter-scales (setupConstantMarks).
+      if (n.style.getPropertyValue("transform")) continue;
+      if (!n.closest("[data-key]") && inGlyphLayer(n)) {
+        n.style.setProperty("transform-box", "fill-box");
+        n.style.setProperty("transform-origin", "center");
+        const place = transAsCss(n);
+        n.style.setProperty("transform", (place ? place + " " : "") + "scale(var(--vw-ix,1),var(--vw-iy,1))");
+      } else {
+        n.setAttribute("vector-effect", "non-scaling-stroke");
+      }
+    }
+  }
+
+  // An unkeyed layer of glyphs (vellumplot ids its layer groups
+  // "layer-<i>-<mark>-g<j>").
+  function inGlyphLayer(n: Element): boolean {
+    const g = n.closest("[data-vellum-id]");
+    const m = g ? /^layer-\d+-([a-z0-9_]+)-g\d+/.exec(g.getAttribute("data-vellum-id") || "") : null;
+    return !!m && GLYPH_MARKS[m[1]] === true;
+  }
+
+  // Counter-scale a text node about its anchor: T re-maps the anchor, the
+  // inverse-scale vars cancel T's size change around it. The anchor is the
+  // node's (x, y) through its own placement transform (translate / matrix);
+  // a transform this can't restate (rotate(), skew()) leaves the node as is.
+  function constantText(n: SVGElement): void {
+    if (n.style.getPropertyValue("transform")) return;
+    const own = (n.getAttribute("transform") || "").trim();
+    const place = transAsCss(n);
+    if (own && !place) return;
+    const x = parseFloat(n.getAttribute("x") || "") || 0, y = parseFloat(n.getAttribute("y") || "") || 0;
+    let X = x, Y = y;
+    const m = /matrix\(([^)]*)\)/.exec(place);
+    if (m) {
+      const v = m[1].split(",").map(Number);
+      X = v[0] * x + v[2] * y + v[4]; Y = v[1] * x + v[3] * y + v[5];
+    } else {
+      const t = /translate\(([-+\d.eE]+)px,([-+\d.eE]+)px\)/.exec(place);
+      if (t) { X = x + Number(t[1]); Y = y + Number(t[2]); }
+    }
+    if (!isFinite(X) || !isFinite(Y)) return;
+    // view-box origin 0 0 is the local origin for vellum's 0-based viewBox.
+    n.style.setProperty("transform-box", "view-box");
+    n.style.setProperty("transform-origin", "0px 0px");
+    n.style.setProperty(
+      "transform",
+      "translate(" + X + "px," + Y + "px) scale(var(--vw-ix,1),var(--vw-iy,1)) translate(" + -X + "px," + -Y + "px)" + (place ? " " + place : "")
+    );
   }
 
   // A node's own `transform` attribute, restated as a CSS transform function so
