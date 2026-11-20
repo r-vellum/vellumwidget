@@ -170,7 +170,7 @@ HTMLWidgets.widget({
         },
         retickGridCount: function () {
           let n = 0;
-          for (let i = 0; i < ws.azPanels.length; i++) { const g = ws.azPanels[i].grid; if (g) n += g.querySelectorAll("line").length; }
+          for (let i = 0; i < ws.azPanels.length; i++) { const g = ws.azPanels[i].grid; if (g) n += g.querySelectorAll("line:not(.vellumwidget-retick-tick)").length; }
           return n;
         },
         // Every zoomable panel's name + current pan transform (multi-panel axis zoom).
@@ -187,9 +187,17 @@ HTMLWidgets.widget({
         getView: function () { return ws.vb ? { x: ws.vb.x, y: ws.vb.y, w: ws.vb.w, h: ws.vb.h } : null; },
         staticAxesHidden: function () {
           if (!ws.svgEl) return null;
+          // Gridlines and axis label groups hidden; an axis group may stay shown
+          // for its axis line, with everything else in it hidden.
           const nodes = ws.svgEl.querySelectorAll('[role="grid"], [data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
           if (!nodes.length) return null;
-          return Array.prototype.every.call(nodes, function (n: Element) { return (n as SVGElement).style.display === "none"; });
+          return Array.prototype.every.call(nodes, function (n: Element) {
+            if ((n as SVGElement).style.display === "none") return true;
+            if (n.getAttribute("role") === "grid") return false;
+            return Array.prototype.every.call(n.children, function (c: Element) {
+              return (c as SVGElement).style.display === "none" || c.tagName.toLowerCase() === "path";
+            });
+          });
         },
         setView: function (nvb: ViewBox) { ws.vb = { x: nvb.x, y: nvb.y, w: nvb.w, h: nvb.h }; ws.fx.applyViewBox(); },
         toView: ws.fx.toView,

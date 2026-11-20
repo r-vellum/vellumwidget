@@ -1,5 +1,15 @@
 # vellumwidget 0.11.0.9000
 
+* **Zoomed axes show their gridlines and tick marks (VW-17).** Under axis-aware
+  zoom the re-ticked gridlines went in under vellumplot's opaque panel
+  background, so a zoomed panel showed none, and the static tick marks stayed
+  in the scaled pan group and drifted off their breaks. The panel background
+  now moves out of the pan group and the re-ticked grid sits on top of it; the
+  background no longer scales with the zoom either. The static ticks are
+  hidden along with the static labels and re-drawn at the new breaks in the
+  theme's stroke and length, and an axis line (`theme_classic()`) stays
+  visible. Applies to facets, compositions and secondary axes alike.
+
 * **Overview + detail: `vellumplot::bind_scale()` is enacted (F-15).** Brushing
   an overview view zooms every panel bound to the brush to the brushed range on
   the bound axis, re-ticking its axes; clearing the brush resets it. The view
