@@ -105,7 +105,7 @@ export function declarativeFeature(
   // empty selection and `empty !== false`, the whole plot stays `if_true`
   // (spotlight semantics — matches the static render). SVG mode only.
   function applyConditions(): void {
-    if (ws.rasterMode || !ws.interactions || !ws.interactions.conditions) return;
+    if (ws.fx.ringMode() || !ws.interactions || !ws.interactions.conditions) return;
     const selByName: Record<string, SelDef> = {};
     (ws.interactions.selections || []).forEach((s) => (selByName[s.name] = s));
     for (let ci = 0; ci < ws.interactions.conditions.length; ci++) {
@@ -142,7 +142,7 @@ export function declarativeFeature(
 
   function applyFilters(): void {
     const ix = ws.interactions;
-    if (ws.rasterMode || !ix || !ix.filters || !ix.filters.length) return;
+    if (ws.fx.ringMode() || !ix || !ix.filters || !ix.filters.length) return;
     const filters = ix.filters;
     const selByName: Record<string, SelDef> = {};
     (ix.selections || []).forEach((s) => (selByName[s.name] = s));

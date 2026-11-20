@@ -1,5 +1,21 @@
 # vellumwidget 0.12.0.9000
 
+* **Zoom in far enough on a big plot and its marks become real, interactive
+  SVG (VW-16).** In raster mode with the display list, once a zoom settles with
+  fewer than `render_options(detail_marks = )` marks in view (default 3,000),
+  the visible marks are built as keyed SVG nodes inside the zoomed panel, from
+  their exact geometry and paint. Hover and click selection then style the marks
+  themselves (no rings), `condition()` and `filter_by()` apply to them, and they
+  are keyboard-focusable marks for screen readers. Panning or zooming within the
+  detail tier rebuilds the nodes for the new view, keeping the selection.
+  Zooming back out past 1.5 times the threshold returns to the canvas, and
+  the selection shows as rings again. `detail_marks = 0` turns it off. The
+  swap happens once the view settles, not on every wheel tick.
+
+* A `condition()`'s `if_false` colour given as an R colour name (`"grey80"`) is
+  now sent to the browser as hex. The browser ignored such names, so the
+  condition styled nothing (SVG mode too).
+
 * **Zoomed-in big plots are drawn exactly, from a smaller payload (VW-15).**
   With a vellum that has the marks-only display list (`scene_display_list()`),
   raster mode ships each keyed mark's exact device-pixel geometry, paint and key

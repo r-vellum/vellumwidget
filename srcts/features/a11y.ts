@@ -145,7 +145,8 @@ export function a11yFeature(
       buildDataTable(); // (a no-op when a11y is off — also clears a stale table)
       return;
     }
-    if (ws.rasterMode) {
+    if (ws.fx.ringMode()) {
+      ws.svgEl.removeAttribute("aria-roledescription");
       // No per-element DOM nodes to focus, and a data table of the (large) element
       // set would reintroduce the DOM blowup raster mode exists to avoid. Present
       // the chart as a labelled image; the scene's <title>/<desc> (or `alt`) name it.
@@ -183,8 +184,10 @@ export function a11yFeature(
     }
 
     const seen: Record<string, boolean> = {};
-    for (let i = 0; i < ws.elements.length; i++) {
-      const k = ws.elements[i].key;
+    // The raster detail tier focuses only its materialised (visible) marks.
+    const keys = ws.rasterMode ? ws.detailKeys : ws.elements.map((e) => e.key);
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
       if (seen[k]) continue;
       const nodes = ws.nodesByKey[k];
       if (!nodes || !nodes.length) continue;
@@ -200,7 +203,10 @@ export function a11yFeature(
     // The first mark carries tabindex=0 so a Tab press enters the mark set.
     if (ws.focusables.length) ws.focusables[0].node.setAttribute("tabindex", "0");
 
-    buildDataTable();
+    // No data table of a raster plot's (large) element set, even in detail.
+    if (ws.rasterMode) {
+      if (ws.tableEl) { ws.tableEl.remove(); ws.tableEl = null; }
+    } else buildDataTable();
   }
 
   return { a11yLabel, announce, focusRoving, markFocused, setupA11y };

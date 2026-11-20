@@ -131,6 +131,12 @@ navigator_options <- function(height = 56) {
 #'   only a bounding-box index, draws zoomed-in marks as plain dots, and says
 #'   so with a message: a plot that big is better drawn as density, with
 #'   `vellumplot::mark_datashade()` or `vellumplot::mark_hex()`.
+#' @param detail_marks In raster mode with the display list, once a zoom
+#'   settles with fewer than this many marks in view (default `3000`), the
+#'   visible marks become real SVG nodes (the detail tier): hover, selection,
+#'   `condition()` and `filter_by()` styling and keyboard focus then work on
+#'   them as in SVG mode. Zooming back out past 1.5 times this many returns to
+#'   the canvas. `0` turns the detail tier off.
 #' @param text How text is written into the SVG, passed to [vellum::scene_svg()]:
 #'   `"native"` (default) emits selectable `<text>` referencing system fonts ---
 #'   smaller when the page has the font, post-processable, and better for
@@ -144,7 +150,8 @@ render_options <- function(
   mode = c("auto", "svg", "raster"),
   raster_threshold = 20000L,
   text = c("native", "outline"),
-  max_marks = 500000L
+  max_marks = 500000L,
+  detail_marks = 3000L
 ) {
   text_set <- !missing(text)
   structure(
@@ -157,6 +164,7 @@ render_options <- function(
       ),
       text = .check_choice(text, c("native", "outline"), "text"),
       max_marks = .check_number(max_marks, "max_marks", min = 0),
+      detail_marks = .check_number(detail_marks, "detail_marks", min = 0),
       text_set = text_set
     ),
     class = "vellumwidget_render_options"

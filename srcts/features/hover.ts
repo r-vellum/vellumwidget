@@ -231,7 +231,7 @@ export function hoverFeature(
     if (!ws.hovering) return;
     ws.hovering = false;
     ws.hoverSig = "";
-    if (ws.rasterMode) ws.fx.clearGroup(ws.hovGroup);
+    if (ws.rasterMode) ws.fx.clearGroup(ws.hovGroup); // (empty in the detail tier)
     if (ws.largeDim) hideHighlightOverlay();
     ws.el.classList.remove("vellumwidget-hovering");
     ws.fx.clearClass("vellumwidget-hl");

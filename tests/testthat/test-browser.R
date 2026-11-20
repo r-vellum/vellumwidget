@@ -155,7 +155,8 @@ test_that("VW-15: the zoomed canvas draws each mark's own colour from the displa
   df <- data.frame(x = runif(n), y = runif(n), g = sample(letters[1:4], n, TRUE), id = seq_len(n))
   p <- vellumplot::vplot(df) |>
     vellumplot::mark_point(x = x, y = y, color = g, shape = g, data_id = id, size = 4)
-  w <- as_widget(p, render = render_options(mode = "raster"), elementId = "w1")
+  # (detail tier off: this checks the canvas, which ~40 marks in view would replace)
+  w <- as_widget(p, render = render_options(mode = "raster", detail_marks = 0), elementId = "w1")
   expect_false(is.null(w$x$displayList))
   b <- open_widget(w)
   ev <- function(js) b$Runtime$evaluate(js)$result$value
@@ -207,4 +208,58 @@ test_that("VW-15: with many marks in view the exact redraw waits for the zoom to
   Sys.sleep(0.6)
   expect_identical(ev("getComputedStyle(document.querySelector('.vellumwidget-canvas')).display"), "block")
   expect_true(ev("!!document.querySelector('svg.vellumwidget-marks-off')"))
+})
+
+test_that("VW-16: zooming in far enough materialises keyed SVG nodes (detail tier)", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .display_list_supported(), "vellum without the display list")
+  set.seed(6)
+  n <- 25000L
+  df <- data.frame(x = runif(n), y = runif(n), g = sample(letters[1:4], n, TRUE), id = seq_len(n))
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(
+      x = x, y = y, data_id = id,
+      color = vellumplot::condition("pick", g, "grey80")
+    ) |>
+    vellumplot::select_point("pick", on = "click")
+  w <- as_widget(p, elementId = "w1")
+  expect_true(w$x$options$raster)
+  b <- open_widget(w)
+  ev <- function(js) b$Runtime$evaluate(js)$result$value
+  pn <- w$x$panels[[1]]
+  view <- function(f) {
+    ev(sprintf(
+      "HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f})",
+      pn$px0 + (0.5 - f / 2) * (pn$px1 - pn$px0), pn$py0 + (0.5 - f / 2) * (pn$py1 - pn$py0),
+      f * (pn$px1 - pn$px0), f * (pn$py1 - pn$py0)
+    ))
+    Sys.sleep(0.5) # past the settle delay
+  }
+  tier <- function() ev("HTMLWidgets.find('#w1')._test.markTier()")
+  nodes <- function() ev("document.querySelectorAll('.vellumwidget-detail [data-key]').length")
+  view(0.5)
+  expect_identical(tier(), "mid")
+  expect_identical(nodes(), 0L)
+  view(0.25) # ~1560 of 25k uniform points in view
+  expect_identical(tier(), "detail")
+  expect_gt(nodes(), 1000L)
+  expect_lt(nodes(), 3000L)
+  expect_identical(ev("getComputedStyle(document.querySelector('.vellumwidget-canvas')).display"), "none")
+  # click a node: it is selected by class, and the condition greys the rest
+  ev("(function(){var n=document.querySelector('.vellumwidget-detail [data-key]'), r=n.getBoundingClientRect(); window.__xy=[r.left+r.width/2, r.top+r.height/2]; return 1})()")
+  xy <- as.numeric(strsplit(ev("window.__xy.join(',')"), ",")[[1]])
+  for (type in c("mouseMoved", "mousePressed", "mouseReleased")) {
+    b$Input$dispatchMouseEvent(type = type, x = xy[1], y = xy[2], button = "left", clickCount = 1)
+    Sys.sleep(0.1)
+  }
+  Sys.sleep(0.3)
+  expect_identical(ev("document.querySelectorAll('.vellumwidget-detail .vellumwidget-selected').length"), 1L)
+  expect_gt(ev("[].filter.call(document.querySelectorAll('.vellumwidget-detail [data-key]'), function(n){ return !!n.style.fill; }).length"), 1000L)
+  # keyboard focus: the nodes are focusable marks
+  expect_gt(ev("document.querySelectorAll('.vellumwidget-detail [tabindex]').length"), 1000L)
+  # back out: the nodes go and the selection is a ring again
+  view(0.6)
+  expect_identical(tier(), "mid")
+  expect_identical(nodes(), 0L)
+  expect_identical(ev("document.querySelectorAll('.vellumwidget-fb-sel').length"), 1L)
 })

@@ -130,6 +130,7 @@ export interface Options {
   navigator?: boolean; // show an overview x-range navigator strip below the plot
   navigatorHeight?: number; // strip height in px (default 56)
   axisZoom?: boolean; // axis-aware zoom: scale the data region + re-tick the axes, keeping the frame fixed (linear cartesian panels; SVG only)
+  detailMarks?: number; // raster detail tier: materialise SVG nodes below this many visible marks (0 = off)
   zoomMarks?: "fixed" | "scale"; // under axis_zoom, keep glyph marks a constant pixel size ("fixed", default) or let them scale ("scale")
   tooltipDelay?: number; // ms to wait before showing the tooltip on hover (default 0)
   tooltipFollow?: boolean; // true (default): tip tracks the cursor; false: anchor above the mark

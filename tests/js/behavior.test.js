@@ -4310,6 +4310,99 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(inst._test.nearestKeyAt(101, 50, 20) === "7", "dlist: hit-testing works on the derived geometry");
 }
 
+// ============ VW-16: the raster detail tier ============
+{
+  const b64 = (Arr, xs) => Buffer.from(new Arr(xs).buffer).toString("base64");
+  const f32 = (xs) => ({ type: "f32", n: xs.length, data: b64(Float32Array, xs) });
+  const u8 = (xs) => ({ type: "u8", n: xs.length, data: b64(Uint8Array, xs) });
+  // 4 points in panel-1-1 (20..180 x 10..90): a red circle, a square, a
+  // translucent blue circle, and one far right; plus a rect.
+  const DL = {
+    format: "vellum-display-list", version: 1, width: 200, height: 100, n: 5,
+    record: { kind: u8([0, 0, 0, 0, 1]), paint: u8([0, 0, 1, 0, 0]), key: { type: "u8", n: 5, seq: [0, 1] },
+      flags: { type: "u8", n: 5, const: 0 }, clip: { type: "u8", n: 5, const: 0 }, panel: { type: "u8", n: 5, const: 1 } },
+    point: { cx: f32([60, 64, 62, 170]), cy: f32([50, 50, 54, 50]), r: { type: "f32", n: 4, const: 2 }, shape: u8([0, 1, 0, 0]) },
+    rect: { x: f32([66]), y: f32([46]), w: f32([4]), h: f32([4]) },
+    path: { xy: { type: "f32", n: 0, data: "" }, run_offset: { type: "u8", n: 1, const: 0 }, path_offset: { type: "u8", n: 1, const: 0 },
+      closed: { type: "u8", n: 0, data: "" }, evenodd: { type: "u8", n: 0, data: "" } },
+    paints: { fill: ["#ff0000ff", "#0000ff80"], stroke: ["#ff0000ff", null], stroke_width: [1, 0], dash: [null, null], linecap: ["round", "round"], linejoin: ["round", "round"] },
+    clips: null, keys: ["p1", "p2", "p3", "p4", "r1"], panels: "panel-1-1"
+  };
+  const panel = {
+    name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+  };
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"><g role="grid"><path d="M0 0 L0 80"/></g></g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">50</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">25</text></g></svg>';
+  function mountTier(opts) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    inst.renderValue({
+      svg: svg,
+      elements: { key: ["p1", "p2", "p3", "p4", "r1"], mark: ["point", "point", "point", "point", "rect"] },
+      panels: [panel],
+      marks: { href: "data:image/png;base64,", width: 200, height: 100, panels: "panel-1-1" },
+      displayList: DL,
+      options: Object.assign({ raster: true, hover: true, select: true, zoom: true, selectMode: "multiple", a11y: true }, opts || {})
+    });
+    return { el: e, inst: inst };
+  }
+  const t = mountTier({ detailMarks: 4 });
+  ok(t.inst._test.markTier() === "overview" && t.inst._test.axisZoomActive(), "tier: a raster render starts in the overview tier");
+  // zoom to a 40x20 window around the cluster: 4 records visible (not < 4): mid
+  t.inst._test.setView({ x: 45, y: 40, w: 40, h: 20 });
+  t.inst._test.evalTier();
+  ok(t.inst._test.markTier() === "mid" && !t.el.querySelector(".vellumwidget-detail"), "tier: more visible marks than detailMarks stays on the canvas (mid)");
+  // tighter: 3 visible (p1, p2, p3) -> detail
+  t.inst._test.setView({ x: 48, y: 40, w: 20, h: 20 });
+  t.inst._test.evalTier();
+  const det = t.el.querySelectorAll('[data-vellum-pan="panel-1-1"] > g.vellumwidget-detail [data-key]');
+  ok(t.inst._test.markTier() === "detail" && det.length === 3, "tier: few enough visible marks become SVG nodes in the pan group");
+  const c1 = t.el.querySelector('.vellumwidget-detail [data-key="p1"]');
+  const sq = t.el.querySelector('.vellumwidget-detail [data-key="p2"]');
+  const c3 = t.el.querySelector('.vellumwidget-detail [data-key="p3"]');
+  ok(c1.tagName === "circle" && c1.getAttribute("cx") === "60" && c1.getAttribute("r") === "2" && c1.getAttribute("fill") === "#ff0000" && c1.getAttribute("stroke-width") === "1",
+    "tier: a circle record becomes a <circle> with its own paint");
+  ok(sq.tagName === "path" && /^M62 48L66 48L66 52L62 52Z$/.test(sq.getAttribute("d")), "tier: a square marker becomes its exact ring");
+  ok(c3.getAttribute("fill") === "#0000ff" && c3.getAttribute("fill-opacity") === "0.502" && !c3.hasAttribute("stroke"),
+    "tier: alpha becomes fill-opacity, a missing stroke stays off");
+  ok(/scale\(var\(--vw-ix/.test(c1.style.transform), "tier: glyph nodes keep a constant size under axis zoom");
+  ok(c1.getAttribute("role") === "graphics-symbol" && c1.hasAttribute("tabindex"), "tier: detail nodes are keyboard-focusable marks");
+  ok(t.el.querySelector("svg").getAttribute("role") === "graphics-document" && !t.el.querySelector(".vellumwidget-data-table"),
+    "tier: the chart is interactive in detail, with no data table of the whole set");
+  ok(t.el.querySelector("use.vellumwidget-marks").style.visibility === "hidden", "tier: the mark image is hidden under the nodes");
+  // selection is class-based on the nodes (no rings) and survives the tier swap
+  fireOn(t.el.querySelector("svg"), "click", c1);
+  ok(c1.classList.contains("vellumwidget-selected") && t.el.querySelectorAll(".vellumwidget-fb-sel").length === 0,
+    "tier: clicking a detail node selects it by class, not by ring");
+  // panning within detail rebuilds for the new view, keeping the selection
+  t.inst._test.setView({ x: 47, y: 40, w: 20, h: 20 });
+  t.inst._test.evalTier();
+  const c1b = t.el.querySelector('.vellumwidget-detail [data-key="p1"]');
+  ok(c1b && c1b !== c1 && c1b.classList.contains("vellumwidget-selected") && t.el.querySelectorAll(".vellumwidget-detail").length === 1,
+    "tier: a settle within detail rebuilds the nodes and re-applies the selection");
+  // zooming back out: nodes go, rings come back, focusables are dropped
+  t.inst._test.setView({ x: 0, y: 0, w: 200, h: 100 });
+  t.inst._test.evalTier();
+  ok(t.inst._test.markTier() === "overview" && !t.el.querySelector(".vellumwidget-detail") && t.el.querySelectorAll(".vellumwidget-fb-sel").length === 1,
+    "tier: zooming out leaves detail; the selection is drawn as a ring again");
+  ok(t.el.querySelector("svg").getAttribute("role") === "img" && t.el.querySelector("use.vellumwidget-marks").style.visibility === "",
+    "tier: out of detail the chart is an image again and the mark image shows");
+  // hysteresis: in detail, 4 visible (<= 1.5 x 4 = 6) stays detail
+  t.inst._test.setView({ x: 48, y: 40, w: 20, h: 20 }); t.inst._test.evalTier();
+  t.inst._test.setView({ x: 45, y: 40, w: 40, h: 20 }); t.inst._test.evalTier();
+  ok(t.inst._test.markTier() === "detail" && t.el.querySelectorAll(".vellumwidget-detail [data-key]").length === 4,
+    "tier: hysteresis keeps detail up to 1.5x the threshold");
+  // detailMarks = 0 turns the tier off
+  const off = mountTier({ detailMarks: 0 });
+  off.inst._test.setView({ x: 48, y: 40, w: 20, h: 20 }); off.inst._test.evalTier();
+  ok(off.inst._test.markTier() === "mid" && !off.el.querySelector(".vellumwidget-detail"), "tier: detailMarks = 0 never materialises nodes");
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();
