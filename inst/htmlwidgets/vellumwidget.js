@@ -419,6 +419,7 @@
   var DL_POINT = 0;
   var DL_RECT = 1;
   var DL_FLAG_PICK = 16;
+  var DL_FLAG_BLEND = 32;
   function b64bytes(s) {
     const bin = atob(s);
     const out = new Uint8Array(bin.length);
@@ -504,6 +505,13 @@
       panels: asColumn(raw.panels).map(String),
       exact: true,
       group: raw.record.group ? u32(dlColumn(raw.record.group)) : new Uint32Array(n),
+      run: raw.record.run ? u32(dlColumn(raw.record.run)) : new Uint32Array(n),
+      nRuns: Number(raw.runs) || 0,
+      covered: true,
+      runImgs: null,
+      runHref: null,
+      runW: 0,
+      runH: 0,
       gradients: [],
       groups: [],
       cpXy: new Float32Array(0),
@@ -512,6 +520,10 @@
       cpEvenodd: new Uint8Array(0)
     };
     if (dl.group.length !== n) dl.group = new Uint32Array(n);
+    if (dl.run.length !== n) {
+      dl.run = new Uint32Array(n);
+      dl.nRuns = 0;
+    }
     const k = raw.keys;
     if (k && typeof k === "object" && !Array.isArray(k) && "type" in k) {
       const kc = dlColumn(k);
@@ -587,6 +599,8 @@
         dl.flags[i] |= 1;
         dl.exact = false;
       }
+      if (dl.flags[i] & ~DL_FLAG_PICK && !(dl.run[i] > 0 && dl.run[i] <= dl.nRuns)) dl.covered = false;
+      if (dl.flags[i] & DL_FLAG_BLEND) dl.covered = false;
       const kd = kind[i];
       if (kd === DL_POINT) {
         const j = ip++, r = dl.r[j];
@@ -622,6 +636,15 @@
       }
     }
     return dl;
+  }
+  function attachRuns(dl, imgs, hrefs, w, h) {
+    if (!dl.covered || !dl.nRuns || imgs.length !== dl.nRuns || !(w > 0 && h > 0)) return false;
+    dl.runImgs = imgs;
+    dl.runHref = hrefs;
+    dl.runW = w;
+    dl.runH = h;
+    dl.exact = true;
+    return true;
   }
   function fillBboxes(elements, dl) {
     const box = {};
@@ -2549,7 +2572,7 @@
         return g;
       };
       let D;
-      if (dl.gradients.length || dl.groups.length || dl.cpPathOff.length > 1) {
+      if (dl.gradients.length || dl.groups.length || dl.cpPathOff.length > 1 || dl.runHref) {
         const el = document.createElementNS(SVGNS, "defs");
         el.setAttribute("class", "vellumwidget-detail");
         svg.insertBefore(el, svg.firstChild);
@@ -2574,9 +2597,73 @@
         }
         return st.length ? st[st.length - 1].el : root;
       };
+      const runIds = {};
+      const placed = {};
+      const placeRun = function(p, r) {
+        const tag = p + ":" + r;
+        if (placed[tag] || !D || !dl.runHref) return;
+        placed[tag] = true;
+        if (!runIds[r]) {
+          const im = document.createElementNS(SVGNS, "image");
+          runIds[r] = D.pre + "run" + r;
+          im.setAttribute("id", runIds[r]);
+          im.setAttribute("x", "0");
+          im.setAttribute("y", "0");
+          im.setAttribute("width", String(dl.runW));
+          im.setAttribute("height", String(dl.runH));
+          im.setAttribute("preserveAspectRatio", "none");
+          im.setAttribute("href", dl.runHref[r - 1]);
+          D.el.appendChild(im);
+        }
+        const u = document.createElementNS(SVGNS, "use");
+        u.setAttribute("class", "vellumwidget-detail-run");
+        u.setAttribute("href", "#" + runIds[r]);
+        groupFor(p).appendChild(u);
+        if (chains[p]) chains[p].length = 0;
+      };
+      let order = vis;
+      if (dl.runImgs) {
+        const firsts = {}, extra = [];
+        for (let i = 0; i < dl.n; i++) {
+          if (!(dl.run[i] > 0)) continue;
+          const tag = dl.panel[i] + ":" + dl.run[i];
+          if (!firsts[tag]) {
+            firsts[tag] = true;
+            extra.push(i);
+          }
+        }
+        if (extra.length) {
+          const all = {};
+          for (let v = 0; v < vis.length; v++) all[vis[v]] = true;
+          for (let e = 0; e < extra.length; e++) all[extra[e]] = true;
+          order = Object.keys(all).map(Number).sort((a, b) => a - b);
+        }
+      }
+      const visSet = {};
+      for (let v = 0; v < vis.length; v++) visSet[vis[v]] = true;
       const seen = {};
-      for (let v = 0; v < vis.length; v++) {
-        const i = vis[v];
+      for (let v = 0; v < order.length; v++) {
+        const i = order[v];
+        if (dl.runImgs && dl.run[i] > 0) {
+          const p = dl.panel[i] <= dl.panels.length ? dl.panel[i] : 0;
+          placeRun(p, dl.run[i]);
+          if (!visSet[i] || dl.flags[i] & DL_FLAG_PICK) continue;
+          const n2 = nodeFor(dl, i);
+          n2.setAttribute("fill", "#000");
+          n2.setAttribute("fill-opacity", "0");
+          n2.removeAttribute("stroke");
+          n2.removeAttribute("stroke-opacity");
+          n2.removeAttribute("stroke-dasharray");
+          n2.setAttribute("class", "vellumwidget-detail-proxy");
+          groupFor(p).appendChild(n2);
+          const k2 = dl.keys[dl.key[i]];
+          (ws.nodesByKey[k2] = ws.nodesByKey[k2] || []).push(n2);
+          if (!seen[k2]) {
+            seen[k2] = true;
+            ws.detailKeys.push(k2);
+          }
+          continue;
+        }
         if (dl.flags[i]) continue;
         const n = nodeFor(dl, i, D);
         hostFor(dl.panel[i] <= dl.panels.length ? dl.panel[i] : 0, dl.group[i]).appendChild(n);
@@ -5480,9 +5567,52 @@
         curAlpha = 1;
         tgt.globalAlpha = 1;
       };
+      const runImgs = dl.runImgs;
+      const drawnRun = [];
+      const drawRun = function(r) {
+        const img = runImgs[r - 1];
+        if (!img) return;
+        const one = function(A, pc) {
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          if (pc) {
+            ctx.beginPath();
+            ctx.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]);
+            ctx.clip();
+          }
+          ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+          ctx.drawImage(img, 0, 0, dl.runW, dl.runH);
+          ctx.restore();
+        };
+        let any = false;
+        for (let p = 1; p <= np; p++) if (pclip[p]) {
+          one(aff[p], pclip[p]);
+          any = true;
+        }
+        if (!any) one(aff[0], null);
+      };
       let curGroup = 0;
       tgt.save();
       for (let i = 0; i < dl.n; i++) {
+        if (runImgs && dl.run[i] > 0) {
+          const r = dl.run[i];
+          if (!drawnRun[r]) {
+            drawnRun[r] = true;
+            if (curGroup !== 0) {
+              enterGroup(0);
+              curGroup = 0;
+            }
+            flush();
+            tgt.restore();
+            drawRun(r);
+            tgt.save();
+            curState = -1;
+            curPaint = -1;
+            curAlpha = 1;
+            tgt.globalAlpha = 1;
+          }
+          continue;
+        }
         if (dl.flags[i]) continue;
         let ov = 0, alpha = 1;
         if (flags) {
@@ -5933,6 +6063,26 @@
       ws.el.setAttribute("tabindex", "0");
       ws.el.addEventListener("keydown", ws.fx.onKey);
     }
+    function loadFlagged(f) {
+      const dl = ws.dl;
+      if (!dl || !dl.covered || !dl.nRuns) return;
+      const hrefs = asColumn(f.runs).map(String);
+      if (hrefs.length !== dl.nRuns) return;
+      const imgs = [];
+      let left = hrefs.length;
+      for (let k = 0; k < hrefs.length; k++) {
+        const im = document.createElement("img");
+        im.onload = function() {
+          if (--left > 0 || ws.dl !== dl) return;
+          if (attachRuns(dl, imgs, hrefs, Number(f.width), Number(f.height))) {
+            ws.fx.drawPoints();
+            ws.fx.scheduleTier();
+          }
+        };
+        imgs.push(im);
+        im.src = hrefs[k];
+      }
+    }
     function renderValue(x) {
       ws.opts = Object.assign(
         // Interactive-by-default: hover/select/brush/lasso/zoom and axis-aware
@@ -6074,6 +6224,7 @@
         if (ws.rasterMode) {
           ws.fx.ensureCanvas();
           ws.fx.sampleBaseRaster();
+          if (ws.marksLayer && x.flagged) loadFlagged(x.flagged);
         } else {
           ws.fx.clearPointData();
         }
@@ -6971,6 +7122,12 @@
           },
           markTier: function() {
             return ws.markTier;
+          },
+          listExact: function() {
+            return ws.dl ? ws.dl.exact : null;
+          },
+          runsAttached: function() {
+            return !!(ws.dl && ws.dl.runImgs);
           },
           condTags: function() {
             return Object.keys(ws.condTagElems).map(function(k) {

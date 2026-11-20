@@ -459,3 +459,32 @@ test_that("VW-23: gradient bars (display list v2) reach the detail tier", {
   img <- png::readPNG(jsonlite::base64_dec(shot$data))
   expect_gt(mean(img[, , 1] > 0.8 & img[, , 3] < 0.4), 0.05) # gold-ish
 })
+
+test_that("VW-30: flagged marks are composited in paint order in the mid and detail tiers", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
+  # an exact blue disc, a masked gold disc over it (flagged), an exact red disc over that
+  s <- vellum::vl_scene(4, 3, dpi = 96, bg = "white") |>
+    vellum::draw(vellum::circle_grob(0.35, 0.5, r = 0.2, gp = vellum::vl_gpar(fill = "blue", col = NA), key = "a")) |>
+    vellum::push(vellum::vl_viewport(mask = vellum::as_mask(vellum::rect_grob(gp = vellum::vl_gpar(fill = "black"))))) |>
+    vellum::draw(vellum::circle_grob(0.5, 0.5, r = 0.2, gp = vellum::vl_gpar(fill = "gold", col = NA), key = "m")) |>
+    vellum::pop() |>
+    vellum::draw(vellum::circle_grob(0.65, 0.5, r = 0.2, gp = vellum::vl_gpar(fill = "red", col = NA), key = "c"))
+  for (dm in c(1L, 100L)) {
+    w <- as_widget(s, elementId = "w1", render = render_options(mode = "raster", detail_marks = dm))
+    b <- open_widget(w)
+    ev <- function(js) b$Runtime$evaluate(js)$result$value
+    ev("HTMLWidgets.find('#w1')._test.setView({x:96,y:72,w:192,h:144})")
+    Sys.sleep(0.6)
+    expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), if (dm == 1L) "mid" else "detail")
+    expect_true(ev("HTMLWidgets.find('#w1')._test.runsAttached()"))
+    r <- as.numeric(strsplit(ev("(function(){var r=document.querySelector('.vellumwidget-stage').getBoundingClientRect();return [r.left,r.top,r.width,r.height].join(',')})()"), ",")[[1]])
+    shot <- b$Page$captureScreenshot(format = "png", clip = list(x = r[1], y = r[2], width = r[3], height = r[4], scale = 1))
+    img <- png::readPNG(jsonlite::base64_dec(shot$data))
+    px <- function(fx, fy) img[round(fy * dim(img)[1]), round(fx * dim(img)[2]), 1:3]
+    # scene x 0.425 (gold over blue) and 0.575 (red over gold), at the centre line;
+    # the view is x 0.25..0.75, so they sit at 0.35 and 0.65 of the stage
+    expect_true(all(abs(px(0.35, 0.5) - c(1, 0.84, 0)) < 0.1)) # gold, not blue
+    expect_true(all(abs(px(0.65, 0.5) - c(1, 0, 0)) < 0.1)) # red, not gold
+  }
+})

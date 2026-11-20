@@ -2,14 +2,14 @@
 // renderValue / resize entry points.
 
 import { asColumn, normalizeElements, normalizePanels } from "../elements";
-import { decodeDisplayList, fillBboxes } from "../dlist";
+import { attachRuns, decodeDisplayList, fillBboxes } from "../dlist";
 import { isScalesBound } from "./bindScales";
 import { DIM_OVERLAY_MIN, SVGNS } from "./constants";
 import { cssEscape } from "../css";
 import { isDarkBg, sceneBackgrounds } from "../ink";
 import { registerProxyHandler } from "../shiny";
 import type { WidgetFns, WidgetState } from "../state";
-import type { MarksLayer, Payload } from "../types";
+import type { FlaggedLayer, MarksLayer, Payload } from "../types";
 import { fmtViewBox, parseViewBox } from "../viewbox";
 
 // Page-unique ids for the split render's mark image (several widgets per page).
@@ -178,6 +178,34 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     ws.el.addEventListener("keydown", ws.fx.onKey);
   }
 
+  // The mixed tier (VW-30): with a vellum that renders the display list's
+  // flagged marks as their own rasters (one per run in paint order), the list
+  // is drawn in full anyway -- the exact records on the canvas or as detail
+  // nodes, each run as its image where it falls in paint order -- so one
+  // flagged mark no longer keeps every mark on the PNG. Until the images have
+  // loaded (or when they don't match the list) nothing changes: the list
+  // stays inexact and the mark PNG is kept, as with an older vellum.
+  function loadFlagged(f: FlaggedLayer): void {
+    const dl = ws.dl;
+    if (!dl || !dl.covered || !dl.nRuns) return;
+    const hrefs = asColumn(f.runs).map(String);
+    if (hrefs.length !== dl.nRuns) return;
+    const imgs: HTMLImageElement[] = [];
+    let left = hrefs.length;
+    for (let k = 0; k < hrefs.length; k++) {
+      const im = document.createElement("img");
+      im.onload = function () {
+        if (--left > 0 || ws.dl !== dl) return;
+        if (attachRuns(dl, imgs, hrefs, Number(f.width), Number(f.height))) {
+          ws.fx.drawPoints();
+          ws.fx.scheduleTier();
+        }
+      };
+      imgs.push(im);
+      im.src = hrefs[k];
+    }
+  }
+
   function renderValue(x: Payload) {
     ws.opts = Object.assign(
       // Interactive-by-default: hover/select/brush/lasso/zoom and axis-aware
@@ -339,6 +367,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       if (ws.rasterMode) {
         ws.fx.ensureCanvas();
         ws.fx.sampleBaseRaster();
+        if (ws.marksLayer && x.flagged) loadFlagged(x.flagged);
       } else {
         ws.fx.clearPointData();
       }

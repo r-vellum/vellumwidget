@@ -1037,6 +1037,63 @@ test_that("raster mode asks for display list v2 when vellum has it (VW-23)", {
   expect_true(all(.dl_col(w1$x$displayList$record$flags) == 1))
 })
 
+# A raw scene with exact points, a masked disc between them (flagged) and a
+# keyed label after them (flagged): two runs.
+.flagged_scene <- function() {
+  vellum::vl_scene(3, 2, dpi = 72, bg = "white") |>
+    vellum::draw(vellum::points_grob(c(0.2, 0.4), 0.5, key = c("a1", "a2"))) |>
+    vellum::push(vellum::vl_viewport(
+      mask = vellum::as_mask(vellum::rect_grob(gp = vellum::vl_gpar(fill = "black")))
+    )) |>
+    vellum::draw(vellum::circle_grob(0.5, 0.5, r = 0.2, key = "m")) |>
+    vellum::pop() |>
+    vellum::draw(vellum::points_grob(0.6, 0.5, key = "b")) |>
+    vellum::draw(vellum::text_grob("lab", x = 0.8, y = 0.8, key = "t"))
+}
+
+test_that("raster mode ships one PNG per flagged run when vellum has the layer (VW-30)", {
+  skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
+  w <- as_widget(.flagged_scene(), render = render_options(mode = "raster"))
+  dl <- w$x$displayList
+  expect_identical(dl$runs, 2L)
+  f <- w$x$flagged
+  expect_length(f$runs, 2L)
+  expect_true(all(startsWith(f$runs, "data:image/png;base64,")))
+  expect_identical(c(f$width, f$height), c(w$x$marks$width, w$x$marks$height))
+  # no flagged mark: no layer
+  plain <- vellum::vl_scene(2, 2, dpi = 72) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, key = "a"))
+  expect_null(as_widget(plain, render = render_options(mode = "raster"))$x$flagged)
+  # SVG mode never ships it
+  expect_null(as_widget(.flagged_scene(), render = render_options(mode = "svg"))$x$flagged)
+})
+
+test_that("the flagged layer falls back to the PNG path when it can't be used (VW-30)", {
+  # an older vellum
+  local({
+    local_mocked_bindings(.flagged_layer_supported = function() FALSE)
+    expect_null(as_widget(.flagged_scene(), render = render_options(mode = "raster"))$x$flagged)
+  })
+  skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
+  marks <- list(width = 10, height = 10)
+  # a list without runs (older vellum), or too many runs
+  dl <- list(record = list(flags = list(type = "u8", n = 1L, const = 4)), runs = NULL)
+  expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
+  dl$record$run <- list(type = "u8", n = 1L, const = 1)
+  dl$runs <- .MAX_FLAGGED_RUNS + 1L
+  expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
+  # a blend-mode mark (flag 32) can't be composited from its own raster
+  dl$runs <- 1L
+  dl$record$flags <- list(type = "u8", n = 1L, const = 36)
+  expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
+  blend <- vellum::vl_scene(2, 2, dpi = 72) |>
+    vellum::draw(vellum::points_grob(0.3, 0.5, key = "a")) |>
+    vellum::push(vellum::vl_viewport(blend = "multiply")) |>
+    vellum::draw(vellum::circle_grob(0.5, 0.5, r = 0.2, key = "m")) |>
+    vellum::pop()
+  expect_null(as_widget(blend, render = render_options(mode = "raster"))$x$flagged)
+})
+
 test_that("render_options(detail_marks) reaches the runtime (VW-16)", {
   expect_equal(render_options()$detail_marks, 3000)
   expect_error(render_options(detail_marks = -1), "at least 0")

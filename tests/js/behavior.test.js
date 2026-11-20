@@ -5049,6 +5049,189 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     "VW-28 export: with no selection the nodes export unstyled");
 }
 
+// ============ VW-30: the mixed tier (flagged runs as rasters) ============
+{
+  const b64 = (Arr, xs) => Buffer.from(new Arr(xs).buffer).toString("base64");
+  const f32 = (xs) => ({ type: "f32", n: xs.length, data: b64(Float32Array, xs) });
+  const u8 = (xs) => ({ type: "u8", n: xs.length, data: b64(Uint8Array, xs) });
+  function recCtx() {
+    const log = [];
+    let arcs = [];
+    return {
+      log: log, fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1, _stack: [], _clips: 0,
+      save() { this._stack.push(this._clips); }, restore() { this._clips = this._stack.pop() || 0; },
+      setTransform(a, b, c, d, e, f) { this._t = [a, d, e, f]; }, clearRect() { log.length = 0; },
+      rect() {}, clip() { this._clips++; }, moveTo() {}, lineTo() {}, closePath() {}, setLineDash() {},
+      beginPath() { arcs = []; }, arc(x) { arcs.push(Math.round(x)); },
+      fill() { log.push({ op: "fill", xs: arcs.slice() }); },
+      stroke() {},
+      drawImage(img, x, y, w, h) { log.push({ op: "img", src: img && img.src, w: w, h: h, t: this._t.slice(), clipped: this._clips > 0 }); }
+    };
+  }
+  // p1 exact, p2 flagged (run 1, under a mask), p3 exact, p4 flagged (run 2, text)
+  function dlRuns(o) {
+    o = o || {};
+    const flags = o.flags || [0, 4, 0, 8];
+    const rec = { kind: { type: "u8", n: 4, const: 0 }, paint: { type: "u8", n: 4, const: 0 }, key: { type: "u32", n: 4, seq: [0, 1] },
+      flags: u8(flags), clip: { type: "u8", n: 4, const: 0 }, panel: { type: "u8", n: 4, const: o.panels ? 1 : 0 },
+      group: { type: "u8", n: 4, const: 0 } };
+    if (!o.noRuns) rec.run = u8([0, 1, 0, 2]);
+    const dl = {
+      format: "vellum-display-list", version: 2, width: 200, height: 100, n: 4, record: rec,
+      point: { cx: f32([40, 80, 120, 160]), cy: { type: "f32", n: 4, const: 50 }, r: { type: "f32", n: 4, const: 3 }, shape: { type: "u8", n: 4, const: 0 } },
+      rect: { x: f32([]), y: f32([]), w: f32([]), h: f32([]) },
+      path: { xy: { type: "f32", n: 0, data: "" }, run_offset: { type: "u8", n: 1, const: 0 }, path_offset: { type: "u8", n: 1, const: 0 },
+        closed: { type: "u8", n: 0, data: "" }, evenodd: { type: "u8", n: 0, data: "" } },
+      paints: { fill: ["#ff0000ff"], stroke: [null], stroke_width: [0], dash: [null], linecap: ["round"], linejoin: ["round"], fill_gradient: [0] },
+      clips: null, keys: ["p1", "p2", "p3", "p4"], panels: o.panels ? "panel-1-1" : null,
+      gradients: null, clip_paths: null, groups: null
+    };
+    if (!o.noRuns) dl.runs = 2;
+    return dl;
+  }
+  const panel = {
+    name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+  };
+  const below = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"><g role="grid"><path d="M20 50 L180 50" stroke="#fff"/></g></g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">50</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">25</text></g></svg>';
+  const raw = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><rect width="200" height="100" fill="#fff"/></svg>';
+  const proto = window.HTMLCanvasElement.prototype;
+  const imgProto = window.HTMLImageElement.prototype;
+  const srcDesc = Object.getOwnPropertyDescriptor(imgProto, "src");
+  let autoLoad = true;
+  const pending = [];
+  Object.defineProperty(imgProto, "src", {
+    configurable: true,
+    get() { return this._vwSrc || ""; },
+    set(v) { this._vwSrc = v; if (autoLoad) { if (this.onload) this.onload(); } else pending.push(this); }
+  });
+  function mount(o) {
+    o = o || {};
+    const ctx = recCtx();
+    const orig = proto.getContext;
+    proto.getContext = function () { return ctx; };
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    const flagged = o.noFlagged ? null : { runs: o.runHrefs || ["data:image/png;base64,RUN1", "data:image/png;base64,RUN2"], width: 200, height: 100 };
+    inst.renderValue({
+      svg: o.panels ? below : raw,
+      elements: { key: ["p1", "p2", "p3", "p4"], mark: ["point", "point", "point", "text"], cond: [["pick:color"], ["pick:color"], ["pick:color"], ["pick:color"]],
+        x0: [null, 77, null, 150], y0: [null, 47, null, 45], x1: [null, 83, null, 170], y1: [null, 53, null, 55] },
+      panels: o.panels ? [panel] : undefined,
+      marks: { href: "data:image/png;base64,ORIGINAL", width: 200, height: 100, panels: o.panels ? "panel-1-1" : null },
+      displayList: dlRuns(o),
+      flagged: flagged,
+      interactions: { selections: [{ name: "pick", kind: "point", on: "click", empty: true }],
+        conditions: [{ selection: "pick", aes: "color", if_false: null, empty: true }], filters: [] },
+      options: Object.assign({ raster: true, hover: true, select: true, zoom: true, selectMode: "multiple", detailMarks: o.detailMarks || 1 }, o.options || {})
+    });
+    return { el: e, inst: inst, ctx: ctx, restore: function () { proto.getContext = orig; } };
+  }
+  const seq = (ctx) => ctx.log.map((r) => r.op === "img" ? "img:" + r.src.slice(-4) : "fill:" + r.xs.join("/")).join(",");
+  const marksShown = (t) => { const u = t.el.querySelector("svg use.vellumwidget-marks, svg > image.vellumwidget-marks"); return !!u && u.style.visibility !== "hidden"; };
+
+  // raw scene (viewBox zoom): the runs are drawn in paint order between the exact marks
+  const a = mount({});
+  ok(a.inst._test.runsAttached() && a.inst._test.listExact() === true, "VW-30: with the run rasters loaded the list counts as exact");
+  a.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); a.inst._test.evalTier();
+  ok(a.inst._test.markTier() === "mid", "VW-30 setup: mid tier");
+  // (view x 20..180 at 1.25 canvas px per scene px: p1 at 25, p3 at 125)
+  ok(seq(a.ctx) === "fill:25,img:RUN1,fill:125,img:RUN2",
+    "VW-30: the canvas draws p1, run 1, p3, run 2 -- the flagged marks keep their paint order");
+  const im = a.ctx.log.filter((r) => r.op === "img")[0];
+  ok(im && im.w === 200 && im.h === 100 && Math.abs(im.t[0] - 1.25) < 1e-6 && Math.abs(im.t[2] + 25) < 1e-6 && !im.clipped,
+    "VW-30: under viewBox zoom a run raster goes through the view's transform, unclipped");
+  ok(!marksShown(a), "VW-30: the mark PNG is hidden: every mark is on the canvas");
+  // styling: the exact marks take a condition, the run raster is drawn as is
+  a.inst._call("select", ["p1"]);
+  ok(/img:RUN1/.test(seq(a.ctx)), "VW-30: a condition keeps the runs on the canvas (their own styling is baked in)");
+  a.restore();
+
+  // detail: the runs are <use>s of one image each, in paint order, and the flagged marks get stand-ins
+  const d = mount({ detailMarks: 100 });
+  d.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); d.inst._test.evalTier();
+  ok(d.inst._test.markTier() === "detail", "VW-30: a list with covered flagged runs reaches the detail tier");
+  const kids = Array.from(d.el.querySelectorAll("g.vellumwidget-detail > *")).map((n) =>
+    n.classList.contains("vellumwidget-detail-run") ? "run:" + n.getAttribute("href").slice(-1) : n.getAttribute("data-key"));
+  ok(kids.join(",") === "p1,run:1,p2,p3,run:2,p4", "VW-30: detail nodes and run images interleave in paint order");
+  const prox = d.el.querySelector('.vellumwidget-detail-proxy[data-key="p2"]');
+  ok(prox && prox.getAttribute("fill-opacity") === "0" && !prox.hasAttribute("stroke"),
+    "VW-30: a flagged mark's stand-in node is transparent (the run image paints it)");
+  const defImg = d.el.querySelector("defs.vellumwidget-detail image");
+  ok(defImg && /RUN1$/.test(defImg.getAttribute("href")) && defImg.getAttribute("width") === "200", "VW-30: the run raster is defined once, in the scene frame");
+  d.inst._call("select", ["p2"]);
+  ok(prox.classList.contains("vellumwidget-selected"), "VW-30: selecting a flagged mark outlines its stand-in");
+  d.restore();
+
+  // axis zoom: each run is drawn through the panel's transform, clipped to it
+  const z = mount({ panels: true, options: { axisZoom: true } });
+  z.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); z.inst._test.evalTier();
+  const zi = z.ctx.log.filter((r) => r.op === "img");
+  ok(zi.length === 2 && zi.every((r) => r.clipped) && Math.abs(zi[0].t[0] - 2) < 1e-6,
+    "VW-30: under axis zoom a run raster goes through the panel's T and is clipped to the panel");
+  z.restore();
+
+  // export (VW-25 path): the redraw includes the runs
+  const x = mount({});
+  {
+    const exp = recCtx();
+    let captured = null;
+    const saved = { gc: proto.getContext, tdu: proto.toDataURL, Blob: global.Blob, XS: global.XMLSerializer, cou: URL.createObjectURL, rou: URL.revokeObjectURL };
+    proto.getContext = function () { return exp; };
+    proto.toDataURL = function () { return "data:image/png;base64,REDRAWN"; };
+    global.Blob = function (parts) { captured = parts.join(""); };
+    global.XMLSerializer = window.XMLSerializer;
+    URL.createObjectURL = function () { return "blob:x"; };
+    URL.revokeObjectURL = function () {};
+    const aClick = window.HTMLAnchorElement.prototype.click;
+    window.HTMLAnchorElement.prototype.click = function () {};
+    x.el.querySelector('[data-act="svg"]').click();
+    window.HTMLAnchorElement.prototype.click = aClick;
+    proto.getContext = saved.gc; proto.toDataURL = saved.tdu;
+    global.Blob = saved.Blob; global.XMLSerializer = saved.XS;
+    URL.createObjectURL = saved.cou; URL.revokeObjectURL = saved.rou;
+    ok(/vellumwidget-marks-export/.test(captured || "") && !/ORIGINAL/.test(captured || "") && seq(exp) === "fill:80,img:RUN1,fill:240,img:RUN2",
+      "VW-30: the export redraws the exact marks and the runs in paint order");
+  }
+  x.restore();
+
+  // fallbacks: exactly the old behaviour
+  const none = mount({ noFlagged: true });
+  none.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); none.inst._test.evalTier();
+  ok(!none.inst._test.runsAttached() && none.inst._test.listExact() === false && none.inst._test.markTier() === "mid" &&
+    marksShown(none) && seq(none.ctx) === "fill:25/125",
+    "VW-30 fallback: no run rasters (older vellum) -> inexact list, mark PNG kept, no detail");
+  none.restore();
+  const old = mount({ noRuns: true });
+  ok(!old.inst._test.runsAttached() && old.inst._test.listExact() === false, "VW-30 fallback: a list without runs ignores the rasters");
+  old.restore();
+  const short = mount({ runHrefs: ["data:image/png;base64,RUN1"] });
+  ok(!short.inst._test.runsAttached() && short.inst._test.listExact() === false, "VW-30 fallback: one raster short of the runs -> unchanged");
+  short.restore();
+  const blend = mount({ flags: [0, 36, 0, 8] });
+  ok(!blend.inst._test.runsAttached() && blend.inst._test.listExact() === false, "VW-30 fallback: a blend-mode mark (flag 32) keeps the PNG path");
+  blend.restore();
+  const uncovered = mount({ flags: [0, 4, 8, 8] });
+  ok(!uncovered.inst._test.runsAttached(), "VW-30 fallback: a flagged record outside every run -> unchanged");
+  uncovered.restore();
+  autoLoad = false;
+  const lazy = mount({});
+  lazy.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); lazy.inst._test.evalTier();
+  ok(!lazy.inst._test.runsAttached() && lazy.inst._test.markTier() === "mid" && marksShown(lazy),
+    "VW-30: until the rasters load, the old behaviour holds");
+  pending.splice(0).forEach((img) => img.onload && img.onload());
+  ok(lazy.inst._test.runsAttached() && lazy.inst._test.listExact() === true && /img:RUN2/.test(seq(lazy.ctx)) && !marksShown(lazy),
+    "VW-30: once they load the canvas redraws with the runs");
+  lazy.restore();
+  autoLoad = true;
+  if (srcDesc) Object.defineProperty(imgProto, "src", srcDesc); else delete imgProto.src;
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();

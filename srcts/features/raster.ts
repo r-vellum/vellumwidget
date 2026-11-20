@@ -371,9 +371,45 @@ export function rasterFeature(
       tgt.save();
       curState = -1; curPaint = -1; curAlpha = 1; tgt.globalAlpha = 1;
     };
+    // A flagged run (VW-30) as its raster, in the scene px frame, through
+    // each panel's transform and clipped to its fixed rect (as the mark
+    // image's <use> in each pan group), or once through the view's.
+    const runImgs = dl.runImgs;
+    const drawnRun: boolean[] = [];
+    const drawRun = function (r: number): void {
+      const img = runImgs![r - 1];
+      if (!img) return;
+      const one = function (A: Affine, pc: number[] | null): void {
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        if (pc) { ctx.beginPath(); ctx.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]); ctx.clip(); }
+        ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+        ctx.drawImage(img, 0, 0, dl.runW, dl.runH);
+        ctx.restore();
+      };
+      let any = false;
+      for (let p = 1; p <= np; p++) if (pclip[p]) { one(aff[p], pclip[p]); any = true; }
+      if (!any) one(aff[0], null);
+    };
     let curGroup = 0;
     tgt.save();
     for (let i = 0; i < dl.n; i++) {
+      if (runImgs && dl.run[i] > 0) {
+        // The run's records are all in its image, drawn where the run starts.
+        // The image carries its own groups (a run takes whole opacity groups),
+        // so it goes onto the canvas itself, after closing any open layer.
+        const r = dl.run[i];
+        if (!drawnRun[r]) {
+          drawnRun[r] = true;
+          if (curGroup !== 0) { enterGroup(0); curGroup = 0; }
+          flush();
+          tgt.restore();
+          drawRun(r);
+          tgt.save();
+          curState = -1; curPaint = -1; curAlpha = 1; tgt.globalAlpha = 1;
+        }
+        continue;
+      }
       if (dl.flags[i]) continue; // not reproducible here: the image draws it
       let ov = 0, alpha = 1;
       if (flags) {

@@ -9,6 +9,13 @@
 // `paints$fill_gradient`), clip paths (`clip_paths`, by `clips$path_start` /
 // `path_n`) and opacity groups (`groups`, by `record$group`). A version-1
 // list decodes exactly as before.
+//
+// Flagged runs (vellum's `layer = "keyed_flagged"`, VW-30): a version-2 list
+// from a vellum that has them numbers the records it can't have drawn exactly
+// into runs (`record$run`, `runs`). With the matching raster of each run
+// (`payload$flagged`, attached by the runtime once loaded: `runImgs`), the
+// list is drawn in full anyway: the exact records by the runtime, each run as
+// its image at the run's place in paint order (the mixed tier).
 
 import { asColumn } from "./elements";
 import type { ElemMeta } from "./types";
@@ -29,7 +36,8 @@ export interface DLPayload {
   width: number;
   height: number;
   n: number;
-  record: { kind: DLColumn; paint: DLColumn; key: DLColumn; flags: DLColumn; clip: DLColumn; panel: DLColumn; group?: DLColumn };
+  record: { kind: DLColumn; paint: DLColumn; key: DLColumn; flags: DLColumn; clip: DLColumn; panel: DLColumn; group?: DLColumn; run?: DLColumn };
+  runs?: number;
   point: { cx: DLColumn; cy: DLColumn; r: DLColumn; shape: DLColumn };
   rect: { x: DLColumn; y: DLColumn; w: DLColumn; h: DLColumn };
   path: { xy: DLColumn; run_offset: DLColumn; path_offset: DLColumn; closed: DLColumn; evenodd: DLColumn };
@@ -84,6 +92,9 @@ export const DL_POINT = 0;
 export const DL_RECT = 1;
 export const DL_PATH = 2;
 export const DL_FLAG_PICK = 16;
+// Inside a group with a blend mode (vellum VW-30): the mark mixes with what is
+// beneath it, so its run raster, rendered on its own, can't stand in for it.
+export const DL_FLAG_BLEND = 32;
 
 // A decoded display list: per record (paint order) its kind, paint, key,
 // flags, clip and panel, the row in its kind's table (`row`), and its bbox.
@@ -109,7 +120,17 @@ export interface DisplayList {
   cpXy: Float32Array; cpRunOff: Uint32Array; cpPathOff: Uint32Array; cpEvenodd: Uint8Array;
   keys: string[];
   panels: string[];
-  exact: boolean; // no record is flagged, pick-only aside (every mark is drawn exactly)
+  exact: boolean; // every mark is drawn: no record is flagged (pick-only aside), or every flagged one is in a loaded run image
+  // Flagged runs (VW-30): per record its run (1-based, 0 = none), the count,
+  // whether every flagged record is in a run (`covered`), and once the run
+  // rasters are loaded, the images (scene px frame runW x runH) and their URIs.
+  run: Uint32Array;
+  nRuns: number;
+  covered: boolean;
+  runImgs: CanvasImageSource[] | null;
+  runHref: string[] | null;
+  runW: number;
+  runH: number;
 }
 
 function b64bytes(s: string): Uint8Array {
@@ -178,10 +199,13 @@ export function decodeDisplayList(raw: DLPayload | null | undefined): DisplayLis
     closed: u8(dlColumn(pa.closed)), evenodd: u8(dlColumn(pa.evenodd)),
     paints: [], clips: [], keys: [], panels: asColumn(raw.panels).map(String), exact: true,
     group: raw.record.group ? u32(dlColumn(raw.record.group)) : new Uint32Array(n),
+    run: raw.record.run ? u32(dlColumn(raw.record.run)) : new Uint32Array(n),
+    nRuns: Number(raw.runs) || 0, covered: true, runImgs: null, runHref: null, runW: 0, runH: 0,
     gradients: [], groups: [],
     cpXy: new Float32Array(0), cpRunOff: new Uint32Array(0), cpPathOff: new Uint32Array(0), cpEvenodd: new Uint8Array(0)
   };
   if (dl.group.length !== n) dl.group = new Uint32Array(n);
+  if (dl.run.length !== n) { dl.run = new Uint32Array(n); dl.nRuns = 0; }
   // keys: a character vector, or an integer column.
   const k = raw.keys as unknown;
   if (k && typeof k === "object" && !Array.isArray(k) && "type" in (k as object)) {
@@ -245,6 +269,8 @@ export function decodeDisplayList(raw: DLPayload | null | undefined): DisplayLis
     if (dl.flags[i] & ~DL_FLAG_PICK) dl.exact = false;
     const pg = dl.paints[dl.paint[i]];
     if ((pg && pg.grad < 0) || dl.group[i] > dl.groups.length) { dl.flags[i] |= 1; dl.exact = false; }
+    if ((dl.flags[i] & ~DL_FLAG_PICK) && !(dl.run[i] > 0 && dl.run[i] <= dl.nRuns)) dl.covered = false;
+    if (dl.flags[i] & DL_FLAG_BLEND) dl.covered = false;
     const kd = kind[i];
     if (kd === DL_POINT) {
       const j = ip++, r = dl.r[j];
@@ -271,6 +297,16 @@ export function decodeDisplayList(raw: DLPayload | null | undefined): DisplayLis
     }
   }
   return dl;
+}
+
+// Attach the loaded run rasters (VW-30): the list becomes exact (drawn in
+// full, the flagged runs as images) when every flagged record is in a run and
+// there is one image per run. Returns whether it did.
+export function attachRuns(dl: DisplayList, imgs: CanvasImageSource[], hrefs: string[], w: number, h: number): boolean {
+  if (!dl.covered || !dl.nRuns || imgs.length !== dl.nRuns || !(w > 0 && h > 0)) return false;
+  dl.runImgs = imgs; dl.runHref = hrefs; dl.runW = w; dl.runH = h;
+  dl.exact = true;
+  return true;
 }
 
 // Give every element the display list covers, and that arrived without a

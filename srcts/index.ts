@@ -118,6 +118,8 @@ HTMLWidgets.widget({
         hasCanvas: function () { return !!ws.canvasEl; },
         displayListSize: function () { return ws.dl ? ws.dl.n : 0; },
         markTier: function () { return ws.markTier; },
+        listExact: function () { return ws.dl ? ws.dl.exact : null; },
+        runsAttached: function () { return !!(ws.dl && ws.dl.runImgs); },
         condTags: function () { return Object.keys(ws.condTagElems).map(function (k) { return k + "=" + ws.condTagElems[k].length; }).join(","); },
         selectedKeys: ws.fx.selectedKeys,
         evalTier: ws.fx.evalTier,

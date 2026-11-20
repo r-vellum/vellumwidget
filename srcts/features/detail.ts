@@ -10,7 +10,7 @@
 // hysteresis: enter below `detailMarks` visible marks, leave above 1.5x that.
 
 import { SETTLE_MS, SVGNS } from "./constants";
-import { DL_POINT, DL_RECT, isLineGlyph, markerRing } from "../dlist";
+import { DL_FLAG_PICK, DL_POINT, DL_RECT, isLineGlyph, markerRing } from "../dlist";
 import type { DisplayList } from "../dlist";
 import { cssEscape } from "../css";
 import type { WidgetFns, WidgetState } from "../state";
@@ -287,7 +287,7 @@ export function detailFeature(
       return g;
     };
     let D: DetailDefs | undefined;
-    if (dl.gradients.length || dl.groups.length || dl.cpPathOff.length > 1) {
+    if (dl.gradients.length || dl.groups.length || dl.cpPathOff.length > 1 || dl.runHref) {
       const el = document.createElementNS(SVGNS, "defs") as SVGDefsElement;
       el.setAttribute("class", "vellumwidget-detail");
       svg.insertBefore(el, svg.firstChild);
@@ -314,9 +314,71 @@ export function detailFeature(
       }
       return st.length ? st[st.length - 1].el : root;
     };
+    // Flagged runs (VW-30): each run's raster is defined once and drawn by a
+    // <use> in each panel group it has marks in, where the run starts in
+    // paint order (after closing any open opacity chain: the image carries
+    // its groups). Its marks get a transparent stand-in node from their
+    // listed geometry (a text label's box), so they still take the pointer
+    // and show a selection outline; their dimming and colours are baked into
+    // the image. Every run is placed, in view or not (its ink, a blur or a
+    // label, can reach past the record boxes).
+    const runIds: Record<number, string> = {};
+    const placed: Record<string, boolean> = {};
+    const placeRun = function (p: number, r: number): void {
+      const tag = p + ":" + r;
+      if (placed[tag] || !D || !dl.runHref) return;
+      placed[tag] = true;
+      if (!runIds[r]) {
+        const im = document.createElementNS(SVGNS, "image");
+        runIds[r] = D.pre + "run" + r;
+        im.setAttribute("id", runIds[r]);
+        im.setAttribute("x", "0"); im.setAttribute("y", "0");
+        im.setAttribute("width", String(dl.runW)); im.setAttribute("height", String(dl.runH));
+        im.setAttribute("preserveAspectRatio", "none");
+        im.setAttribute("href", dl.runHref[r - 1]);
+        D.el.appendChild(im);
+      }
+      const u = document.createElementNS(SVGNS, "use");
+      u.setAttribute("class", "vellumwidget-detail-run");
+      u.setAttribute("href", "#" + runIds[r]);
+      groupFor(p).appendChild(u);
+      if (chains[p]) chains[p].length = 0;
+    };
+    let order = vis;
+    if (dl.runImgs) {
+      // the first record of each run in each panel joins the visible ones
+      const firsts: Record<string, boolean> = {}, extra: number[] = [];
+      for (let i = 0; i < dl.n; i++) {
+        if (!(dl.run[i] > 0)) continue;
+        const tag = dl.panel[i] + ":" + dl.run[i];
+        if (!firsts[tag]) { firsts[tag] = true; extra.push(i); }
+      }
+      if (extra.length) {
+        const all: Record<number, boolean> = {};
+        for (let v = 0; v < vis.length; v++) all[vis[v]] = true;
+        for (let e = 0; e < extra.length; e++) all[extra[e]] = true;
+        order = Object.keys(all).map(Number).sort((a, b) => a - b);
+      }
+    }
+    const visSet: Record<number, boolean> = {};
+    for (let v = 0; v < vis.length; v++) visSet[vis[v]] = true;
     const seen: Record<string, boolean> = {};
-    for (let v = 0; v < vis.length; v++) {
-      const i = vis[v];
+    for (let v = 0; v < order.length; v++) {
+      const i = order[v];
+      if (dl.runImgs && dl.run[i] > 0) {
+        const p = dl.panel[i] <= dl.panels.length ? dl.panel[i] : 0;
+        placeRun(p, dl.run[i]);
+        if (!visSet[i] || (dl.flags[i] & DL_FLAG_PICK)) continue;
+        const n = nodeFor(dl, i);
+        n.setAttribute("fill", "#000"); n.setAttribute("fill-opacity", "0");
+        n.removeAttribute("stroke"); n.removeAttribute("stroke-opacity"); n.removeAttribute("stroke-dasharray");
+        n.setAttribute("class", "vellumwidget-detail-proxy");
+        groupFor(p).appendChild(n);
+        const k = dl.keys[dl.key[i]];
+        (ws.nodesByKey[k] = ws.nodesByKey[k] || []).push(n);
+        if (!seen[k]) { seen[k] = true; ws.detailKeys.push(k); }
+        continue;
+      }
       if (dl.flags[i]) continue; // pick-only: nothing to draw
       const n = nodeFor(dl, i, D);
       hostFor(dl.panel[i] <= dl.panels.length ? dl.panel[i] : 0, dl.group[i]).appendChild(n);
