@@ -50,7 +50,8 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.13.0.9000" id="vellumwidget-01309000">vellumwidget 0.13.0.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-01309000"></a></h2>
-</div>
+<ul><li>Raster widgets ship vellumplot’s new default keys (<code>"p1-1:l2:7"</code>, VP-55) as compactly as plain row numbers: the key column’s delta encoding now also covers integers after a text prefix, with the prefixes sent as runs. A 20k-point default-keyed scatter sends about 40 kB of keys instead of 300 kB.</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.13.0" id="vellumwidget-0130">vellumwidget 0.13.0<a class="anchor" aria-label="anchor" href="#vellumwidget-0130"></a></h2>
 <ul><li><p><strong>Building a big widget is faster (VR-16).</strong> The element table’s meta columns (<code>tooltip</code>, <code>legend</code>, <code>cond</code>, …) are read column-wise from one flattened index instead of scanning every element’s record once per field. At 200k keyed points this step drops from about 1.5 s to 0.4 s. With the matching vellum and vellumplot changes, <code><a href="../reference/as_widget.html">as_widget()</a></code> on a 200k-point keyed scatter takes about 1.6 s instead of 7 s. The payload is unchanged.</p></li>
