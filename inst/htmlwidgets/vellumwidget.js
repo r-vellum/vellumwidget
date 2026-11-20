@@ -1243,7 +1243,9 @@
           x2Lab: null,
           y2Lab: null,
           x2Map: null,
-          y2Map: null
+          y2Map: null,
+          xTick: null,
+          yTick: null
         });
       }
       ws.azPanels = found;
@@ -1254,6 +1256,7 @@
       hideStaticAxes();
       for (let i = 0; i < ws.azPanels.length; i++) {
         const a = ws.azPanels[i];
+        adoptFurniture(a);
         const g = document.createElementNS(SVGNS, "g");
         g.setAttribute("class", "vellumwidget-retick-grid");
         a.outer.insertBefore(g, a.pan);
@@ -1433,10 +1436,125 @@
     }
     function hideStaticAxes() {
       if (!ws.svgEl) return;
-      const hide = ws.svgEl.querySelectorAll(
-        '[role="grid"], [data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]'
-      );
-      for (let i = 0; i < hide.length; i++) hide[i].style.display = "none";
+      const grids = ws.svgEl.querySelectorAll('[role="grid"]');
+      for (let i = 0; i < grids.length; i++) grids[i].style.display = "none";
+      const axes = ws.svgEl.querySelectorAll('[data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
+      for (let i = 0; i < axes.length; i++) {
+        const kids = axes[i].children;
+        let line = false;
+        for (let j = 0; j < kids.length; j++) if (isAxisLine(kids[j])) line = true;
+        if (!line) {
+          axes[i].style.display = "none";
+          continue;
+        }
+        for (let j = 0; j < kids.length; j++) {
+          if (!isAxisLine(kids[j])) kids[j].style.display = "none";
+        }
+      }
+    }
+    function isAxisLine(n) {
+      if (n.tagName.toLowerCase() !== "path") return false;
+      const s = pathSegments(n.getAttribute("d") || "");
+      return s !== null && s.length === 1 && (s[0][0] === s[0][2] || s[0][1] === s[0][3]);
+    }
+    function pathSegments(d) {
+      const re = /M\s*([-\d.eE]+)[\s,]+([-\d.eE]+)\s*L\s*([-\d.eE]+)[\s,]+([-\d.eE]+)\s*/g;
+      const out = [];
+      let m, end = 0;
+      const t = d.trim();
+      while ((m = re.exec(t)) !== null) {
+        if (m.index !== end) return null;
+        const v = [+m[1], +m[2], +m[3], +m[4]];
+        if (!v.every(isFinite)) return null;
+        out.push(v);
+        end = re.lastIndex;
+      }
+      return end === t.length && out.length ? out : null;
+    }
+    function adoptFurniture(a) {
+      const p = a.p;
+      const kids = Array.prototype.slice.call(a.pan.children);
+      const near = function(v, w) {
+        return Math.abs(v - w) < 0.5;
+      };
+      for (let i = 0; i < kids.length; i++) {
+        const c = kids[i];
+        if (c.hasAttribute("data-vellum-id") || c.hasAttribute("data-key")) break;
+        const role = c.getAttribute("role");
+        if (role === "grid") continue;
+        const tag = c.tagName.toLowerCase();
+        if (i === 0 && !role && (tag === "path" || tag === "rect")) {
+          c.setAttribute("data-vw-panel-bg", "");
+          a.outer.insertBefore(c, a.pan);
+          continue;
+        }
+        if (role !== "presentation" || tag !== "g") break;
+        const paths = c.children;
+        let tick = null, isX = false;
+        for (let j = 0; j < paths.length && paths.length; j++) {
+          const segs = pathSegments(paths[j].getAttribute("d") || "");
+          if (!segs) {
+            tick = null;
+            break;
+          }
+          for (let k = 0; k < segs.length; k++) {
+            const s = segs[k];
+            let edge = null, len = 0, vx = false;
+            if (s[0] === s[2]) {
+              vx = true;
+              len = Math.abs(s[3] - s[1]);
+              edge = near(s[1], p.py1) || near(s[3], p.py1) ? "bottom" : near(s[1], p.py0) || near(s[3], p.py0) ? "top" : null;
+            } else if (s[1] === s[3]) {
+              len = Math.abs(s[2] - s[0]);
+              edge = near(s[0], p.px0) || near(s[2], p.px0) ? "left" : near(s[0], p.px1) || near(s[2], p.px1) ? "right" : null;
+            }
+            if (!edge || !(len > 0) || tick && tick.edge !== edge) {
+              tick = null;
+              break;
+            }
+            if (!tick) {
+              isX = vx;
+              tick = {
+                stroke: paths[j].getAttribute("stroke") || ws.axisStyle.textFill,
+                width: parseFloat(paths[j].getAttribute("stroke-width") || "") || 1,
+                len,
+                edge
+              };
+            } else if (len > tick.len) tick.len = len;
+          }
+          if (!tick) break;
+        }
+        if (!tick) break;
+        c.style.display = "none";
+        if (isX) {
+          if (!a.xTick || tick.len > a.xTick.len) a.xTick = tick;
+        } else if (!a.yTick || tick.len > a.yTick.len) a.yTick = tick;
+      }
+    }
+    function tickLine(ts, at, p) {
+      const l = document.createElementNS(SVGNS, "line");
+      let x1 = at, x2 = at, y1 = at, y2 = at;
+      if (ts.edge === "bottom") {
+        y1 = p.py1;
+        y2 = p.py1 - ts.len;
+      } else if (ts.edge === "top") {
+        y1 = p.py0;
+        y2 = p.py0 + ts.len;
+      } else if (ts.edge === "left") {
+        x1 = p.px0;
+        x2 = p.px0 + ts.len;
+      } else {
+        x1 = p.px1;
+        x2 = p.px1 - ts.len;
+      }
+      l.setAttribute("x1", String(x1));
+      l.setAttribute("y1", String(y1));
+      l.setAttribute("x2", String(x2));
+      l.setAttribute("y2", String(y2));
+      l.setAttribute("stroke", ts.stroke);
+      l.setAttribute("stroke-width", String(ts.width));
+      l.setAttribute("class", "vellumwidget-retick-tick");
+      return l;
     }
     function gridLine(x1, y1, x2, y2) {
       const l = document.createElementNS(SVGNS, "line");
@@ -1483,6 +1601,7 @@
       if (!grid || !layer) return;
       while (grid.firstChild) grid.removeChild(grid.firstChild);
       const t = ws.fx.azT(a);
+      const ticks_ = [];
       if (p.x && p.px1 !== p.px0) {
         const ax = p.x;
         const k = (ax.native_hi - ax.native_lo) / (p.px1 - p.px0);
@@ -1494,6 +1613,7 @@
           const sx = t.sx * px + t.tx;
           if (!isFinite(sx) || sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
           grid.appendChild(gridLine(sx, p.py0, sx, p.py1));
+          if (a.xTick) ticks_.push(tickLine(a.xTick, sx, p));
           if (a.xLab) {
             const lab = axisLabel(ticks[i].label, sx, a.xLab.pos, a.xLab.anchor, a.xLab.baseline);
             if (a.xLab.gap > 0) wrapLabel(lab, ticks[i].label, sx, a.xLab.gap);
@@ -1520,6 +1640,7 @@
           const sy = t.sy * py + t.ty;
           if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
           grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
+          if (a.yTick) ticks_.push(tickLine(a.yTick, sy, p));
           if (a.yLab) {
             layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline));
           }
@@ -1533,6 +1654,7 @@
           }
         }
       }
+      for (let i = 0; i < ticks_.length; i++) grid.appendChild(ticks_[i]);
     }
     return { setupAxisZoom, applyPanTransforms, retick };
   }
@@ -5328,7 +5450,7 @@
             let n = 0;
             for (let i = 0; i < ws.azPanels.length; i++) {
               const g = ws.azPanels[i].grid;
-              if (g) n += g.querySelectorAll("line").length;
+              if (g) n += g.querySelectorAll("line:not(.vellumwidget-retick-tick)").length;
             }
             return n;
           },
@@ -5355,7 +5477,11 @@
             const nodes = ws.svgEl.querySelectorAll('[role="grid"], [data-vellum-panel^="axis-x"], [data-vellum-panel^="axis-y"]');
             if (!nodes.length) return null;
             return Array.prototype.every.call(nodes, function(n) {
-              return n.style.display === "none";
+              if (n.style.display === "none") return true;
+              if (n.getAttribute("role") === "grid") return false;
+              return Array.prototype.every.call(n.children, function(c) {
+                return c.style.display === "none" || c.tagName.toLowerCase() === "path";
+              });
             });
           },
           focusCell: ws.fx.focusCell,

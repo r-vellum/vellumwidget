@@ -295,4 +295,17 @@ export interface AzPanel {
   y2Lab: AxisAnchor | null;
   x2Map: SecAxisMap | null;
   y2Map: SecAxisMap | null;
+  // The static (in-panel) tick marks this panel drew, hidden under axis zoom and
+  // re-drawn at the re-ticked breaks with the same stroke, length and edge.
+  xTick: TickStyle | null;
+  yTick: TickStyle | null;
+}
+
+// A panel's static tick marks: their stroke, length (device px) and the panel
+// edge they grow inward from.
+export interface TickStyle {
+  stroke: string;
+  width: number;
+  len: number;
+  edge: "top" | "bottom" | "left" | "right";
 }

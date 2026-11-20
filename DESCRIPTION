@@ -24,7 +24,10 @@ Imports:
     htmlwidgets,
     vellum (>= 0.8.1)
 Suggests:
+    chromote,
     crosstalk,
+    jsonlite,
+    png,
     scales,
     shiny,
     vellumplot (>= 0.13.0),
