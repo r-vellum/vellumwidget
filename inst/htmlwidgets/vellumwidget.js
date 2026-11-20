@@ -41,6 +41,14 @@
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 2; display: none;
 }
+/* Paint-order split (VW-21): the furniture drawn after the marks (a reference
+   line or annotation added after the points), over the marks canvas and under
+   the re-ticked labels and rings. Never a pointer target, so picking still
+   reaches the marks beneath. */
+.vellumwidget-above-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 2; overflow: hidden;
+}
 .vellumwidget-dim-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;
@@ -1537,9 +1545,11 @@
         if (!pan || !outer) return;
         const ax = (p.px1 - p.px0) / rw, ay = (p.py1 - p.py0) / rh;
         if (!(ax > 0) || !(ay > 0)) return;
+        const mirror = ws.aboveEl ? ws.aboveEl.querySelector('[data-vellum-pan="' + cssEscape(p.name) + '"]') : null;
         found.push({
           p,
           pan,
+          mirror,
           outer,
           grid: null,
           ax,
@@ -1585,6 +1595,11 @@
         const t = ws.fx.azT(ws.azPanels[i]);
         ws.azPanels[i].pan.setAttribute("transform", ws.fx.fmtPan(t));
         setPanScaleVars(ws.azPanels[i].pan, t);
+        const m = ws.azPanels[i].mirror;
+        if (m) {
+          m.setAttribute("transform", ws.fx.fmtPan(t));
+          setPanScaleVars(m, t);
+        }
       }
     }
     function setPanScaleVars(g, t) {
@@ -5217,7 +5232,36 @@
 
   // srcts/features/render.ts
   var marksSeq = 0;
+  var aboveSeq = 0;
   function renderFeature(ws) {
+    function placeAbove(src) {
+      if (!ws.stage) return null;
+      const pre = "vw-above" + ++aboveSeq + "-";
+      const fixed = src.replace(/<\?xml[^>]*\?>/, "").replace(/(\s)id="([^"]+)"/g, '$1id="' + pre + '$2"').replace(/url\(#([^)]+)\)/g, "url(#" + pre + "$1)").replace(/(\s(?:xlink:)?href)="#([^"]+)"/g, '$1="#' + pre + '$2"');
+      const tmp = document.createElement("div");
+      tmp.innerHTML = fixed;
+      const svg = tmp.querySelector("svg");
+      if (!svg) return null;
+      const meta = svg.querySelectorAll("title, desc");
+      for (let i = 0; i < meta.length; i++) meta[i].remove();
+      svg.removeAttribute("role");
+      svg.removeAttribute("aria-labelledby");
+      svg.removeAttribute("width");
+      svg.removeAttribute("height");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("class", "vellumwidget-above-layer");
+      const pans = svg.querySelectorAll("[data-vellum-pan][clip-path]");
+      for (let i = 0; i < pans.length; i++) {
+        const up = pans[i].parentNode;
+        if (up && up.hasAttribute("data-vellum-panel") && !up.hasAttribute("clip-path")) {
+          up.setAttribute("clip-path", pans[i].getAttribute("clip-path") || "");
+          pans[i].removeAttribute("clip-path");
+        }
+      }
+      if (ws.svgEl) svg.setAttribute("viewBox", ws.svgEl.getAttribute("viewBox") || "");
+      ws.stage.appendChild(svg);
+      return svg;
+    }
     function placeMarks(svg, m) {
       const img = document.createElementNS(SVGNS, "image");
       img.setAttribute("class", "vellumwidget-marks");
@@ -5411,6 +5455,10 @@
           ws.fx.hideTip();
         });
       }
+      if (ws.aboveEl) {
+        ws.aboveEl.remove();
+        ws.aboveEl = null;
+      }
       ws.holder.innerHTML = x.svg;
       ws.markTier = "overview";
       ws.detailGroups = [];
@@ -5455,6 +5503,7 @@
         } else {
           ws.fx.clearPointData();
         }
+        if (ws.rasterMode && ws.marksLayer && x.above) ws.aboveEl = placeAbove(x.above);
         ws.fx.buildSpatialIndex();
         ws.fx.buildGeometry(x.geometry);
         ws.fx.buildHoverAxis();
@@ -5828,6 +5877,12 @@
       svg.classList.remove("vellumwidget-marks-off");
       const drawn = svg.querySelectorAll(".vellumwidget-marks");
       for (let i = 0; i < drawn.length; i++) drawn[i].style.visibility = "";
+      if (ws.aboveEl) {
+        const g = document.createElementNS(SVGNS, "g");
+        g.setAttribute("class", "vellumwidget-above-export");
+        for (let c = ws.aboveEl.firstChild; c; c = c.nextSibling) g.appendChild(c.cloneNode(true));
+        svg.appendChild(g);
+      }
       if (ws.axisZoomActive && ws.retickLayer) {
         const g = document.createElementNS(SVGNS, "g");
         g.setAttribute("class", "vellumwidget-retick-export");
@@ -6027,6 +6082,7 @@
       if (ws.dimLayer) ws.dimLayer.setAttribute("preserveAspectRatio", par);
       if (ws.crosshairLayer) ws.crosshairLayer.setAttribute("preserveAspectRatio", par);
       if (ws.colorbarLayer) ws.colorbarLayer.setAttribute("preserveAspectRatio", par);
+      if (ws.aboveEl) ws.aboveEl.setAttribute("preserveAspectRatio", par);
     }
     function applyViewBox() {
       ws.calib = null;
@@ -6042,6 +6098,7 @@
       } else if (ws.svgEl && ws.vb) {
         ws.svgEl.setAttribute("viewBox", fmtViewBox(ws.vb));
       }
+      if (ws.aboveEl && ws.svgEl) ws.aboveEl.setAttribute("viewBox", ws.svgEl.getAttribute("viewBox") || "");
       const overlayVb = ws.fx.azMulti() ? ws.vb0 : ws.vb;
       if (ws.dimLayer && overlayVb) ws.dimLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
       if (ws.crosshairLayer && overlayVb) ws.crosshairLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
@@ -6145,6 +6202,7 @@
       tolY: 1,
       rasterMode: false,
       marksLayer: null,
+      aboveEl: null,
       dl: null,
       markTier: "overview",
       detailGroups: [],

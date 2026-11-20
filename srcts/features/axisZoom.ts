@@ -61,8 +61,9 @@ export function axisZoomFeature(
       if (!pan || !outer) return; // upstream not pannable (older vellum/vellumplot)
       const ax = (p.px1 - p.px0) / rw, ay = (p.py1 - p.py0) / rh;
       if (!(ax > 0) || !(ay > 0)) return;
+      const mirror = ws.aboveEl ? ws.aboveEl.querySelector('[data-vellum-pan="' + cssEscape(p.name) + '"]') : null;
       found.push({
-        p: p, pan: pan as SVGGElement, outer: outer as SVGGElement, grid: null,
+        p: p, pan: pan as SVGGElement, mirror: mirror as SVGGElement | null, outer: outer as SVGGElement, grid: null,
         ax: ax, bx: p.px0 - ax * ref.px0, ay: ay, by: p.py0 - ay * ref.py0,
         xLab: null, yLab: null, x2Lab: null, y2Lab: null, x2Map: null, y2Map: null,
         xTick: null, yTick: null
@@ -108,6 +109,8 @@ export function axisZoomFeature(
       const t = ws.fx.azT(ws.azPanels[i]);
       ws.azPanels[i].pan.setAttribute("transform", ws.fx.fmtPan(t));
       setPanScaleVars(ws.azPanels[i].pan, t);
+      const m = ws.azPanels[i].mirror; // the above-marks layer zooms with the panel
+      if (m) { m.setAttribute("transform", ws.fx.fmtPan(t)); setPanScaleVars(m, t); }
     }
   }
 

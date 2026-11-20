@@ -14,6 +14,7 @@ import { fmtViewBox, parseViewBox } from "../viewbox";
 
 // Page-unique ids for the split render's mark image (several widgets per page).
 let marksSeq = 0;
+let aboveSeq = 0;
 
 export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | "resize"> {
   // Split render (VW-14): place the keyed-mark PNG under the SVG furniture. The
@@ -22,6 +23,46 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
   // the panel; the furniture (axes, gridlines, legend, text) stays real SVG.
   // When a listed panel has no pan group (or none are listed: a raw vellum
   // scene), one image goes over the whole scene instead, like the old base image.
+  // The furniture vellum painted after the marks (VW-21) as an overlay svg in
+  // the stage, above the marks canvas. Its ids are made page-unique (both
+  // layers come from one scene, so they share vellum's id prefix) and it is
+  // hidden from assistive technology (the base svg carries the title/desc).
+  function placeAbove(src: string): SVGSVGElement | null {
+    if (!ws.stage) return null;
+    const pre = "vw-above" + (++aboveSeq) + "-";
+    const fixed = src
+      .replace(/<\?xml[^>]*\?>/, "")
+      .replace(/(\s)id="([^"]+)"/g, '$1id="' + pre + '$2"')
+      .replace(/url\(#([^)]+)\)/g, "url(#" + pre + "$1)")
+      .replace(/(\s(?:xlink:)?href)="#([^"]+)"/g, '$1="#' + pre + '$2"');
+    const tmp = document.createElement("div");
+    tmp.innerHTML = fixed;
+    const svg = tmp.querySelector("svg") as SVGSVGElement | null;
+    if (!svg) return null;
+    const meta = svg.querySelectorAll("title, desc");
+    for (let i = 0; i < meta.length; i++) meta[i].remove();
+    svg.removeAttribute("role");
+    svg.removeAttribute("aria-labelledby");
+    svg.removeAttribute("width");
+    svg.removeAttribute("height");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("class", "vellumwidget-above-layer");
+    // The panel clip belongs on the panel group, outside the pan group that
+    // axis zoom transforms (where the base svg has it); on the pan group it
+    // would move and scale with the data.
+    const pans = svg.querySelectorAll("[data-vellum-pan][clip-path]");
+    for (let i = 0; i < pans.length; i++) {
+      const up = pans[i].parentNode as Element | null;
+      if (up && up.hasAttribute("data-vellum-panel") && !up.hasAttribute("clip-path")) {
+        up.setAttribute("clip-path", pans[i].getAttribute("clip-path") || "");
+        pans[i].removeAttribute("clip-path");
+      }
+    }
+    if (ws.svgEl) svg.setAttribute("viewBox", ws.svgEl.getAttribute("viewBox") || "");
+    ws.stage.appendChild(svg);
+    return svg;
+  }
+
   function placeMarks(svg: SVGSVGElement, m: MarksLayer): "pans" | "root" {
     const img = document.createElementNS(SVGNS, "image");
     img.setAttribute("class", "vellumwidget-marks");
@@ -251,6 +292,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       });
       ws.tip.addEventListener("pointerleave", function () { ws.fx.hideTip(); });
     }
+    if (ws.aboveEl) { ws.aboveEl.remove(); ws.aboveEl = null; }
     ws.holder.innerHTML = x.svg;
     ws.markTier = "overview"; ws.detailGroups = []; ws.detailKeys = []; // the new svg has no detail nodes
     ws.svgEl = ws.holder.querySelector("svg");
@@ -300,6 +342,8 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       } else {
         ws.fx.clearPointData();
       }
+      // After the canvas, so the above-marks layer stacks over it (VW-21).
+      if (ws.rasterMode && ws.marksLayer && x.above) ws.aboveEl = placeAbove(x.above);
       ws.fx.buildSpatialIndex();
       ws.fx.buildGeometry(x.geometry);
       ws.fx.buildHoverAxis();

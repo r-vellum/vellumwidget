@@ -116,7 +116,9 @@ navigator_options <- function(height = 56) {
 #'   (`layer =` on [vellum::scene_svg()]), only the keyed marks are an image: the
 #'   axes, gridlines, legend and text stay SVG, so axis-aware zoom re-ticks the
 #'   real axes, and the navigator and `vellumplot::bind_scale()` work as in SVG
-#'   mode. An older vellum draws the whole scene as one image, and zoom then
+#'   mode. With a vellum that also splits the furniture by paint order, what was
+#'   drawn after the marks (a reference line or annotation added after the
+#'   points) stays on top of them. An older vellum draws the whole scene as one image, and zoom then
 #'   magnifies it. The trade-offs of raster mode: per-element
 #'   grammar colours, per-mark screen-reader focus, and display-tier
 #'   cross-filtering do not apply (there are no per-element DOM nodes). Zoomed
