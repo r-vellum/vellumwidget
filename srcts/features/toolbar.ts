@@ -66,6 +66,8 @@ export function toolbarFeature(
   function exportSvgString(): string {
     const svg = ws.svgEl!.cloneNode(true) as SVGSVGElement;
     svg.classList.remove("vellumwidget-marks-off");
+    const drawn = svg.querySelectorAll(".vellumwidget-marks");
+    for (let i = 0; i < drawn.length; i++) (drawn[i] as SVGElement).style.visibility = "";
     if (ws.axisZoomActive && ws.retickLayer) {
       const g = document.createElementNS(SVGNS, "g");
       g.setAttribute("class", "vellumwidget-retick-export");

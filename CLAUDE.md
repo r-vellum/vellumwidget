@@ -18,7 +18,7 @@ validated by its constructor:
 - `tooltip = tooltip_options(delay, follow, sticky, style)`
 - `export = export_options(filename, scale)`
 - `navigator = TRUE/FALSE` or `navigator_options(height)`
-- `render = render_options(mode, raster_threshold, text)`
+- `render = render_options(mode, raster_threshold, text, max_marks)`
 
 The old flat names (`tooltip_delay`, `tooltip_follow`, `tooltip_sticky`,
 `tooltip_style`, `export_filename`, `export_scale`, `navigator_height`, `mode`,

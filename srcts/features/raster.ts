@@ -1,8 +1,10 @@
 // Raster mode: the crisp-zoom canvas point layer and the overlay rings that
 // stand in for per-node selection / hover classes.
 
-import { OVERLAY_MARK_CAP, SVGNS } from "./constants";
+import { LIVE_DRAW_MAX, OVERLAY_MARK_CAP, SETTLE_MS, SVGNS } from "./constants";
 import { hasBbox, isRoundMark } from "../geometry";
+import { DL_POINT, DL_RECT, tracePoint, traceShape } from "../dlist";
+import type { Affine, DisplayList } from "../dlist";
 import type { WidgetFns, WidgetState } from "../state";
 import { isZoomedIn, userToCanvas } from "../viewbox";
 
@@ -43,6 +45,9 @@ export function rasterFeature(
   // read back from the pixels vellum already drew, so the crisp layer matches them.
   function sampleBaseRaster(): void {
     clearPointData();
+    // The display list (VW-15) carries every covered mark's exact geometry and
+    // paint, so there is nothing to read back from the pixels.
+    if (ws.dl) { drawPoints(); return; }
     if (!ws.rasterMode || !ws.svgEl || !ws.vb0) return;
     // The split render's mark layer when there is one (furniture may carry its
     // own images), else the single base image.
@@ -106,6 +111,7 @@ export function rasterFeature(
   // through that panel's T and clipped to its fixed rect, never over the axes.
   function drawPoints(): void {
     if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
+    if (ws.dl) { drawList(ws.dl); return; }
     const az = ws.axisZoomActive && ws.azPanels.length > 0;
     const zoomed = az
       ? ws.azPanels.some(function (a) { const t = ws.fx.azT(a); return t.sx > 1.0001 || t.sy > 1.0001; })
@@ -179,9 +185,168 @@ export function rasterFeature(
     }
   }
 
+  // Size the canvas backing store to the svg box (device-pixel ratio aware) and
+  // show it; returns [W, H] in backing-store px.
+  function fitCanvas(): [number, number] {
+    const c = ws.canvasEl!;
+    const rect = (ws.svgEl || ws.el).getBoundingClientRect();
+    const cw = Math.max(1, Math.round(rect.width || ws.vb0!.w));
+    const ch = Math.max(1, Math.round(rect.height || ws.vb0!.h));
+    const dpr = (window as unknown as { devicePixelRatio?: number }).devicePixelRatio || 1;
+    if (c.width !== cw * dpr || c.height !== ch * dpr) { c.width = cw * dpr; c.height = ch * dpr; }
+    c.style.width = cw + "px";
+    c.style.height = ch + "px";
+    c.style.display = "block";
+    return [c.width, c.height];
+  }
+
+  // The exact mid-zoom tier (VW-15): redraw the display list's marks for the
+  // current view, with their own shape, fill, stroke, width, dash and alpha, in
+  // the engine's paint order. Under axis zoom each record goes through its
+  // panel's T_i and is clipped to that panel; its own clip rect applies too.
+  // Glyphs keep their pixel size ("fixed") or grow with T ("scale"); strokes
+  // keep their width, like the SVG mode's non-scaling strokes. Consecutive
+  // opaque points and rects of one paint are batched into one path.
+  let settleTimer = 0;
+  function drawList(dl: DisplayList, settled?: boolean): void {
+    const ctx = ws.ctx!, vb = ws.vb!, vb0 = ws.vb0!;
+    if (settleTimer) { clearTimeout(settleTimer); settleTimer = 0; }
+    const az = ws.axisZoomActive && ws.azPanels.length > 0;
+    const zoomed = az
+      ? ws.azPanels.some(function (a) { const t = ws.fx.azT(a); return t.sx > 1.0001 || t.sy > 1.0001; })
+      : isZoomedIn(vb, vb0);
+    if (!zoomed || !dl.n) {
+      ws.canvasEl!.style.display = "none";
+      showMarksLayer(true);
+      return;
+    }
+    const [W, H] = fitCanvas();
+    // Every mark is redrawn exactly, so the scaled mark image goes; flagged
+    // marks (gradients, groups, text) are only in the image, which then stays.
+    showMarksLayer(!dl.exact);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const frame = az ? vb0 : vb;
+    const q0 = userToCanvas(frame, W, H, 0, 0), q1 = userToCanvas(frame, W, H, 1, 1);
+    const kx = q1.px - q0.px, ky = q1.py - q0.py;
+    const base = Math.min(W / vb0.w, H / vb0.h); // canvas px per scene px at the full view
+    const scaleMarks = ws.opts.zoomMarks === "scale";
+    // Per display-list panel: its affine and (axis zoom) its fixed canvas clip.
+    const np = dl.panels.length;
+    const aff: Affine[] = [], gs: number[] = [], pclip: (number[] | null)[] = [];
+    const ident: Affine = { ax: kx, bx: q0.px, ay: ky, by: q0.py };
+    for (let p = 0; p <= np; p++) {
+      let A = ident, g = scaleMarks ? kx : base, c: number[] | null = null;
+      const a = az && p > 0 ? ws.azPanels.filter((q) => q.p.name === dl.panels[p - 1])[0] : null;
+      if (a) {
+        const t = ws.fx.azT(a);
+        A = { ax: kx * t.sx, bx: kx * t.tx + q0.px, ay: ky * t.sy, by: ky * t.ty + q0.py };
+        g = scaleMarks ? base * Math.min(t.sx, t.sy) : base;
+        c = [kx * a.p.px0 + q0.px, ky * a.p.py0 + q0.py, kx * a.p.px1 + q0.px, ky * a.p.py1 + q0.py];
+      }
+      aff.push(A); gs.push(g); pclip.push(c);
+    }
+    // Too many marks in view to redraw within a frame: keep the scaled image
+    // up while the view is moving and draw once it settles.
+    if (!settled && dl.n > LIVE_DRAW_MAX) {
+      let vis = 0;
+      for (let i = 0; i < dl.n && vis <= LIVE_DRAW_MAX; i++) {
+        const A = aff[dl.panel[i] <= np ? dl.panel[i] : 0], pc = pclip[dl.panel[i] <= np ? dl.panel[i] : 0];
+        const x = A.ax * (dl.bx0[i] + dl.bx1[i]) / 2 + A.bx, y = A.ay * (dl.by0[i] + dl.by1[i]) / 2 + A.by;
+        if (x < 0 || y < 0 || x > W || y > H) continue;
+        if (pc && (x < pc[0] || x > pc[2] || y < pc[1] || y > pc[3])) continue;
+        vis++;
+      }
+      if (vis > LIVE_DRAW_MAX) {
+        ws.canvasEl!.style.display = "none";
+        showMarksLayer(true);
+        settleTimer = window.setTimeout(function () { settleTimer = 0; if (ws.dl === dl) { fitCanvas(); drawList(dl, true); } }, SETTLE_MS);
+        return;
+      }
+    }
+    let curState = -1, curPaint = -1, open = false, batch = false;
+    const flush = function (): void {
+      if (!open) return;
+      const pt = dl.paints[curPaint];
+      if (pt.fill) { ctx.fillStyle = pt.fill; ctx.fill(); }
+      if (pt.stroke && pt.width > 0) ctx.stroke();
+      open = false;
+    };
+    const setPaint = function (pi: number): void {
+      const pt = dl.paints[pi];
+      ctx.lineWidth = pt.width * base;
+      ctx.setLineDash(pt.dash ? pt.dash.map((d) => d * base) : []);
+      ctx.lineCap = pt.cap;
+      ctx.lineJoin = pt.join;
+      if (pt.stroke) ctx.strokeStyle = pt.stroke;
+    };
+    ctx.save();
+    for (let i = 0; i < dl.n; i++) {
+      if (dl.flags[i]) continue; // not reproducible here: the image draws it
+      const p = dl.panel[i] <= np ? dl.panel[i] : 0;
+      const A = aff[p];
+      // Cull: the record's box on the canvas, against the canvas and panel.
+      let x0 = A.ax * dl.bx0[i] + A.bx, x1 = A.ax * dl.bx1[i] + A.bx;
+      let y0 = A.ay * dl.by0[i] + A.by, y1 = A.ay * dl.by1[i] + A.by;
+      const kd = dl.kind[i];
+      if (kd === DL_POINT) {
+        const j = dl.row[i], cx = A.ax * dl.cx[j] + A.bx, cy = A.ay * dl.cy[j] + A.by, rr = dl.r[j] * gs[p];
+        x0 = cx - rr; x1 = cx + rr; y0 = cy - rr; y1 = cy + rr;
+      }
+      const pc = pclip[p];
+      if (x1 < 0 || y1 < 0 || x0 > W || y0 > H) continue;
+      if (pc && (x1 < pc[0] || x0 > pc[2] || y1 < pc[1] || y0 > pc[3])) continue;
+      // Clip state: the panel's fixed rect and the record's own clip rect.
+      const st = p * 65536 + dl.clip[i];
+      if (st !== curState) {
+        flush();
+        ctx.restore(); ctx.save();
+        if (pc) { ctx.beginPath(); ctx.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]); ctx.clip(); }
+        const cr = dl.clip[i] > 0 ? dl.clips[dl.clip[i] - 1] : null;
+        if (cr) {
+          const cx0 = A.ax * cr.x0 + A.bx, cy0 = A.ay * cr.y0 + A.by;
+          ctx.beginPath(); ctx.rect(cx0, cy0, A.ax * (cr.x1 - cr.x0), A.ay * (cr.y1 - cr.y0)); ctx.clip();
+        }
+        curState = st; curPaint = -1;
+      }
+      const pi = dl.paint[i], pt = dl.paints[pi];
+      // Batch only what composites identically when merged into one path: an
+      // opaque paint whose fill and stroke cannot overlap differently.
+      const canBatch = kd !== 2 && pt.opaque && (!pt.fill || !pt.stroke || pt.fill === pt.stroke);
+      if (!(open && batch && canBatch && pi === curPaint)) {
+        flush();
+        if (pi !== curPaint) { setPaint(pi); curPaint = pi; }
+        ctx.beginPath();
+        open = true;
+        batch = canBatch;
+      }
+      if (kd === DL_POINT) {
+        const j = dl.row[i], sh = dl.shape[j];
+        tracePoint(ctx, sh, A.ax * dl.cx[j] + A.bx, A.ay * dl.cy[j] + A.by, dl.r[j] * gs[p]);
+      } else if (kd === DL_RECT) {
+        traceShape(ctx, dl, i, A);
+      } else {
+        traceShape(ctx, dl, i, A);
+        const pf = pt.fill;
+        if (pf && dl.closed[dl.row[i]] === 1) { ctx.fillStyle = pf; ctx.fill(dl.evenodd[dl.row[i]] === 1 ? "evenodd" : "nonzero"); }
+        if (pt.stroke && pt.width > 0) ctx.stroke();
+        open = false;
+      }
+      if (!batch) flush();
+    }
+    flush();
+    ctx.restore();
+  }
+
   // Show or hide the split render's mark-layer image (all its panel copies).
   function showMarksLayer(on: boolean): void {
-    if (ws.svgEl && ws.marksLayer) ws.svgEl.classList.toggle("vellumwidget-marks-off", !on);
+    if (!ws.svgEl || !ws.marksLayer) return;
+    // Inline on each drawn copy (the <use>s, or the root image), so the
+    // shared image definition is never styled and an export clone can simply
+    // clear it. The svg class only records the state.
+    ws.svgEl.classList.toggle("vellumwidget-marks-off", !on);
+    const drawn = ws.svgEl.querySelectorAll("use.vellumwidget-marks, svg > image.vellumwidget-marks");
+    for (let i = 0; i < drawn.length; i++) (drawn[i] as SVGElement).style.visibility = on ? "" : "hidden";
   }
 
   // A ring marking element `k`'s bbox, or null if it has no geometry. Drawn in the

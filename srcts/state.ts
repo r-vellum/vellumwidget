@@ -2,6 +2,7 @@
 // hold in local variables, now one object the feature modules take.
 
 import type { BoundDomain } from "./binds";
+import type { DisplayList } from "./dlist";
 import type Flatbush from "flatbush";
 import type { Geom, GeometryPayload } from "./geometry";
 import type { CrosstalkHandle, ViewFraction } from "./linking";
@@ -114,6 +115,8 @@ export interface WidgetState {
   // per panel pan group, so axis zoom carries it), "root" (one image over the
   // whole scene), or null (no split: the base image carries marks and furniture).
   marksLayer: "pans" | "root" | null;
+  // The decoded marks-only display list (VW-15), or null when none shipped.
+  dl: DisplayList | null;
   selGroup: SVGGElement | null; // persistent selection rings
   hovGroup: SVGGElement | null; // transient hover ring(s)
   // Crisp-zoom canvas (Phase 6): when the view is zoomed in, the base image would
@@ -371,6 +374,7 @@ export function createState(el: HTMLElement): WidgetState {
     tolY: 1,
     rasterMode: false,
     marksLayer: null,
+    dl: null,
     selGroup: null,
     hovGroup: null,
     canvasEl: null,

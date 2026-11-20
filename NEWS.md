@@ -1,5 +1,24 @@
 # vellumwidget 0.12.0.9000
 
+* **Zoomed-in big plots are drawn exactly, from a smaller payload (VW-15).**
+  With a vellum that has the marks-only display list (`scene_display_list()`),
+  raster mode ships each keyed mark's exact device-pixel geometry, paint and key
+  instead of its bounding box. Once zoomed in, the canvas redraws the marks with
+  their own shape (circle, square, triangle, diamond, plus, cross, star), rects
+  and paths, fill, stroke, width, dash and alpha, in the engine's paint order,
+  where it used to draw plain dots in a colour read back from the image. The
+  hit-test boxes are derived in the browser. The key column ships as integer
+  differences when the keys are row numbers, and long runs of one value (every
+  mark a "point") as runs. A 20,000-point keyed scatter's payload drops from
+  1.09 MB to 0.61 MB, a 200,000-point one from 8.3 MB to 3.9 MB. With more than
+  50,000 marks in view, the exact redraw waits until the zoom settles, and the
+  image stands in meanwhile. Above `render_options(max_marks = )` (default
+  500,000) no list ships: the widget keeps the bounding-box index and a message
+  suggests `vellumplot::mark_datashade()` or `vellumplot::mark_hex()`. With an
+  older vellum nothing changes. Marks the list cannot draw exactly (gradient or
+  pattern paints, path clips, marks in a translucent group) keep their box and
+  stay in the image.
+
 * **Raster mode keeps real axes, so axis zoom, the navigator and linked zoom
   work on big plots (VW-14).** With a vellum that has the split render
   (`scene_svg(layer =)` / `scene_png(layer =)`), raster mode no longer draws the

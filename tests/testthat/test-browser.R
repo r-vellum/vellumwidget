@@ -89,13 +89,16 @@ test_that("VW-13: a raster widget decodes the compact index (click selects a poi
   set.seed(1)
   n <- 25000L
   df <- data.frame(x = rnorm(n), y = rnorm(n), g = sample(letters[1:4], n, TRUE), id = seq_len(n))
-  w <- vellumplot::vplot(df) |>
-    vellumplot::mark_point(x = x, y = y, color = g, data_id = id) |>
-    as_widget()
-  el <- w$x$elements
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id)
+  w <- as_widget(p)
   expect_true(w$x$options$raster)
-  expect_identical(el$mark$levels, "point")
-  # the right-most data point (not a legend swatch): isolated, so a click on its centre picks it alone
+  expect_identical(w$x$elements$mark$levels, "point")
+  # the right-most data point (not a legend swatch): isolated, so a click on
+  # its centre picks it alone (positions from the scene: with a display list
+  # the payload carries no bbox for it)
+  el <- vellum::scene_model(vellum::as_vellum_scene(p))$elements
+  el <- el[!is.na(el$key), ]
   i <- which.max(ifelse(startsWith(el$key, "legend:"), -Inf, el$x1))
   cx <- (el$x0[i] + el$x1[i]) / 2
   cy <- (el$y0[i] + el$y1[i]) / 2
@@ -142,4 +145,66 @@ test_that("VW-14: a split-render raster widget zooms by axis and re-ticks", {
   expect_true(ev("!!document.querySelector('svg.vellumwidget-marks-off')"))
   # theme_grey: re-ticked white gridlines show through
   expect_gt(white_share(b, r), 0.0005)
+})
+
+test_that("VW-15: the zoomed canvas draws each mark's own colour from the display list", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .display_list_supported(), "vellum without the display list")
+  set.seed(4)
+  n <- 400L
+  df <- data.frame(x = runif(n), y = runif(n), g = sample(letters[1:4], n, TRUE), id = seq_len(n))
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, shape = g, data_id = id, size = 4)
+  w <- as_widget(p, render = render_options(mode = "raster"), elementId = "w1")
+  expect_false(is.null(w$x$displayList))
+  b <- open_widget(w)
+  ev <- function(js) b$Runtime$evaluate(js)$result$value
+  pn <- w$x$panels[[1]]
+  ev(sprintf(
+    "HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f})",
+    pn$px0 + 0.3 * (pn$px1 - pn$px0), pn$py0 + 0.3 * (pn$py1 - pn$py0),
+    0.3 * (pn$px1 - pn$px0), 0.3 * (pn$py1 - pn$py0)
+  ))
+  Sys.sleep(0.3)
+  expect_identical(ev("getComputedStyle(document.querySelector('.vellumwidget-canvas')).display"), "block")
+  # every drawn mark's centre pixel on the canvas is one of the plot's paints,
+  # not a colour read back from the (blurred) image
+  px <- ev("(function(){
+    var c = document.querySelector('.vellumwidget-canvas'), x = c.getContext('2d');
+    var d = x.getImageData(0, 0, c.width, c.height).data, seen = {};
+    for (var i = 0; i < d.length; i += 4 * 97) if (d[i + 3] === 255) seen[d[i] + ',' + d[i + 1] + ',' + d[i + 2]] = (seen[d[i] + ',' + d[i + 1] + ',' + d[i + 2]] || 0) + 1;
+    return JSON.stringify(seen); })()")
+  seen <- jsonlite::fromJSON(px)
+  pal <- vapply(w$x$displayList$paints$fill, function(h) {
+    paste(strtoi(substring(h, c(2, 4, 6), c(3, 5, 7)), 16L), collapse = ",")
+  }, "")
+  top <- names(sort(unlist(seen), decreasing = TRUE))[1:4]
+  expect_true(all(top %in% pal))
+  expect_true(ev("!!document.querySelector('svg.vellumwidget-marks-off')"))
+})
+
+test_that("VW-15: with many marks in view the exact redraw waits for the zoom to settle", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .display_list_supported(), "vellum without the display list")
+  set.seed(5)
+  n <- 80000L
+  df <- data.frame(x = runif(n), y = runif(n), id = seq_len(n))
+  w <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id) |>
+    as_widget(elementId = "w1")
+  b <- open_widget(w)
+  ev <- function(js) b$Runtime$evaluate(js)$result$value
+  pn <- w$x$panels[[1]]
+  # a shallow zoom keeps ~70k marks in view: the image stands in at first ...
+  st <- ev(sprintf(
+    "(function(){ HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f});
+      return getComputedStyle(document.querySelector('.vellumwidget-canvas')).display; })()",
+    pn$px0 + 0.05 * (pn$px1 - pn$px0), pn$py0 + 0.05 * (pn$py1 - pn$py0),
+    0.9 * (pn$px1 - pn$px0), 0.9 * (pn$py1 - pn$py0)
+  ))
+  expect_identical(st, "none")
+  # ... and the exact canvas replaces it once the view settles
+  Sys.sleep(0.6)
+  expect_identical(ev("getComputedStyle(document.querySelector('.vellumwidget-canvas')).display"), "block")
+  expect_true(ev("!!document.querySelector('svg.vellumwidget-marks-off')"))
 })

@@ -14,6 +14,12 @@ export const OVERLAY_MARK_CAP = 2000;
 // pile of long lines whose boxes all contain the cursor). Well above the
 // number of marks that overlap one cursor position in practice.
 export const PICK_CANDIDATES = 256;
+// Exact mid-zoom canvas (VW-15): above this many marks in view, redrawing
+// them every wheel tick costs more than a frame (500k points: ~200 ms), so
+// during a gesture the scaled mark image stands in and the exact redraw waits
+// for the zoom to settle (SETTLE_MS without another view change).
+export const LIVE_DRAW_MAX = 50000;
+export const SETTLE_MS = 120;
 // --- raster-mode feedback (rings drawn on the overlay, index-driven) ---
 export const SVGNS = "http://www.w3.org/2000/svg";
 // Unified tooltip: one box listing every mark in the hovered column, one row
