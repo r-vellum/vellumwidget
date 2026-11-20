@@ -227,9 +227,21 @@ export interface Payload {
   geometry?: GeometryPayload; // true vertices per keyed element, for exact picking
   panels?: PanelInfo[] | PanelInfo; // cartesian data panels (htmlwidgets may unbox a length-1 list)
   colorbar?: ColorbarInfo; // interactive continuous-colour colorbar (optional)
+  marks?: MarksLayer; // split-render mark layer (raster mode, VW-14)
   interactions?: InteractionSpec; // declarative interactivity (from the plot spec)
   provenance?: Provenance; // click-to-source rows per element (from inspect_source())
   options: Options;
+}
+
+// The split render's mark layer (raster mode with vellum's `layer =` split): a
+// transparent PNG of the keyed marks alone, at the scene's device-px size, placed
+// inside each listed panel's pan group (or over the whole scene when `panels` is
+// absent) under SVG furniture. See `.raster_marks()` on the R side.
+export interface MarksLayer {
+  href: string;
+  width: number;
+  height: number;
+  panels?: string[] | string;
 }
 
 // Click-to-source payload (from vellumplot::inspect_source()): the source data

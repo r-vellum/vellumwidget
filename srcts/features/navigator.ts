@@ -65,8 +65,13 @@ export function navigatorFeature(
     clone.removeAttribute("height");
     // Drop defs/clip-paths (duplicate ids would clash with the live svg) and any
     // interactivity/a11y hooks — this is a static backdrop.
-    const defs = clone.querySelector("defs");
-    if (defs) defs.remove();
+    const defs = clone.querySelectorAll("defs");
+    for (let i = 0; i < defs.length; i++) defs[i].remove();
+    // Split render: each panel's <use> of the mark image draws the whole image
+    // (the live panels clip it); unclipped here, one copy is enough. The <use>
+    // still resolves to the live svg's image definition.
+    const uses = clone.querySelectorAll("use.vellumwidget-marks");
+    for (let i = 1; i < uses.length; i++) uses[i].remove();
     const clipped = clone.querySelectorAll("[clip-path]");
     for (let i = 0; i < clipped.length; i++) clipped[i].removeAttribute("clip-path");
     const keyed = clone.querySelectorAll("[data-key],[tabindex],[role]");

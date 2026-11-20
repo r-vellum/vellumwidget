@@ -72,9 +72,9 @@ the selection driving it. With binds in a composition each cell zooms
 on its own (a wheel or pan moves only the cell under the pointer, and a
 bound axis follows its selection), so \code{x}..\code{h} are the last-zoomed
 cell's view and \code{zoomed} is \code{TRUE} while any cell is zoomed in. Binds
-are enacted in SVG mode only: a raster render
-(\code{render_options(mode = "raster")}, or \code{"auto"} above the threshold)
-ignores them for now. Updates as state when a zoom/pan
+are enacted in SVG mode, and in raster mode with a vellum that has the
+split render (\code{render_options(mode = "raster")}, or \code{"auto"} above the
+threshold); with an older vellum a raster render ignores them. Updates as state when a zoom/pan
 settles (wheel, drag-pan release, pinch, keyboard, reset, zoom-to-selection,
 a proxy \code{\link[=vw_zoom]{vw_zoom()}}, or a brush that moves a bound panel).}
 }

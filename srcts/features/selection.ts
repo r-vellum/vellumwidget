@@ -32,6 +32,9 @@ export function selectionFeature(
   function refreshSelected(): void {
     if (ws.rasterMode) {
       ws.fx.drawSelFeedback();
+      // Conditions and filters are SVG-only, but scale binds work in raster
+      // mode under the split render's axis zoom (VW-14).
+      ws.fx.reevaluateInteractions();
       return;
     }
     ws.fx.clearClass("vellumwidget-selected");

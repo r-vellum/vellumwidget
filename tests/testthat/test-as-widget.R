@@ -540,6 +540,7 @@ test_that("discrete legend swatches + series membership flow into the payload (P
 })
 
 test_that("mode = 'raster' ships a base image with the element index (no per-element SVG)", {
+  local_single_raster()
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(
       c(0.25, 0.75),
@@ -795,6 +796,7 @@ test_that("geometry is dropped, with a message, above the vertex limit", {
 })
 
 test_that("the raster base image is encoded in memory (no temp file)", {
+  local_single_raster()
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
   before <- list.files(tempdir())
@@ -806,6 +808,7 @@ test_that("the raster base image is encoded in memory (no temp file)", {
 })
 
 test_that("the raster base image is rendered at 2x for HiDPI screens", {
+  local_single_raster()
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
   w <- as_widget(scene, render = render_options(mode = "raster"))
@@ -839,6 +842,51 @@ test_that("the raster shell is the same size as the SVG mode's, at any page size
   }
 })
 
+test_that("raster mode uses the split render when vellum has it (VW-14)", {
+  skip_if_not(.split_render_supported(), "vellum without the split render")
+  set.seed(1)
+  df <- data.frame(x = rnorm(60), y = rnorm(60), g = rep(c("a", "b"), 30), id = 1:60)
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id)
+  w <- as_widget(p, render = render_options(mode = "raster"))
+  expect_true(w$x$options$raster)
+  # furniture stays SVG: the pan group is there, the data marks are not
+  expect_match(w$x$svg, 'data-vellum-pan="panel-1-1"', fixed = TRUE)
+  expect_no_match(w$x$svg, 'data-key="1"', fixed = TRUE)
+  expect_no_match(w$x$svg, "data:image/png", fixed = TRUE)
+  # the legend's keyed swatches stay real nodes in the furniture
+  expect_match(w$x$svg, 'data-key="legend:', fixed = TRUE)
+  # the mark layer: a transparent PNG of the keyed marks in the data panel
+  m <- w$x$marks
+  expect_match(m$href, "^data:image/png;base64,")
+  expect_identical(as.character(m$panels), "panel-1-1")
+  expect_equal(c(m$width, m$height), c(w$width, w$height))
+  png <- base64enc::base64decode(sub("^data:image/png;base64,", "", m$href))
+  expect_equal(.png_dims(png), list(width = 2 * m$width, height = 2 * m$height))
+  # text applies to the SVG furniture, so it is no longer ignored
+  expect_no_warning(
+    as_widget(p, render = render_options(mode = "raster", text = "outline"))
+  )
+  # SVG mode ships no mark layer
+  expect_null(as_widget(p, render = render_options(mode = "svg"))$x$marks)
+  # a raw scene names no panels: every keyed mark is in the layer, laid over all
+  sc <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
+  wr <- as_widget(sc, render = render_options(mode = "raster"))
+  expect_null(wr$x$marks$panels)
+  expect_match(wr$x$marks$href, "^data:image/png;base64,")
+})
+
+test_that("raster mode falls back to one image with an older vellum (VW-14)", {
+  local_single_raster()
+  df <- data.frame(x = 1:30, y = 1:30, id = 1:30)
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id)
+  w <- as_widget(p, render = render_options(mode = "raster"))
+  expect_null(w$x$marks)
+  expect_match(w$x$svg, "data:image/png;base64,", fixed = TRUE)
+})
+
 test_that(".png_dims reads the IHDR of the encoded bytes", {
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, key = "a"))
@@ -870,6 +918,7 @@ test_that("mode = 'auto' switches to raster above raster_threshold, stays SVG be
 })
 
 test_that("raster shell carries the scene title/description for accessibility", {
+  local_single_raster()
   scene <- vellum::vl_scene(
     2,
     2,
@@ -905,6 +954,7 @@ test_that("text = 'native' (default) emits selectable <text>; 'outline' emits gl
 })
 
 test_that("text is ignored (with a warning) in raster mode", {
+  local_single_raster()
   scene <- vellum::vl_scene(2, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5, key = c("a", "b")))
   expect_warning(

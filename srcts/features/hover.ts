@@ -11,7 +11,7 @@ export function hoverFeature(
 ): Pick<
   WidgetFns,
   "showHighlightOverlay" | "hideHighlightOverlay" | "clearCrosshair" | "drawCrosshair"
-  | "showTip" | "showTipMulti" | "hideTip" | "moveTip" | "clearHover"
+  | "showTip" | "showTipMulti" | "hideTip" | "moveTip" | "clearHover" | "azOverlayWrap"
 > {
   // --- large-scene hover dim (overlay, O(hovered)) ---
   function dimOpacityVal(): string {
@@ -244,5 +244,5 @@ export function hoverFeature(
     }
   }
 
-  return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover };
+  return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover, azOverlayWrap };
 }

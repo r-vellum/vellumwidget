@@ -256,7 +256,23 @@ as_widget <- function(
     svg = FALSE,
     auto = n_keyed > render$raster_threshold
   )
-  if (use_raster) {
+  marks <- NULL
+  if (use_raster && .split_render_supported()) {
+    # Split render (VW-14, vellum >= 0.9.0.9000): the furniture (axes, gridlines,
+    # legend, text) stays real SVG, so axis zoom can re-tick it, and only the heavy
+    # keyed mark layer is a PNG, which the runtime places inside each panel's pan
+    # group. Restricting the mark layer to the data panels keeps the legend's
+    # keyed swatches in the furniture as real nodes.
+    panel_names <- .scene_panel_names(model)
+    svg <- vellum::scene_svg(
+      scene,
+      text = render$text,
+      layer = "unkeyed",
+      panels = panel_names
+    )
+    dims <- .svg_dims(svg)
+    marks <- .raster_marks(scene, panel_names)
+  } else if (use_raster) {
     # Raster mode bakes the marks (text included) into a single PNG, so the SVG
     # `text` control has nothing to act on. Flag it only when the caller asked
     # explicitly, so the drop is visible rather than silent.
@@ -288,6 +304,8 @@ as_widget <- function(
     geometry = .vellumwidget_geometry(scene),
     panels = .vellumwidget_panels(model),
     colorbar = .vellumwidget_colorbar(model),
+    # The split render's mark layer (raster mode, VW-14), or NULL.
+    marks = marks,
     interactions = interactions,
     options = list(
       raster = use_raster,
@@ -1196,6 +1214,55 @@ meta_num <- function(meta, field) {
   list(svg = svg, width = d$width, height = d$height)
 }
 
+# Does the installed vellum have the split render (`layer =` / `panels =` on
+# `scene_svg()` and `scene_png()`)? Older vellum (0.9.0) does not, and raster mode
+# then falls back to one PNG of the whole scene (`.raster_svg()`).
+.split_render_supported <- function() {
+  all(c("layer", "panels") %in% names(formals(vellum::scene_svg))) &&
+    all(c("layer", "panels") %in% names(formals(vellum::scene_png)))
+}
+
+# The panels whose keyed marks go into the mark layer: every panel that holds a
+# keyed mark, except the legend (its interactive swatches stay in the furniture
+# as real nodes). NULL -- every keyed mark -- when the scene names no panels (a
+# raw vellum scene) or a keyed mark sits outside every panel; the runtime then
+# lays the mark layer over the whole scene instead of into the pan groups.
+.scene_panel_names <- function(model) {
+  el <- model$elements
+  if (is.null(el) || is.null(el$panel)) {
+    return(NULL)
+  }
+  pn <- as.character(el$panel[!is.na(el$key)])
+  if (!length(pn) || anyNA(pn)) {
+    return(NULL)
+  }
+  nm <- setdiff(unique(pn), "legend")
+  if (length(nm)) nm else NULL
+}
+
+# The split render's mark layer: the keyed marks alone, on a transparent page at
+# `.RASTER_SCALE`, as a data URI plus the scene's device-px size (the frame the
+# runtime places it in, like `.raster_svg()`).
+.raster_marks <- function(scene, panels) {
+  png <- vellum::scene_png(
+    scene,
+    scale = .RASTER_SCALE,
+    layer = "keyed",
+    panels = panels
+  )
+  d <- .png_dims(png)
+  if (is.null(d)) {
+    stop("could not read the rendered raster dimensions", call. = FALSE)
+  }
+  d <- .scene_dims(scene, d)
+  list(
+    href = paste0("data:image/png;base64,", base64enc::base64encode(png)),
+    width = d$width,
+    height = d$height,
+    panels = if (is.null(panels)) NULL else I(panels)
+  )
+}
+
 # Normalise an R or CSS colour to a CSS colour string (hex, with alpha when
 # present), so users can pass R colour names ("steelblue", "grey35") or numbers.
 # NULL/NA -> NULL (no override). Vectorised (for per-element colours).
@@ -1272,9 +1339,9 @@ meta_num <- function(meta, field) {
 #'     on its own (a wheel or pan moves only the cell under the pointer, and a
 #'     bound axis follows its selection), so `x`..`h` are the last-zoomed
 #'     cell's view and `zoomed` is `TRUE` while any cell is zoomed in. Binds
-#'     are enacted in SVG mode only: a raster render
-#'     (`render_options(mode = "raster")`, or `"auto"` above the threshold)
-#'     ignores them for now. Updates as state when a zoom/pan
+#'     are enacted in SVG mode, and in raster mode with a vellum that has the
+#'     split render (`render_options(mode = "raster")`, or `"auto"` above the
+#'     threshold); with an older vellum a raster render ignores them. Updates as state when a zoom/pan
 #'     settles (wheel, drag-pan release, pinch, keyboard, reset, zoom-to-selection,
 #'     a proxy [vw_zoom()], or a brush that moves a bound panel).}
 #' }
