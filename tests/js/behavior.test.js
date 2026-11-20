@@ -4267,7 +4267,7 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(dl.bx0[0] === 96 && dl.bx1[0] === 104 && dl.by0[2] === 15 && dl.by1[2] === 20 && dl.bx1[3] === 70 && dl.by0[3] === 60,
     "dlist: bboxes from a point's radius, a (negative-height) rect and a path's vertices");
   ok(dl.exact === false && dl.panels[0] === "panel-1-1" && dl.clips[0].x1 === 180, "dlist: a flagged record makes the list inexact");
-  ok(T3.decodeDisplayList({ format: "x", version: 1 }) === null && T3.decodeDisplayList({ format: "vellum-display-list", version: 2 }) === null,
+  ok(T3.decodeDisplayList({ format: "x", version: 1 }) === null && T3.decodeDisplayList({ format: "vellum-display-list", version: 3 }) === null,
     "dlist: an unknown format or version is ignored");
   // fillBboxes: an element with no bbox takes its records' union; one with a bbox keeps it.
   const els = [{ key: "7" }, { key: "9", x0: 1, y0: 1, x1: 2, y1: 2 }, { key: "zz" }];
@@ -4365,8 +4365,8 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   t.inst._test.setView({ x: 45, y: 40, w: 40, h: 20 });
   t.inst._test.evalTier();
   ok(t.inst._test.markTier() === "mid" && !t.el.querySelector(".vellumwidget-detail"), "tier: more visible marks than detailMarks stays on the canvas (mid)");
-  // tighter: 3 visible (p1, p2, p3) -> detail
-  t.inst._test.setView({ x: 48, y: 40, w: 20, h: 20 });
+  // tighter: 3 visible (p1, p2, p3; the rect at x 66..70 is out) -> detail
+  t.inst._test.setView({ x: 46, y: 40, w: 19, h: 20 });
   t.inst._test.evalTier();
   const det = t.el.querySelectorAll('[data-vellum-pan="panel-1-1"] > g.vellumwidget-detail [data-key]');
   ok(t.inst._test.markTier() === "detail" && det.length === 3, "tier: few enough visible marks become SVG nodes in the pan group");
@@ -4401,7 +4401,7 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(t.el.querySelector("svg").getAttribute("role") === "img" && t.el.querySelector("use.vellumwidget-marks").style.visibility === "",
     "tier: out of detail the chart is an image again and the mark image shows");
   // hysteresis: in detail, 4 visible (<= 1.5 x 4 = 6) stays detail
-  t.inst._test.setView({ x: 48, y: 40, w: 20, h: 20 }); t.inst._test.evalTier();
+  t.inst._test.setView({ x: 46, y: 40, w: 19, h: 20 }); t.inst._test.evalTier();
   t.inst._test.setView({ x: 45, y: 40, w: 40, h: 20 }); t.inst._test.evalTier();
   ok(t.inst._test.markTier() === "detail" && t.el.querySelectorAll(".vellumwidget-detail [data-key]").length === 4,
     "tier: hysteresis keeps detail up to 1.5x the threshold");
@@ -4848,6 +4848,139 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   }
   const noaz = mountFurn({ axisZoom: false });
   ok(!noaz.q("path.rule").hasAttribute("vector-effect") && !noaz.q("text.note").style.transform, "furniture: no axis zoom, nothing changes");
+}
+
+// ============ VW-23: display list v2 -- gradients, clip paths, opacity groups ============
+{
+  const b64 = (Arr, xs) => Buffer.from(new Arr(xs).buffer).toString("base64");
+  const f32 = (xs) => ({ type: "f32", n: xs.length, data: b64(Float32Array, xs) });
+  const u8 = (xs) => ({ type: "u8", n: xs.length, data: b64(Uint8Array, xs) });
+  // A recording context that also logs gradients, clips, transforms and layer composites.
+  function recCtx() {
+    const log = [];
+    return {
+      log: log, fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1, _stack: [], _m: [1, 0, 0, 1, 0, 0],
+      save() { this._stack.push([this.fillStyle, this.globalAlpha, this._m.slice()]); },
+      restore() { const v = this._stack.pop(); if (v) { this.fillStyle = v[0]; this.globalAlpha = v[1]; this._m = v[2]; } },
+      setTransform(a, b, c, d, e, f) { this._m = [a, b, c, d, e, f]; },
+      transform(a, b, c, d, e, f) { const m = this._m; this._m = [m[0] * a + m[2] * b, m[1] * a + m[3] * b, m[0] * c + m[2] * d, m[1] * c + m[3] * d, m[0] * e + m[2] * f + m[4], m[1] * e + m[3] * f + m[5]]; },
+      clearRect() { log.length = 0; }, rect() {}, moveTo() {}, lineTo() {}, closePath() {}, setLineDash() {}, beginPath() {}, arc() {},
+      clip(rule) { log.push({ op: "clip", rule: rule || "rect" }); },
+      createLinearGradient(x1, y1, x2, y2) { const g = { kind: "linear", args: [x1, y1, x2, y2], stops: [], addColorStop(o, c) { this.stops.push(o + ":" + c); } }; log.push({ op: "grad", g: g }); return g; },
+      createRadialGradient() { const g = { kind: "radial", args: [].slice.call(arguments), stops: [], addColorStop(o, c) { this.stops.push(o + ":" + c); } }; log.push({ op: "grad", g: g }); return g; },
+      drawImage() { log.push({ op: "composite", alpha: this.globalAlpha }); },
+      fill(rule) { log.push({ op: "fill", style: typeof this.fillStyle === "string" ? this.fillStyle : "gradient:" + this.fillStyle.kind, alpha: this.globalAlpha, m: this._m.slice() }); },
+      stroke() { log.push({ op: "stroke" }); }
+    };
+  }
+  // p1 solid; p2 gradient fill; p3 in a 0.5 opacity group; p4 clipped by a
+  // triangle; p5 pick-only.
+  function dlV2(o) {
+    o = o || {};
+    return {
+      format: "vellum-display-list", version: o.version || 2, width: 200, height: 100, n: 5,
+      record: { kind: { type: "u8", n: 5, const: 0 }, paint: u8([0, 1, 0, 0, 2]), key: { type: "u32", n: 5, seq: [0, 1] },
+        flags: u8([0, 0, 0, 0, 16]), clip: u8([0, 0, 0, 1, 0]), panel: { type: "u8", n: 5, const: 1 },
+        group: o.noGroups ? undefined : u8([0, 0, 1, 0, 0]) },
+      point: { cx: f32([40, 70, 100, 130, 160]), cy: { type: "f32", n: 5, const: 50 }, r: { type: "f32", n: 5, const: 4 }, shape: { type: "u8", n: 5, const: 0 } },
+      rect: { x: f32([]), y: f32([]), w: f32([]), h: f32([]) },
+      path: { xy: { type: "f32", n: 0, data: "" }, run_offset: { type: "u8", n: 1, const: 0 }, path_offset: { type: "u8", n: 1, const: 0 },
+        closed: { type: "u8", n: 0, data: "" }, evenodd: { type: "u8", n: 0, data: "" } },
+      paints: { fill: ["#ff0000ff", null, null], stroke: [null, null, null], stroke_width: [0, 0, 0], dash: [null, null, null],
+        linecap: ["round", "round", "round"], linejoin: ["round", "round", "round"], fill_gradient: o.badGrad ? [0, 5, 0] : [0, 1, 0] },
+      clips: { x0: [120], y0: [40], x1: [140], y1: [60], path_start: [0], path_n: [1] },
+      gradients: { type: "linear", x1: 0, y1: 0, x2: 10, y2: 0, r1: 0, r2: 0, a: 1, b: 0, c: 0, d: 1, e: 65, f: 0,
+        stop_offset: [0, 2], stop_pos: [0, 1], stop_color: ["#ff0000ff", "#0000ff80"] },
+      clip_paths: { xy: f32([120, 60, 140, 60, 130, 40]), run_offset: u8([0, 3]), path_offset: u8([0, 1]), evenodd: u8([0]) },
+      groups: o.noGroups ? null : { alpha: [0.5], parent: [0] },
+      keys: ["p1", "p2", "p3", "p4", "p5"], panels: "panel-1-1"
+    };
+  }
+  const T = widgetDef._internals || null;
+  const panel = {
+    name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+  };
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"></g></g></svg>';
+  const proto = window.HTMLCanvasElement.prototype;
+  function mountV2(o) {
+    const ctx = recCtx(), layer = recCtx();
+    const orig = proto.getContext;
+    // the widget's canvas records into `ctx`, group layers into `layer`
+    proto.getContext = function () { return this.classList && this.classList.contains("vellumwidget-canvas") ? ctx : layer; };
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    const keys = ["p1", "p2", "p3", "p4", "p5"];
+    inst.renderValue({
+      svg: svg,
+      elements: { key: keys, mark: keys.map(() => "point"), cond: keys.map(() => ["pick:color"]) },
+      panels: [panel],
+      marks: { href: "data:image/png;base64,", width: 200, height: 100, panels: "panel-1-1" },
+      displayList: dlV2(o),
+      interactions: { selections: [{ name: "pick", kind: "point", on: "click", empty: true }],
+        conditions: [{ selection: "pick", aes: "color", if_false: "#cccccc", empty: true }], filters: [] },
+      options: Object.assign({ raster: true, hover: true, select: true, zoom: true, selectMode: "multiple", detailMarks: 10 }, (o && o.options) || {})
+    });
+    return { el: e, inst: inst, ctx: ctx, layer: layer, restore: function () { proto.getContext = orig; } };
+  }
+  const m = mountV2();
+  ok(m.inst._test.displayListSize() === 5, "dlv2: a version-2 list decodes");
+  // mid tier (zoomed): the canvas draws every record exactly
+  m.inst._test.setView({ x: 20, y: 10, w: 160, h: 80 });
+  m.inst._test.setView({ x: 25, y: 12, w: 150, h: 75 });
+  m.inst._test.evalTier();
+  ok(m.inst._test.markTier() === "detail", "dlv2: a list with gradients, clip paths and groups is exact: the detail tier is reachable");
+  const det = m.el.querySelector(".vellumwidget-detail [data-key=\"p2\"]");
+  const gid = det && /^url\(#(.+)\)$/.exec(det.getAttribute("fill") || "");
+  const gEl = gid && document.getElementById(gid[1]);
+  ok(gEl && gEl.tagName === "linearGradient" && gEl.getAttribute("gradientUnits") === "userSpaceOnUse" &&
+     gEl.getAttribute("gradientTransform") === "matrix(1 0 0 1 65 0)" && gEl.querySelectorAll("stop").length === 2 &&
+     gEl.querySelectorAll("stop")[1].getAttribute("stop-opacity") === "0.502",
+    "dlv2 detail: a gradient fill is a userSpaceOnUse <linearGradient> with its transform and stops");
+  const p3 = m.el.querySelector(".vellumwidget-detail [data-key=\"p3\"]");
+  ok(p3 && p3.parentNode.getAttribute("opacity") === "0.5" && !m.el.querySelector(".vellumwidget-detail [data-key=\"p1\"]").parentNode.hasAttribute("opacity"),
+    "dlv2 detail: a record in an opacity group sits in a <g opacity>");
+  const p4 = m.el.querySelector(".vellumwidget-detail [data-key=\"p4\"]");
+  const cid = p4 && /^url\(#(.+)\)$/.exec(p4.getAttribute("clip-path") || "");
+  const c0 = cid && document.getElementById(cid[1]);
+  const c1 = c0 && document.getElementById((/^url\(#(.+)\)$/.exec(c0.getAttribute("clip-path") || "") || [])[1]);
+  ok(c0 && c0.querySelector("path") && c1 && c1.querySelector("rect"), "dlv2 detail: a clip path chains the path and the clip rect (intersection)");
+  ok(!m.el.querySelector(".vellumwidget-detail [data-key=\"p5\"]"), "dlv2 detail: a pick-only record draws no node");
+  // a mark only partly in view (centre outside) is still built
+  m.inst._test.setView({ x: 73, y: 30, w: 40, h: 40 }); m.inst._test.evalTier();
+  ok(m.inst._test.markTier() === "detail" && m.el.querySelector(".vellumwidget-detail [data-key=\"p2\"]"),
+    "dlv2 detail: a mark whose box overlaps the view is built even with its centre outside");
+  // back out to mid: the canvas
+  m.inst._test.setView({ x: 0, y: 0, w: 200, h: 100 }); m.inst._test.evalTier();
+  m.inst._call("select", ["p1", "p2", "p3", "p4"]); // a condition: the overview canvas draws
+  const log = m.ctx.log;
+  const grads = log.filter((r) => r.op === "grad");
+  ok(grads.length === 1 && grads[0].g.kind === "linear" && grads[0].g.stops.join(",") === "0:#ff0000ff,1:#0000ff80",
+    "dlv2 canvas: a gradient fill is built from its stops");
+  const gfill = log.filter((r) => r.op === "fill" && r.style === "gradient:linear")[0];
+  ok(gfill && gfill.m[4] === 65 && gfill.m[0] === 1, "dlv2 canvas: the gradient is placed through the record's affine times its own transform");
+  const comp = log.filter((r) => r.op === "composite");
+  ok(comp.length === 1 && comp[0].alpha === 0.5 && m.layer.log.filter((r) => r.op === "fill" && r.alpha === 1).length === 1,
+    "dlv2 canvas: an opacity group draws into a layer (at full alpha) composited once at its alpha");
+  ok(log.some((r) => r.op === "clip" && r.rule === "nonzero"), "dlv2 canvas: a clip path clips");
+  // a condition colour replaces a gradient fill
+  m.inst._call("select", ["p1"]);
+  ok(m.ctx.log.some((r) => r.op === "fill" && r.style === "#cccccc") && !m.ctx.log.some((r) => r.style === "gradient:linear"),
+    "dlv2 canvas: a condition colour replaces the gradient");
+  m.restore();
+  // a gradient ref past the table is not drawable: the record is flagged
+  const bad = mountV2({ badGrad: true });
+  bad.inst._test.setView({ x: 25, y: 12, w: 150, h: 75 }); bad.inst._test.evalTier();
+  ok(bad.inst._test.markTier() === "mid", "dlv2: a gradient ref past the table flags its record (list inexact, no detail)");
+  bad.restore();
+  // version 1 with a pick-only record: exact (it paints nothing)
+  const v1 = mountV2({ version: 1, noGroups: true });
+  v1.inst._test.setView({ x: 25, y: 12, w: 150, h: 75 }); v1.inst._test.evalTier();
+  ok(v1.inst._test.markTier() === "detail", "dlv2: pick-only records no longer keep a list from being exact");
+  v1.restore();
 }
 
 // Checks that need the MutationObserver (removal watcher) to have run.

@@ -1,5 +1,26 @@
 # vellumwidget 0.13.1.9000
 
+* **Gradients, path clips and translucent groups no longer keep a raster plot
+  out of the exact tiers (VW-23).** With a vellum that has display list
+  version 2 (`scene_display_list(version = 2)`, feature-detected), gradient
+  fills (`linear_gradient()` / `radial_gradient()`, pad extension), clips by
+  a path and marks inside an opacity group are listed exactly. They are drawn
+  on the zoomed canvas (a group as one layer at its opacity), take
+  `condition()` / `filter_by()` styling (a condition colour replaces a
+  gradient), become SVG nodes in the detail tier (`<linearGradient>` /
+  `<radialGradient>`, chained `<clipPath>`s, `<g opacity>`) and export sharp.
+  Older vellum: unchanged (those marks stay in the image). Masks
+  (`clip_to()`, `set_mask()`), blend modes, effects, hatches and patterns
+  still stay in the image.
+* Keyed marks that paint nothing (pick-only hover targets) no longer make the
+  display list inexact.
+* The detail tier now also builds marks that are only partly in view (a bar
+  or disc whose centre is off-screen). It used to test the centre alone, so
+  such marks disappeared on deep zoom.
+* Fixed: zooming a raster plot whose display list has a single paint with no
+  fill (e.g. one-colour keyed segments) threw, and the marks vanished. The
+  length-1 `NA` column arrives as `null`, which left the paint table empty.
+
 * **Raster exports show the marks as they are drawn (VW-25).** The toolbar's
   SVG, PNG and clipboard exports used the overview mark PNG. So
   `condition()` colours, dimming and `filter_by()` (VW-22) were missing, and

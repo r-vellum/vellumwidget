@@ -1000,6 +1000,43 @@ test_that("covered bboxes are dropped only for exactly listed marks (VW-15)", {
   expect_identical(.drop_listed_bboxes(cols, NULL), cols)
 })
 
+test_that("pick-only records count as exactly listed (VW-23)", {
+  cols <- list(key = c("1", "2"), x0 = c(1, 2), y0 = c(1, 2), x1 = c(2, 3), y1 = c(2, 3))
+  dl <- list(
+    keys = c("1", "2"),
+    record = list(
+      key = list(type = "u8", n = 2L, seq = c(0, 1)),
+      flags = list(type = "u8", n = 2L, data = base64enc::base64encode(as.raw(c(16, 17))))
+    )
+  )
+  out <- .drop_listed_bboxes(cols, dl)
+  # key 1 paints nothing (16 alone); key 2 is also a gradient (1)
+  expect_identical(is.na(out$x0), c(TRUE, FALSE))
+})
+
+test_that("raster mode asks for display list v2 when vellum has it (VW-23)", {
+  skip_if_not_installed("vellumplot")
+  skip_if_not(.split_render_supported() && .display_list_supported(), "vellum without the display list")
+  d <- data.frame(g = c("a", "b", "c"), v = c(3, 5, 2), id = 1:3)
+  p <- vellumplot::vplot(d) |>
+    vellumplot::mark_bar(x = g, y = v, data_id = id, fill = vellumplot::linear_gradient(c("red", "blue")))
+  w <- as_widget(p, render = render_options(mode = "raster"))
+  dl <- w$x$displayList
+  if (.display_list_v2_supported()) {
+    expect_identical(dl$version, 2L)
+    expect_true(all(.dl_col(dl$record$flags) == 0))
+    expect_true(all(dl$paints$fill_gradient[.dl_col(dl$record$paint) + 1] > 0))
+    expect_true(all(is.na(w$x$elements$x0 %||% NA))) # bboxes derived from the list
+  } else {
+    expect_identical(dl$version, 1L)
+  }
+  # an older vellum (no `version`): version 1, the gradient bars flagged
+  local_mocked_bindings(.display_list_v2_supported = function() FALSE)
+  w1 <- as_widget(p, render = render_options(mode = "raster"))
+  expect_identical(w1$x$displayList$version, 1L)
+  expect_true(all(.dl_col(w1$x$displayList$record$flags) == 1))
+})
+
 test_that("render_options(detail_marks) reaches the runtime (VW-16)", {
   expect_equal(render_options()$detail_marks, 3000)
   expect_error(render_options(detail_marks = -1), "at least 0")

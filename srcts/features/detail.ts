@@ -48,9 +48,9 @@ export function detailFeature(
     return isZoomedIn(ws.vb, ws.vb0);
   }
 
-  // The records whose centre is in view, in paint order, or null when there
-  // are more than `cap`. Under axis zoom a record is in view when its centre,
-  // moved by its panel's T, lands inside that panel's fixed rect.
+  // The records in view, in paint order, or null when there are more than
+  // `cap`. Under axis zoom a record is in view when its box, moved by its
+  // panel's T, overlaps that panel's fixed rect.
   function visibleRecords(dl: DisplayList, cap: number): number[] | null {
     const out: number[] = [];
     const np = dl.panels.length;
@@ -64,14 +64,16 @@ export function detailFeature(
     }
     const vb = ws.vb!;
     for (let i = 0; i < dl.n; i++) {
-      let x = (dl.bx0[i] + dl.bx1[i]) / 2, y = (dl.by0[i] + dl.by1[i]) / 2;
+      // The record's box (not just its centre), so a big mark only partly
+      // in view -- a bar, a disc, a polygon -- is still built (VW-23).
+      let x0 = dl.bx0[i], x1 = dl.bx1[i], y0 = dl.by0[i], y1 = dl.by1[i];
       const t = dl.panel[i] <= np ? T[dl.panel[i]] : null;
       if (t) {
-        x = t.sx * x + t.tx; y = t.sy * y + t.ty;
-        if (x < t.r[0] || x > t.r[2] || y < t.r[1] || y > t.r[3]) continue;
+        x0 = t.sx * x0 + t.tx; x1 = t.sx * x1 + t.tx; y0 = t.sy * y0 + t.ty; y1 = t.sy * y1 + t.ty;
+        if (x1 < t.r[0] || x0 > t.r[2] || y1 < t.r[1] || y0 > t.r[3]) continue;
       } else if (ws.axisZoomActive) {
-        if (x < ws.vb0!.x || x > ws.vb0!.x + ws.vb0!.w || y < ws.vb0!.y || y > ws.vb0!.y + ws.vb0!.h) continue;
-      } else if (x < vb.x || x > vb.x + vb.w || y < vb.y || y > vb.y + vb.h) continue;
+        if (x1 < ws.vb0!.x || x0 > ws.vb0!.x + ws.vb0!.w || y1 < ws.vb0!.y || y0 > ws.vb0!.y + ws.vb0!.h) continue;
+      } else if (x1 < vb.x || x0 > vb.x + vb.w || y1 < vb.y || y0 > vb.y + vb.h) continue;
       out.push(i);
       if (out.length > cap) return null;
     }
@@ -111,8 +113,75 @@ export function detailFeature(
     return [c, null];
   }
 
+  // Display list v2 (VW-23) paint servers and clips for the detail nodes:
+  // gradients and clip-path chains are defined once per build in a <defs>
+  // (removed with the nodes), with page-unique ids.
+  let defsSeq = 0;
+  interface DetailDefs { el: SVGDefsElement; pre: string; grads: Record<number, string>; clips: Record<number, string> }
+  function gradRef(D: DetailDefs, dl: DisplayList, gi: number): string {
+    if (D.grads[gi]) return D.grads[gi];
+    const g = dl.gradients[gi - 1];
+    const id = D.pre + "g" + gi;
+    const e = document.createElementNS(SVGNS, g.radial ? "radialGradient" : "linearGradient");
+    e.setAttribute("id", id);
+    e.setAttribute("gradientUnits", "userSpaceOnUse");
+    e.setAttribute("gradientTransform", "matrix(" + g.m.join(" ") + ")");
+    if (g.radial) {
+      e.setAttribute("cx", String(g.x2)); e.setAttribute("cy", String(g.y2)); e.setAttribute("r", String(g.r2));
+      e.setAttribute("fx", String(g.x1)); e.setAttribute("fy", String(g.y1)); e.setAttribute("fr", String(g.r1));
+    } else {
+      e.setAttribute("x1", String(g.x1)); e.setAttribute("y1", String(g.y1));
+      e.setAttribute("x2", String(g.x2)); e.setAttribute("y2", String(g.y2));
+    }
+    for (let k = 0; k < g.stops.length; k++) {
+      const st = document.createElementNS(SVGNS, "stop");
+      const c = splitHex(g.stops[k].c);
+      st.setAttribute("offset", String(g.stops[k].o));
+      st.setAttribute("stop-color", c[0]);
+      if (c[1] != null) st.setAttribute("stop-opacity", c[1]);
+      e.appendChild(st);
+    }
+    D.el.appendChild(e);
+    return (D.grads[gi] = id);
+  }
+  // A clip with paths: a chain of <clipPath>s (each clipped by the next, so
+  // they intersect): the paths, then the clip rect.
+  function clipRef(D: DetailDefs, dl: DisplayList, ci: number): string {
+    if (D.clips[ci]) return D.clips[ci];
+    const c = dl.clips[ci - 1];
+    const ids: string[] = [];
+    for (let q = 0; q <= c.pn; q++) ids.push(D.pre + "c" + ci + "-" + q);
+    for (let q = 0; q <= c.pn; q++) {
+      const cp = document.createElementNS(SVGNS, "clipPath");
+      cp.setAttribute("id", ids[q]);
+      cp.setAttribute("clipPathUnits", "userSpaceOnUse");
+      if (q < c.pn) {
+        const sh = c.ps + q;
+        let d = "";
+        for (let run = dl.cpPathOff[sh]; run < dl.cpPathOff[sh + 1]; run++) {
+          for (let v = dl.cpRunOff[run]; v < dl.cpRunOff[run + 1]; v++) {
+            d += (v === dl.cpRunOff[run] ? "M" : "L") + dl.cpXy[2 * v] + " " + dl.cpXy[2 * v + 1];
+          }
+          d += "Z";
+        }
+        const path = document.createElementNS(SVGNS, "path");
+        path.setAttribute("d", d);
+        if (dl.cpEvenodd[sh] === 1) path.setAttribute("clip-rule", "evenodd");
+        cp.appendChild(path);
+        cp.setAttribute("clip-path", "url(#" + ids[q + 1] + ")");
+      } else {
+        const r = document.createElementNS(SVGNS, "rect");
+        r.setAttribute("x", String(c.x0)); r.setAttribute("y", String(c.y0));
+        r.setAttribute("width", String(Math.max(0, c.x1 - c.x0))); r.setAttribute("height", String(Math.max(0, c.y1 - c.y0)));
+        cp.appendChild(r);
+      }
+      D.el.appendChild(cp);
+    }
+    return (D.clips[ci] = ids[0]);
+  }
+
   // One record as an SVG node in scene (device px) coordinates.
-  function nodeFor(dl: DisplayList, i: number): SVGElement {
+  function nodeFor(dl: DisplayList, i: number, D?: DetailDefs): SVGElement {
     const j = dl.row[i], kd = dl.kind[i];
     let n: SVGElement;
     let glyph = false;
@@ -156,7 +225,9 @@ export function detailFeature(
     }
     const pt = dl.paints[dl.paint[i]];
     const fillable = kd !== 2 || dl.closed[j] === 1;
-    if (pt.fill && fillable && !(kd === DL_POINT && isLineGlyph(dl.shape[j]))) {
+    if (pt.grad > 0 && D && fillable) {
+      n.setAttribute("fill", "url(#" + gradRef(D, dl, pt.grad) + ")");
+    } else if (pt.fill && fillable && !(kd === DL_POINT && isLineGlyph(dl.shape[j]))) {
       const f = splitHex(pt.fill);
       n.setAttribute("fill", f[0]);
       if (f[1] != null) n.setAttribute("fill-opacity", f[1]);
@@ -171,6 +242,8 @@ export function detailFeature(
       n.setAttribute("stroke-linejoin", pt.join);
     }
     n.setAttribute("data-key", dl.keys[dl.key[i]]);
+    const ci = dl.clip[i];
+    if (D && ci > 0 && dl.clips[ci - 1] && dl.clips[ci - 1].pn > 0) n.setAttribute("clip-path", "url(#" + clipRef(D, dl, ci) + ")");
     // Constant glyph size and stroke width under axis zoom, as setupConstantMarks
     // does for the SVG mode's marks.
     if (ws.axisZoomActive) {
@@ -213,11 +286,40 @@ export function detailFeature(
       groups[p] = g;
       return g;
     };
+    let D: DetailDefs | undefined;
+    if (dl.gradients.length || dl.groups.length || dl.cpPathOff.length > 1) {
+      const el = document.createElementNS(SVGNS, "defs") as SVGDefsElement;
+      el.setAttribute("class", "vellumwidget-detail");
+      svg.insertBefore(el, svg.firstChild);
+      ws.detailGroups.push(el as unknown as SVGGElement);
+      D = { el: el, pre: "vw-detail" + (++defsSeq) + "-", grads: {}, clips: {} };
+    }
+    // Opacity groups: consecutive records of one group share a <g opacity>
+    // chain under their panel's detail group.
+    const chains: Record<number, { g: number; el: SVGGElement }[]> = {};
+    const hostFor = function (p: number, grp: number): SVGGElement {
+      const root = groupFor(p);
+      if (!dl.groups.length) return root;
+      const want: number[] = [];
+      for (let q = grp; q > 0 && want.length < 64; q = dl.groups[q - 1] ? dl.groups[q - 1].parent : 0) want.unshift(q);
+      const st = chains[p] || (chains[p] = []);
+      let k = 0;
+      while (k < st.length && k < want.length && st[k].g === want[k]) k++;
+      st.length = k;
+      while (st.length < want.length) {
+        const g = document.createElementNS(SVGNS, "g") as SVGGElement;
+        g.setAttribute("opacity", String(dl.groups[want[st.length] - 1].alpha));
+        (st.length ? st[st.length - 1].el : root).appendChild(g);
+        st.push({ g: want[st.length], el: g });
+      }
+      return st.length ? st[st.length - 1].el : root;
+    };
     const seen: Record<string, boolean> = {};
     for (let v = 0; v < vis.length; v++) {
       const i = vis[v];
-      const n = nodeFor(dl, i);
-      groupFor(dl.panel[i] <= dl.panels.length ? dl.panel[i] : 0).appendChild(n);
+      if (dl.flags[i]) continue; // pick-only: nothing to draw
+      const n = nodeFor(dl, i, D);
+      hostFor(dl.panel[i] <= dl.panels.length ? dl.panel[i] : 0, dl.group[i]).appendChild(n);
       const k = dl.keys[dl.key[i]];
       (ws.nodesByKey[k] = ws.nodesByKey[k] || []).push(n);
       if (!seen[k]) { seen[k] = true; ws.detailKeys.push(k); }

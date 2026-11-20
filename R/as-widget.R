@@ -1386,6 +1386,13 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   ))
 }
 
+# Does it list gradients, path clips and opacity groups exactly (display list
+# version 2, VW-23)? Older vellum has no `version` argument.
+.display_list_v2_supported <- function() {
+  .display_list_supported() &&
+    "version" %in% names(formals(getExportedValue("vellum", "scene_display_list")))
+}
+
 # The marks-only display list for raster mode (VW-15): each keyed mark of the
 # data panels with its exact device-px geometry, paint and key, as vellum's
 # private columnar payload. The runtime draws the zoomed-in tier from it and
@@ -1412,6 +1419,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
       "*" = "Or raise the cap with {.code render_options(max_marks = )}."
     ))
     return(NULL)
+  }
+  if (.display_list_v2_supported()) {
+    return(vellum::scene_display_list(scene, what = "keyed", panels = panels, version = 2L))
   }
   vellum::scene_display_list(scene, what = "keyed", panels = panels)
 }
@@ -1445,8 +1455,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   )
 }
 
-# The keys whose every display-list record is drawn exactly (no flag): the
-# runtime derives their bboxes from the list, so they ship none.
+# The keys whose every display-list record is drawn exactly (no flag, or only
+# pick-only, 16: it paints nothing): the runtime derives their bboxes from the
+# list, so they ship none.
 .dl_exact_keys <- function(dl) {
   keys <- if (is.list(dl$keys)) {
     as.character(.dl_col(dl$keys))
@@ -1454,7 +1465,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     as.character(dl$keys)
   }
   k <- keys[.dl_col(dl$record$key) + 1L]
-  flagged <- .dl_col(dl$record$flags) != 0
+  flagged <- .dl_col(dl$record$flags) %% 16 != 0
   setdiff(unique(k[!flagged]), unique(k[flagged]))
 }
 

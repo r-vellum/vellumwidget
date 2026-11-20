@@ -433,3 +433,29 @@ test_that("VW-25: the toolbar export draws the marks as shown (condition, zoom)"
   img <- export_png()
   expect_gt(grey_share(img, 0.5, 0.95), 0.4)
 })
+
+test_that("VW-23: gradient bars (display list v2) reach the detail tier", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .display_list_v2_supported(), "vellum without display list v2")
+  d <- data.frame(g = letters[1:6], v = c(3, 5, 2, 6, 4, 1), id = 1:6)
+  p <- vellumplot::vplot(d) |>
+    vellumplot::mark_bar(x = g, y = v, data_id = id, fill = vellumplot::linear_gradient(c("gold", "purple"), x2 = 0, y2 = 1))
+  w <- as_widget(p, elementId = "w1", render = render_options(mode = "raster"))
+  expect_identical(w$x$displayList$version, 2L)
+  b <- open_widget(w)
+  ev <- function(js) b$Runtime$evaluate(js)$result$value
+  pn <- w$x$panels[[1]]
+  ev(sprintf(
+    "HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f})",
+    pn$px0 + 0.2 * (pn$px1 - pn$px0), pn$py0 + 0.4 * (pn$py1 - pn$py0),
+    0.5 * (pn$px1 - pn$px0), 0.5 * (pn$py1 - pn$py0)
+  ))
+  Sys.sleep(0.5)
+  expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), "detail")
+  expect_true(ev("[].every.call(document.querySelectorAll('.vellumwidget-detail [data-key]'), function(n){ var m = /^url\\(#(.+)\\)$/.exec(n.getAttribute('fill') || ''); return !!m && document.getElementById(m[1]).tagName === 'linearGradient'; })"))
+  # the bars are painted: a gold-to-purple pixel range inside the panel
+  r <- panel_rect(b)
+  shot <- b$Page$captureScreenshot(format = "png", clip = list(x = r[1], y = r[2], width = r[3], height = r[4], scale = 1))
+  img <- png::readPNG(jsonlite::base64_dec(shot$data))
+  expect_gt(mean(img[, , 1] > 0.8 & img[, , 3] < 0.4), 0.05) # gold-ish
+})
