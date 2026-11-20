@@ -53,7 +53,11 @@ export function viewportFeature(
     const payload: {
       x: number; y: number; w: number; h: number; zoomed: boolean;
       data?: DataRange; panels?: Record<string, DataRange | null>; bound?: Record<string, string>;
-    } = { x: ws.vb.x, y: ws.vb.y, w: ws.vb.w, h: ws.vb.h, zoomed: ws.vb0 ? isZoomedIn(ws.vb, ws.vb0) : false };
+    } = {
+      x: ws.vb.x, y: ws.vb.y, w: ws.vb.w, h: ws.vb.h,
+      // Per-cell zoom (VW-18): `x`..`h` are the active cell's view; zoomed if any cell is.
+      zoomed: ws.vb0 ? isZoomedIn(ws.vb, ws.vb0) || ws.fx.anyCellZoomed() : false
+    };
     // Panels zoomed by a bind_scale(), each with the selection driving it.
     if (ws.axisZoomActive && Object.keys(ws.scaleBinds).length) payload.bound = Object.assign({}, ws.scaleBoundBy);
     if (ws.panels.length) {
@@ -152,6 +156,7 @@ export function viewportFeature(
 
   function resetZoom(): void {
     if (ws.vb0) {
+      ws.cellViews = {}; // every cell returns to the full view (VW-18)
       ws.vb = { x: ws.vb0.x, y: ws.vb0.y, w: ws.vb0.w, h: ws.vb0.h };
       applyViewBox();
     }
@@ -164,6 +169,7 @@ export function viewportFeature(
     if (ws.fx.azMulti()) {
       const a = ws.fx.azNearest((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2);
       if (a) {
+        ws.fx.focusCell(a.p.cell); // zoom the region's own cell (VW-18)
         rect = {
           x0: (rect.x0 - a.bx) / a.ax, x1: (rect.x1 - a.bx) / a.ax,
           y0: (rect.y0 - a.by) / a.ay, y1: (rect.y1 - a.by) / a.ay

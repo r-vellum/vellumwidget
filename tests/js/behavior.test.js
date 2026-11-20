@@ -3938,11 +3938,27 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   iOD._test.brushInterval({ x0: 300, y0: 20, x1: 340, y1: 80 });
   ok(tOf(iOD, "cell-2-panel-1-1") === "matrix(4 0 0 1 -820 0)" && iOD._test.intervals().br.range.panel === "cell-1-panel-1-1",
     "bind_scale: brushing the detail cell does not re-drive its own bind");
-  // the shared zoom still drives the detail's unbound axis
+  // VW-18: with binds each cell zooms on its own. A zoom in the overview (the
+  // active cell) leaves the detail's unbound y alone ...
   iOD._test.setView({ x: 50, y: 25, w: 200, h: 50 });
+  ok(tOf(iOD, "cell-2-panel-1-1") === "matrix(4 0 0 1 -820 0)",
+    "VW-18: zooming the overview cell leaves the bound detail's unbound axis alone (" + tOf(iOD, "cell-2-panel-1-1") + ")");
+  ok(/^matrix\(2 0 0 2 /.test(tOf(iOD, "cell-1-panel-1-1")), "VW-18: the overview cell zooms itself");
+  // ... and a zoom in the detail moves only its unbound y (the bound x holds),
+  // leaving the overview's zoom where it was.
+  iOD._test.focusCell("cell-2");
+  ok(iOD._test.activeCell() === "cell-2" && iOD._test.getView().w === 400,
+    "VW-18: focusing the detail cell hands it its own (full) view");
+  iOD._test.setView({ x: 0, y: 25, w: 400, h: 50 });
   const tz = tOf(iOD, "cell-2-panel-1-1");
-  ok(/^matrix\(4 0 0 2 -820 /.test(tz), "bind_scale: the bound x holds while y follows the shared zoom (" + tz + ")");
-  iOD._test.setView({ x: 0, y: 0, w: 400, h: 100 });
+  ok(/^matrix\(4 0 0 2 -820 /.test(tz), "VW-18: the bound x holds while y follows the detail cell's zoom (" + tz + ")");
+  ok(/^matrix\(2 0 0 2 /.test(tOf(iOD, "cell-1-panel-1-1")), "VW-18: the overview keeps its own zoom");
+  iOD._test.focusCell("cell-1");
+  ok(iOD._test.getView().w === 200, "VW-18: re-focusing the overview restores its parked view");
+  ok(/^matrix\(4 0 0 2 -820 /.test(tOf(iOD, "cell-2-panel-1-1")), "VW-18: the detail keeps its parked view");
+  iOD._test.resetZoom();
+  ok(tOf(iOD, "cell-1-panel-1-1") === "matrix(1 0 0 1 0 0)" && tOf(iOD, "cell-2-panel-1-1") === "matrix(4 0 0 1 -820 0)",
+    "VW-18: reset returns every cell to its full view (the bound x stays bound)");
   iOD._test.clearSelection();
   ok(tOf(iOD, "cell-2-panel-1-1") === "matrix(1 0 0 1 0 0)", "bind_scale: clearing the brush resets the detail's zoom");
   const z2 = captured["bindod_zoom"];
@@ -3974,6 +3990,11 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
     "bind = scales: the detail (its own 0..200 scale) zooms to 25..75 (" + tOf(iSc, "cell-2-panel-1-1") + ")");
   const zd = captured["bindsc_zoom"].panels["cell-2-panel-1-1"];
   ok(zd && near(zd.x[0], 25) && near(zd.x[1], 75), "bind = scales: the detail reports the linked range");
+  // VW-18: a y zoom on the source view does not reach the detail's unbound y.
+  iSc._test.setView({ x: 50, y: 25, w: 200, h: 50 });
+  ok(tOf(iSc, "cell-2-panel-1-1") === "matrix(4 0 0 1 -740 0)",
+    "VW-18: zooming the scales-bound source moves only the detail's bound axis (" + tOf(iSc, "cell-2-panel-1-1") + ")");
+  iSc._test.setView({ x: 50, y: 0, w: 200, h: 100 });
   iSc._test.clearSelection(); // an empty-space click keeps the view-driven selection
   ok(iSc._test.intervals().z, "bind = scales: clearing the selection does not drop the view-driven interval");
   iSc._test.setView({ x: 0, y: 0, w: 400, h: 100 });

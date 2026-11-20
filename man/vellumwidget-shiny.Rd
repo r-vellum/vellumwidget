@@ -68,7 +68,13 @@ single-panel plot keeps the older \code{data} field, the same range as its one
 (\code{"cell-1-panel-1-1"}, \code{"cell-2-panel-1-1"}, ...). When a
 \code{vellumplot::bind_scale()} zooms a panel to an interval selection, the
 panel's entry is its bound range and \code{bound} maps each bound panel id to
-the selection driving it. Updates as state when a zoom/pan
+the selection driving it. With binds in a composition each cell zooms
+on its own (a wheel or pan moves only the cell under the pointer, and a
+bound axis follows its selection), so \code{x}..\code{h} are the last-zoomed
+cell's view and \code{zoomed} is \code{TRUE} while any cell is zoomed in. Binds
+are enacted in SVG mode only: a raster render
+(\code{render_options(mode = "raster")}, or \code{"auto"} above the threshold)
+ignores them for now. Updates as state when a zoom/pan
 settles (wheel, drag-pan release, pinch, keyboard, reset, zoom-to-selection,
 a proxy \code{\link[=vw_zoom]{vw_zoom()}}, or a brush that moves a bound panel).}
 }
