@@ -279,6 +279,7 @@ export interface WidgetFns {
   drawSelFeedback: () => void;
   refreshSelected: () => void;
   showMarksLayer: (on: boolean) => void;
+  exportMarksImage: (scale: number) => { href: string; x: number; y: number; w: number; h: number } | null;
   scheduleTier: () => void;
   evalTier: () => void;
   ringMode: () => boolean;

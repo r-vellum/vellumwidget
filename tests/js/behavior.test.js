@@ -4556,6 +4556,133 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   }));
 }
 
+// ============ VW-25: raster export draws the marks as currently drawn ============
+{
+  const b64 = (Arr, xs) => Buffer.from(new Arr(xs).buffer).toString("base64");
+  const f32 = (xs) => ({ type: "f32", n: xs.length, data: b64(Float32Array, xs) });
+  const u8 = (xs) => ({ type: "u8", n: xs.length, data: b64(Uint8Array, xs) });
+  function recCtx() {
+    const log = [];
+    let arcs = [];
+    return {
+      log: log, fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1, _stack: [],
+      save() { this._stack.push([this.fillStyle, this.strokeStyle, this.globalAlpha]); },
+      restore() { const v = this._stack.pop(); if (v) { this.fillStyle = v[0]; this.strokeStyle = v[1]; this.globalAlpha = v[2]; } },
+      setTransform() {}, clearRect() { log.length = 0; }, rect() {}, clip() {}, moveTo() {}, lineTo() {}, closePath() {}, setLineDash() {},
+      beginPath() { arcs = []; }, arc(x) { arcs.push(Math.round(x)); },
+      fill() { log.push({ op: "fill", style: this.fillStyle, alpha: this.globalAlpha, xs: arcs.slice() }); },
+      stroke() { log.push({ op: "stroke", style: this.strokeStyle, alpha: this.globalAlpha, xs: arcs.slice() }); }
+    };
+  }
+  const fills = (ctx) => ctx.log.filter((r) => r.op === "fill").flatMap((r) => r.xs.map((x) => x + ":" + r.style + "@" + r.alpha)).sort();
+  function dl4(flagged) {
+    return {
+      format: "vellum-display-list", version: 1, width: 200, height: 100, n: 4,
+      record: { kind: { type: "u8", n: 4, const: 0 }, paint: { type: "u8", n: 4, const: 0 }, key: { type: "u32", n: 4, seq: [0, 1] },
+        flags: flagged ? u8([0, 0, 0, 1]) : { type: "u8", n: 4, const: 0 }, clip: { type: "u8", n: 4, const: 0 }, panel: { type: "u8", n: 4, const: 1 } },
+      point: { cx: f32([40, 80, 120, 160]), cy: { type: "f32", n: 4, const: 50 }, r: { type: "f32", n: 4, const: 3 }, shape: { type: "u8", n: 4, const: 0 } },
+      rect: { x: f32([]), y: f32([]), w: f32([]), h: f32([]) },
+      path: { xy: { type: "f32", n: 0, data: "" }, run_offset: { type: "u8", n: 1, const: 0 }, path_offset: { type: "u8", n: 1, const: 0 },
+        closed: { type: "u8", n: 0, data: "" }, evenodd: { type: "u8", n: 0, data: "" } },
+      paints: { fill: ["#ff0000ff"], stroke: [null], stroke_width: [0], dash: [null], linecap: ["round"], linejoin: ["round"] },
+      clips: null, keys: ["p1", "p2", "p3", "p4"], panels: "panel-1-1"
+    };
+  }
+  const panel = {
+    name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+  };
+  const below = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"><g role="grid"><path d="M20 50 L180 50" stroke="#fff"/></g></g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">50</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">25</text></g></svg>';
+  const above = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"><g data-vellum-id="layer-2-rule-g2"><path class="ref" d="M20 30 L180 30" stroke="#ff0000"/></g></g></g></svg>';
+  const proto = window.HTMLCanvasElement.prototype;
+  function mountEx(o) {
+    const screen = recCtx();
+    const orig = proto.getContext;
+    // (no list: the old pixel-sampling path would need an Image, so no context)
+    proto.getContext = function () { return o.nolist ? null : screen; };
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    inst.renderValue({
+      svg: below,
+      elements: { key: ["p1", "p2", "p3", "p4"], mark: ["point", "point", "point", "point"], cond: [["pick:color"], ["pick:color"], ["pick:color"], ["pick:color"]] },
+      panels: [panel],
+      marks: { href: "data:image/png;base64,ORIGINAL", width: 400, height: 200, panels: "panel-1-1" },
+      above: above,
+      displayList: o.nolist ? null : dl4(o.flagged),
+      interactions: { selections: [{ name: "pick", kind: "point", on: "click", empty: true }],
+        conditions: [{ selection: "pick", aes: "color", if_false: null, empty: true }], filters: [] },
+      options: Object.assign({ raster: true, hover: true, select: true, zoom: true, selectMode: "multiple" }, o.options || {})
+    });
+    proto.getContext = orig;
+    return { el: e, inst: inst, screen: screen };
+  }
+  // Export through the toolbar's SVG button; the export canvas gets its own
+  // recording context, its size and a stub data URI.
+  function exportSvg(t) {
+    const exp = recCtx();
+    let size = null, captured = null;
+    const saved = { gc: proto.getContext, tdu: proto.toDataURL, Blob: global.Blob, XS: global.XMLSerializer, cou: URL.createObjectURL, rou: URL.revokeObjectURL };
+    proto.getContext = function () { return exp; };
+    proto.toDataURL = function () { size = [this.width, this.height]; return "data:image/png;base64,REDRAWN"; };
+    global.Blob = function (parts) { captured = parts.join(""); };
+    global.XMLSerializer = window.XMLSerializer;
+    URL.createObjectURL = function () { return "blob:x"; };
+    URL.revokeObjectURL = function () {};
+    const aClick = window.HTMLAnchorElement.prototype.click;
+    window.HTMLAnchorElement.prototype.click = function () {};
+    t.el.querySelector('[data-act="svg"]').click();
+    window.HTMLAnchorElement.prototype.click = aClick;
+    proto.getContext = saved.gc; proto.toDataURL = saved.tdu;
+    global.Blob = saved.Blob; global.XMLSerializer = saved.XS;
+    URL.createObjectURL = saved.cou; URL.revokeObjectURL = saved.rou;
+    return { svg: captured || "", ctx: exp, size: size };
+  }
+  // A dim condition at the overview: the export carries it.
+  const a = mountEx({});
+  a.inst._call("select", ["p1"]);
+  const ea = exportSvg(a);
+  ok(/class="vellumwidget-marks-export"[^>]*href="data:image\/png;base64,REDRAWN"/.test(ea.svg) && !/ORIGINAL/.test(ea.svg) && !/<use[^>]*vellumwidget-marks/.test(ea.svg),
+    "export: with an exact list the marks are a redrawn image, not the mark PNG");
+  // (canvas px at 2x: the marks at x = 40, 80, 120, 160 land at 80 ... 320)
+  ok(fills(ea.ctx).join(",") === "160:#ff0000ff@0.28,240:#ff0000ff@0.28,320:#ff0000ff@0.28,80:#ff0000ff@1",
+    "export: the redraw carries the condition (member opaque, the rest dimmed)");
+  ok(ea.size && ea.size[0] === 400 && ea.size[1] === 200, "export: drawn at export resolution (at least 2x the frame)");
+  // order: furniture, redrawn marks, the above layer, the re-ticked labels
+  a.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 });
+  const ez = exportSvg(a);
+  const iImg = ez.svg.indexOf("vellumwidget-marks-export"), iAb = ez.svg.indexOf("vellumwidget-above-export"),
+    iRef = ez.svg.indexOf('class="ref"'), iRt = ez.svg.indexOf("vellumwidget-retick-export"), iGrid = ez.svg.indexOf('role="grid"');
+  ok(iGrid >= 0 && iImg > iGrid && iAb > iImg && iRef > iAb && iRt > iRef, "export: furniture, then the redrawn marks, then the above layer, then the re-ticked labels");
+  ok(/vellumwidget-marks-export"[^>]*x="0" y="0" width="200" height="100"/.test(ez.svg), "export: under axis zoom the image covers the fixed frame");
+  ok(fills(ez.ctx).join(",") === "120:#ff0000ff@0.28,280:#ff0000ff@0.28", "export: a zoomed export redraws the marks in view through the panel transform, at full size");
+  // export_options(scale) raises the resolution
+  const k = mountEx({ options: { export: { scale: 3 } } });
+  ok(exportSvg(k).size[0] === 600, "export: export_options(scale) above 2 sets the resolution");
+  // the detail tier's nodes are replaced by the redraw
+  const d = mountEx({ options: { detailMarks: 2 } });
+  d.inst._test.setView({ x: 30, y: 40, w: 20, h: 20 }); d.inst._test.evalTier();
+  const ed = exportSvg(d);
+  ok(d.inst._test.markTier() === "detail" && !/vellumwidget-detail/.test(ed.svg) && /vellumwidget-marks-export/.test(ed.svg),
+    "export: in the detail tier the nodes give way to the redrawn image");
+  // filter_by / cross-filter: hidden marks are left out
+  const x = mountEx({});
+  x.inst._call("filter", ["p2"]);
+  ok(fills(exportSvg(x).ctx).join(",") === "160:#ff0000ff@1", "export: a cross-filter leaves the hidden marks out");
+  // fall back to the PNG: an inexact list, or no list
+  const g = mountEx({ flagged: true });
+  const eg = exportSvg(g);
+  ok(/ORIGINAL/.test(eg.svg) && /<use[^>]*vellumwidget-marks/.test(eg.svg) && !/vellumwidget-marks-export/.test(eg.svg),
+    "export: a list with flagged records keeps the mark PNG");
+  const n = mountEx({ nolist: true });
+  ok(/ORIGINAL/.test(exportSvg(n).svg), "export: no display list (older vellum) keeps the mark PNG");
+}
+
 // ============ VW-21: furniture painted after the marks stays above them ============
 {
   const PNG1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";

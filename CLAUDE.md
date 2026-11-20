@@ -117,6 +117,9 @@ tiers as per-key state (`features/markState.ts`: `ws.msFlags`/`msColor`,
 indexed by display-list key id, never by DOM lookup), which `drawList` applies;
 while any is active the canvas also replaces the mark PNG at the overview zoom
 (VW-22).
+Exports (`exportSvgString()`) redraw an exact display list at export
+resolution with that state (`exportMarksImage()`, raster.ts `paintList`, the
+painter shared with the canvas) instead of embedding the mark PNG (VW-25).
 
 ## Build and test
 

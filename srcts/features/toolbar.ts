@@ -65,11 +65,34 @@ export function toolbarFeature(
   // shows the mark layer itself. The furniture painted after the marks
   // (VW-21) is its own overlay in the same frame, with pan groups carrying the
   // same transforms, so it is folded in over the marks as it is on screen.
+  //
+  // Raster mode with an exact display list (VW-25): the marks are exported as
+  // currently drawn, not as the mark PNG -- the list is redrawn at export
+  // resolution with the per-key state (conditions, dimming, filters) into one
+  // image over the current frame, so a zoomed export is sharp and styled. It
+  // replaces the PNG copies and the detail tier's nodes (the same marks) and
+  // sits over the base furniture, where the canvas sits on screen. Without an
+  // exact list the PNG is kept.
   function exportSvgString(): string {
     const svg = ws.svgEl!.cloneNode(true) as SVGSVGElement;
     svg.classList.remove("vellumwidget-marks-off");
-    const drawn = svg.querySelectorAll(".vellumwidget-marks");
-    for (let i = 0; i < drawn.length; i++) (drawn[i] as SVGElement).style.visibility = "";
+    const listed = ws.rasterMode ? ws.fx.exportMarksImage(exportScale()) : null;
+    if (listed) {
+      const old = svg.querySelectorAll(".vellumwidget-marks, .vellumwidget-marks-defs, .vellumwidget-detail");
+      for (let i = 0; i < old.length; i++) old[i].remove();
+      const img = document.createElementNS(SVGNS, "image");
+      img.setAttribute("class", "vellumwidget-marks-export");
+      img.setAttribute("x", String(listed.x));
+      img.setAttribute("y", String(listed.y));
+      img.setAttribute("width", String(listed.w));
+      img.setAttribute("height", String(listed.h));
+      img.setAttribute("preserveAspectRatio", "none");
+      img.setAttribute("href", listed.href);
+      svg.appendChild(img);
+    } else {
+      const drawn = svg.querySelectorAll(".vellumwidget-marks");
+      for (let i = 0; i < drawn.length; i++) (drawn[i] as SVGElement).style.visibility = "";
+    }
     if (ws.aboveEl) {
       const g = document.createElementNS(SVGNS, "g");
       g.setAttribute("class", "vellumwidget-above-export");

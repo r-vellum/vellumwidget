@@ -1,5 +1,16 @@
 # vellumwidget 0.13.1.9000
 
+* **Raster exports show the marks as they are drawn (VW-25).** The toolbar's
+  SVG, PNG and clipboard exports used the overview mark PNG. So
+  `condition()` colours, dimming and `filter_by()` (VW-22) were missing, and
+  a zoomed export showed that PNG scaled up and blurred. When vellum's display
+  list covers every mark exactly, the export now redraws it at export
+  resolution (at least 2x, or `export_options(scale)`), with the current
+  style state, into one image over the current view. The detail tier's nodes
+  and the mark PNG are left out of the export, and the above-marks furniture
+  and re-ticked labels still go on top. Without an exact list (older vellum,
+  above `max_marks`, flagged marks) the export keeps the mark PNG.
+
 * The navigator's mini-map now shows the furniture painted after the marks
   (a reference line or annotation drawn over the points in raster mode,
   VW-21). It cloned only the base svg, so that layer was missing (VW-27).
