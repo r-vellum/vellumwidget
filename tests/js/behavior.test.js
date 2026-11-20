@@ -4779,6 +4779,40 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(!navNone.el.querySelector(".vellumwidget-nav-above"), "navigator: no above layer -> nothing folded in");
 }
 
+// ============ VW-31: the mini-map's strokes do not squash ============
+{
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const i = widgetDef.factory(e);
+  i.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<g data-vellum-panel="panel-1-1">' +
+      '<path class="grid" d="M0 50H200" fill="none" stroke="#fff" stroke-width="0.5"/>' +
+      '<path class="rule" d="M0 30H200" fill="none" stroke="#f00" stroke-width="2.5"/>' +
+      '<g stroke="#333" stroke-width="0.25"><line class="tick" x1="0" y1="90" x2="5" y2="90"/></g>' +
+      '<rect class="bg" x="0" y="0" width="200" height="100" fill="#eee"/>' +
+      '<rect class="nostroke" x="0" y="0" width="10" height="10" fill="#000" stroke="none"/>' +
+      '<path data-key="k" d="M40 15h20v10z" fill="#00f"/>' +
+      '</g></svg>',
+    elements: { key: ["k"], x0: [40], y0: [15], x1: [60], y1: [25] },
+    options: { hover: true, select: true, zoom: true, navigator: true }
+  });
+  const mini = e.querySelector(".vellumwidget-nav-mini svg");
+  const q = (sel) => mini.querySelector(sel);
+  ok(mini.getAttribute("preserveAspectRatio") === "none", "VW-31: the mini-map still stretches to fill the strip");
+  ok(q(".grid").getAttribute("vector-effect") === "non-scaling-stroke" && q(".grid").getAttribute("stroke-width") === "1",
+    "VW-31: a thin stroke is non-scaling and raised to the 1 px minimum");
+  ok(q(".rule").getAttribute("vector-effect") === "non-scaling-stroke" && q(".rule").getAttribute("stroke-width") === "2.5",
+    "VW-31: a stroke above the minimum keeps its own width");
+  ok(q(".tick").getAttribute("vector-effect") === "non-scaling-stroke" && q(".tick").getAttribute("stroke-width") === "1",
+    "VW-31: a stroke inherited from a group is found and raised too");
+  ok(!q(".bg").hasAttribute("vector-effect") && !q(".nostroke").hasAttribute("vector-effect") && !q(".bg").hasAttribute("stroke-width"),
+    "VW-31: unstroked shapes are left alone");
+  ok(!e.querySelector(".vellumwidget-svg-holder svg .grid").hasAttribute("vector-effect") &&
+    e.querySelector(".vellumwidget-svg-holder svg .grid").getAttribute("stroke-width") === "0.5",
+    "VW-31: the live plot's strokes are untouched");
+}
+
 // ============ VW-26: unkeyed panel furniture keeps its size under axis zoom ============
 {
   const panel = {
