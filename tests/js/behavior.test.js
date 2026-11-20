@@ -4291,6 +4291,14 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(T3.decodeKeys({ delta: [5, 2, -1], at: [1], v: ["legend:a"] }).join(",") === "5,legend:a,7,6" &&
      T3.decodeKeys({ delta: [3, 1], at: [], v: [] }).join(",") === "3,4" && T3.decodeKeys(["a", "b"]).join(",") === "a,b",
     "keys: the delta encoding decodes (with exceptions), plain keys pass through");
+  // keys: prefixed integer keys (vellumplot default keys, VP-55) decode with
+  // their run-length prefixes; a scalar (auto-unboxed) prefix level works too.
+  ok(T3.decodeKeys({ delta: [1, 1, -1, 1], at: [2], v: ["legend:a"],
+                     pre: { levels: ["p1-1:l1:", "p1-1:l2:"], rv: [0, 1], rl: [2, 2] } }).join(",") ===
+       "p1-1:l1:1,p1-1:l1:2,legend:a,p1-1:l2:1,p1-1:l2:2" &&
+     T3.decodeKeys({ delta: [3, 1], at: [], v: [], pre: { levels: "cell-1:p1-1:l1:", rv: 0, rl: 2 } }).join(",") ===
+       "cell-1:p1-1:l1:3,cell-1:p1-1:l1:4",
+    "keys: the prefixed delta encoding decodes");
 
   // renderValue: a raster payload whose covered marks ship no bbox gets them from the list.
   const e = document.createElement("div");

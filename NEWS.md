@@ -1,5 +1,10 @@
 # vellumwidget 0.13.0.9000
 
+* Raster widgets ship vellumplot's new default keys (`"p1-1:l2:7"`, VP-55)
+  as compactly as plain row numbers: the key column's delta encoding now also
+  covers integers after a text prefix, with the prefixes sent as runs. A
+  20k-point default-keyed scatter sends about 40 kB of keys instead of 300 kB.
+
 # vellumwidget 0.13.0
 
 * **Building a big widget is faster (VR-16).** The element table's meta
