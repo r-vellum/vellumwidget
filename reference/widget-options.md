@@ -84,13 +84,16 @@ render_options(
   text stay SVG, so axis-aware zoom re-ticks the real axes, and the
   navigator and
   [`vellumplot::bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html)
-  work as in SVG mode. An older vellum draws the whole scene as one
-  image, and zoom then magnifies it. The trade-offs of raster mode:
-  there are no per-element DOM nodes until the detail tier (see
-  `detail_marks`), so hover and selection show as rings and per-mark
-  screen-reader focus is off. Zoomed in, the marks are redrawn exactly
-  from vellum's marks-only display list (see `max_marks`), or as plain
-  dots with an older vellum. With the display list,
+  work as in SVG mode. With a vellum that also splits the furniture by
+  paint order, what was drawn after the marks (a reference line or
+  annotation added after the points) stays on top of them. An older
+  vellum draws the whole scene as one image, and zoom then magnifies it.
+  The trade-offs of raster mode: there are no per-element DOM nodes
+  until the detail tier (see `detail_marks`), so hover and selection
+  show as rings and per-mark screen-reader focus is off. Zoomed in, the
+  marks are redrawn exactly from vellum's marks-only display list (see
+  `max_marks`), or as plain dots with an older vellum. With the display
+  list,
   [`vellumplot::condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
   colours and dimming,
   [`vellumplot::filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html),

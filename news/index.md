@@ -2,6 +2,22 @@
 
 ## vellumwidget 0.12.0.9000
 
+- **In raster mode, a reference line or annotation added after the
+  points is drawn over them again (VW-21).** The split render put all
+  the furniture under the marks image, so
+  [`mark_rule()`](https://r-vellum.github.io/vellumplot/reference/mark_point.html)
+  or
+  [`annotate()`](https://r-vellum.github.io/vellumplot/reference/annotate.html)
+  layered after
+  [`mark_point()`](https://r-vellum.github.io/vellumplot/reference/mark_point.html)
+  disappeared under the points. With a vellum that splits the furniture
+  by paint order (`layer = "unkeyed_above"`), what was painted after the
+  marks ships as its own SVG layer, stacked over the marks at every tier
+  (image, zoomed canvas, detail nodes). It zooms with its panel and is
+  part of the SVG/PNG export. It never takes the pointer, so hovering
+  and clicking still reach the marks underneath. With an older vellum it
+  is drawn as before.
+
 - **[`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html),
   [`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)
   and selection dimming show at every zoom in raster mode (VW-22).**
