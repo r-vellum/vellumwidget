@@ -2,6 +2,17 @@
 
 ## vellumwidget 0.13.1.9000
 
+- **SVG and PNG exports from SVG mode show condition dimming and
+  selection outlines (VW-28).** The widget styles these through CSS
+  classes, and the page stylesheet does not travel with an exported SVG,
+  so a
+  [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+  spotlight or a click selection exported undimmed and unoutlined. The
+  export now writes those styles inline (dim opacity, selection stroke,
+  legend mute, hidden filtered marks), resolved from the live theme, so
+  the export matches the screen. Hover and keyboard focus stay out of
+  the export.
+
 - **Gradients, path clips and translucent groups no longer keep a raster
   plot out of the exact tiers (VW-23).** With a vellum that has display
   list version 2 (`scene_display_list(version = 2)`, feature-detected),
