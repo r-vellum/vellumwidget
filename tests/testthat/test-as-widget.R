@@ -580,11 +580,21 @@ test_that("raster mode ships the element index in the compact encoding (VW-13)",
     join = as.character(seq_len(n))
   )
   e <- encode(cols)
-  # dictionary: each level once + 0-based codes
-  expect_identical(e$mark, list(levels = "point", codes = rep(0L, n)))
-  # a one-value list-column is flattened, then dictionary-encoded (NA for empty)
+  # dictionary: each level once + 0-based codes, as runs when they are long
+  expect_identical(e$mark, list(levels = "point", rv = 0L, rl = n))
+  # a one-value list-column is flattened, then dictionary-encoded (-1 for empty)
   expect_identical(e$legend$levels, "color:a")
-  expect_identical(e$legend$codes, c(rep(0L, n - 1L), NA))
+  expect_identical(e$legend$rv, c(0L, -1L))
+  expect_identical(e$legend$rl, c(n - 1L, 1L))
+  # without long runs the codes ship one per element
+  alt <- encode(list(key = cols$key, g = rep(c("a", "b"), n / 2)))
+  expect_identical(alt$g$codes, rep(c(0L, 1L), n / 2))
+  # mostly-integer keys: a first value and differences, the rest sparse
+  k <- encode(list(key = c("5", "7", "legend:a", "6", as.character(10:50))))$key
+  expect_identical(k$delta, c(5, 2, -1, 4, rep(1, 40)))
+  expect_identical(k$at, 2L)
+  expect_identical(k$v, "legend:a")
+  expect_identical(encode(list(key = c("a", "b", "c")))$key, c("a", "b", "c"))
   # sparse: 0-based indices + values; an all-NA column is dropped
   expect_identical(e$tooltip, list(at = 0L, v = "a"))
   expect_null(e$hover_group)
@@ -602,7 +612,10 @@ test_that("raster mode ships the element index in the compact encoding (VW-13)",
   df <- data.frame(x = 1:30, y = 1:30, id = 1:30)
   p <- vellumplot::vplot(df) |>
     vellumplot::mark_point(x = x, y = y, data_id = id)
-  wr <- as_widget(p, render = render_options(mode = "raster"))
+  wr <- local({
+    local_single_raster()
+    as_widget(p, render = render_options(mode = "raster"))
+  })
   expect_identical(wr$x$elements$mark$levels, "point")
   ws <- as_widget(p, render = render_options(mode = "svg"))
   expect_true(all(ws$x$elements$mark == "point"))
@@ -885,6 +898,56 @@ test_that("raster mode falls back to one image with an older vellum (VW-14)", {
   w <- as_widget(p, render = render_options(mode = "raster"))
   expect_null(w$x$marks)
   expect_match(w$x$svg, "data:image/png;base64,", fixed = TRUE)
+})
+
+test_that("raster mode ships the marks-only display list when vellum has it (VW-15)", {
+  skip_if_not(.split_render_supported(), "vellum without the split render")
+  skip_if_not(.display_list_supported(), "vellum without the display list")
+  set.seed(1)
+  df <- data.frame(x = rnorm(60), y = rnorm(60), g = rep(c("a", "b"), 30), id = 1:60)
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id)
+  w <- as_widget(p, render = render_options(mode = "raster"))
+  dl <- w$x$displayList
+  expect_identical(dl$format, "vellum-display-list")
+  expect_identical(dl$n, 60L)
+  expect_identical(as.character(dl$panels), "panel-1-1")
+  # the covered marks ship no bbox: only the legend swatches keep theirs
+  el <- w$x$elements
+  expect_identical(el$x0$at, which(grepl("^legend:", .decode_keys_r(el$key))) - 1L)
+  # the list's keys are the plot's data_id
+  expect_setequal(as.character(.dl_col(dl$keys)), as.character(1:60))
+  # SVG mode ships none
+  expect_null(as_widget(p, render = render_options(mode = "svg"))$x$displayList)
+  # above max_marks: no list, the bbox index instead, and a message saying why
+  expect_message(
+    w2 <- as_widget(p, render = render_options(mode = "raster", max_marks = 10)),
+    "mark_datashade"
+  )
+  expect_null(w2$x$displayList)
+  expect_false(is.null(w2$x$elements$x0))
+  expect_length(.decode_keys_r(w2$x$elements$key), 62L)
+})
+
+test_that("covered bboxes are dropped only for exactly listed marks (VW-15)", {
+  cols <- list(key = c("1", "2", "3"), x0 = 1:3 + 0, y0 = 1:3 + 0, x1 = 2:4 + 0, y1 = 2:4 + 0)
+  dl <- list(
+    keys = c("1", "2", "3"),
+    record = list(
+      key = list(type = "u8", n = 4L, rle = list(values = c(0, 1, 2), lengths = c(1, 1, 2))),
+      flags = list(type = "u8", n = 4L, rle = list(values = c(0, 1, 0, 1), lengths = c(1, 1, 1, 1)))
+    )
+  )
+  out <- .drop_listed_bboxes(cols, dl)
+  # key 1 is listed exactly, key 2 is flagged, key 3 has a flagged record too
+  expect_identical(is.na(out$x0), c(TRUE, FALSE, FALSE))
+  expect_identical(.drop_listed_bboxes(cols, NULL), cols)
+})
+
+test_that("render_options() validates max_marks", {
+  expect_equal(render_options()$max_marks, 5e5)
+  expect_error(render_options(max_marks = -1), "at least 0")
+  expect_error(render_options(max_marks = "a"), "max_marks")
 })
 
 test_that(".png_dims reads the IHDR of the encoded bytes", {

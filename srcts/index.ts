@@ -13,7 +13,8 @@
 
 import { ensureStyle } from "./css";
 import { sourceTable } from "./dom";
-import { normalizeElements, normalizePanels } from "./elements";
+import { decodeKeys, normalizeElements, normalizePanels } from "./elements";
+import { decodeDisplayList, fillBboxes, tracePoint, traceShape } from "./dlist";
 import { a11yFeature } from "./features/a11y";
 import { axisZoomFeature } from "./features/axisZoom";
 import { bindScalesFeature } from "./features/bindScales";
@@ -111,6 +112,8 @@ HTMLWidgets.widget({
         largeDim: function () { return ws.largeDim; },
         rasterMode: function () { return ws.rasterMode; },
         hasCanvas: function () { return !!ws.canvasEl; },
+        displayListSize: function () { return ws.dl ? ws.dl.n : 0; },
+        bboxOf: function (k: string) { const m = ws.meta[k]; return m ? [m.x0, m.y0, m.x1, m.y1] : null; },
         pointCount: function () { return ws.ptN; },
         hoverMode: function () { return ws.opts.hoverMode || "closest"; },
         columnKeys: ws.fx.columnKeys,
@@ -283,5 +286,10 @@ registerProxyHandler();
   secAxisMap,
   secTicks,
   sourceTable,
+  decodeDisplayList,
+  fillBboxes,
+  tracePoint,
+  traceShape,
+  decodeKeys,
   bus: vellumwidgetBus
 };

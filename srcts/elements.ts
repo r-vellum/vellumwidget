@@ -20,7 +20,9 @@ interface SparseColumn<T> {
 }
 interface DictColumn<T> {
   levels: T[] | T;
-  codes: (number | null)[] | number | null;
+  codes?: (number | null)[] | number | null;
+  rv?: number[] | number; // run-length form: run codes (-1 = none) ...
+  rl?: number[] | number; // ... and run lengths
 }
 export type EncodedColumn<T> = T[] | T | SparseColumn<T> | DictColumn<T> | null | undefined;
 
@@ -38,6 +40,17 @@ export function decodeColumn<T>(v: EncodedColumn<T>, n: number): (T | null)[] | 
       for (let i = 0; i < at.length; i++) out[at[i]] = vals[i];
       return out;
     }
+    if (o.levels !== undefined && o.rv !== undefined && o.rl !== undefined) {
+      const levels = asColumn<T>(o.levels as T[] | T);
+      const rv = asColumn<number>(o.rv), rl = asColumn<number>(o.rl);
+      const out: (T | null)[] = new Array(n);
+      let k = 0;
+      for (let r = 0; r < rv.length; r++) {
+        const val = rv[r] < 0 ? null : levels[rv[r]];
+        for (let m = 0; m < rl[r]; m++) out[k++] = val;
+      }
+      return out;
+    }
     if (o.levels !== undefined && o.codes !== undefined) {
       const levels = asColumn<T>(o.levels as T[] | T);
       const codes = asColumn<number | null>(o.codes);
@@ -52,6 +65,26 @@ export function decodeColumn<T>(v: EncodedColumn<T>, n: number): (T | null)[] | 
   return asColumn<T>(v as T[] | T);
 }
 
+// The key column: plain strings, or (raster mode, `.encode_keys()` in R) mostly
+// integer keys as `{delta, at, v}` -- a running sum of `delta` for the integer
+// keys, with the other keys `v` at their 0-based positions `at`.
+export function decodeKeys(v: unknown): string[] {
+  if (v != null && typeof v === "object" && !Array.isArray(v) && "delta" in (v as object)) {
+    const o = v as { delta: number[] | number; at?: number[] | number; v?: string[] | string };
+    const delta = asColumn(o.delta), at = asColumn(o.at), other = asColumn(o.v);
+    const n = delta.length + at.length;
+    const out: string[] = new Array(n);
+    let j = 0, a = 0, run = 0;
+    for (let i = 0; i < n; i++) {
+      if (a < at.length && at[a] === i) { out[i] = String(other[a++]); continue; }
+      run += delta[j++];
+      out[i] = String(run);
+    }
+    return out;
+  }
+  return asColumn(v as string[] | string).map(String);
+}
+
 // Reconstruct the per-element `ElemMeta[]` view the runtime uses from whichever
 // shape R sent: a columnar `ColumnElements` (the current wire format) or a legacy
 // `ElemMeta[]` (also what the empty case `[]` and the test harness use). Purely a
@@ -61,7 +94,7 @@ export function normalizeElements(raw: ElemMeta[] | ColumnElements | null | unde
   if (raw == null) return [];
   if (Array.isArray(raw)) return raw; // legacy per-record payload (and the empty [])
   const c = raw as ColumnElements;
-  const key = asColumn<string>(c.key);
+  const key = decodeKeys(c.key as unknown);
   const n = key.length;
   if (!n) return [];
   const x0 = asColumn<number | null>(c.x0);

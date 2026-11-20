@@ -4234,6 +4234,82 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(nav.inst._test.axisZoomActive() === true, "split: navigator + axis zoom in raster mode");
 }
 
+// ============ VW-15: the marks-only display list ============
+{
+  const T3 = window.__vellumwidgetTest;
+  const b64 = (Arr, xs) => Buffer.from(new Arr(xs).buffer).toString("base64");
+  const col = (type, xs) => ({ type: type, n: xs.length, data: b64(type === "f32" ? Float32Array : type === "u8" ? Uint8Array : type === "u16" ? Uint16Array : Uint32Array, xs) });
+  // 2 points (a circle, a square), 1 rect, 1 closed path (two rings), 1 flagged point.
+  const DL = {
+    format: "vellum-display-list", version: 1, width: 400, height: 100, n: 5,
+    record: {
+      kind: col("u8", [0, 0, 1, 2, 0]),
+      paint: { type: "u8", n: 5, rle: { values: [0, 1], lengths: [2, 3] } },
+      key: { type: "u8", n: 5, seq: [0, 1] },
+      flags: col("u8", [0, 0, 0, 0, 1]),
+      clip: { type: "u8", n: 5, const: 1 },
+      panel: { type: "u8", n: 5, const: 1 }
+    },
+    point: { cx: col("f32", [100, 120, 300]), cy: col("f32", [50, 50, 50]), r: { type: "f32", n: 3, const: 4 }, shape: col("u8", [0, 1, 0]) },
+    rect: { x: col("f32", [30]), y: col("f32", [20]), w: col("f32", [10]), h: col("f32", [-5]) },
+    path: { xy: col("f32", [60, 60, 70, 60, 70, 70, 61, 61, 62, 61, 62, 62]), run_offset: col("u8", [0, 3, 6]), path_offset: col("u8", [0, 2]), closed: col("u8", [1]), evenodd: col("u8", [1]) },
+    paints: { fill: ["#ff0000ff", "#0000ff80"], stroke: ["#ff0000ff", null], stroke_width: [1, 0], dash: [null, "2,1"], linecap: ["round", "butt"], linejoin: ["round", "miter"] },
+    clips: { x0: 20, y0: 10, x1: 180, y1: 90 },
+    keys: { type: "u16", n: 5, data: b64(Uint16Array, [7, 8, 9, 10, 11]) },
+    panels: "panel-1-1"
+  };
+  const dl = T3.decodeDisplayList(DL);
+  ok(dl && dl.n === 5 && dl.keys.join(",") === "7,8,9,10,11", "dlist: decodes the record table and an integer key column");
+  ok(dl.paint[1] === 0 && dl.paint[2] === 1 && dl.clip[3] === 1 && dl.key[4] === 4, "dlist: rle / const / seq columns decode");
+  ok(dl.paints[1].fill === "#0000ff80" && dl.paints[1].stroke === null && dl.paints[1].dash.join() === "2,1" && !dl.paints[1].opaque && dl.paints[0].opaque,
+    "dlist: paints (colour, none, dash, opacity)");
+  ok(dl.row[0] === 0 && dl.row[1] === 1 && dl.row[2] === 0 && dl.row[3] === 0 && dl.row[4] === 2, "dlist: each record finds its row in its kind's table");
+  ok(dl.bx0[0] === 96 && dl.bx1[0] === 104 && dl.by0[2] === 15 && dl.by1[2] === 20 && dl.bx1[3] === 70 && dl.by0[3] === 60,
+    "dlist: bboxes from a point's radius, a (negative-height) rect and a path's vertices");
+  ok(dl.exact === false && dl.panels[0] === "panel-1-1" && dl.clips[0].x1 === 180, "dlist: a flagged record makes the list inexact");
+  ok(T3.decodeDisplayList({ format: "x", version: 1 }) === null && T3.decodeDisplayList({ format: "vellum-display-list", version: 2 }) === null,
+    "dlist: an unknown format or version is ignored");
+  // fillBboxes: an element with no bbox takes its records' union; one with a bbox keeps it.
+  const els = [{ key: "7" }, { key: "9", x0: 1, y0: 1, x1: 2, y1: 2 }, { key: "zz" }];
+  ok(T3.fillBboxes(els, dl) === 1 && els[0].x0 === 96 && els[0].y1 === 54 && els[1].x0 === 1 && els[2].x0 === undefined,
+    "dlist: bboxes are derived for the covered elements only");
+  // tracing: record the path calls on a fake context.
+  const calls = [];
+  const rec = new Proxy({}, { get: (t, k) => function () { calls.push(k + "(" + [].slice.call(arguments).map((v) => Math.round(v * 100) / 100).join(",") + ")"); } });
+  T3.tracePoint(rec, 1, 10, 10, 2);
+  ok(calls.join(" ") === "moveTo(8,8) lineTo(12,8) lineTo(12,12) lineTo(8,12) closePath()", "dlist: a square marker traces its ring");
+  calls.length = 0; T3.tracePoint(rec, 0, 10, 10, 2);
+  ok(calls[0] === "moveTo(12,10)" && /^arc\(10,10,2,0,6.28\)$/.test(calls[1]), "dlist: a circle traces an arc");
+  calls.length = 0; T3.tracePoint(rec, 4, 10, 10, 2);
+  ok(calls.join(" ") === "moveTo(10,8) lineTo(10,12) moveTo(8,10) lineTo(12,10)", "dlist: a plus marker traces two arms");
+  calls.length = 0; T3.traceShape(rec, dl, 3, { ax: 2, bx: 1, ay: 2, by: 0 });
+  ok(calls.join(" ") === "moveTo(121,120) lineTo(141,120) lineTo(141,140) closePath() moveTo(123,122) lineTo(125,122) lineTo(125,124) closePath()",
+    "dlist: a path traces each ring through the affine, closed");
+  calls.length = 0; T3.traceShape(rec, dl, 2, { ax: 1, bx: 0, ay: 1, by: 0 });
+  ok(calls.join(" ") === "rect(30,20,10,-5)", "dlist: a rect traces as a rect");
+  // keys: the delta form with sparse non-integer keys.
+  ok(T3.decodeKeys({ delta: [5, 2, -1], at: [1], v: ["legend:a"] }).join(",") === "5,legend:a,7,6" &&
+     T3.decodeKeys({ delta: [3, 1], at: [], v: [] }).join(",") === "3,4" && T3.decodeKeys(["a", "b"]).join(",") === "a,b",
+    "keys: the delta encoding decodes (with exceptions), plain keys pass through");
+
+  // renderValue: a raster payload whose covered marks ship no bbox gets them from the list.
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const inst = widgetDef.factory(e, 400, 100);
+  inst.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100"><g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"></g></g></svg>',
+    elements: { key: { delta: [7, 1, 1, 1, 1], at: [], v: [] }, mark: { levels: ["point", "rect", "path"], rv: [0, 1, 2, 0], rl: [2, 1, 1, 1] } },
+    marks: { href: "data:image/png;base64,", width: 400, height: 100, panels: "panel-1-1" },
+    displayList: DL,
+    options: { raster: true, hover: true, select: true }
+  });
+  ok(inst._test.displayListSize() === 5, "dlist: a raster render decodes the shipped list");
+  ok(inst._test.bboxOf("7").join(",") === "96,46,104,54" && inst._test.bboxOf("9").join(",") === "30,15,40,20",
+    "dlist: elements shipped without bboxes get them from the list");
+  ok(inst._test.indexSize() === 5, "dlist: the derived bboxes feed the spatial index");
+  ok(inst._test.nearestKeyAt(101, 50, 20) === "7", "dlist: hit-testing works on the derived geometry");
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();

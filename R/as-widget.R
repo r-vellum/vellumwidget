@@ -257,6 +257,7 @@ as_widget <- function(
     auto = n_keyed > render$raster_threshold
   )
   marks <- NULL
+  dlist <- NULL
   if (use_raster && .split_render_supported()) {
     # Split render (VW-14, vellum >= 0.9.0.9000): the furniture (axes, gridlines,
     # legend, text) stays real SVG, so axis zoom can re-tick it, and only the heavy
@@ -272,6 +273,7 @@ as_widget <- function(
     )
     dims <- .svg_dims(svg)
     marks <- .raster_marks(scene, panel_names)
+    dlist <- .raster_display_list(scene, model, panel_names, render$max_marks)
   } else if (use_raster) {
     # Raster mode bakes the marks (text included) into a single PNG, so the SVG
     # `text` control has nothing to act on. Flag it only when the caller asked
@@ -297,7 +299,7 @@ as_widget <- function(
     # Raster mode is the big-N path, where the element index is most of the
     # payload: ship it in the compact wire encoding (`.encode_elements()`).
     elements = if (use_raster) {
-      .encode_elements(.vellumwidget_elements(model))
+      .encode_elements(.drop_listed_bboxes(.vellumwidget_elements(model), dlist))
     } else {
       .vellumwidget_elements(model)
     },
@@ -306,6 +308,8 @@ as_widget <- function(
     colorbar = .vellumwidget_colorbar(model),
     # The split render's mark layer (raster mode, VW-14), or NULL.
     marks = marks,
+    # The marks-only display list (raster mode, VW-15), or NULL.
+    displayList = dlist,
     interactions = interactions,
     options = list(
       raster = use_raster,
@@ -777,7 +781,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #   the 0-based indices that carry a value and those values. Absent elsewhere.
 # - **dictionary** `{levels, codes}`: a string column with few distinct values
 #   (`mark`, a one-series `legend`, `hover_group`, ...) ships each level once and
-#   a 0-based integer code per element (`null` for `NA`).
+#   a 0-based integer code per element (`null` for `NA`), or, when the codes
+#   come in few long runs, `{levels, rv, rl}`: run codes (-1 for `NA`) and
+#   lengths.
 # - the bbox columns are rounded outward to 1/100 px (a 0.01 px larger box is
 #   invisible to brush / nearest hit-testing, and it halves their JSON).
 #
@@ -801,8 +807,8 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
       ceiling(v * 100) / 100
     }
   }
-  bbox <- c("key", "x0", "y0", "x1", "y1")
-  for (f in setdiff(names(cols), bbox)) {
+  cols$key <- .encode_keys(cols$key)
+  for (f in setdiff(names(cols), "key")) {
     v <- cols[[f]]
     if (is.list(v)) {
       if (all(lengths(v) <= 1L)) {
@@ -832,11 +838,37 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     if (is.character(v)) {
       lv <- unique(v[set])
       if (length(lv) <= n / 4) {
-        cols[[f]] <- list(levels = lv, codes = match(v, lv) - 1L)
+        codes <- match(v, lv) - 1L
+        # Long runs of one value (every mark a "point", a series drawn in
+        # one go) ship as runs: `rv` codes (-1 for none) and `rl` lengths.
+        r <- rle(ifelse(is.na(codes), -1L, codes))
+        cols[[f]] <- if (length(r$lengths) < n / 10) {
+          list(levels = lv, rv = r$values, rl = r$lengths)
+        } else {
+          list(levels = lv, codes = codes)
+        }
       }
     }
   }
   cols
+}
+
+# The key column, compactly when most keys are plain integers (a `data_id` of
+# row numbers, the usual big-scatter case): `{delta, at, v}` -- the integer keys
+# as a first value plus successive differences (mostly one or two digits), and
+# the other keys (legend swatches, say) sparse at their 0-based positions.
+# Otherwise the plain character vector.
+.encode_keys <- function(key) {
+  int <- grepl("^(0|[1-9][0-9]{0,14})$", key)
+  if (length(key) < 2L || sum(int) < 0.9 * length(key)) {
+    return(key)
+  }
+  v <- as.numeric(key[int])
+  list(
+    delta = c(v[[1]], diff(v)),
+    at = which(!int) - 1L,
+    v = key[!int]
+  )
 }
 
 # One numeric meta field across all elements (NA where absent), or NULL when no
@@ -1220,6 +1252,100 @@ meta_num <- function(meta, field) {
 .split_render_supported <- function() {
   all(c("layer", "panels") %in% names(formals(vellum::scene_svg))) &&
     all(c("layer", "panels") %in% names(formals(vellum::scene_png)))
+}
+
+# Does the installed vellum have the marks-only display list (VR-14)?
+.display_list_supported <- function() {
+  is.function(tryCatch(
+    getExportedValue("vellum", "scene_display_list"),
+    error = function(e) NULL
+  ))
+}
+
+# The marks-only display list for raster mode (VW-15): each keyed mark of the
+# data panels with its exact device-px geometry, paint and key, as vellum's
+# private columnar payload. The runtime draws the zoomed-in tier from it and
+# derives the hit-test bboxes, so the covered marks ship no bbox. NULL with an
+# older vellum, or above `max_marks` (with a message: the list would be big,
+# and a plot that size reads better as density).
+.raster_display_list <- function(scene, model, panels, max_marks) {
+  if (!.display_list_supported()) {
+    return(NULL)
+  }
+  el <- model$elements
+  keyed <- !is.na(el$key)
+  if (!is.null(panels) && !is.null(el$panel)) {
+    keyed <- keyed & el$panel %in% panels
+  }
+  n <- sum(keyed)
+  if (!n) {
+    return(NULL)
+  }
+  if (n > max_marks) {
+    cli::cli_inform(c(
+      "i" = "This plot has {n} marks, more than {.code max_marks} ({max_marks}): the widget ships a bounding-box index instead of the exact marks, so zoomed-in marks are drawn as plain dots.",
+      "*" = "A plot this big reads better as density: try {.fn vellumplot::mark_datashade} or {.fn vellumplot::mark_hex}.",
+      "*" = "Or raise the cap with {.code render_options(max_marks = )}."
+    ))
+    return(NULL)
+  }
+  vellum::scene_display_list(scene, what = "keyed", panels = panels)
+}
+
+# One display-list column (`list(type, n, data | const | seq | rle)`) as an R
+# vector; the runtime's `dlColumn()` is the same in JS.
+.dl_col <- function(col) {
+  n <- col$n
+  if (!n) {
+    return(numeric(0))
+  }
+  if (!is.null(col$const)) {
+    return(rep(col$const, n))
+  }
+  if (!is.null(col$seq)) {
+    return(col$seq[[1]] + col$seq[[2]] * (seq_len(n) - 1))
+  }
+  if (!is.null(col$rle)) {
+    return(rep(col$rle$values, col$rle$lengths))
+  }
+  raw <- base64enc::base64decode(col$data)
+  switch(
+    col$type,
+    f32 = readBin(raw, "double", n, size = 4, endian = "little"),
+    u8 = as.integer(raw),
+    u16 = readBin(raw, "integer", n, size = 2, signed = FALSE, endian = "little"),
+    u32 = {
+      v <- readBin(raw, "integer", n, size = 4, endian = "little")
+      as.numeric(v) + ifelse(v < 0, 2^32, 0)
+    }
+  )
+}
+
+# The keys whose every display-list record is drawn exactly (no flag): the
+# runtime derives their bboxes from the list, so they ship none.
+.dl_exact_keys <- function(dl) {
+  keys <- if (is.list(dl$keys)) {
+    as.character(.dl_col(dl$keys))
+  } else {
+    as.character(dl$keys)
+  }
+  k <- keys[.dl_col(dl$record$key) + 1L]
+  flagged <- .dl_col(dl$record$flags) != 0
+  setdiff(unique(k[!flagged]), unique(k[flagged]))
+}
+
+# Blank the bboxes of the marks the display list covers exactly (the runtime
+# fills them back in from the list). With most marks covered the bbox columns
+# then go sparse in `.encode_elements()`.
+.drop_listed_bboxes <- function(cols, dl) {
+  if (is.null(dl) || !length(cols$key)) {
+    return(cols)
+  }
+  hit <- cols$key %in% .dl_exact_keys(dl)
+  for (f in c("x0", "y0", "x1", "y1")) {
+    if (!is.null(cols[[f]])) cols[[f]][hit] <- NA_real_
+  }
+  cols
 }
 
 # The panels whose keyed marks go into the mark layer: every panel that holds a

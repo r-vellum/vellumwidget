@@ -42,9 +42,6 @@ export const VELLUMWIDGET_CSS = `
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 2; display: none;
 }
-/* Split render (VW-14): the mark-layer image is hidden while the crisp canvas
-   redraws its points under axis zoom. */
-.vellumwidget-marks-off .vellumwidget-marks { visibility: hidden; }
 .vellumwidget-dim-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;

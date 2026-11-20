@@ -17,7 +17,8 @@ navigator_options(height = 56)
 render_options(
   mode = c("auto", "svg", "raster"),
   raster_threshold = 20000L,
-  text = c("native", "outline")
+  text = c("native", "outline"),
+  max_marks = 500000L
 )
 }
 \arguments{
@@ -66,8 +67,9 @@ real axes, and the navigator and \code{vellumplot::bind_scale()} work as in SVG
 mode. An older vellum draws the whole scene as one image, and zoom then
 magnifies it. The trade-offs of raster mode: per-element
 grammar colours, per-mark screen-reader focus, and display-tier
-cross-filtering do not apply (there are no per-element DOM nodes), and a
-zoomed-in view shows the marks redrawn as plain dots.}
+cross-filtering do not apply (there are no per-element DOM nodes). Zoomed
+in, the marks are redrawn exactly from vellum's marks-only display list
+(see \code{max_marks}), or as plain dots with an older vellum.}
 
 \item{raster_threshold}{Keyed-element count above which \code{mode = "auto"}
 switches to the raster image (default \code{20000}).}
@@ -80,6 +82,14 @@ pixel-faithful and font-independent but not selectable. Applies to the
 SVG, including raster mode's SVG furniture under the split render; with an
 older vellum, raster mode bakes text into the base image and this argument
 is ignored (with a warning if set explicitly).}
+
+\item{max_marks}{In raster mode with a vellum that has the marks-only display
+list, the most marks whose exact geometry and paint ship with the widget
+(default \code{500000}, about 8 MB). Zoomed-in marks are then redrawn exactly,
+with their own shape, colour, stroke and alpha. Above it, the widget ships
+only a bounding-box index, draws zoomed-in marks as plain dots, and says
+so with a message: a plot that big is better drawn as density, with
+\code{vellumplot::mark_datashade()} or \code{vellumplot::mark_hex()}.}
 }
 \value{
 An object of class \code{vellumwidget_tooltip_options},

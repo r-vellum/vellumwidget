@@ -1,6 +1,7 @@
 // Shared type declarations for the vellumwidget runtime: the payload shapes the R
 // side ships and the small structural types the helpers and the factory share.
 
+import type { DLPayload } from "./dlist";
 import type { GeometryPayload } from "./geometry";
 
 // The subset of the object a widget's factory returns that the proxy needs: the
@@ -228,6 +229,7 @@ export interface Payload {
   panels?: PanelInfo[] | PanelInfo; // cartesian data panels (htmlwidgets may unbox a length-1 list)
   colorbar?: ColorbarInfo; // interactive continuous-colour colorbar (optional)
   marks?: MarksLayer; // split-render mark layer (raster mode, VW-14)
+  displayList?: DLPayload; // marks-only display list (raster mode, VW-15)
   interactions?: InteractionSpec; // declarative interactivity (from the plot spec)
   provenance?: Provenance; // click-to-source rows per element (from inspect_source())
   options: Options;

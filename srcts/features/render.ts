@@ -2,6 +2,7 @@
 // renderValue / resize entry points.
 
 import { asColumn, normalizeElements, normalizePanels } from "../elements";
+import { decodeDisplayList, fillBboxes } from "../dlist";
 import { isScalesBound } from "./bindScales";
 import { DIM_OVERLAY_MIN, SVGNS } from "./constants";
 import { cssEscape } from "../css";
@@ -145,6 +146,10 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       x.options || {}
     );
     ws.elements = normalizeElements(x.elements);
+    // The marks-only display list (raster mode, VW-15): the covered marks ship
+    // without bboxes, which are derived here from their exact geometry.
+    ws.dl = x.options && x.options.raster && x.displayList ? decodeDisplayList(x.displayList) : null;
+    if (ws.dl) fillBboxes(ws.elements, ws.dl);
     ws.panels = normalizePanels(x.panels);
     ws.colorbar = x.colorbar || null;
     ws.interactions = x.interactions || null;

@@ -119,10 +119,18 @@ navigator_options <- function(height = 56) {
 #'   mode. An older vellum draws the whole scene as one image, and zoom then
 #'   magnifies it. The trade-offs of raster mode: per-element
 #'   grammar colours, per-mark screen-reader focus, and display-tier
-#'   cross-filtering do not apply (there are no per-element DOM nodes), and a
-#'   zoomed-in view shows the marks redrawn as plain dots.
+#'   cross-filtering do not apply (there are no per-element DOM nodes). Zoomed
+#'   in, the marks are redrawn exactly from vellum's marks-only display list
+#'   (see `max_marks`), or as plain dots with an older vellum.
 #' @param raster_threshold Keyed-element count above which `mode = "auto"`
 #'   switches to the raster image (default `20000`).
+#' @param max_marks In raster mode with a vellum that has the marks-only display
+#'   list, the most marks whose exact geometry and paint ship with the widget
+#'   (default `500000`, about 8 MB). Zoomed-in marks are then redrawn exactly,
+#'   with their own shape, colour, stroke and alpha. Above it, the widget ships
+#'   only a bounding-box index, draws zoomed-in marks as plain dots, and says
+#'   so with a message: a plot that big is better drawn as density, with
+#'   `vellumplot::mark_datashade()` or `vellumplot::mark_hex()`.
 #' @param text How text is written into the SVG, passed to [vellum::scene_svg()]:
 #'   `"native"` (default) emits selectable `<text>` referencing system fonts ---
 #'   smaller when the page has the font, post-processable, and better for
@@ -135,7 +143,8 @@ navigator_options <- function(height = 56) {
 render_options <- function(
   mode = c("auto", "svg", "raster"),
   raster_threshold = 20000L,
-  text = c("native", "outline")
+  text = c("native", "outline"),
+  max_marks = 500000L
 ) {
   text_set <- !missing(text)
   structure(
@@ -147,6 +156,7 @@ render_options <- function(
         min = 0
       ),
       text = .check_choice(text, c("native", "outline"), "text"),
+      max_marks = .check_number(max_marks, "max_marks", min = 0),
       text_set = text_set
     ),
     class = "vellumwidget_render_options"

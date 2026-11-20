@@ -8,3 +8,16 @@ local_single_raster <- function(env = parent.frame()) {
     .env = env
   )
 }
+
+# The key column as R strings, whatever its wire form (see `.encode_keys()`).
+.decode_keys_r <- function(key) {
+  if (!is.list(key)) {
+    return(as.character(key))
+  }
+  n <- length(key$delta) + length(key$at)
+  out <- character(n)
+  other <- key$at + 1L
+  out[other] <- key$v
+  out[setdiff(seq_len(n), other)] <- format(cumsum(key$delta), scientific = FALSE, trim = TRUE)
+  out
+}
