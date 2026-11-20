@@ -5017,6 +5017,150 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   v1.restore();
 }
 
+// ============ VW-28: SVG-mode export keeps class-based state styles ============
+{
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const svgS =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50" viewBox="0 0 100 50"><g data-vellum-panel="panel-1-1">' +
+    '<path data-key="s1" fill="#f00" d="M5 5h4v4h-4z"/>' +
+    '<path data-key="s2" fill="#0f0" d="M20 5h4v4h-4z"/>' +
+    '<path data-key="s3" fill="#00f" opacity="0.5" d="M35 5h4v4h-4z"/>' +
+    '<path data-key="s4" fill="#000" d="M50 5h4v4h-4z"/>' +
+    "</g></svg>";
+  const inst = widgetDef.factory(e, 200, 100);
+  inst.renderValue({
+    svg: svgS,
+    elements: [{ key: "s1", cond: ["pick:color"] }, { key: "s2", cond: ["pick:color"] }, { key: "s3", cond: ["pick:color"] }, { key: "s4", cond: ["pick:color"] }],
+    interactions: {
+      selections: [{ name: "pick", kind: "point", on: "click", empty: true }],
+      conditions: [{ selection: "pick", aes: "color", empty: true }]
+    },
+    options: { hover: true, select: true, selectMode: "multiple" }
+  });
+  inst._call("select", ["s1"]);
+  e.querySelector('[data-key="s4"]').classList.add("vellumwidget-filtered");
+  function exportSvgS(selector) {
+    let captured = null;
+    const saved = { Blob: global.Blob, XS: global.XMLSerializer, cou: URL.createObjectURL, rou: URL.revokeObjectURL };
+    global.Blob = function (parts) { captured = parts.join(""); };
+    global.XMLSerializer = window.XMLSerializer;
+    URL.createObjectURL = function () { return "blob:x"; };
+    URL.revokeObjectURL = function () {};
+    const aClick = window.HTMLAnchorElement.prototype.click;
+    window.HTMLAnchorElement.prototype.click = function () {};
+    e.querySelector(selector).click();
+    window.HTMLAnchorElement.prototype.click = aClick;
+    global.Blob = saved.Blob; global.XMLSerializer = saved.XS;
+    URL.createObjectURL = saved.cou; URL.revokeObjectURL = saved.rou;
+    return new window.DOMParser().parseFromString(captured || "<svg/>", "image/svg+xml");
+  }
+  const s1 = e.querySelector('[data-key="s1"]'), s2 = e.querySelector('[data-key="s2"]');
+  ok(s1.classList.contains("vellumwidget-selected") && s2.classList.contains("vellumwidget-cond-dim"),
+    "VW-28 setup: s1 selected, s2 condition-dimmed");
+  const doc = exportSvgS('[data-act="svg"]');
+  const x1 = doc.querySelector('[data-key="s1"]'), x2 = doc.querySelector('[data-key="s2"]'),
+    x3 = doc.querySelector('[data-key="s3"]'), x4 = doc.querySelector('[data-key="s4"]');
+  ok(x2 && parseFloat(x2.style.opacity) === 0.28, "VW-28 export: a condition-dimmed node carries its opacity inline");
+  ok(x3 && parseFloat(x3.style.opacity) === 0.28 && x3.getAttribute("opacity") === "0.5",
+    "VW-28 export: the dim overrides an opacity attribute, as the stylesheet does on screen");
+  ok(x1 && !x1.style.opacity && x1.style.stroke !== "" && parseFloat(x1.style.strokeWidth) === 1.4,
+    "VW-28 export: the selected node keeps its outline (stroke + width) and is not dimmed");
+  ok(x4 && x4.style.display === "none", "VW-28 export: a filtered node is hidden in the export");
+  // A themed dim opacity (custom property on the root) is resolved on the live node.
+  e.style.setProperty("--vellumwidget-dim-opacity", "0.5");
+  const themed = exportSvgS('[data-act="svg"]').querySelector('[data-key="s2"]');
+  const cv = window.getComputedStyle(s2).getPropertyValue("--vellumwidget-dim-opacity").trim();
+  ok(parseFloat(themed.style.opacity) === (cv ? parseFloat(cv) : 0.28),
+    "VW-28 export: the dim opacity follows the theme's custom property where it resolves");
+  e.style.removeProperty("--vellumwidget-dim-opacity");
+  // the live DOM is untouched
+  ok(!s2.style.opacity && !s1.style.stroke, "VW-28 export: the on-screen nodes are not restyled");
+  // clearing the selection: nothing left inline
+  inst._call("clearSelection");
+  const cleared = exportSvgS('[data-act="svg"]');
+  ok(!cleared.querySelector('[data-key="s2"]').style.opacity && !cleared.querySelector('[data-key="s1"]').style.stroke,
+    "VW-28 export: with no selection the nodes export unstyled");
+}
+
+// ============ VW-29: one glyph-size rule for the mid and detail tiers ============
+{
+  const b64 = (Arr, xs) => Buffer.from(new Arr(xs).buffer).toString("base64");
+  const f32 = (xs) => ({ type: "f32", n: xs.length, data: b64(Float32Array, xs) });
+  function recCtx() {
+    const log = [];
+    let arcs = [];
+    return {
+      log: log, fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1, _stack: [],
+      save() {}, restore() {}, setTransform() {}, clearRect() { log.length = 0; }, rect() {}, clip() {},
+      moveTo() {}, lineTo() {}, closePath() {}, setLineDash() {},
+      beginPath() { arcs = []; }, arc(x, y, r) { arcs.push(r); },
+      fill() { log.push({ op: "fill", rs: arcs.slice() }); },
+      stroke() { log.push({ op: "stroke", rs: arcs.slice(), lw: this.lineWidth }); }
+    };
+  }
+  // A raw scene: no panels (so no axis zoom), two stroked discs of radius 3.
+  const dl = {
+    format: "vellum-display-list", version: 1, width: 200, height: 100, n: 2,
+    record: { kind: { type: "u8", n: 2, const: 0 }, paint: { type: "u8", n: 2, const: 0 }, key: { type: "u32", n: 2, seq: [0, 1] },
+      flags: { type: "u8", n: 2, const: 0 }, clip: { type: "u8", n: 2, const: 0 }, panel: { type: "u8", n: 2, const: 0 } },
+    point: { cx: f32([60, 140]), cy: { type: "f32", n: 2, const: 50 }, r: { type: "f32", n: 2, const: 3 }, shape: { type: "u8", n: 2, const: 0 } },
+    rect: { x: f32([]), y: f32([]), w: f32([]), h: f32([]) },
+    path: { xy: { type: "f32", n: 0, data: "" }, run_offset: { type: "u8", n: 1, const: 0 }, path_offset: { type: "u8", n: 1, const: 0 },
+      closed: { type: "u8", n: 0, data: "" }, evenodd: { type: "u8", n: 0, data: "" } },
+    paints: { fill: ["#ff0000ff"], stroke: ["#000000ff"], stroke_width: [1], dash: [null], linecap: ["round"], linejoin: ["round"] },
+    clips: null, keys: ["p1", "p2"], panels: ""
+  };
+  const proto = window.HTMLCanvasElement.prototype;
+  const ctx = recCtx();
+  const orig = proto.getContext;
+  proto.getContext = function () { return ctx; };
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const inst = widgetDef.factory(e, 200, 100);
+  inst.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><rect width="200" height="100" fill="#fff"/></svg>',
+    elements: { key: ["p1", "p2"], mark: ["point", "point"], x0: [57, 137], y0: [47, 47], x1: [63, 143], y1: [53, 53] },
+    marks: { href: "data:image/png;base64,ORIGINAL", width: 400, height: 200 },
+    displayList: dl,
+    options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple", detailMarks: 1 }
+  });
+  const radii = () => ctx.log.filter((r) => r.op === "fill").flatMap((r) => r.rs);
+  const widths = () => ctx.log.filter((r) => r.op === "stroke").map((r) => r.lw);
+  inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); inst._test.evalTier();
+  ok(inst._test.markTier() === "mid", "VW-29 setup: a 2x viewBox zoom with two marks in view is the mid tier");
+  ok(radii().length === 2 && radii().every((r) => Math.abs(r - 6) < 1e-6),
+    "VW-29: under viewBox zoom the canvas draws a disc at 2x its radius, as the zoomed SVG node is");
+  ok(widths().length > 0 && widths().every((w) => Math.abs(w - 2) < 1e-6),
+    "VW-29: under viewBox zoom the canvas stroke scales with the view too");
+  inst._test.setView({ x: 0, y: 0, w: 200, h: 100 }); inst._test.evalTier();
+  inst._test.setView({ x: 25, y: 37.5, w: 150, h: 25 }); inst._test.evalTier();
+  ok(radii().length === 2 && radii().every((r) => Math.abs(r - 3 * 200 / 150) < 1e-6),
+    "VW-29: a disc follows the viewBox's fit scale (min of the two axes, as SVG's meet does)");
+  // the detail tier's node for the same record: an unscaled circle in the zoomed viewBox
+  const d = mountDetailNoPanel();
+  function mountDetailNoPanel() {
+    proto.getContext = function () { return recCtx(); };
+    const e2 = document.createElement("div");
+    document.body.appendChild(e2);
+    const i2 = widgetDef.factory(e2, 200, 100);
+    i2.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><rect width="200" height="100" fill="#fff"/></svg>',
+      elements: { key: ["p1", "p2"], mark: ["point", "point"], x0: [57, 137], y0: [47, 47], x1: [63, 143], y1: [53, 53] },
+      marks: { href: "data:image/png;base64,ORIGINAL", width: 400, height: 200 },
+      displayList: dl,
+      options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple", detailMarks: 100 }
+    });
+    i2.inst = i2;
+    return { el: e2, inst: i2 };
+  }
+  d.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); d.inst._test.evalTier();
+  const node = d.el.querySelector('.vellumwidget-detail [data-key="p1"]');
+  ok(d.inst._test.markTier() === "detail" && node && !/scale\(var/.test(node.style.transform || "") && !node.hasAttribute("vector-effect"),
+    "VW-29: the detail node is not counter-scaled under viewBox zoom (it grows with the view, as the canvas now does)");
+  proto.getContext = orig;
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();
