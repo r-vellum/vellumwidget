@@ -41,9 +41,6 @@
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 2; display: none;
 }
-/* Split render (VW-14): the mark-layer image is hidden while the crisp canvas
-   redraws its points under axis zoom. */
-.vellumwidget-marks-off .vellumwidget-marks { visibility: hidden; }
 .vellumwidget-dim-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 5; overflow: visible;
@@ -243,6 +240,17 @@
         for (let i = 0; i < at.length; i++) out[at[i]] = vals[i];
         return out;
       }
+      if (o.levels !== void 0 && o.rv !== void 0 && o.rl !== void 0) {
+        const levels = asColumn(o.levels);
+        const rv = asColumn(o.rv), rl = asColumn(o.rl);
+        const out = new Array(n);
+        let k = 0;
+        for (let r = 0; r < rv.length; r++) {
+          const val = rv[r] < 0 ? null : levels[rv[r]];
+          for (let m = 0; m < rl[r]; m++) out[k++] = val;
+        }
+        return out;
+      }
       if (o.levels !== void 0 && o.codes !== void 0) {
         const levels = asColumn(o.levels);
         const codes = asColumn(o.codes);
@@ -256,11 +264,30 @@
     }
     return asColumn(v);
   }
+  function decodeKeys(v) {
+    if (v != null && typeof v === "object" && !Array.isArray(v) && "delta" in v) {
+      const o = v;
+      const delta = asColumn(o.delta), at = asColumn(o.at), other = asColumn(o.v);
+      const n = delta.length + at.length;
+      const out = new Array(n);
+      let j = 0, a = 0, run = 0;
+      for (let i = 0; i < n; i++) {
+        if (a < at.length && at[a] === i) {
+          out[i] = String(other[a++]);
+          continue;
+        }
+        run += delta[j++];
+        out[i] = String(run);
+      }
+      return out;
+    }
+    return asColumn(v).map(String);
+  }
   function normalizeElements(raw) {
     if (raw == null) return [];
     if (Array.isArray(raw)) return raw;
     const c = raw;
-    const key = asColumn(c.key);
+    const key = decodeKeys(c.key);
     const n = key.length;
     if (!n) return [];
     const x0 = asColumn(c.x0);
@@ -332,6 +359,253 @@
   function normalizePanels(raw) {
     if (raw == null) return [];
     return Array.isArray(raw) ? raw : [raw];
+  }
+
+  // srcts/dlist.ts
+  var DL_POINT = 0;
+  var DL_RECT = 1;
+  function b64bytes(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function dlColumn(c) {
+    const n = c ? c.n || 0 : 0;
+    const make = (len) => {
+      const t = c ? c.type : "u32";
+      return t === "f32" ? new Float32Array(len) : t === "u8" ? new Uint8Array(len) : t === "u16" ? new Uint16Array(len) : new Uint32Array(len);
+    };
+    if (!c || !n) return make(0);
+    if (c.const != null) {
+      const a = make(n);
+      a.fill(c.const);
+      return a;
+    }
+    if (c.seq != null) {
+      const s = asColumn(c.seq), a = make(n);
+      for (let i = 0; i < n; i++) a[i] = s[0] + s[1] * i;
+      return a;
+    }
+    if (c.rle != null) {
+      const v = asColumn(c.rle.values), l = asColumn(c.rle.lengths), a = make(n);
+      let o = 0;
+      for (let i = 0; i < v.length; i++) {
+        a.fill(v[i], o, o + l[i]);
+        o += l[i];
+      }
+      return a;
+    }
+    const bytes = b64bytes(c.data || "");
+    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    if (c.type === "f32") return new Float32Array(buf, 0, n);
+    if (c.type === "u16") return new Uint16Array(buf, 0, n);
+    if (c.type === "u32") return new Uint32Array(buf, 0, n);
+    return new Uint8Array(buf, 0, n);
+  }
+  var u32 = (a) => a instanceof Uint32Array ? a : Uint32Array.from(a);
+  var f32 = (a) => a instanceof Float32Array ? a : Float32Array.from(a);
+  var u8 = (a) => a instanceof Uint8Array ? a : Uint8Array.from(a);
+  function isNa(s) {
+    return s == null || s === "NA" || s === "";
+  }
+  function opaqueHex(s) {
+    return s == null || !/^#[0-9a-fA-F]{8}$/.test(s) || /ff$/i.test(s);
+  }
+  function decodeDisplayList(raw) {
+    if (!raw || raw.format !== "vellum-display-list" || raw.version !== 1) return null;
+    const n = raw.n || 0;
+    const kind = u8(dlColumn(raw.record.kind));
+    const pt = raw.point, rc = raw.rect, pa = raw.path;
+    const dl = {
+      n,
+      kind,
+      paint: u32(dlColumn(raw.record.paint)),
+      key: u32(dlColumn(raw.record.key)),
+      flags: u8(dlColumn(raw.record.flags)),
+      clip: u32(dlColumn(raw.record.clip)),
+      panel: u32(dlColumn(raw.record.panel)),
+      row: new Uint32Array(n),
+      bx0: new Float32Array(n),
+      by0: new Float32Array(n),
+      bx1: new Float32Array(n),
+      by1: new Float32Array(n),
+      cx: f32(dlColumn(pt.cx)),
+      cy: f32(dlColumn(pt.cy)),
+      r: f32(dlColumn(pt.r)),
+      shape: u8(dlColumn(pt.shape)),
+      rx: f32(dlColumn(rc.x)),
+      ry: f32(dlColumn(rc.y)),
+      rw: f32(dlColumn(rc.w)),
+      rh: f32(dlColumn(rc.h)),
+      xy: f32(dlColumn(pa.xy)),
+      runOff: u32(dlColumn(pa.run_offset)),
+      pathOff: u32(dlColumn(pa.path_offset)),
+      closed: u8(dlColumn(pa.closed)),
+      evenodd: u8(dlColumn(pa.evenodd)),
+      paints: [],
+      clips: [],
+      keys: [],
+      panels: asColumn(raw.panels).map(String),
+      exact: true
+    };
+    const k = raw.keys;
+    if (k && typeof k === "object" && !Array.isArray(k) && "type" in k) {
+      const kc = dlColumn(k);
+      dl.keys = new Array(kc.length);
+      for (let i = 0; i < kc.length; i++) dl.keys[i] = String(kc[i]);
+    } else {
+      dl.keys = asColumn(raw.keys).map(String);
+    }
+    const P = raw.paints;
+    const fill = asColumn(P.fill), stroke = asColumn(P.stroke), sw = asColumn(P.stroke_width);
+    const dash = asColumn(P.dash), cap = asColumn(P.linecap), join = asColumn(P.linejoin);
+    for (let i = 0; i < fill.length; i++) {
+      const f = isNa(fill[i]) ? null : String(fill[i]);
+      const s = isNa(stroke[i]) ? null : String(stroke[i]);
+      const d = isNa(dash[i]) ? null : String(dash[i]).split(",").map(Number).filter((x) => isFinite(x));
+      dl.paints.push({
+        fill: f,
+        stroke: s,
+        width: Number(sw[i]) || 0,
+        dash: d && d.length ? d : null,
+        cap: cap[i] || "butt",
+        join: join[i] || "miter",
+        opaque: opaqueHex(f) && opaqueHex(s)
+      });
+    }
+    if (raw.clips) {
+      const x0 = asColumn(raw.clips.x0), y0 = asColumn(raw.clips.y0), x1 = asColumn(raw.clips.x1), y1 = asColumn(raw.clips.y1);
+      for (let i = 0; i < x0.length; i++) dl.clips.push({ x0: x0[i], y0: y0[i], x1: x1[i], y1: y1[i] });
+    }
+    let ip = 0, ir = 0, ih = 0;
+    for (let i = 0; i < n; i++) {
+      if (dl.flags[i]) dl.exact = false;
+      const kd = kind[i];
+      if (kd === DL_POINT) {
+        const j = ip++, r = dl.r[j];
+        dl.row[i] = j;
+        dl.bx0[i] = dl.cx[j] - r;
+        dl.bx1[i] = dl.cx[j] + r;
+        dl.by0[i] = dl.cy[j] - r;
+        dl.by1[i] = dl.cy[j] + r;
+      } else if (kd === DL_RECT) {
+        const j = ir++;
+        dl.row[i] = j;
+        const x = dl.rx[j], y = dl.ry[j], w = dl.rw[j], h = dl.rh[j];
+        dl.bx0[i] = Math.min(x, x + w);
+        dl.bx1[i] = Math.max(x, x + w);
+        dl.by0[i] = Math.min(y, y + h);
+        dl.by1[i] = Math.max(y, y + h);
+      } else {
+        const j = ih++;
+        dl.row[i] = j;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        const v0 = dl.runOff[dl.pathOff[j]], v1 = dl.runOff[dl.pathOff[j + 1]];
+        for (let v = v0; v < v1; v++) {
+          const x = dl.xy[2 * v], y = dl.xy[2 * v + 1];
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+        dl.bx0[i] = x0;
+        dl.by0[i] = y0;
+        dl.bx1[i] = x1;
+        dl.by1[i] = y1;
+      }
+    }
+    return dl;
+  }
+  function fillBboxes(elements, dl) {
+    const box = {};
+    for (let i = 0; i < dl.n; i++) {
+      const k = dl.keys[dl.key[i]];
+      if (k == null || !isFinite(dl.bx0[i])) continue;
+      const b = box[k];
+      if (!b) box[k] = [dl.bx0[i], dl.by0[i], dl.bx1[i], dl.by1[i]];
+      else {
+        if (dl.bx0[i] < b[0]) b[0] = dl.bx0[i];
+        if (dl.by0[i] < b[1]) b[1] = dl.by0[i];
+        if (dl.bx1[i] > b[2]) b[2] = dl.bx1[i];
+        if (dl.by1[i] > b[3]) b[3] = dl.by1[i];
+      }
+    }
+    let filled = 0;
+    for (let i = 0; i < elements.length; i++) {
+      const e = elements[i];
+      if (e.x0 != null && e.y0 != null && e.x1 != null && e.y1 != null) continue;
+      const b = box[e.key];
+      if (!b) continue;
+      e.x0 = b[0];
+      e.y0 = b[1];
+      e.x1 = b[2];
+      e.y1 = b[3];
+      filled++;
+    }
+    return filled;
+  }
+  var S3 = 0.8660254037844386;
+  var MARKER = {
+    1: [-1, -1, 1, -1, 1, 1, -1, 1],
+    2: [0, -1, S3, 0.5, -S3, 0.5],
+    3: [0, -1, 1, 0, 0, 1, -1, 0],
+    6: [0, 1, S3, -0.5, -S3, -0.5],
+    7: function() {
+      const o = [];
+      for (let k = 0; k < 10; k++) {
+        const a = -Math.PI / 2 + k * Math.PI / 5, rad = k % 2 === 0 ? 1 : 0.382;
+        o.push(rad * Math.cos(a), rad * Math.sin(a));
+      }
+      return o;
+    }()
+  };
+  function isLineGlyph(shape) {
+    return shape === 4 || shape === 5;
+  }
+  function tracePoint(ctx, shape, x, y, r) {
+    if (shape === 0 || !MARKER[shape] && !isLineGlyph(shape)) {
+      ctx.moveTo(x + r, y);
+      ctx.arc(x, y, r, 0, 6.283185307179586);
+      return;
+    }
+    if (shape === 4) {
+      ctx.moveTo(x, y - r);
+      ctx.lineTo(x, y + r);
+      ctx.moveTo(x - r, y);
+      ctx.lineTo(x + r, y);
+      return;
+    }
+    if (shape === 5) {
+      const d = r * Math.SQRT1_2;
+      ctx.moveTo(x - d, y - d);
+      ctx.lineTo(x + d, y + d);
+      ctx.moveTo(x - d, y + d);
+      ctx.lineTo(x + d, y - d);
+      return;
+    }
+    const m = MARKER[shape];
+    ctx.moveTo(x + m[0] * r, y + m[1] * r);
+    for (let i = 2; i < m.length; i += 2) ctx.lineTo(x + m[i] * r, y + m[i + 1] * r);
+    ctx.closePath();
+  }
+  function traceShape(ctx, dl, i, A) {
+    const j = dl.row[i];
+    if (dl.kind[i] === DL_RECT) {
+      const x0 = A.ax * dl.rx[j] + A.bx, y0 = A.ay * dl.ry[j] + A.by;
+      ctx.rect(x0, y0, A.ax * dl.rw[j], A.ay * dl.rh[j]);
+      return;
+    }
+    const r0 = dl.pathOff[j], r1 = dl.pathOff[j + 1], closed = dl.closed[j] === 1;
+    for (let run = r0; run < r1; run++) {
+      const v0 = dl.runOff[run], v1 = dl.runOff[run + 1];
+      for (let v = v0; v < v1; v++) {
+        const x = A.ax * dl.xy[2 * v] + A.bx, y = A.ay * dl.xy[2 * v + 1] + A.by;
+        if (v === v0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      if (closed) ctx.closePath();
+    }
   }
 
   // srcts/tooltip.ts
@@ -499,6 +773,8 @@
   var DIM_OVERLAY_MIN = 2e3;
   var OVERLAY_MARK_CAP = 2e3;
   var PICK_CANDIDATES = 256;
+  var LIVE_DRAW_MAX = 5e4;
+  var SETTLE_MS = 120;
   var SVGNS = "http://www.w3.org/2000/svg";
   var TIP_MULTI_CAP = 30;
   var MODE_ICON = { brush: "\u25AD", lasso: "\u25CC", pan: "\u270B" };
@@ -4228,6 +4504,10 @@
     }
     function sampleBaseRaster() {
       clearPointData();
+      if (ws.dl) {
+        drawPoints();
+        return;
+      }
       if (!ws.rasterMode || !ws.svgEl || !ws.vb0) return;
       const imgNode = ws.svgEl.querySelector("image.vellumwidget-marks") || ws.svgEl.querySelector("image");
       const href = imgNode && (imgNode.getAttribute("href") || imgNode.getAttribute("xlink:href"));
@@ -4281,6 +4561,10 @@
     }
     function drawPoints() {
       if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
+      if (ws.dl) {
+        drawList(ws.dl);
+        return;
+      }
       const az = ws.axisZoomActive && ws.azPanels.length > 0;
       const zoomed = az ? ws.azPanels.some(function(a) {
         const t = ws.fx.azT(a);
@@ -4345,8 +4629,179 @@
         dot(q.px, q.py, rad[i] * rScale, i);
       }
     }
+    function fitCanvas() {
+      const c = ws.canvasEl;
+      const rect = (ws.svgEl || ws.el).getBoundingClientRect();
+      const cw = Math.max(1, Math.round(rect.width || ws.vb0.w));
+      const ch = Math.max(1, Math.round(rect.height || ws.vb0.h));
+      const dpr = window.devicePixelRatio || 1;
+      if (c.width !== cw * dpr || c.height !== ch * dpr) {
+        c.width = cw * dpr;
+        c.height = ch * dpr;
+      }
+      c.style.width = cw + "px";
+      c.style.height = ch + "px";
+      c.style.display = "block";
+      return [c.width, c.height];
+    }
+    let settleTimer = 0;
+    function drawList(dl, settled) {
+      const ctx = ws.ctx, vb = ws.vb, vb0 = ws.vb0;
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+        settleTimer = 0;
+      }
+      const az = ws.axisZoomActive && ws.azPanels.length > 0;
+      const zoomed = az ? ws.azPanels.some(function(a) {
+        const t = ws.fx.azT(a);
+        return t.sx > 1.0001 || t.sy > 1.0001;
+      }) : isZoomedIn(vb, vb0);
+      if (!zoomed || !dl.n) {
+        ws.canvasEl.style.display = "none";
+        showMarksLayer(true);
+        return;
+      }
+      const [W, H] = fitCanvas();
+      showMarksLayer(!dl.exact);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      const frame = az ? vb0 : vb;
+      const q0 = userToCanvas(frame, W, H, 0, 0), q1 = userToCanvas(frame, W, H, 1, 1);
+      const kx = q1.px - q0.px, ky = q1.py - q0.py;
+      const base = Math.min(W / vb0.w, H / vb0.h);
+      const scaleMarks = ws.opts.zoomMarks === "scale";
+      const np = dl.panels.length;
+      const aff = [], gs = [], pclip = [];
+      const ident = { ax: kx, bx: q0.px, ay: ky, by: q0.py };
+      for (let p = 0; p <= np; p++) {
+        let A = ident, g = scaleMarks ? kx : base, c = null;
+        const a = az && p > 0 ? ws.azPanels.filter((q) => q.p.name === dl.panels[p - 1])[0] : null;
+        if (a) {
+          const t = ws.fx.azT(a);
+          A = { ax: kx * t.sx, bx: kx * t.tx + q0.px, ay: ky * t.sy, by: ky * t.ty + q0.py };
+          g = scaleMarks ? base * Math.min(t.sx, t.sy) : base;
+          c = [kx * a.p.px0 + q0.px, ky * a.p.py0 + q0.py, kx * a.p.px1 + q0.px, ky * a.p.py1 + q0.py];
+        }
+        aff.push(A);
+        gs.push(g);
+        pclip.push(c);
+      }
+      if (!settled && dl.n > LIVE_DRAW_MAX) {
+        let vis = 0;
+        for (let i = 0; i < dl.n && vis <= LIVE_DRAW_MAX; i++) {
+          const A = aff[dl.panel[i] <= np ? dl.panel[i] : 0], pc = pclip[dl.panel[i] <= np ? dl.panel[i] : 0];
+          const x = A.ax * (dl.bx0[i] + dl.bx1[i]) / 2 + A.bx, y = A.ay * (dl.by0[i] + dl.by1[i]) / 2 + A.by;
+          if (x < 0 || y < 0 || x > W || y > H) continue;
+          if (pc && (x < pc[0] || x > pc[2] || y < pc[1] || y > pc[3])) continue;
+          vis++;
+        }
+        if (vis > LIVE_DRAW_MAX) {
+          ws.canvasEl.style.display = "none";
+          showMarksLayer(true);
+          settleTimer = window.setTimeout(function() {
+            settleTimer = 0;
+            if (ws.dl === dl) {
+              fitCanvas();
+              drawList(dl, true);
+            }
+          }, SETTLE_MS);
+          return;
+        }
+      }
+      let curState = -1, curPaint = -1, open = false, batch = false;
+      const flush = function() {
+        if (!open) return;
+        const pt = dl.paints[curPaint];
+        if (pt.fill) {
+          ctx.fillStyle = pt.fill;
+          ctx.fill();
+        }
+        if (pt.stroke && pt.width > 0) ctx.stroke();
+        open = false;
+      };
+      const setPaint = function(pi) {
+        const pt = dl.paints[pi];
+        ctx.lineWidth = pt.width * base;
+        ctx.setLineDash(pt.dash ? pt.dash.map((d) => d * base) : []);
+        ctx.lineCap = pt.cap;
+        ctx.lineJoin = pt.join;
+        if (pt.stroke) ctx.strokeStyle = pt.stroke;
+      };
+      ctx.save();
+      for (let i = 0; i < dl.n; i++) {
+        if (dl.flags[i]) continue;
+        const p = dl.panel[i] <= np ? dl.panel[i] : 0;
+        const A = aff[p];
+        let x0 = A.ax * dl.bx0[i] + A.bx, x1 = A.ax * dl.bx1[i] + A.bx;
+        let y0 = A.ay * dl.by0[i] + A.by, y1 = A.ay * dl.by1[i] + A.by;
+        const kd = dl.kind[i];
+        if (kd === DL_POINT) {
+          const j = dl.row[i], cx = A.ax * dl.cx[j] + A.bx, cy = A.ay * dl.cy[j] + A.by, rr = dl.r[j] * gs[p];
+          x0 = cx - rr;
+          x1 = cx + rr;
+          y0 = cy - rr;
+          y1 = cy + rr;
+        }
+        const pc = pclip[p];
+        if (x1 < 0 || y1 < 0 || x0 > W || y0 > H) continue;
+        if (pc && (x1 < pc[0] || x0 > pc[2] || y1 < pc[1] || y0 > pc[3])) continue;
+        const st = p * 65536 + dl.clip[i];
+        if (st !== curState) {
+          flush();
+          ctx.restore();
+          ctx.save();
+          if (pc) {
+            ctx.beginPath();
+            ctx.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]);
+            ctx.clip();
+          }
+          const cr = dl.clip[i] > 0 ? dl.clips[dl.clip[i] - 1] : null;
+          if (cr) {
+            const cx0 = A.ax * cr.x0 + A.bx, cy0 = A.ay * cr.y0 + A.by;
+            ctx.beginPath();
+            ctx.rect(cx0, cy0, A.ax * (cr.x1 - cr.x0), A.ay * (cr.y1 - cr.y0));
+            ctx.clip();
+          }
+          curState = st;
+          curPaint = -1;
+        }
+        const pi = dl.paint[i], pt = dl.paints[pi];
+        const canBatch = kd !== 2 && pt.opaque && (!pt.fill || !pt.stroke || pt.fill === pt.stroke);
+        if (!(open && batch && canBatch && pi === curPaint)) {
+          flush();
+          if (pi !== curPaint) {
+            setPaint(pi);
+            curPaint = pi;
+          }
+          ctx.beginPath();
+          open = true;
+          batch = canBatch;
+        }
+        if (kd === DL_POINT) {
+          const j = dl.row[i], sh = dl.shape[j];
+          tracePoint(ctx, sh, A.ax * dl.cx[j] + A.bx, A.ay * dl.cy[j] + A.by, dl.r[j] * gs[p]);
+        } else if (kd === DL_RECT) {
+          traceShape(ctx, dl, i, A);
+        } else {
+          traceShape(ctx, dl, i, A);
+          const pf = pt.fill;
+          if (pf && dl.closed[dl.row[i]] === 1) {
+            ctx.fillStyle = pf;
+            ctx.fill(dl.evenodd[dl.row[i]] === 1 ? "evenodd" : "nonzero");
+          }
+          if (pt.stroke && pt.width > 0) ctx.stroke();
+          open = false;
+        }
+        if (!batch) flush();
+      }
+      flush();
+      ctx.restore();
+    }
     function showMarksLayer(on) {
-      if (ws.svgEl && ws.marksLayer) ws.svgEl.classList.toggle("vellumwidget-marks-off", !on);
+      if (!ws.svgEl || !ws.marksLayer) return;
+      ws.svgEl.classList.toggle("vellumwidget-marks-off", !on);
+      const drawn = ws.svgEl.querySelectorAll("use.vellumwidget-marks, svg > image.vellumwidget-marks");
+      for (let i = 0; i < drawn.length; i++) drawn[i].style.visibility = on ? "" : "hidden";
     }
     function ringFor(k, cls) {
       const m = ws.meta[k];
@@ -4625,6 +5080,8 @@
         x.options || {}
       );
       ws.elements = normalizeElements(x.elements);
+      ws.dl = x.options && x.options.raster && x.displayList ? decodeDisplayList(x.displayList) : null;
+      if (ws.dl) fillBboxes(ws.elements, ws.dl);
       ws.panels = normalizePanels(x.panels);
       ws.colorbar = x.colorbar || null;
       ws.interactions = x.interactions || null;
@@ -5122,6 +5579,8 @@
     function exportSvgString() {
       const svg = ws.svgEl.cloneNode(true);
       svg.classList.remove("vellumwidget-marks-off");
+      const drawn = svg.querySelectorAll(".vellumwidget-marks");
+      for (let i = 0; i < drawn.length; i++) drawn[i].style.visibility = "";
       if (ws.axisZoomActive && ws.retickLayer) {
         const g = document.createElementNS(SVGNS, "g");
         g.setAttribute("class", "vellumwidget-retick-export");
@@ -5438,6 +5897,7 @@
       tolY: 1,
       rasterMode: false,
       marksLayer: null,
+      dl: null,
       selGroup: null,
       hovGroup: null,
       canvasEl: null,
@@ -5585,6 +6045,13 @@
           },
           hasCanvas: function() {
             return !!ws.canvasEl;
+          },
+          displayListSize: function() {
+            return ws.dl ? ws.dl.n : 0;
+          },
+          bboxOf: function(k) {
+            const m = ws.meta[k];
+            return m ? [m.x0, m.y0, m.x1, m.y1] : null;
           },
           pointCount: function() {
             return ws.ptN;
@@ -5793,6 +6260,11 @@
     secAxisMap,
     secTicks,
     sourceTable,
+    decodeDisplayList,
+    fillBboxes,
+    tracePoint,
+    traceShape,
+    decodeKeys,
     bus: vellumwidgetBus
   };
 })();

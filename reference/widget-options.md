@@ -16,7 +16,8 @@ navigator_options(height = 56)
 render_options(
   mode = c("auto", "svg", "raster"),
   raster_threshold = 20000L,
-  text = c("native", "outline")
+  text = c("native", "outline"),
+  max_marks = 500000L
 )
 ```
 
@@ -86,8 +87,9 @@ render_options(
   image, and zoom then magnifies it. The trade-offs of raster mode:
   per-element grammar colours, per-mark screen-reader focus, and
   display-tier cross-filtering do not apply (there are no per-element
-  DOM nodes), and a zoomed-in view shows the marks redrawn as plain
-  dots.
+  DOM nodes). Zoomed in, the marks are redrawn exactly from vellum's
+  marks-only display list (see `max_marks`), or as plain dots with an
+  older vellum.
 
 - raster_threshold:
 
@@ -106,6 +108,19 @@ render_options(
   split render; with an older vellum, raster mode bakes text into the
   base image and this argument is ignored (with a warning if set
   explicitly).
+
+- max_marks:
+
+  In raster mode with a vellum that has the marks-only display list, the
+  most marks whose exact geometry and paint ship with the widget
+  (default `500000`, about 8 MB). Zoomed-in marks are then redrawn
+  exactly, with their own shape, colour, stroke and alpha. Above it, the
+  widget ships only a bounding-box index, draws zoomed-in marks as plain
+  dots, and says so with a message: a plot that big is better drawn as
+  density, with
+  [`vellumplot::mark_datashade()`](https://r-vellum.github.io/vellumplot/reference/mark_datashade.html)
+  or
+  [`vellumplot::mark_hex()`](https://r-vellum.github.io/vellumplot/reference/mark_tile.html).
 
 ## Value
 
@@ -153,6 +168,7 @@ render_options(mode = "raster")
 #>   mode: raster
 #>   raster_threshold: 20000
 #>   text: native
+#>   max_marks: 5e+05
 
 if (FALSE) { # \dontrun{
 library(vellumplot)
