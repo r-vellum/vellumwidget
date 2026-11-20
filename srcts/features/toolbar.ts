@@ -1,5 +1,6 @@
 // Toolbar: interaction modes, export (SVG / PNG / clipboard), fullscreen.
 
+import { inlineStateStyles } from "../css";
 import { download } from "../dom";
 import { MODE_ICON, MODE_LABEL, SVGNS } from "./constants";
 import { unionBbox } from "../geometry";
@@ -74,11 +75,16 @@ export function toolbarFeature(
   // sits over the base furniture, where the canvas sits on screen. Without an
   // exact list the PNG is kept.
   //
+  // The page stylesheet does not travel with the document, so the state
+  // classes (condition dimming, selection outlines, legend mute/hide, filters)
+  // are written onto the clone as inline styles first (VW-28).
+  //
   // `strokeK` (the PNG path's resolution scale): a non-scaling stroke keeps
   // its width in device px, so when the image is rasterised at k x it would
   // come out k times too thin; its width and dashes are scaled by k instead.
   function exportSvgString(strokeK?: number): string {
     const svg = ws.svgEl!.cloneNode(true) as SVGSVGElement;
+    inlineStateStyles(ws.svgEl!, svg);
     svg.classList.remove("vellumwidget-marks-off");
     const listed = ws.rasterMode ? ws.fx.exportMarksImage(exportScale()) : null;
     if (listed) {

@@ -202,3 +202,56 @@ export function cssEscape(value: string): string {
   if (anyCss && typeof anyCss.escape === "function") return anyCss.escape(value);
   return value.replace(/["\\\]\[#.:;,()>~+*^$|=@!%&{}\/\s]/g, "\\$&");
 }
+
+// ---- export: state classes as inline styles (VW-28) ----
+
+// The classes the stylesheet above uses to show widget state on keyed nodes
+// (condition dimming, colour-filter fade, legend hide/mute, cross-filter hide,
+// selection outline). Transient pointer state (hover, keyboard focus) is left
+// out: an export shows what is selected and filtered, not where the pointer is.
+const STATE_SEL = [
+  "vellumwidget-cond-dim", "vellumwidget-colorfiltered", "vellumwidget-legend-muted",
+  "vellumwidget-legend-off", "vellumwidget-selected", "vellumwidget-filtered", "vellumwidget-legend-hidden"
+].map((c) => "[data-key]." + c).join(", ");
+
+function cssVar(cs: CSSStyleDeclaration | null, name: string, fallback: string): string {
+  const v = cs ? cs.getPropertyValue(name).trim() : "";
+  return v || fallback;
+}
+
+// An exported SVG (and the PNG rasterised from it) is a standalone document:
+// the page stylesheet does not travel with it, so a node styled only through a
+// state class would export unstyled. Copy those styles inline onto the clone.
+// `live` and `clone` must have the same structure (call this right after
+// cloneNode). The values follow the stylesheet's own cascade (legend-off over
+// colour filter over condition dim over legend mute) and resolve its custom
+// properties on the live node, so a themed dim opacity or selection ink
+// exports as shown. A node whose opacity is already inline keeps it (inline
+// beats the stylesheet on screen too).
+export function inlineStateStyles(live: Element, clone: Element): void {
+  const a = live.querySelectorAll(STATE_SEL);
+  const b = clone.querySelectorAll(STATE_SEL);
+  if (a.length !== b.length) return;
+  for (let i = 0; i < a.length; i++) {
+    const n = a[i] as SVGElement, c = b[i] as SVGElement, cl = n.classList;
+    if (cl.contains("vellumwidget-filtered") || cl.contains("vellumwidget-legend-hidden")) {
+      c.style.display = "none";
+      continue;
+    }
+    let cs: CSSStyleDeclaration | null = null;
+    try { cs = window.getComputedStyle(n); } catch (e) { cs = null; }
+    if (!n.style.opacity) {
+      let op = "";
+      if (cl.contains("vellumwidget-legend-off") && cl.contains("vellumwidget-legend")) op = "0.4";
+      else if (cl.contains("vellumwidget-colorfiltered")) op = cssVar(cs, "--vellumwidget-colorfilter-opacity", "0.12");
+      else if (cl.contains("vellumwidget-cond-dim")) op = cssVar(cs, "--vellumwidget-dim-opacity", "0.28");
+      else if (cl.contains("vellumwidget-legend-muted")) op = "0.12";
+      if (op) c.style.opacity = op;
+    }
+    if (cl.contains("vellumwidget-selected")) {
+      c.style.stroke = cssVar(cs, "--vellumwidget-selected-stroke", cssVar(cs, "--vellumwidget-ink", "#111827"));
+      c.style.strokeWidth = cssVar(cs, "--vellumwidget-selected-width", "1.4px");
+      c.style.setProperty("paint-order", "normal");
+    }
+  }
+}
