@@ -1,5 +1,12 @@
 # vellumwidget 0.13.1.9000
 
+* **The navigator's mini-map draws gridlines, ticks and reference lines
+  visibly (VW-31).** It squashes the whole plot into a short strip, and the
+  strokes squashed with it, so horizontal gridlines and thin rules shrank to
+  a fraction of a pixel and nearly disappeared. The mini-map's strokes now keep
+  their own width on screen (`vector-effect: non-scaling-stroke`), with a
+  1 px minimum.
+
 * **Gradients, path clips and translucent groups no longer keep a raster plot
   out of the exact tiers (VW-23).** With a vellum that has display list
   version 2 (`scene_display_list(version = 2)`, feature-detected), gradient

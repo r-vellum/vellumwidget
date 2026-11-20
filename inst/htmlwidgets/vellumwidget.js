@@ -3835,6 +3835,29 @@
   }
 
   // srcts/features/navigator.ts
+  var NAV_MIN_STROKE = 1;
+  function inherited(el, top, attr, prop) {
+    for (let n = el; n; n = n === top ? null : n.parentElement) {
+      const st = n.style ? n.style.getPropertyValue(prop) : "";
+      if (st) return st;
+      const a = n.getAttribute(attr);
+      if (a !== null && a !== "inherit") return a;
+    }
+    return null;
+  }
+  function navStrokes(clone) {
+    const shapes = clone.querySelectorAll("path,line,polyline,polygon,rect,circle,ellipse");
+    for (let i = 0; i < shapes.length; i++) {
+      const el = shapes[i];
+      const stroke = inherited(el, clone, "stroke", "stroke");
+      if (!stroke || stroke === "none" || stroke === "transparent") continue;
+      const w = parseFloat(inherited(el, clone, "stroke-width", "stroke-width") || "1");
+      const sw = String(Math.max(isFinite(w) ? w : 1, NAV_MIN_STROKE));
+      el.setAttribute("vector-effect", "non-scaling-stroke");
+      el.setAttribute("stroke-width", sw);
+      if (el.style && el.style.getPropertyValue("stroke-width")) el.style.setProperty("stroke-width", sw);
+    }
+  }
   function navigatorFeature(ws) {
     function navToView(xFrac, wFrac) {
       if (!ws.vb0) return;
@@ -3897,6 +3920,7 @@
       clone.removeAttribute("id");
       const ided = clone.querySelectorAll(".vellumwidget-nav-above [id]");
       for (let i = 0; i < ided.length; i++) ided[i].removeAttribute("id");
+      navStrokes(clone);
       mini.appendChild(clone);
       ws.navEl.appendChild(mini);
       ws.navWindow = document.createElement("div");
