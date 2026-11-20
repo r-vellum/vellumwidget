@@ -30,7 +30,7 @@ export function legendFeature(
     ws.fx.clearClass("vellumwidget-legend-off");
     ws.hiddenKeySet = {};
     const pol = legendPolicy();
-    if (pol === "select") return;
+    if (pol === "select") { if (ws.rasterMode) ws.fx.updateMarkStates(); return; }
     const cls = pol === "mute" ? "vellumwidget-legend-muted" : "vellumwidget-legend-hidden";
     for (const s in ws.legendOff) {
       if (!ws.legendOff[s]) continue;
@@ -39,6 +39,7 @@ export function legendFeature(
       if (pol === "hide") for (let i = 0; i < members.length; i++) ws.hiddenKeySet[members[i]] = true;
       ws.fx.addClassForKeys(ws.legendSwatch[s] || [], "vellumwidget-legend-off");
     }
+    if (ws.rasterMode) ws.fx.updateMarkStates(); // hide / mute on the canvas tiers
   }
 
   // Single click: toggle one series on/off.

@@ -32,8 +32,8 @@ export function selectionFeature(
   function refreshSelected(): void {
     if (ws.fx.ringMode()) {
       ws.fx.drawSelFeedback();
-      // Conditions and filters are SVG-only, but scale binds work in raster
-      // mode under the split render's axis zoom (VW-14).
+      // Conditions and filters go to the canvas's per-key mark state
+      // (VW-22); scale binds work under the split render's axis zoom (VW-14).
       ws.fx.reevaluateInteractions();
       return;
     }
@@ -102,16 +102,18 @@ export function selectionFeature(
     ws.calib = null; // the set of measurable (non-inert) marks changed
     ws.fx.clearClass("vellumwidget-filtered");
     ws.filteredKeySet = {};
-    if (showKeys == null) return;
-    const show: Record<string, boolean> = {};
-    for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
-    for (let i = 0; i < ws.elements.length; i++) {
-      const key = ws.elements[i].key;
-      if (!show[key]) {
-        ws.fx.addClassForKeys([key], "vellumwidget-filtered");
-        ws.filteredKeySet[key] = true;
+    if (showKeys != null) {
+      const show: Record<string, boolean> = {};
+      for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
+      for (let i = 0; i < ws.elements.length; i++) {
+        const key = ws.elements[i].key;
+        if (!show[key]) {
+          ws.fx.addClassForKeys([key], "vellumwidget-filtered");
+          ws.filteredKeySet[key] = true;
+        }
       }
     }
+    if (ws.rasterMode) ws.fx.updateMarkStates(); // the node-less tiers hide them on the canvas
   }
 
   // A mark is "inert" when it is hidden by a legend-click (`hide`) or by a

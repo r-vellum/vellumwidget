@@ -4403,6 +4403,151 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(off.inst._test.markTier() === "mid" && !off.el.querySelector(".vellumwidget-detail"), "tier: detailMarks = 0 never materialises nodes");
 }
 
+// ============ VW-22: conditions / filters in the node-less raster tiers ============
+const slowChecks = []; // promises resolved after timers (settle redraws)
+{
+  const b64 = (Arr, xs) => Buffer.from(new Arr(xs).buffer).toString("base64");
+  const f32 = (xs) => ({ type: "f32", n: xs.length, data: b64(Float32Array, xs) });
+  const u8 = (xs) => ({ type: "u8", n: xs.length, data: b64(Uint8Array, xs) });
+  // A recording 2D context: each fill/stroke with its style, alpha and the
+  // circle centres traced since the last beginPath.
+  function recCtx() {
+    const log = [];
+    let arcs = [];
+    const c = {
+      log: log, fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1, lineCap: "butt", lineJoin: "miter",
+      _stack: [],
+      save() { this._stack.push([this.fillStyle, this.strokeStyle, this.globalAlpha]); },
+      restore() { const v = this._stack.pop(); if (v) { this.fillStyle = v[0]; this.strokeStyle = v[1]; this.globalAlpha = v[2]; } },
+      setTransform() {}, clearRect() { log.length = 0; }, rect() {}, clip() {}, moveTo() {}, lineTo() {}, closePath() {}, setLineDash() {},
+      beginPath() { arcs = []; },
+      arc(x) { arcs.push(Math.round(x)); },
+      fill() { log.push({ op: "fill", style: this.fillStyle, alpha: this.globalAlpha, xs: arcs.slice() }); },
+      stroke() { log.push({ op: "stroke", style: this.strokeStyle, alpha: this.globalAlpha, xs: arcs.slice() }); }
+    };
+    return c;
+  }
+  // Which circle centres were filled, and how: "x:style@alpha".
+  const fills = (ctx) => ctx.log.filter((r) => r.op === "fill").flatMap((r) => r.xs.map((x) => x + ":" + r.style + "@" + r.alpha)).sort();
+  // 4 opaque red circles at x = 40, 80, 120, 160 in panel-1-1.
+  function dlOf(n, flagged) {
+    const xs = [40, 80, 120, 160];
+    return {
+      format: "vellum-display-list", version: 1, width: 200, height: 100, n: n,
+      record: { kind: { type: "u8", n: n, const: 0 }, paint: { type: "u8", n: n, const: 0 }, key: { type: "u32", n: n, seq: [0, 1] },
+        flags: flagged ? u8([0, 0, 0, 1]) : { type: "u8", n: n, const: 0 }, clip: { type: "u8", n: n, const: 0 }, panel: { type: "u8", n: n, const: 1 } },
+      point: { cx: n === 4 ? f32(xs) : { type: "f32", n: n, const: 100 }, cy: { type: "f32", n: n, const: 50 }, r: { type: "f32", n: n, const: 3 }, shape: { type: "u8", n: n, const: 0 } },
+      rect: { x: f32([]), y: f32([]), w: f32([]), h: f32([]) },
+      path: { xy: { type: "f32", n: 0, data: "" }, run_offset: { type: "u8", n: 1, const: 0 }, path_offset: { type: "u8", n: 1, const: 0 },
+        closed: { type: "u8", n: 0, data: "" }, evenodd: { type: "u8", n: 0, data: "" } },
+      paints: { fill: ["#ff0000ff"], stroke: [null], stroke_width: [0], dash: [null], linecap: ["round"], linejoin: ["round"] },
+      clips: null, keys: Array.from({ length: n }, (_, i) => "p" + (i + 1)), panels: "panel-1-1"
+    };
+  }
+  const panel = {
+    name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+  };
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"></g></g></svg>';
+  function mountMS(opts) {
+    const o = Object.assign({ n: 4 }, opts);
+    const ctx = recCtx();
+    const proto = window.HTMLCanvasElement.prototype, orig = proto.getContext;
+    proto.getContext = function () { return ctx; };
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    const keys = Array.from({ length: o.n }, (_, i) => "p" + (i + 1));
+    inst.renderValue({
+      svg: svg,
+      elements: { key: keys, mark: keys.map(() => "point"),
+        cond: o.cond ? keys.map(() => ["pick:color"]) : undefined, filt: o.filt ? keys.map(() => ["pick"]) : undefined },
+      panels: [panel],
+      marks: { href: "data:image/png;base64,", width: 200, height: 100, panels: "panel-1-1" },
+      displayList: dlOf(o.n, o.flagged),
+      interactions: {
+        selections: [{ name: "pick", kind: "point", on: "click", empty: true }],
+        conditions: o.cond ? [{ selection: "pick", aes: "color", if_false: o.cond === "dim" ? null : o.cond, empty: true }] : [],
+        filters: o.filt ? [{ selection: "pick" }] : []
+      },
+      options: Object.assign({ raster: true, hover: true, select: true, zoom: true, selectMode: "multiple" }, o.options || {})
+    });
+    proto.getContext = orig;
+    const canvas = e.querySelector("canvas.vellumwidget-canvas");
+    const img = () => e.querySelector("use.vellumwidget-marks").style.visibility;
+    return { el: e, inst: inst, ctx: ctx, canvas: canvas, img: img };
+  }
+
+  // A dim condition, overview -> mid -> detail -> overview.
+  const d = mountMS({ cond: "dim", options: { detailMarks: 2 } });
+  ok(d.canvas.style.display !== "block" && d.img() === "", "markstate: no state -> the overview is the mark image");
+  d.inst._call("select", ["p1"]);
+  ok(d.canvas.style.display === "block" && d.img() === "hidden",
+    "markstate: an active condition at the overview draws the marks on the canvas instead of the image");
+  ok(fills(d.ctx).join(",") === "120:#ff0000ff@0.28,160:#ff0000ff@0.28,40:#ff0000ff@1,80:#ff0000ff@0.28",
+    "markstate: the member keeps its paint, non-members draw at the dim opacity");
+  ok(d.ctx.log.filter((r) => r.op === "fill" && r.alpha < 1).every((r) => r.xs.length === 1),
+    "markstate: dimmed marks are drawn one by one (overlaps compound like SVG nodes)");
+  d.inst._test.setView({ x: 30, y: 25, w: 100, h: 50 }); d.inst._test.evalTier();
+  ok(d.inst._test.markTier() === "mid" && d.canvas.style.display === "block" && fills(d.ctx).some((f) => /@0.28$/.test(f)) && fills(d.ctx).some((f) => /@1$/.test(f)),
+    "markstate: the mid canvas keeps the condition");
+  d.inst._test.setView({ x: 30, y: 40, w: 20, h: 20 }); d.inst._test.evalTier();
+  ok(d.inst._test.markTier() === "detail" && !d.el.querySelector('.vellumwidget-detail [data-key="p1"]').classList.contains("vellumwidget-cond-dim"),
+    "markstate: detail nodes take the condition by class (member)");
+  d.inst._test.setView({ x: 70, y: 40, w: 20, h: 20 }); d.inst._test.evalTier();
+  ok(d.el.querySelector('.vellumwidget-detail [data-key="p2"]').classList.contains("vellumwidget-cond-dim"),
+    "markstate: detail nodes take the condition by class (non-member)");
+  d.inst._test.setView({ x: 0, y: 0, w: 200, h: 100 }); d.inst._test.evalTier();
+  ok(d.inst._test.markTier() === "overview" && d.canvas.style.display === "block" && d.img() === "hidden" && fills(d.ctx).length === 4,
+    "markstate: back at the overview the canvas still carries the condition");
+  d.inst._call("clearSelection");
+  ok(d.canvas.style.display !== "block" && d.img() === "", "markstate: an empty selection (spotlight) returns to the image");
+
+  // An explicit if_false colour: non-members batched in that colour.
+  const c = mountMS({ cond: "#cccccc" });
+  c.inst._call("select", ["p1"]);
+  ok(fills(c.ctx).join(",") === "120:#cccccc@1,160:#cccccc@1,40:#ff0000ff@1,80:#cccccc@1",
+    "markstate: non-members draw in the condition's if_false colour");
+  ok(c.ctx.log.filter((r) => r.op === "fill" && r.style === "#cccccc").length === 1, "markstate: same-colour opaque marks are batched");
+
+  // filter_by(): non-members of the filtered view are not drawn and not pickable.
+  const f = mountMS({ filt: true });
+  f.inst._call("select", ["p3"]);
+  ok(fills(f.ctx).join(",") === "120:#ff0000ff@1" && f.img() === "hidden", "markstate: filter_by() hides non-members on the overview canvas");
+  ok(f.inst._test.inert("p1") && !f.inst._test.inert("p3"), "markstate: filtered-out marks are inert");
+  f.inst._call("clearSelection");
+  ok(f.canvas.style.display !== "block", "markstate: clearing the filter returns to the image");
+
+  // A cross-filter (proxy / crosstalk) hides too.
+  const x = mountMS({});
+  x.inst._call("filter", ["p1", "p2"]);
+  ok(fills(x.ctx).join(",") === "40:#ff0000ff@1,80:#ff0000ff@1", "markstate: a cross-filter hides the other marks on the canvas");
+  x.inst._call("clearFilter");
+  ok(x.canvas.style.display !== "block", "markstate: clearing the cross-filter returns to the image");
+
+  // A flagged record lives only in the image: the overview stays the image.
+  const g = mountMS({ cond: "dim", flagged: true });
+  g.inst._call("select", ["p1"]);
+  ok(g.canvas.style.display !== "block" && g.img() === "", "markstate: an inexact list keeps the overview image (documented limit)");
+
+  // Over LIVE_DRAW_MAX marks a state change redraws once settled, and keeps a
+  // drawn canvas up meanwhile.
+  const big = mountMS({ n: 50001, cond: "dim" });
+  big.inst._call("select", ["p1"]);
+  ok(big.canvas.style.display !== "block", "markstate: >50k marks: the first state draw waits for the settle");
+  slowChecks.push(new Promise(function (resolve) {
+    setTimeout(function () {
+      ok(big.canvas.style.display === "block" && big.ctx.log.filter((r) => r.op === "fill").length === 50001,
+        "markstate: >50k marks: the settled redraw draws every mark");
+      big.inst._call("select", ["p2"]);
+      ok(big.canvas.style.display === "block" && big.ctx.log.length > 0 && big.img() === "hidden", "markstate: >50k marks: a later state change keeps the drawn canvas until it redraws");
+      resolve();
+    }, 200);
+  }));
+}
+
 // ============ VW-21: furniture painted after the marks stays above them ============
 {
   const PNG1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
@@ -4491,7 +4636,9 @@ setTimeout(function () {
   asyncChecks[0]();
   setTimeout(function () {
     for (let i = 1; i < asyncChecks.length; i++) asyncChecks[i]();
+    Promise.all(slowChecks).then(function () {
     console.log(failures === 0 ? "\nALL PASS" : "\n" + failures + " FAILURE(S)");
     process.exit(failures === 0 ? 0 : 1);
+    });
   }, 0);
 }, 0);

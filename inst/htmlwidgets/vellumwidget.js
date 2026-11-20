@@ -1982,6 +1982,125 @@
     return { setupAxisZoom, applyPanTransforms, retick };
   }
 
+  // srcts/features/markState.ts
+  var MS_DIM = 1;
+  var MS_HIDDEN = 2;
+  var MS_MUTED = 4;
+  var DIM_DEFAULT = 0.28;
+  var MUTED_ALPHA = 0.12;
+  function markStateFeature(ws) {
+    let forDl = null;
+    let keyIdx = /* @__PURE__ */ new Map();
+    let tagIds = {};
+    let paletteIdx = {};
+    function sync() {
+      const dl = ws.dl;
+      if (!dl) {
+        forDl = null;
+        ws.msFlags = ws.msColor = ws.msCond = null;
+        ws.msActive = false;
+        return false;
+      }
+      if (forDl === dl) return true;
+      forDl = dl;
+      keyIdx = /* @__PURE__ */ new Map();
+      for (let i = 0; i < dl.keys.length; i++) keyIdx.set(dl.keys[i], i);
+      tagIds = {};
+      paletteIdx = {};
+      ws.msPalette = [];
+      ws.msFlags = new Uint8Array(dl.keys.length);
+      ws.msColor = new Uint16Array(dl.keys.length);
+      ws.msCond = new Uint16Array(dl.keys.length);
+      ws.msActive = false;
+      return true;
+    }
+    function keyIds(keys) {
+      sync();
+      const out = new Int32Array(keys.length);
+      for (let i = 0; i < keys.length; i++) {
+        const v = keyIdx.get(keys[i]);
+        out[i] = v == null ? -1 : v;
+      }
+      return out;
+    }
+    function condStatesBegin() {
+      if (!sync() || !ws.msCond) return false;
+      ws.msCond.fill(0);
+      return true;
+    }
+    function condStateSet(tag, tagged, members, active, color) {
+      const cond = ws.msCond;
+      if (!cond || !ws.dl) return;
+      let ids = tagIds[tag];
+      if (!ids) ids = tagIds[tag] = keyIds(tagged);
+      let code = 1;
+      if (color != null) {
+        let p = paletteIdx[color];
+        if (p == null) {
+          p = paletteIdx[color] = ws.msPalette.length;
+          ws.msPalette.push(color);
+        }
+        code = p + 2;
+      }
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        if (id < 0) continue;
+        cond[id] = active && !members[tagged[i]] ? code : 0;
+      }
+    }
+    function updateMarkStates() {
+      if (!ws.rasterMode || !sync() || !ws.msFlags || !ws.msColor || !ws.msCond) return;
+      const flags = ws.msFlags, color = ws.msColor, cond = ws.msCond;
+      flags.fill(0);
+      color.fill(0);
+      let active = false;
+      for (let k = 0; k < cond.length; k++) {
+        const c = cond[k];
+        if (!c) continue;
+        active = true;
+        if (c === 1) flags[k] = MS_DIM;
+        else color[k] = c - 1;
+      }
+      const hide = function(set) {
+        for (const key in set) {
+          if (!set[key]) continue;
+          const id = keyIdx.get(key);
+          if (id != null) {
+            flags[id] |= MS_HIDDEN;
+            active = true;
+          }
+        }
+      };
+      hide(ws.filteredKeySet);
+      hide(ws.hiddenKeySet);
+      if (ws.fx.legendPolicy() === "mute") {
+        for (const s in ws.legendOff) {
+          if (!ws.legendOff[s]) continue;
+          const members = ws.legendIndex[s] || [];
+          for (let i = 0; i < members.length; i++) {
+            const id = keyIdx.get(members[i]);
+            if (id != null) {
+              flags[id] |= MS_MUTED;
+              active = true;
+            }
+          }
+        }
+      }
+      ws.msActive = active;
+      ws.msDimAlpha = dimAlpha();
+      if (ws.fx.ringMode()) ws.fx.drawPoints(true);
+    }
+    function dimAlpha() {
+      try {
+        const v = parseFloat(getComputedStyle(ws.el).getPropertyValue("--vellumwidget-dim-opacity"));
+        return isFinite(v) && v >= 0 && v <= 1 ? v : DIM_DEFAULT;
+      } catch (e) {
+        return DIM_DEFAULT;
+      }
+    }
+    return { condStatesBegin, condStateSet, updateMarkStates, keyIds };
+  }
+
   // srcts/features/detail.ts
   var DETAIL_DEFAULT = 3e3;
   function detailFeature(ws) {
@@ -2963,7 +3082,9 @@
       if (n.style.stroke) n.style.stroke = "";
     }
     function applyConditions() {
-      if (ws.fx.ringMode() || !ws.interactions || !ws.interactions.conditions) return;
+      if (!ws.interactions || !ws.interactions.conditions) return;
+      const ring = ws.fx.ringMode();
+      if (ring && !ws.fx.condStatesBegin()) return;
       const selByName = {};
       (ws.interactions.selections || []).forEach((s) => selByName[s.name] = s);
       for (let ci = 0; ci < ws.interactions.conditions.length; ci++) {
@@ -2973,6 +3094,10 @@
         const sel = selByName[c.selection];
         const members = sel ? selectionMembers(sel) : {};
         const active = Object.keys(members).length > 0 || c.empty === false;
+        if (ring) {
+          ws.fx.condStateSet(tag, tagged, members, active, c.if_false);
+          continue;
+        }
         for (let i = 0; i < tagged.length; i++) {
           const nodes = ws.fx.elementsForKey(tagged[i]);
           const member = !!members[tagged[i]];
@@ -2990,7 +3115,8 @@
     }
     function applyFilters() {
       const ix = ws.interactions;
-      if (ws.fx.ringMode() || !ix || !ix.filters || !ix.filters.length) return;
+      if (!ix || !ix.filters || !ix.filters.length) return false;
+      if (ws.fx.ringMode() && !ws.dl) return false;
       const filters = ix.filters;
       const selByName = {};
       (ix.selections || []).forEach((s) => selByName[s.name] = s);
@@ -3013,17 +3139,18 @@
       }
       if (!restrict) {
         ws.fx.applyFilter(null);
-        return;
+        return true;
       }
       const show = [];
       for (let i = 0; i < ws.elements.length; i++) {
         if (!hide[ws.elements[i].key]) show.push(ws.elements[i].key);
       }
       ws.fx.applyFilter(show);
+      return true;
     }
     function reevaluateInteractions() {
       applyConditions();
-      applyFilters();
+      if (!applyFilters() && ws.rasterMode) ws.fx.updateMarkStates();
       ws.fx.applyScaleBinds();
     }
     return { setupInteractions, reevaluateInteractions };
@@ -3433,7 +3560,10 @@
       ws.fx.clearClass("vellumwidget-legend-off");
       ws.hiddenKeySet = {};
       const pol = legendPolicy();
-      if (pol === "select") return;
+      if (pol === "select") {
+        if (ws.rasterMode) ws.fx.updateMarkStates();
+        return;
+      }
       const cls = pol === "mute" ? "vellumwidget-legend-muted" : "vellumwidget-legend-hidden";
       for (const s in ws.legendOff) {
         if (!ws.legendOff[s]) continue;
@@ -3442,6 +3572,7 @@
         if (pol === "hide") for (let i = 0; i < members.length; i++) ws.hiddenKeySet[members[i]] = true;
         ws.fx.addClassForKeys(ws.legendSwatch[s] || [], "vellumwidget-legend-off");
       }
+      if (ws.rasterMode) ws.fx.updateMarkStates();
     }
     function legendToggle(series) {
       ws.legendOff[series] = !ws.legendOff[series];
@@ -4813,7 +4944,7 @@
       };
       img.src = href;
     }
-    function drawPoints() {
+    function drawPoints(stateOnly) {
       if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
       if (ws.dl) {
         if (ws.markTier === "detail") {
@@ -4821,7 +4952,7 @@
           showMarksLayer(false);
           return;
         }
-        drawList(ws.dl);
+        drawList(ws.dl, false, !!stateOnly);
         return;
       }
       const az = ws.axisZoomActive && ws.azPanels.length > 0;
@@ -4904,7 +5035,7 @@
       return [c.width, c.height];
     }
     let settleTimer = 0;
-    function drawList(dl, settled) {
+    function drawList(dl, settled, stateOnly) {
       const ctx = ws.ctx, vb = ws.vb, vb0 = ws.vb0;
       if (settleTimer) {
         clearTimeout(settleTimer);
@@ -4915,15 +5046,14 @@
         const t = ws.fx.azT(a);
         return t.sx > 1.0001 || t.sy > 1.0001;
       }) : isZoomedIn(vb, vb0);
-      if (!zoomed || !dl.n) {
+      const styled = ws.msActive && !!ws.msFlags && !!ws.msColor;
+      if (!(zoomed || styled && dl.exact) || !dl.n) {
         ws.canvasEl.style.display = "none";
         showMarksLayer(true);
         return;
       }
+      const wasShown = ws.canvasEl.style.display === "block";
       const [W, H] = fitCanvas();
-      showMarksLayer(!dl.exact);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, W, H);
       const frame = az ? vb0 : vb;
       const q0 = userToCanvas(frame, W, H, 0, 0), q1 = userToCanvas(frame, W, H, 1, 1);
       const kx = q1.px - q0.px, ky = q1.py - q0.py;
@@ -4955,8 +5085,10 @@
           vis++;
         }
         if (vis > LIVE_DRAW_MAX) {
-          ws.canvasEl.style.display = "none";
-          showMarksLayer(true);
+          if (!(stateOnly && wasShown)) {
+            ws.canvasEl.style.display = "none";
+            showMarksLayer(true);
+          }
           settleTimer = window.setTimeout(function() {
             settleTimer = 0;
             if (ws.dl === dl) {
@@ -4967,28 +5099,45 @@
           return;
         }
       }
-      let curState = -1, curPaint = -1, open = false, batch = false;
+      showMarksLayer(!dl.exact);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      const flags = styled ? ws.msFlags : null, recol = styled ? ws.msColor : null, pal = ws.msPalette;
+      const dimA = ws.msDimAlpha;
+      let curFill = null, curStroke = null;
+      let curState = -1, curPaint = -1, curOv = 0, curAlpha = 1, open = false, batch = false;
       const flush = function() {
         if (!open) return;
         const pt = dl.paints[curPaint];
-        if (pt.fill) {
-          ctx.fillStyle = pt.fill;
+        if (curFill) {
+          ctx.fillStyle = curFill;
           ctx.fill();
         }
-        if (pt.stroke && pt.width > 0) ctx.stroke();
+        if (curStroke && pt.width > 0) ctx.stroke();
         open = false;
       };
-      const setPaint = function(pi) {
+      const setPaint = function(pi, ov) {
         const pt = dl.paints[pi];
         ctx.lineWidth = pt.width * base;
         ctx.setLineDash(pt.dash ? pt.dash.map((d) => d * base) : []);
         ctx.lineCap = pt.cap;
         ctx.lineJoin = pt.join;
-        if (pt.stroke) ctx.strokeStyle = pt.stroke;
+        const oc = ov ? pal[ov - 1] : null;
+        curFill = pt.fill && oc ? withAlphaOf(oc, pt.fill) : pt.fill;
+        curStroke = pt.stroke && oc ? withAlphaOf(oc, pt.stroke) : pt.stroke;
+        if (curStroke) ctx.strokeStyle = curStroke;
       };
       ctx.save();
       for (let i = 0; i < dl.n; i++) {
         if (dl.flags[i]) continue;
+        let ov = 0, alpha = 1;
+        if (flags) {
+          const k = dl.key[i], f = flags[k];
+          if (f & MS_HIDDEN) continue;
+          if (f & MS_DIM) alpha = dimA;
+          else if (f & MS_MUTED) alpha = MUTED_ALPHA;
+          ov = recol[k];
+        }
         const p = dl.panel[i] <= np ? dl.panel[i] : 0;
         const A = aff[p];
         let x0 = A.ax * dl.bx0[i] + A.bx, x1 = A.ax * dl.bx1[i] + A.bx;
@@ -5023,14 +5172,20 @@
           }
           curState = st;
           curPaint = -1;
+          curAlpha = 1;
         }
         const pi = dl.paint[i], pt = dl.paints[pi];
-        const canBatch = kd !== 2 && pt.opaque && (!pt.fill || !pt.stroke || pt.fill === pt.stroke);
-        if (!(open && batch && canBatch && pi === curPaint)) {
+        const canBatch = kd !== 2 && pt.opaque && alpha === 1 && (ov ? isOpaqueHex(pal[ov - 1]) : !pt.fill || !pt.stroke || pt.fill === pt.stroke);
+        if (!(open && batch && canBatch && pi === curPaint && ov === curOv)) {
           flush();
-          if (pi !== curPaint) {
-            setPaint(pi);
+          if (pi !== curPaint || ov !== curOv) {
+            setPaint(pi, ov);
             curPaint = pi;
+            curOv = ov;
+          }
+          if (alpha !== curAlpha) {
+            ctx.globalAlpha = alpha;
+            curAlpha = alpha;
           }
           ctx.beginPath();
           open = true;
@@ -5043,18 +5198,29 @@
           traceShape(ctx, dl, i, A);
         } else {
           traceShape(ctx, dl, i, A);
-          const pf = pt.fill;
+          const pf = curFill;
           if (pf && dl.closed[dl.row[i]] === 1) {
             ctx.fillStyle = pf;
             ctx.fill(dl.evenodd[dl.row[i]] === 1 ? "evenodd" : "nonzero");
           }
-          if (pt.stroke && pt.width > 0) ctx.stroke();
+          if (curStroke && pt.width > 0) ctx.stroke();
           open = false;
         }
         if (!batch) flush();
       }
       flush();
       ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+    function withAlphaOf(c, ref) {
+      if (/^#[0-9a-fA-F]{6}$/.test(c) && /^#[0-9a-fA-F]{8}$/.test(ref)) {
+        const a = ref.slice(7, 9).toLowerCase();
+        return a === "ff" ? c : c + a;
+      }
+      return c;
+    }
+    function isOpaqueHex(c) {
+      return /^#[0-9a-fA-F]{6}$/.test(c) || /^#[0-9a-fA-F]{8}$/.test(c) && /ff$/i.test(c);
     }
     function showMarksLayer(on) {
       if (!ws.svgEl || !ws.marksLayer) return;
@@ -5103,6 +5269,10 @@
       ws.hovering = true;
       if (ws.fx.ringMode()) {
         drawHovFeedback(keys);
+        if (ws.dl && hoverDriven()) {
+          ws.lastHoverKeys = keys;
+          ws.fx.reevaluateInteractions();
+        }
         return;
       }
       ws.lastHoverKeys = keys;
@@ -5111,6 +5281,14 @@
       ws.fx.reevaluateInteractions();
       if (ws.largeDim) ws.fx.showHighlightOverlay(keys);
       else ws.el.classList.add("vellumwidget-hovering");
+    }
+    function hoverDriven() {
+      const ix = ws.interactions;
+      if (!ix || !ix.selections) return false;
+      const used = {};
+      (ix.conditions || []).forEach((c) => used[c.selection] = true);
+      (ix.filters || []).forEach((f) => used[f.selection] = true);
+      return ix.selections.some((s) => s.on === "hover" && used[s.name]);
     }
     function setHover(k) {
       setHoverKeys(ws.fx.linkedKeys(k));
@@ -5673,16 +5851,18 @@
       ws.calib = null;
       ws.fx.clearClass("vellumwidget-filtered");
       ws.filteredKeySet = {};
-      if (showKeys == null) return;
-      const show = {};
-      for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
-      for (let i = 0; i < ws.elements.length; i++) {
-        const key = ws.elements[i].key;
-        if (!show[key]) {
-          ws.fx.addClassForKeys([key], "vellumwidget-filtered");
-          ws.filteredKeySet[key] = true;
+      if (showKeys != null) {
+        const show = {};
+        for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
+        for (let i = 0; i < ws.elements.length; i++) {
+          const key = ws.elements[i].key;
+          if (!show[key]) {
+            ws.fx.addClassForKeys([key], "vellumwidget-filtered");
+            ws.filteredKeySet[key] = true;
+          }
         }
       }
+      if (ws.rasterMode) ws.fx.updateMarkStates();
     }
     function inert(k) {
       return !!ws.hiddenKeySet[k] || !!ws.filteredKeySet[k] || !!ws.colorHiddenSet[k];
@@ -6205,6 +6385,12 @@
       aboveEl: null,
       dl: null,
       markTier: "overview",
+      msFlags: null,
+      msColor: null,
+      msCond: null,
+      msPalette: [],
+      msActive: false,
+      msDimAlpha: 0.28,
       detailGroups: [],
       detailKeys: [],
       selGroup: null,
@@ -6311,7 +6497,8 @@
         toolbarFeature(ws),
         renderFeature(ws),
         a11yFeature(ws),
-        detailFeature(ws)
+        detailFeature(ws),
+        markStateFeature(ws)
       );
       ensureStyle();
       el.classList.add("vellumwidget-root");

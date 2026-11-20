@@ -118,12 +118,18 @@ navigator_options <- function(height = 56) {
 #'   real axes, and the navigator and `vellumplot::bind_scale()` work as in SVG
 #'   mode. With a vellum that also splits the furniture by paint order, what was
 #'   drawn after the marks (a reference line or annotation added after the
-#'   points) stays on top of them. An older vellum draws the whole scene as one image, and zoom then
-#'   magnifies it. The trade-offs of raster mode: per-element
-#'   grammar colours, per-mark screen-reader focus, and display-tier
-#'   cross-filtering do not apply (there are no per-element DOM nodes). Zoomed
-#'   in, the marks are redrawn exactly from vellum's marks-only display list
-#'   (see `max_marks`), or as plain dots with an older vellum.
+#'   points) stays on top of them. An older vellum draws the whole scene as one
+#'   image, and zoom then
+#'   magnifies it. The trade-offs of raster mode: there are no per-element DOM
+#'   nodes until the detail tier (see `detail_marks`), so hover and selection
+#'   show as rings and per-mark screen-reader focus is off. Zoomed in, the
+#'   marks are redrawn exactly from vellum's marks-only display list (see
+#'   `max_marks`), or as plain dots with an older vellum. With the display
+#'   list, `vellumplot::condition()` colours and dimming, `vellumplot::filter_by()`,
+#'   cross-filters and legend hide/mute show at every zoom: the marks are then
+#'   drawn on a canvas from the list. Without it (an older vellum, or more marks
+#'   than `max_marks`), and for marks the list cannot reproduce (gradients,
+#'   grouped marks), these show only in the detail tier.
 #' @param raster_threshold Keyed-element count above which `mode = "auto"`
 #'   switches to the raster image (default `20000`).
 #' @param max_marks In raster mode with a vellum that has the marks-only display

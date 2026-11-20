@@ -67,12 +67,18 @@ axes, gridlines, legend and text stay SVG, so axis-aware zoom re-ticks the
 real axes, and the navigator and \code{vellumplot::bind_scale()} work as in SVG
 mode. With a vellum that also splits the furniture by paint order, what was
 drawn after the marks (a reference line or annotation added after the
-points) stays on top of them. An older vellum draws the whole scene as one image, and zoom then
-magnifies it. The trade-offs of raster mode: per-element
-grammar colours, per-mark screen-reader focus, and display-tier
-cross-filtering do not apply (there are no per-element DOM nodes). Zoomed
-in, the marks are redrawn exactly from vellum's marks-only display list
-(see \code{max_marks}), or as plain dots with an older vellum.}
+points) stays on top of them. An older vellum draws the whole scene as one
+image, and zoom then
+magnifies it. The trade-offs of raster mode: there are no per-element DOM
+nodes until the detail tier (see \code{detail_marks}), so hover and selection
+show as rings and per-mark screen-reader focus is off. Zoomed in, the
+marks are redrawn exactly from vellum's marks-only display list (see
+\code{max_marks}), or as plain dots with an older vellum. With the display
+list, \code{vellumplot::condition()} colours and dimming, \code{vellumplot::filter_by()},
+cross-filters and legend hide/mute show at every zoom: the marks are then
+drawn on a canvas from the list. Without it (an older vellum, or more marks
+than \code{max_marks}), and for marks the list cannot reproduce (gradients,
+grouped marks), these show only in the detail tier.}
 
 \item{raster_threshold}{Keyed-element count above which \code{mode = "auto"}
 switches to the raster image (default \code{20000}).}

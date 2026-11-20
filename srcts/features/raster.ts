@@ -4,6 +4,7 @@
 import { LIVE_DRAW_MAX, OVERLAY_MARK_CAP, SETTLE_MS, SVGNS } from "./constants";
 import { hasBbox, isRoundMark } from "../geometry";
 import { DL_POINT, DL_RECT, tracePoint, traceShape } from "../dlist";
+import { MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
 import type { Affine, DisplayList } from "../dlist";
 import type { WidgetFns, WidgetState } from "../state";
 import { isZoomedIn, userToCanvas } from "../viewbox";
@@ -109,12 +110,13 @@ export function rasterFeature(
   // Under axis zoom (split render, VW-14) the svg frame stays at vb0 and each
   // panel's marks move by their own T_i, so the points are drawn per panel:
   // through that panel's T and clipped to its fixed rect, never over the axes.
-  function drawPoints(): void {
+  // `stateOnly`: only the marks' style state changed (VW-22), not the view.
+  function drawPoints(stateOnly?: boolean): void {
     if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
     if (ws.dl) {
       // The detail tier's SVG nodes stand in for the canvas and the image.
       if (ws.markTier === "detail") { ws.canvasEl.style.display = "none"; showMarksLayer(false); return; }
-      drawList(ws.dl);
+      drawList(ws.dl, false, !!stateOnly);
       return;
     }
     const az = ws.axisZoomActive && ws.azPanels.length > 0;
@@ -212,25 +214,28 @@ export function rasterFeature(
   // Glyphs keep their pixel size ("fixed") or grow with T ("scale"); strokes
   // keep their width, like the SVG mode's non-scaling strokes. Consecutive
   // opaque points and rects of one paint are batched into one path.
+  //
+  // Per-key style state (VW-22, ws.msFlags/msColor): a hidden key is skipped,
+  // a dimmed or muted one is drawn at the dim alpha, a recoloured one with
+  // its condition colour. While any such state is active the canvas also
+  // stands in for the mark PNG at the overview zoom, when the list is exact
+  // (a flagged record exists only in the image, which can't be restyled).
   let settleTimer = 0;
-  function drawList(dl: DisplayList, settled?: boolean): void {
+  function drawList(dl: DisplayList, settled?: boolean, stateOnly?: boolean): void {
     const ctx = ws.ctx!, vb = ws.vb!, vb0 = ws.vb0!;
     if (settleTimer) { clearTimeout(settleTimer); settleTimer = 0; }
     const az = ws.axisZoomActive && ws.azPanels.length > 0;
     const zoomed = az
       ? ws.azPanels.some(function (a) { const t = ws.fx.azT(a); return t.sx > 1.0001 || t.sy > 1.0001; })
       : isZoomedIn(vb, vb0);
-    if (!zoomed || !dl.n) {
+    const styled = ws.msActive && !!ws.msFlags && !!ws.msColor;
+    if (!(zoomed || (styled && dl.exact)) || !dl.n) {
       ws.canvasEl!.style.display = "none";
       showMarksLayer(true);
       return;
     }
+    const wasShown = ws.canvasEl!.style.display === "block";
     const [W, H] = fitCanvas();
-    // Every mark is redrawn exactly, so the scaled mark image goes; flagged
-    // marks (gradients, groups, text) are only in the image, which then stays.
-    showMarksLayer(!dl.exact);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, W, H);
     const frame = az ? vb0 : vb;
     const q0 = userToCanvas(frame, W, H, 0, 0), q1 = userToCanvas(frame, W, H, 1, 1);
     const kx = q1.px - q0.px, ky = q1.py - q0.py;
@@ -263,31 +268,55 @@ export function rasterFeature(
         vis++;
       }
       if (vis > LIVE_DRAW_MAX) {
-        ws.canvasEl!.style.display = "none";
-        showMarksLayer(true);
+        // A style-only change leaves the view (and so a drawn canvas) where it
+        // was: keep it up until the redraw rather than flash the plain image.
+        if (!(stateOnly && wasShown)) {
+          ws.canvasEl!.style.display = "none";
+          showMarksLayer(true);
+        }
         settleTimer = window.setTimeout(function () { settleTimer = 0; if (ws.dl === dl) { fitCanvas(); drawList(dl, true); } }, SETTLE_MS);
         return;
       }
     }
-    let curState = -1, curPaint = -1, open = false, batch = false;
+    // Every mark is redrawn exactly, so the scaled mark image goes; flagged
+    // marks (gradients, groups, text) are only in the image, which then stays.
+    showMarksLayer(!dl.exact);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const flags = styled ? ws.msFlags! : null, recol = styled ? ws.msColor! : null, pal = ws.msPalette;
+    const dimA = ws.msDimAlpha;
+    // The current paint's fill/stroke (with a condition colour standing in).
+    let curFill: string | null = null, curStroke: string | null = null;
+    let curState = -1, curPaint = -1, curOv = 0, curAlpha = 1, open = false, batch = false;
     const flush = function (): void {
       if (!open) return;
       const pt = dl.paints[curPaint];
-      if (pt.fill) { ctx.fillStyle = pt.fill; ctx.fill(); }
-      if (pt.stroke && pt.width > 0) ctx.stroke();
+      if (curFill) { ctx.fillStyle = curFill; ctx.fill(); }
+      if (curStroke && pt.width > 0) ctx.stroke();
       open = false;
     };
-    const setPaint = function (pi: number): void {
+    const setPaint = function (pi: number, ov: number): void {
       const pt = dl.paints[pi];
       ctx.lineWidth = pt.width * base;
       ctx.setLineDash(pt.dash ? pt.dash.map((d) => d * base) : []);
       ctx.lineCap = pt.cap;
       ctx.lineJoin = pt.join;
-      if (pt.stroke) ctx.strokeStyle = pt.stroke;
+      const oc = ov ? pal[ov - 1] : null;
+      curFill = pt.fill && oc ? withAlphaOf(oc, pt.fill) : pt.fill;
+      curStroke = pt.stroke && oc ? withAlphaOf(oc, pt.stroke) : pt.stroke;
+      if (curStroke) ctx.strokeStyle = curStroke;
     };
     ctx.save();
     for (let i = 0; i < dl.n; i++) {
       if (dl.flags[i]) continue; // not reproducible here: the image draws it
+      let ov = 0, alpha = 1;
+      if (flags) {
+        const k = dl.key[i], f = flags[k];
+        if (f & MS_HIDDEN) continue;
+        // As the CSS: a condition's dim wins over the legend mute.
+        if (f & MS_DIM) alpha = dimA; else if (f & MS_MUTED) alpha = MUTED_ALPHA;
+        ov = recol![k];
+      }
       const p = dl.panel[i] <= np ? dl.panel[i] : 0;
       const A = aff[p];
       // Cull: the record's box on the canvas, against the canvas and panel.
@@ -312,15 +341,18 @@ export function rasterFeature(
           const cx0 = A.ax * cr.x0 + A.bx, cy0 = A.ay * cr.y0 + A.by;
           ctx.beginPath(); ctx.rect(cx0, cy0, A.ax * (cr.x1 - cr.x0), A.ay * (cr.y1 - cr.y0)); ctx.clip();
         }
-        curState = st; curPaint = -1;
+        curState = st; curPaint = -1; curAlpha = 1;
       }
       const pi = dl.paint[i], pt = dl.paints[pi];
       // Batch only what composites identically when merged into one path: an
       // opaque paint whose fill and stroke cannot overlap differently.
-      const canBatch = kd !== 2 && pt.opaque && (!pt.fill || !pt.stroke || pt.fill === pt.stroke);
-      if (!(open && batch && canBatch && pi === curPaint)) {
+      // A condition colour paints fill and stroke alike; a dimmed mark is
+      // drawn alone so overlapping dimmed marks compound as SVG nodes do.
+      const canBatch = kd !== 2 && pt.opaque && alpha === 1 && (ov ? isOpaqueHex(pal[ov - 1]) : (!pt.fill || !pt.stroke || pt.fill === pt.stroke));
+      if (!(open && batch && canBatch && pi === curPaint && ov === curOv)) {
         flush();
-        if (pi !== curPaint) { setPaint(pi); curPaint = pi; }
+        if (pi !== curPaint || ov !== curOv) { setPaint(pi, ov); curPaint = pi; curOv = ov; }
+        if (alpha !== curAlpha) { ctx.globalAlpha = alpha; curAlpha = alpha; }
         ctx.beginPath();
         open = true;
         batch = canBatch;
@@ -332,15 +364,30 @@ export function rasterFeature(
         traceShape(ctx, dl, i, A);
       } else {
         traceShape(ctx, dl, i, A);
-        const pf = pt.fill;
+        const pf = curFill;
         if (pf && dl.closed[dl.row[i]] === 1) { ctx.fillStyle = pf; ctx.fill(dl.evenodd[dl.row[i]] === 1 ? "evenodd" : "nonzero"); }
-        if (pt.stroke && pt.width > 0) ctx.stroke();
+        if (curStroke && pt.width > 0) ctx.stroke();
         open = false;
       }
       if (!batch) flush();
     }
     flush();
     ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  // A condition colour carries the alpha of the paint it replaces, as the
+  // SVG mode's inline fill keeps a node's fill-opacity.
+  function withAlphaOf(c: string, ref: string): string {
+    if (/^#[0-9a-fA-F]{6}$/.test(c) && /^#[0-9a-fA-F]{8}$/.test(ref)) {
+      const a = ref.slice(7, 9).toLowerCase();
+      return a === "ff" ? c : c + a;
+    }
+    return c;
+  }
+
+  function isOpaqueHex(c: string): boolean {
+    return /^#[0-9a-fA-F]{6}$/.test(c) || (/^#[0-9a-fA-F]{8}$/.test(c) && /ff$/i.test(c));
   }
 
   // Show or hide the split render's mark-layer image (all its panel copies).
@@ -408,6 +455,8 @@ export function rasterFeature(
     // (except in the detail tier, whose visible marks are real nodes).
     if (ws.fx.ringMode()) {
       drawHovFeedback(keys);
+      // A hover-driven condition/filter still reacts, on the canvas (VW-22).
+      if (ws.dl && hoverDriven()) { ws.lastHoverKeys = keys; ws.fx.reevaluateInteractions(); }
       return;
     }
     ws.lastHoverKeys = keys;
@@ -418,6 +467,16 @@ export function rasterFeature(
     // (O(hovered)); otherwise the CSS `.vellumwidget-hovering` rule dims per node.
     if (ws.largeDim) ws.fx.showHighlightOverlay(keys);
     else ws.el.classList.add("vellumwidget-hovering");
+  }
+
+  // Whether a condition or filter reads a hover selection.
+  function hoverDriven(): boolean {
+    const ix = ws.interactions;
+    if (!ix || !ix.selections) return false;
+    const used: Record<string, boolean> = {};
+    (ix.conditions || []).forEach((c) => (used[c.selection] = true));
+    (ix.filters || []).forEach((f) => (used[f.selection] = true));
+    return ix.selections.some((s) => s.on === "hover" && used[s.name]);
   }
 
   function setHover(k: string): void {

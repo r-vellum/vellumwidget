@@ -17,6 +17,7 @@ import { decodeKeys, normalizeElements, normalizePanels } from "./elements";
 import { decodeDisplayList, fillBboxes, tracePoint, traceShape } from "./dlist";
 import { a11yFeature } from "./features/a11y";
 import { axisZoomFeature } from "./features/axisZoom";
+import { markStateFeature } from "./features/markState";
 import { detailFeature } from "./features/detail";
 import { bindScalesFeature } from "./features/bindScales";
 import { colorbarFeature } from "./features/colorbar";
@@ -77,7 +78,8 @@ HTMLWidgets.widget({
       toolbarFeature(ws),
       renderFeature(ws),
       a11yFeature(ws),
-      detailFeature(ws)
+      detailFeature(ws),
+      markStateFeature(ws)
     );
 
     ensureStyle();

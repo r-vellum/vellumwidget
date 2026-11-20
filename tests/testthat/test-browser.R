@@ -264,6 +264,81 @@ test_that("VW-16: zooming in far enough materialises keyed SVG nodes (detail tie
   expect_identical(ev("document.querySelectorAll('.vellumwidget-fb-sel').length"), 1L)
 })
 
+test_that("VW-22: a condition and filter_by() show in the overview and mid tiers", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .display_list_supported(), "vellum without the display list")
+  set.seed(6)
+  n <- 25000L
+  df <- data.frame(x = runif(n), y = runif(n), g = sample(letters[1:4], n, TRUE), id = seq_len(n))
+  members <- jsonlite::toJSON(as.character(df$id[df$x < 0.33]))
+  # The canvas's opaque pixel colours, most frequent first.
+  canvas_colours <- function(ev) {
+    seen <- jsonlite::fromJSON(ev("(function(){
+      var c = document.querySelector('.vellumwidget-canvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, seen = {};
+      for (var i = 0; i < d.length; i += 4 * 13) if (d[i + 3] === 255) { var k = d[i] + ',' + d[i + 1] + ',' + d[i + 2]; seen[k] = (seen[k] || 0) + 1; }
+      return JSON.stringify(seen); })()"))
+    names(sort(unlist(seen), decreasing = TRUE))
+  }
+  shown <- function(ev) ev("getComputedStyle(document.querySelector('.vellumwidget-canvas')).display")
+
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id, color = vellumplot::condition("pick", g, "grey80")) |>
+    vellumplot::select_point("pick", on = "click")
+  w <- as_widget(p, elementId = "w1")
+  b <- open_widget(w)
+  ev <- function(js) b$Runtime$evaluate(js)$result$value
+  expect_identical(shown(ev), "none")
+  ev(sprintf("HTMLWidgets.find('#w1')._call('select', %s)", members))
+  Sys.sleep(0.3)
+  # overview: the canvas replaces the image, two thirds of the marks are grey80
+  expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), "overview")
+  expect_identical(shown(ev), "block")
+  expect_true(ev("!!document.querySelector('svg.vellumwidget-marks-off')"))
+  top <- canvas_colours(ev)
+  expect_identical(top[1], "204,204,204")
+  pal <- vapply(w$x$displayList$paints$fill, function(h) {
+    paste(strtoi(substring(h, c(2, 4, 6), c(3, 5, 7)), 16L), collapse = ",")
+  }, "")
+  expect_true(any(top[2:4] %in% pal)) # the members keep their own colour
+  # mid: still grey
+  pn <- w$x$panels[[1]]
+  ev(sprintf(
+    "HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f})",
+    pn$px0 + 0.25 * (pn$px1 - pn$px0), pn$py0 + 0.25 * (pn$py1 - pn$py0),
+    0.5 * (pn$px1 - pn$px0), 0.5 * (pn$py1 - pn$py0)
+  ))
+  Sys.sleep(0.5)
+  expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), "mid")
+  expect_identical(canvas_colours(ev)[1], "204,204,204")
+  # clearing the selection: back to the image at the overview
+  ev("HTMLWidgets.find('#w1')._call('resetZoom')")
+  ev("HTMLWidgets.find('#w1')._call('clearSelection')")
+  Sys.sleep(0.5)
+  expect_identical(shown(ev), "none")
+  b$close()
+
+  # filter_by(): the filtered-out right two thirds leave the overview canvas
+  w2 <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id, color = g) |>
+    vellumplot::select_point("pick", on = "click") |>
+    vellumplot::filter_by("pick") |>
+    as_widget(elementId = "w1")
+  b2 <- open_widget(w2)
+  ev2 <- function(js) b2$Runtime$evaluate(js)$result$value
+  ev2(sprintf("HTMLWidgets.find('#w1')._call('select', %s)", members))
+  Sys.sleep(0.3)
+  expect_identical(shown(ev2), "block")
+  inked <- function(from, to) ev2(sprintf("(function(){
+    var c = document.querySelector('.vellumwidget-canvas'), s = document.querySelector('.vellumwidget svg');
+    var v = s.viewBox.baseVal, k = c.width / v.width, x0 = Math.round(k * (%f - v.x)), x1 = Math.round(k * (%f - v.x));
+    var d = c.getContext('2d').getImageData(x0, 0, x1 - x0, c.height).data, n = 0;
+    for (var i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
+    return n; })()", from, to))
+  right <- inked(pn$px0 + 0.5 * (pn$px1 - pn$px0), pn$px1 - 4)
+  expect_gt(inked(pn$px0 + 4, pn$px0 + 0.3 * (pn$px1 - pn$px0)), 1000L)
+  expect_identical(right, 0L)
+})
+
 test_that("VW-21: a reference line added after the points is drawn over them", {
   skip_browser()
   skip_if_not(.paint_order_supported(), "vellum without the paint-order split")
