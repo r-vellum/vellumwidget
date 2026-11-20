@@ -38,7 +38,7 @@ import { distToBbox, distToGeom, distToSegment2, rectsIntersect, unionBbox } fro
 import { boundPan, channelToNative } from "./binds";
 import { axisForEncoding, inInterval, intervalKeys, intervalRangeOf, nativeToData, pxToDataX, pxToDataY, selEncodings } from "./scales";
 import { cssEscape, cssEscapePolyfill, dispatchProxyCall, findWidgetById, idSelector, registerProxyHandler } from "./shiny";
-import { brushKeys, columnTolerance, lassoKeys, nearestKey, nearestSortedIdx, pointInPolygon, polyBounds } from "./spatial";
+import { brushKeys, columnTolerance, dropPartialSeries, isSeriesElem, lassoKeys, nearestKey, nearestSortedIdx, pointInPolygon, polyBounds } from "./spatial";
 import { vellumwidgetBus } from "./linking";
 import { createState } from "./state";
 import { axisRetickable, axisTicks, dataToNative, detectTimeFormat, fmtRNum, fmtTick, logTicks, niceTicks, parseSecLabels, secAxisMap, secTicks, strftimeUTC, timeTicks } from "./ticks";
@@ -131,7 +131,7 @@ HTMLWidgets.widget({
           const iv = ws.fx.applyIntervalBrush(rect);
           if (!iv) return null;
           ws.lastBrush = iv.band;
-          if (ws.opts.select) ws.fx.setSelection(iv.keys);
+          if (ws.opts.select) ws.fx.setSelection(ws.fx.brushSelectable(iv.keys, iv.band));
           else ws.fx.reevaluateInteractions();
           return iv;
         },
@@ -229,6 +229,8 @@ registerProxyHandler();
   distToSegment2,
   distToGeom,
   brushKeys,
+  dropPartialSeries,
+  isSeriesElem,
   nearestKey,
   zoomViewBox,
   parseViewBox,

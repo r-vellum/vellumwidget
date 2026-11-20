@@ -112,3 +112,45 @@ export function columnTolerance(sorted: number[] | Float64Array): number {
   }
   return isFinite(minGap) ? minGap / 2 : 1;
 }
+
+// --- connected marks under a brush (VW-19) ---
+// A connected mark (a line, area or path drawn as one keyed element spanning a
+// data range) is a whole series, not a datum. A brush that covers only part of it
+// must not select it: the selected style restrokes the mark itself, so a partly
+// brushed line turned the selection colour (near-white in a dark colour scheme)
+// and vanished. Vega-Lite likewise leaves a line alone under an interval brush
+// unless a condition() styles it.
+function finite(v: unknown): v is number { return typeof v === "number" && isFinite(v); }
+export function isSeriesElem(e: ElemMeta): boolean {
+  if (e.mark !== "line" && e.mark !== "polygon") return false;
+  return (finite(e.ixh) && finite(e.ix) && e.ixh !== e.ix) || (finite(e.iyh) && finite(e.iy) && e.iyh !== e.iy);
+}
+
+// The keys a brush may *select*: `keys` minus the connected marks the brushed
+// region (`inside(element)`: is its whole bbox in the region?) does not cover in
+// full. Points, bars, segments and multi-part marks (error bars, boxes) keep
+// today's behaviour.
+export function dropPartialSeries(elems: ElemMeta[], keys: string[], inside: (e: ElemMeta & Bbox) => boolean): string[] {
+  if (!keys.length) return keys;
+  const want: Record<string, boolean> = {};
+  for (let i = 0; i < keys.length; i++) want[keys[i]] = true;
+  const partial: Record<string, boolean> = {};
+  let any = false;
+  for (let i = 0; i < elems.length; i++) {
+    const e = elems[i];
+    if (!want[e.key] || !isSeriesElem(e)) continue;
+    if (!hasBbox(e) || !inside(e)) { partial[e.key] = true; any = true; }
+  }
+  return any ? keys.filter(function (k) { return !partial[k]; }) : keys;
+}
+
+// Is the bbox inside the rectangle (half a pixel of slack)?
+export function bboxInRect(e: Bbox, r: Bbox): boolean {
+  return e.x0 >= r.x0 - 0.5 && e.x1 <= r.x1 + 0.5 && e.y0 >= r.y0 - 0.5 && e.y1 <= r.y1 + 0.5;
+}
+
+// Are all four bbox corners inside the polygon?
+export function bboxInPolygon(e: Bbox, poly: Pt[]): boolean {
+  return pointInPolygon(e.x0, e.y0, poly) && pointInPolygon(e.x1, e.y0, poly) &&
+    pointInPolygon(e.x0, e.y1, poly) && pointInPolygon(e.x1, e.y1, poly);
+}

@@ -6,7 +6,7 @@ import { asColumn } from "../elements";
 import { PICK_CANDIDATES } from "./constants";
 import { distToBbox, distToGeom, hasBbox, isRoundMark } from "../geometry";
 import type { Geom, GeometryPayload } from "../geometry";
-import { brushKeys, columnTolerance, lassoKeys, nearestSortedIdx, pointInPolygon, polyBounds } from "../spatial";
+import { bboxInPolygon, bboxInRect, brushKeys, columnTolerance, dropPartialSeries, lassoKeys, nearestSortedIdx, pointInPolygon, polyBounds } from "../spatial";
 import type { Pt } from "../spatial";
 import type { WidgetFns, WidgetState } from "../state";
 import type { Bbox, ElemMeta } from "../types";
@@ -16,7 +16,7 @@ export function pickingFeature(
 ): Pick<
   WidgetFns,
   "buildSpatialIndex" | "buildGeometry" | "distToElem" | "buildHoverAxis" | "nearestAxisKey"
-  | "columnKeys" | "nearestKeyAt" | "brushKeysIn" | "lassoKeysIn"
+  | "columnKeys" | "nearestKeyAt" | "brushKeysIn" | "lassoKeysIn" | "brushSelectable"
 > {
   // --- spatial index (nearest / brush) ---
   // Rebuild the Flatbush index from the current elements' bboxes. Only bboxed
@@ -238,5 +238,14 @@ export function pickingFeature(
     return out;
   }
 
-  return { buildSpatialIndex, buildGeometry, distToElem, buildHoverAxis, nearestAxisKey, columnKeys, nearestKeyAt, brushKeysIn, lassoKeysIn };
+  // The brushed keys a brush or lasso may select (VW-19): a connected mark (line,
+  // area, multi-segment series) only when the region covers all of it.
+  function brushSelectable(keys: string[], region: Bbox | Pt[]): string[] {
+    const inside = Array.isArray(region)
+      ? function (e: Bbox) { return bboxInPolygon(e, region); }
+      : function (e: Bbox) { return bboxInRect(e, region); };
+    return dropPartialSeries(ws.elements, keys, inside);
+  }
+
+  return { buildSpatialIndex, buildGeometry, distToElem, buildHoverAxis, nearestAxisKey, columnKeys, nearestKeyAt, brushKeysIn, lassoKeysIn, brushSelectable };
 }

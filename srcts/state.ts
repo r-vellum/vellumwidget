@@ -223,6 +223,7 @@ export interface WidgetFns {
   azT: (a: AzPanel) => PanTransform;
   brushDataFields: (bb: Bbox) => Record<string, number | string>;
   brushKeysIn: (rect: Bbox) => string[];
+  brushSelectable: (keys: string[], region: Bbox | Pt[]) => string[];
   buildColorbar: () => void;
   buildGeometry: (g: GeometryPayload | undefined) => void;
   buildHoverAxis: () => void;

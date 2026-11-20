@@ -4003,6 +4003,56 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   window.Shiny = savedShiny; window.HTMLWidgets.shinyMode = savedMode;
 }
 
+// ============ VW-19: a brush does not select a partly covered line ============
+// The overview of an overview + detail is one keyed line spanning the whole x
+// range. A partial brush used to select it, and the selected style restroked
+// the line in the selection colour (near-white in a dark scheme). It stays a
+// member of the interval (conditions, filters, `_brush`) but is not selected;
+// points keep today's selection.
+{
+  const T = window.__vellumwidgetTest;
+  const L = { key: "L", mark: "line", x0: 20, y0: 20, x1: 380, y1: 80, ix: 0, ixh: 100, iy: 5, iyh: 45 };
+  const P1 = { key: "p1", mark: "point", x0: 109, y0: 49, x1: 111, y1: 51, ix: 25, iy: 25 };
+  ok(T.isSeriesElem(L) && !T.isSeriesElem(P1) && !T.isSeriesElem({ key: "s", mark: "segment", ix: 0, ixh: 9 }),
+    "VW-19: isSeriesElem: a spanning line is a series; points and segments are not");
+  ok(!T.isSeriesElem({ key: "z", mark: "line", ix: 3, ixh: 3 }), "VW-19: isSeriesElem: a zero-span line is not a series");
+  const inside = (e) => e.x0 >= 0 && e.x1 <= 200;
+  ok(JSON.stringify(T.dropPartialSeries([L, P1], ["L", "p1"], inside)) === '["p1"]',
+    "VW-19: dropPartialSeries drops a partly covered line, keeps the point");
+  ok(JSON.stringify(T.dropPartialSeries([L, P1], ["L", "p1"], () => true)) === '["L","p1"]',
+    "VW-19: dropPartialSeries keeps a line the region covers in full");
+  const area = Object.assign({}, L, { key: "A", mark: "polygon" });
+  ok(JSON.stringify(T.dropPartialSeries([area], ["A"], inside)) === "[]", "VW-19: an area (polygon series) is dropped too");
+
+  const el19 = document.createElement("div");
+  document.body.appendChild(el19);
+  const svg19 =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">' +
+    '<g data-vellum-panel="panel-1-1"><path data-key="L" d="M20 80 L380 20" stroke="#000" fill="none"/>' +
+    '<path data-key="p1" d="M109 49h2v2z"/><path data-key="p2" d="M289 49h2v2z"/></g></svg>';
+  const i19 = widgetDef.factory(el19, 400, 100);
+  i19.renderValue({
+    svg: svg19,
+    elements: [L, P1, { key: "p2", mark: "point", x0: 289, y0: 49, x1: 291, y1: 51, ix: 75, iy: 25 }],
+    panels: {
+      name: "panel-1-1", px0: 20, py0: 10, px1: 380, py1: 90,
+      x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100, aes: "x" },
+      y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50, aes: "y" }
+    },
+    interactions: { selections: [{ name: "br", kind: "interval", on: "x", region: "rect", empty: true, encodings: ["x"] }] },
+    options: { hover: true, select: true, brush: true, selectMode: "multiple", axisZoom: false }
+  });
+  const q = (k) => el19.querySelector('[data-key="' + k + '"]');
+  const res = i19._test.brushInterval({ x0: 92, y0: 20, x1: 200, y1: 80 }); // data 20..50
+  ok(res && res.keys.indexOf("L") >= 0 && res.keys.indexOf("p1") >= 0,
+    "VW-19: the partly brushed line is still a member of the interval");
+  ok(!q("L").classList.contains("vellumwidget-selected"), "VW-19: the partly brushed line is not restyled as selected");
+  ok(q("p1").classList.contains("vellumwidget-selected") && !q("p2").classList.contains("vellumwidget-selected"),
+    "VW-19: points keep today's selection under the brush");
+  i19._test.brushInterval({ x0: 15, y0: 20, x1: 385, y1: 80 }); // the whole range
+  ok(q("L").classList.contains("vellumwidget-selected"), "VW-19: a brush covering the whole line still selects it");
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();

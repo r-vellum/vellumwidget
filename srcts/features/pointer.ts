@@ -239,7 +239,9 @@ export function pointerFeature(
       const iv = ws.fx.applyIntervalBrush(rect);
       ws.lastBrush = iv ? iv.band : rect;
       const hitKeys = iv ? iv.keys : ws.fx.dropInert(ws.fx.brushKeysIn(rect)); // never (re-)select hidden/filtered marks
-      if (ws.opts.select) ws.fx.setSelection(hitKeys); // also pushes _selected
+      // A partly brushed line/area is a member (conditions, filters, `_brush`)
+      // but is not selected: the selected style would restroke it (VW-19).
+      if (ws.opts.select) ws.fx.setSelection(ws.fx.brushSelectable(hitKeys, iv ? iv.band : rect)); // also pushes _selected
       else if (iv) ws.fx.reevaluateInteractions(); // conditions/filters still react
       // The brushed region + keys, as a discrete gesture event; data-space bounds
       // (x0d/x1d/y0d/y1d + panel) added when a panel scale applies, and the
@@ -257,7 +259,7 @@ export function pointerFeature(
       if (poly.length >= 3) {
         const b = polyBounds(poly);
         ws.lastBrush = b; // zoom-to-selection frames the lasso's bounds
-        if (ws.opts.select) ws.fx.setSelection(hitKeys);
+        if (ws.opts.select) ws.fx.setSelection(ws.fx.brushSelectable(hitKeys, poly));
         // Report as a brush gesture (keys + the lasso's bounding box), with a
         // `lasso: true` flag so the server can tell the two apart, plus data-space
         // bounds when a panel scale applies.
