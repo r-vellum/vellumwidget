@@ -115,6 +115,10 @@ render (VW-14): the furniture is SVG and the keyed-mark PNG
 vellum (one base image), raster mode, void panels (graphs, `theme_void`)
 and panels the re-ticker can’t follow (e.g. polar) fall back to
 whole-scene viewBox zoom. Glyph marks keep a constant pixel size.
+Unkeyed panel furniture in the pan groups (and their above-overlay
+mirrors) keeps its size too (VW-26, `setupConstantFurniture()`):
+non-scaling strokes, unkeyed glyph layers counter-scaled, text
+counter-scaled about its anchor.
 
 With a vellum that splits the furniture by paint order (VW-21,
 `.paint_order_supported()`), `payload$svg` is `layer = "unkeyed_below"`
@@ -135,7 +139,10 @@ filters, cross-filters and legend hide/mute reach the node-less tiers as
 per-key state (`features/markState.ts`: `ws.msFlags`/`msColor`, indexed
 by display-list key id, never by DOM lookup), which `drawList` applies;
 while any is active the canvas also replaces the mark PNG at the
-overview zoom (VW-22).
+overview zoom (VW-22). Exports (`exportSvgString()`) redraw an exact
+display list at export resolution with that state (`exportMarksImage()`,
+raster.ts `paintList`, the painter shared with the canvas) instead of
+embedding the mark PNG (VW-25).
 
 ## Build and test
 

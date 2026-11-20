@@ -2,6 +2,33 @@
 
 ## vellumwidget 0.13.1.9000
 
+- **Raster exports show the marks as they are drawn (VW-25).** The
+  toolbar’s SVG, PNG and clipboard exports used the overview mark PNG.
+  So
+  [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+  colours, dimming and
+  [`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)
+  (VW-22) were missing, and a zoomed export showed that PNG scaled up
+  and blurred. When vellum’s display list covers every mark exactly, the
+  export now redraws it at export resolution (at least 2x, or
+  `export_options(scale)`), with the current style state, into one image
+  over the current view. The detail tier’s nodes and the mark PNG are
+  left out of the export, and the above-marks furniture and re-ticked
+  labels still go on top. Without an exact list (older vellum, above
+  `max_marks`, flagged marks) the export keeps the mark PNG.
+
+- PNG exports at `export_options(scale)` above 1 keep non-scaling
+  strokes (axis-zoomed lines, rules and outlines) at their on-screen
+  weight. Before, they came out `scale` times too thin.
+
+- Under axis zoom, unkeyed panel furniture keeps its size, as the keyed
+  marks do (VW-26). A reference rule no longer thickens, an annotation’s
+  text stays its size, anchored where it was placed, and an unkeyed
+  point layer keeps its pixel size. This applies in SVG mode and to both
+  raster furniture layers (below and above the marks). Text marks with a
+  key get the same treatment. `render_options(zoom_marks = "scale")`
+  keeps the old scaling.
+
 - The navigator’s mini-map now shows the furniture painted after the
   marks (a reference line or annotation drawn over the points in raster
   mode, VW-21). It cloned only the base svg, so that layer was missing

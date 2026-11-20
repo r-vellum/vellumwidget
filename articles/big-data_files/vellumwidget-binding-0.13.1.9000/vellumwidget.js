@@ -1589,6 +1589,7 @@
       ws.stage.appendChild(ws.retickLayer);
       applyPanTransforms();
       setupConstantMarks();
+      setupConstantFurniture();
       retick();
     }
     function applyPanTransforms() {
@@ -1634,6 +1635,69 @@
           }
         }
       }
+    }
+    function setupConstantFurniture() {
+      if (!ws.axisZoomActive || ws.opts.zoomMarks === "scale") return;
+      for (let i = 0; i < ws.azPanels.length; i++) {
+        const a = ws.azPanels[i];
+        constantFurnitureIn(a.pan);
+        if (a.mirror) constantFurnitureIn(a.mirror);
+      }
+    }
+    const SHAPES = { path: true, line: true, polyline: true, polygon: true, rect: true, circle: true, ellipse: true };
+    function constantFurnitureIn(pan) {
+      const all = pan.querySelectorAll("*");
+      for (let i = 0; i < all.length; i++) {
+        const n = all[i];
+        const tag = n.tagName.toLowerCase();
+        if (tag === "text") {
+          constantText(n);
+          continue;
+        }
+        if (!SHAPES[tag]) continue;
+        if (n.closest('.vellumwidget-detail, [role="grid"]')) continue;
+        if (n.style.getPropertyValue("transform")) continue;
+        if (!n.closest("[data-key]") && inGlyphLayer(n)) {
+          n.style.setProperty("transform-box", "fill-box");
+          n.style.setProperty("transform-origin", "center");
+          const place = transAsCss(n);
+          n.style.setProperty("transform", (place ? place + " " : "") + "scale(var(--vw-ix,1),var(--vw-iy,1))");
+        } else {
+          n.setAttribute("vector-effect", "non-scaling-stroke");
+        }
+      }
+    }
+    function inGlyphLayer(n) {
+      const g = n.closest("[data-vellum-id]");
+      const m = g ? /^layer-\d+-([a-z0-9_]+)-g\d+/.exec(g.getAttribute("data-vellum-id") || "") : null;
+      return !!m && GLYPH_MARKS[m[1]] === true;
+    }
+    function constantText(n) {
+      if (n.style.getPropertyValue("transform")) return;
+      const own = (n.getAttribute("transform") || "").trim();
+      const place = transAsCss(n);
+      if (own && !place) return;
+      const x = parseFloat(n.getAttribute("x") || "") || 0, y = parseFloat(n.getAttribute("y") || "") || 0;
+      let X = x, Y = y;
+      const m = /matrix\(([^)]*)\)/.exec(place);
+      if (m) {
+        const v = m[1].split(",").map(Number);
+        X = v[0] * x + v[2] * y + v[4];
+        Y = v[1] * x + v[3] * y + v[5];
+      } else {
+        const t = /translate\(([-+\d.eE]+)px,([-+\d.eE]+)px\)/.exec(place);
+        if (t) {
+          X = x + Number(t[1]);
+          Y = y + Number(t[2]);
+        }
+      }
+      if (!isFinite(X) || !isFinite(Y)) return;
+      n.style.setProperty("transform-box", "view-box");
+      n.style.setProperty("transform-origin", "0px 0px");
+      n.style.setProperty(
+        "transform",
+        "translate(" + X + "px," + Y + "px) scale(var(--vw-ix,1),var(--vw-iy,1)) translate(" + -X + "px," + -Y + "px)" + (place ? " " + place : "")
+      );
     }
     function transAsCss(node) {
       const t = (node.getAttribute("transform") || "").trim();
@@ -5064,31 +5128,12 @@
       }
       const wasShown = ws.canvasEl.style.display === "block";
       const [W, H] = fitCanvas();
-      const frame = az ? vb0 : vb;
-      const q0 = userToCanvas(frame, W, H, 0, 0), q1 = userToCanvas(frame, W, H, 1, 1);
-      const kx = q1.px - q0.px, ky = q1.py - q0.py;
-      const base = Math.min(W / vb0.w, H / vb0.h);
-      const scaleMarks = ws.opts.zoomMarks === "scale";
-      const np = dl.panels.length;
-      const aff = [], gs = [], pclip = [];
-      const ident = { ax: kx, bx: q0.px, ay: ky, by: q0.py };
-      for (let p = 0; p <= np; p++) {
-        let A = ident, g = scaleMarks ? kx : base, c = null;
-        const a = az && p > 0 ? ws.azPanels.filter((q) => q.p.name === dl.panels[p - 1])[0] : null;
-        if (a) {
-          const t = ws.fx.azT(a);
-          A = { ax: kx * t.sx, bx: kx * t.tx + q0.px, ay: ky * t.sy, by: ky * t.ty + q0.py };
-          g = scaleMarks ? base * Math.min(t.sx, t.sy) : base;
-          c = [kx * a.p.px0 + q0.px, ky * a.p.py0 + q0.py, kx * a.p.px1 + q0.px, ky * a.p.py1 + q0.py];
-        }
-        aff.push(A);
-        gs.push(g);
-        pclip.push(c);
-      }
+      const L = listLayout(dl, W, H);
       if (!settled && dl.n > LIVE_DRAW_MAX) {
         let vis = 0;
+        const np = dl.panels.length;
         for (let i = 0; i < dl.n && vis <= LIVE_DRAW_MAX; i++) {
-          const A = aff[dl.panel[i] <= np ? dl.panel[i] : 0], pc = pclip[dl.panel[i] <= np ? dl.panel[i] : 0];
+          const A = L.aff[dl.panel[i] <= np ? dl.panel[i] : 0], pc = L.pclip[dl.panel[i] <= np ? dl.panel[i] : 0];
           const x = A.ax * (dl.bx0[i] + dl.bx1[i]) / 2 + A.bx, y = A.ay * (dl.by0[i] + dl.by1[i]) / 2 + A.by;
           if (x < 0 || y < 0 || x > W || y > H) continue;
           if (pc && (x < pc[0] || x > pc[2] || y < pc[1] || y > pc[3])) continue;
@@ -5110,6 +5155,36 @@
         }
       }
       showMarksLayer(!dl.exact);
+      paintList(ctx, dl, W, H, L, styled);
+    }
+    function listLayout(dl, W, H) {
+      const vb = ws.vb, vb0 = ws.vb0;
+      const az = ws.axisZoomActive && ws.azPanels.length > 0;
+      const frame = az ? vb0 : vb;
+      const q0 = userToCanvas(frame, W, H, 0, 0), q1 = userToCanvas(frame, W, H, 1, 1);
+      const kx = q1.px - q0.px, ky = q1.py - q0.py;
+      const base = Math.min(W / vb0.w, H / vb0.h);
+      const scaleMarks = ws.opts.zoomMarks === "scale";
+      const np = dl.panels.length;
+      const aff = [], gs = [], pclip = [];
+      const ident = { ax: kx, bx: q0.px, ay: ky, by: q0.py };
+      for (let p = 0; p <= np; p++) {
+        let A = ident, g = scaleMarks ? kx : base, c = null;
+        const a = az && p > 0 ? ws.azPanels.filter((q) => q.p.name === dl.panels[p - 1])[0] : null;
+        if (a) {
+          const t = ws.fx.azT(a);
+          A = { ax: kx * t.sx, bx: kx * t.tx + q0.px, ay: ky * t.sy, by: ky * t.ty + q0.py };
+          g = scaleMarks ? base * Math.min(t.sx, t.sy) : base;
+          c = [kx * a.p.px0 + q0.px, ky * a.p.py0 + q0.py, kx * a.p.px1 + q0.px, ky * a.p.py1 + q0.py];
+        }
+        aff.push(A);
+        gs.push(g);
+        pclip.push(c);
+      }
+      return { aff, gs, pclip, base };
+    }
+    function paintList(ctx, dl, W, H, L, styled) {
+      const aff = L.aff, gs = L.gs, pclip = L.pclip, base = L.base, np = dl.panels.length;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, W, H);
       const flags = styled ? ws.msFlags : null, recol = styled ? ws.msColor : null, pal = ws.msPalette;
@@ -5222,6 +5297,32 @@
       ctx.restore();
       ctx.globalAlpha = 1;
     }
+    function exportMarksImage(scale) {
+      const dl = ws.dl;
+      if (!ws.rasterMode || !dl || !dl.exact || !ws.vb || !ws.vb0) return null;
+      const vb0 = ws.vb0;
+      const az = ws.axisZoomActive && ws.azPanels.length > 0;
+      const frame = az ? vb0 : ws.vb;
+      let s = Math.max(2, scale || 1);
+      const MAX_PX = 32e6;
+      if (vb0.w * vb0.h * s * s > MAX_PX) s = Math.sqrt(MAX_PX / (vb0.w * vb0.h));
+      const W = Math.max(1, Math.round(vb0.w * s)), H = Math.max(1, Math.round(vb0.h * s));
+      const c = document.createElement("canvas");
+      const ctx = typeof c.getContext === "function" ? c.getContext("2d") : null;
+      if (!ctx) return null;
+      c.width = W;
+      c.height = H;
+      const styled = ws.msActive && !!ws.msFlags && !!ws.msColor;
+      if (dl.n) paintList(ctx, dl, W, H, listLayout(dl, W, H), styled);
+      let href = "";
+      try {
+        href = c.toDataURL("image/png");
+      } catch (e) {
+        return null;
+      }
+      if (!/^data:image\/png/.test(href || "")) return null;
+      return { href, x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+    }
     function withAlphaOf(c, ref) {
       if (/^#[0-9a-fA-F]{6}$/.test(c) && /^#[0-9a-fA-F]{8}$/.test(ref)) {
         const a = ref.slice(7, 9).toLowerCase();
@@ -5303,7 +5404,7 @@
     function setHover(k) {
       setHoverKeys(ws.fx.linkedKeys(k));
     }
-    return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover, showMarksLayer };
+    return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover, showMarksLayer, exportMarksImage };
   }
 
   // srcts/ink.ts
@@ -6062,11 +6163,26 @@
       const s = ws.opts.export && ws.opts.export.scale;
       return s && s > 0 ? s : 1;
     }
-    function exportSvgString() {
+    function exportSvgString(strokeK) {
       const svg = ws.svgEl.cloneNode(true);
       svg.classList.remove("vellumwidget-marks-off");
-      const drawn = svg.querySelectorAll(".vellumwidget-marks");
-      for (let i = 0; i < drawn.length; i++) drawn[i].style.visibility = "";
+      const listed = ws.rasterMode ? ws.fx.exportMarksImage(exportScale()) : null;
+      if (listed) {
+        const old = svg.querySelectorAll(".vellumwidget-marks, .vellumwidget-marks-defs, .vellumwidget-detail");
+        for (let i = 0; i < old.length; i++) old[i].remove();
+        const img = document.createElementNS(SVGNS, "image");
+        img.setAttribute("class", "vellumwidget-marks-export");
+        img.setAttribute("x", String(listed.x));
+        img.setAttribute("y", String(listed.y));
+        img.setAttribute("width", String(listed.w));
+        img.setAttribute("height", String(listed.h));
+        img.setAttribute("preserveAspectRatio", "none");
+        img.setAttribute("href", listed.href);
+        svg.appendChild(img);
+      } else {
+        const drawn = svg.querySelectorAll(".vellumwidget-marks");
+        for (let i = 0; i < drawn.length; i++) drawn[i].style.visibility = "";
+      }
       if (ws.aboveEl) {
         const g = document.createElementNS(SVGNS, "g");
         g.setAttribute("class", "vellumwidget-above-export");
@@ -6079,6 +6195,17 @@
         for (let c = ws.retickLayer.firstChild; c; c = c.nextSibling) g.appendChild(c.cloneNode(true));
         svg.appendChild(g);
       }
+      if (strokeK && strokeK !== 1) {
+        const ns = svg.querySelectorAll('[vector-effect="non-scaling-stroke"]');
+        for (let i = 0; i < ns.length; i++) {
+          const w = parseFloat(ns[i].getAttribute("stroke-width") || "1");
+          ns[i].setAttribute("stroke-width", String((isFinite(w) ? w : 1) * strokeK));
+          const d = ns[i].getAttribute("stroke-dasharray");
+          if (d && d !== "none") {
+            ns[i].setAttribute("stroke-dasharray", d.split(/[\s,]+/).filter(Boolean).map((v) => String(parseFloat(v) * strokeK)).join(" "));
+          }
+        }
+      }
       return new XMLSerializer().serializeToString(svg);
     }
     function saveSvg() {
@@ -6088,7 +6215,7 @@
     }
     function toCanvas(then, fail) {
       if (!ws.svgEl) return fail();
-      const s = exportSvgString();
+      const s = exportSvgString(exportScale());
       const url = URL.createObjectURL(new Blob([s], { type: "image/svg+xml;charset=utf-8" }));
       const img = new Image();
       img.onload = function() {
