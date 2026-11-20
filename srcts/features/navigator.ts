@@ -1,5 +1,6 @@
 // Overview navigator: the opt-in x-range strip.
 
+import { SVGNS } from "./constants";
 import type { WidgetFns, WidgetState } from "../state";
 import { fmtViewBox } from "../viewbox";
 
@@ -45,7 +46,8 @@ export function navigatorFeature(
   }
 
   // Build the navigator strip once: a squashed mini-render of the whole scene
-  // (an inert clone of the base svg at the full viewBox) plus a draggable window
+  // (an inert clone of the base svg at the full viewBox, with the above-marks
+  // overlay folded in) plus a draggable window
   // with two resize handles. Drag body -> pan x; drag a handle -> zoom x.
   function buildNavigator(): void {
     if (ws.navEl) { ws.navEl.remove(); ws.navEl = null; ws.navWindow = null; }
@@ -63,6 +65,15 @@ export function navigatorFeature(
     clone.setAttribute("preserveAspectRatio", "none");
     clone.removeAttribute("width");
     clone.removeAttribute("height");
+    // The furniture vellum painted after the marks (VW-21) lives in its own
+    // overlay svg in the same frame; fold it in last, over the mark image, as
+    // it stacks on screen. Its ids are dropped below with the rest.
+    if (ws.aboveEl) {
+      const g = document.createElementNS(SVGNS, "g");
+      g.setAttribute("class", "vellumwidget-nav-above");
+      for (let c = ws.aboveEl.firstChild; c; c = c.nextSibling) g.appendChild(c.cloneNode(true));
+      clone.appendChild(g);
+    }
     // Drop defs/clip-paths (duplicate ids would clash with the live svg) and any
     // interactivity/a11y hooks — this is a static backdrop.
     const defs = clone.querySelectorAll("defs");
@@ -81,6 +92,9 @@ export function navigatorFeature(
       keyed[i].removeAttribute("role");
     }
     clone.removeAttribute("id");
+    // The overlay's copies keep ids that the live overlay still uses.
+    const ided = clone.querySelectorAll(".vellumwidget-nav-above [id]");
+    for (let i = 0; i < ided.length; i++) ided[i].removeAttribute("id");
     mini.appendChild(clone);
     ws.navEl.appendChild(mini);
     ws.navWindow = document.createElement("div");

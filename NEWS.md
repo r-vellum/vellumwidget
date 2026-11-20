@@ -6,6 +6,9 @@
   pixel size. This applies in SVG mode and to both raster furniture layers
   (below and above the marks). Text marks with a key get the same treatment.
   `render_options(zoom_marks = "scale")` keeps the old scaling.
+* The navigator's mini-map now shows the furniture painted after the marks
+  (a reference line or annotation drawn over the points in raster mode,
+  VW-21). It cloned only the base svg, so that layer was missing (VW-27).
 
 # vellumwidget 0.13.1
 

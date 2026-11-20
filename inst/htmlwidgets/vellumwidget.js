@@ -3697,6 +3697,12 @@
       clone.setAttribute("preserveAspectRatio", "none");
       clone.removeAttribute("width");
       clone.removeAttribute("height");
+      if (ws.aboveEl) {
+        const g = document.createElementNS(SVGNS, "g");
+        g.setAttribute("class", "vellumwidget-nav-above");
+        for (let c = ws.aboveEl.firstChild; c; c = c.nextSibling) g.appendChild(c.cloneNode(true));
+        clone.appendChild(g);
+      }
       const defs = clone.querySelectorAll("defs");
       for (let i = 0; i < defs.length; i++) defs[i].remove();
       const uses = clone.querySelectorAll("use.vellumwidget-marks");
@@ -3710,6 +3716,8 @@
         keyed[i].removeAttribute("role");
       }
       clone.removeAttribute("id");
+      const ided = clone.querySelectorAll(".vellumwidget-nav-above [id]");
+      for (let i = 0; i < ided.length; i++) ided[i].removeAttribute("id");
       mini.appendChild(clone);
       ws.navEl.appendChild(mini);
       ws.navWindow = document.createElement("div");

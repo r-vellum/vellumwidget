@@ -4575,7 +4575,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1" clip-path="url(#vl1-c0)">' +
     '<g data-vellum-id="layer-2-rule" role="presentation"><path class="ref" d="M20 30 L180 30" stroke="#ff0000" stroke-width="2"/></g></g></g>' +
     '<g data-vellum-panel="axis-x-3"></g><text class="title" x="5" y="5">T</text></svg>';
-  function mountAbove(withAbove) {
+  function mountAbove(withAbove, extra) {
     const e = document.createElement("div");
     document.body.appendChild(e);
     const inst = widgetDef.factory(e, 200, 100);
@@ -4585,7 +4585,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       panels: [panel],
       marks: { href: PNG1, width: 200, height: 100, panels: "panel-1-1" },
       above: ab ? above : null,
-      options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple" }
+      options: Object.assign({ raster: true, hover: true, select: true, zoom: true, selectMode: "multiple" }, extra || {})
     });
     inst.renderValue(payload(withAbove));
     return { el: e, inst: inst, payload: payload };
@@ -4638,6 +4638,18 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(!t.el.querySelector(".vellumwidget-above-layer"), "above: a render without the layer leaves no overlay");
   const none = mountAbove(false);
   ok(!none.el.querySelector(".vellumwidget-above-layer"), "above: no layer shipped (older vellum) -> no overlay, as before");
+  // VW-27: the navigator's mini-map folds the above layer in, over the marks
+  const nav = mountAbove(true, { navigator: true });
+  const mini = nav.el.querySelector(".vellumwidget-nav-mini svg");
+  const miniHtml = mini ? mini.outerHTML : "";
+  const iMiniUse = miniHtml.search(/<use[^>]*vellumwidget-marks/), iMiniRef = miniHtml.indexOf('class="ref"');
+  ok(mini && mini.querySelector(".vellumwidget-nav-above path.ref") && iMiniUse >= 0 && iMiniRef > iMiniUse,
+    "navigator: the mini-map carries the above layer, after the mark image");
+  ok(mini && !mini.querySelector(".vellumwidget-nav-above [id], .vellumwidget-nav-above [clip-path], .vellumwidget-nav-above defs"),
+    "navigator: the folded-in overlay keeps no ids, clips or defs (no clash with the live overlay)");
+  ok(nav.el.querySelectorAll("path.ref").length === 2, "navigator: the live overlay keeps its own line");
+  const navNone = mountAbove(false, { navigator: true });
+  ok(!navNone.el.querySelector(".vellumwidget-nav-above"), "navigator: no above layer -> nothing folded in");
 }
 
 // ============ VW-26: unkeyed panel furniture keeps its size under axis zoom ============
