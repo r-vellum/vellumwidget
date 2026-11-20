@@ -900,6 +900,43 @@ test_that("raster mode falls back to one image with an older vellum (VW-14)", {
   expect_match(w$x$svg, "data:image/png;base64,", fixed = TRUE)
 })
 
+test_that("raster mode splits the furniture by paint order when vellum can (VW-21)", {
+  skip_if_not(.paint_order_supported(), "vellum without the paint-order split")
+  set.seed(1)
+  df <- data.frame(x = runif(60), y = runif(60), id = 1:60)
+  base <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id)
+  p <- base |>
+    vellumplot::mark_rule(yintercept = 0.5, color = "red") |>
+    vellumplot::annotate("text", x = 0.5, y = 0.8, label = "NOTE")
+  w <- as_widget(p, render = render_options(mode = "raster"))
+  # the reference line and the note were drawn after the points: above them
+  expect_match(w$x$above, ">NOTE<", fixed = TRUE)
+  expect_match(w$x$above, 'stroke="#ff0000"', fixed = TRUE)
+  expect_match(w$x$above, 'data-vellum-pan="panel-1-1"', fixed = TRUE)
+  expect_no_match(w$x$svg, ">NOTE<", fixed = TRUE)
+  expect_no_match(w$x$svg, 'stroke="#ff0000"', fixed = TRUE)
+  # the gridlines and axes stay below, and no data mark is in either layer
+  expect_match(w$x$svg, 'data-vellum-panel="axis-x', fixed = TRUE)
+  expect_no_match(w$x$above, 'data-key="1"', fixed = TRUE)
+  # drawn before the points: below, and nothing above but the frame -> NULL
+  p2 <- vellumplot::vplot(df) |>
+    vellumplot::mark_rule(yintercept = 0.5, color = "red") |>
+    vellumplot::mark_point(x = x, y = y, data_id = id)
+  w2 <- as_widget(p2, render = render_options(mode = "raster"))
+  expect_match(w2$x$svg, 'stroke="#ff0000"', fixed = TRUE)
+  expect_null(w2$x$above)
+  # SVG mode ships none
+  expect_null(as_widget(p, render = render_options(mode = "svg"))$x$above)
+})
+
+test_that(".svg_drawn_or_null() keeps only an SVG that draws something", {
+  empty <- '<svg viewBox="0 0 2 2"><title>T</title><desc>D</desc><defs><clipPath id="c"><path d="M0 0"/></clipPath></defs><g data-vellum-panel="p"><g></g></g></svg>'
+  expect_null(.svg_drawn_or_null(empty))
+  drawn <- sub("<g></g>", '<path d="M0 0 L1 1"/>', empty, fixed = TRUE)
+  expect_identical(.svg_drawn_or_null(drawn), drawn)
+})
+
 test_that("raster mode ships the marks-only display list when vellum has it (VW-15)", {
   skip_if_not(.split_render_supported(), "vellum without the split render")
   skip_if_not(.display_list_supported(), "vellum without the display list")

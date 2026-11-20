@@ -258,6 +258,7 @@ as_widget <- function(
   )
   marks <- NULL
   dlist <- NULL
+  above <- NULL
   if (use_raster && .split_render_supported()) {
     # Split render (VW-14, vellum >= 0.9.0.9000): the furniture (axes, gridlines,
     # legend, text) stays real SVG, so axis zoom can re-tick it, and only the heavy
@@ -265,12 +266,25 @@ as_widget <- function(
     # group. Restricting the mark layer to the data panels keeps the legend's
     # keyed swatches in the furniture as real nodes.
     panel_names <- .scene_panel_names(model)
+    # Paint-order split (VW-21): with a vellum that splits the furniture by
+    # paint order, what was drawn after the marks (a reference line or an
+    # annotation added after the points, the title) ships as its own SVG that
+    # the runtime stacks above the marks; the rest stays below them.
+    split <- .paint_order_supported()
     svg <- vellum::scene_svg(
       scene,
       text = render$text,
-      layer = "unkeyed",
+      layer = if (split) "unkeyed_below" else "unkeyed",
       panels = panel_names
     )
+    if (split) {
+      above <- .svg_drawn_or_null(vellum::scene_svg(
+        scene,
+        text = render$text,
+        layer = "unkeyed_above",
+        panels = panel_names
+      ))
+    }
     dims <- .svg_dims(svg)
     marks <- .raster_marks(scene, panel_names)
     dlist <- .raster_display_list(scene, model, panel_names, render$max_marks)
@@ -310,6 +324,8 @@ as_widget <- function(
     marks = marks,
     # The marks-only display list (raster mode, VW-15), or NULL.
     displayList = dlist,
+    # The furniture painted after the marks (raster mode, VW-21), or NULL.
+    above = above,
     interactions = interactions,
     options = list(
       raster = use_raster,
@@ -1327,6 +1343,22 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 .split_render_supported <- function() {
   all(c("layer", "panels") %in% names(formals(vellum::scene_svg))) &&
     all(c("layer", "panels") %in% names(formals(vellum::scene_png)))
+}
+
+# Does the installed vellum split the furniture by paint order relative to the
+# marks (`layer = "unkeyed_below"` / `"unkeyed_above"`)?
+.paint_order_supported <- function() {
+  .split_render_supported() &&
+    all(c("unkeyed_below", "unkeyed_above") %in% eval(formals(vellum::scene_svg)$layer)) &&
+    "unkeyed_above" %in% eval(formals(vellum::scene_png)$layer)
+}
+
+# An SVG document, or NULL when it draws nothing (only empty groups, defs and
+# the title/description), so a plot with nothing above its marks ships no layer.
+.svg_drawn_or_null <- function(svg) {
+  body <- gsub("<defs>.*?</defs>|<title[^>]*>.*?</title>|<desc[^>]*>.*?</desc>", "", svg, perl = TRUE)
+  drawn <- "<(path|text|rect|circle|ellipse|line|polyline|polygon|image|use)[\\s>/]"
+  if (grepl(drawn, body, perl = TRUE)) svg else NULL
 }
 
 # Does the installed vellum have the marks-only display list (VR-14)?

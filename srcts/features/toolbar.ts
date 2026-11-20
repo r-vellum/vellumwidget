@@ -62,12 +62,20 @@ export function toolbarFeature(
   // re-ticked axis labels live in their own overlay in the same vb0 frame, so
   // they are folded in, or the export would show a zoomed plot with no tick
   // labels. The canvas-only "marks hidden" state is dropped: the exported image
-  // shows the mark layer itself.
+  // shows the mark layer itself. The furniture painted after the marks
+  // (VW-21) is its own overlay in the same frame, with pan groups carrying the
+  // same transforms, so it is folded in over the marks as it is on screen.
   function exportSvgString(): string {
     const svg = ws.svgEl!.cloneNode(true) as SVGSVGElement;
     svg.classList.remove("vellumwidget-marks-off");
     const drawn = svg.querySelectorAll(".vellumwidget-marks");
     for (let i = 0; i < drawn.length; i++) (drawn[i] as SVGElement).style.visibility = "";
+    if (ws.aboveEl) {
+      const g = document.createElementNS(SVGNS, "g");
+      g.setAttribute("class", "vellumwidget-above-export");
+      for (let c = ws.aboveEl.firstChild; c; c = c.nextSibling) g.appendChild(c.cloneNode(true));
+      svg.appendChild(g);
+    }
     if (ws.axisZoomActive && ws.retickLayer) {
       const g = document.createElementNS(SVGNS, "g");
       g.setAttribute("class", "vellumwidget-retick-export");

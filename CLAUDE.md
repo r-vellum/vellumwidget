@@ -99,6 +99,13 @@ with an older vellum (one base image), raster mode, void
 panels (graphs, `theme_void`) and panels the re-ticker can't follow (e.g. polar)
 fall back to whole-scene viewBox zoom. Glyph marks keep a constant pixel size.
 
+With a vellum that splits the furniture by paint order (VW-21,
+`.paint_order_supported()`), `payload$svg` is `layer = "unkeyed_below"` and
+`payload$above` the `"unkeyed_above"` SVG: an overlay svg in the stage
+(`ws.aboveEl`, over the canvas, `pointer-events: none`) whose pan groups are
+each `AzPanel.mirror`, transformed with the base pan group, and whose viewBox
+follows the base svg; export folds it in after the marks.
+
 Raster mode has three mark tiers (`ws.markTier`): `"overview"` (the mark PNG),
 `"mid"` (the exact canvas drawn from vellum's display list, `ws.dl`,
 `srcts/dlist.ts`, `features/raster.ts` `drawList`) and `"detail"` (keyed SVG

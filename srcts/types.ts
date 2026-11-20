@@ -231,6 +231,7 @@ export interface Payload {
   colorbar?: ColorbarInfo; // interactive continuous-colour colorbar (optional)
   marks?: MarksLayer; // split-render mark layer (raster mode, VW-14)
   displayList?: DLPayload; // marks-only display list (raster mode, VW-15)
+  above?: string | null; // furniture painted after the marks, as SVG (raster mode, VW-21)
   interactions?: InteractionSpec; // declarative interactivity (from the plot spec)
   provenance?: Provenance; // click-to-source rows per element (from inspect_source())
   options: Options;
@@ -299,6 +300,8 @@ export interface SecAxisMap {
 export interface AzPanel {
   p: PanelInfo;
   pan: SVGGElement;
+  // The same panel's pan group in the above-marks layer (VW-21), moved by T too.
+  mirror: SVGGElement | null;
   outer: SVGGElement;
   grid: SVGGElement | null;
   ax: number; bx: number; ay: number; by: number;

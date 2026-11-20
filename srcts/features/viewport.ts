@@ -115,6 +115,7 @@ export function viewportFeature(
     if (ws.dimLayer) ws.dimLayer.setAttribute("preserveAspectRatio", par);
     if (ws.crosshairLayer) ws.crosshairLayer.setAttribute("preserveAspectRatio", par);
     if (ws.colorbarLayer) ws.colorbarLayer.setAttribute("preserveAspectRatio", par);
+    if (ws.aboveEl) ws.aboveEl.setAttribute("preserveAspectRatio", par);
   }
 
   function applyViewBox(): void {
@@ -133,6 +134,8 @@ export function viewportFeature(
     } else if (ws.svgEl && ws.vb) {
       ws.svgEl.setAttribute("viewBox", fmtViewBox(ws.vb));
     }
+    // The above-marks layer shares the base svg's frame (VW-21).
+    if (ws.aboveEl && ws.svgEl) ws.aboveEl.setAttribute("viewBox", ws.svgEl.getAttribute("viewBox") || "");
     // Overlays that sit over the panel marks track the view (their device-px
     // content zooms with the marks); the colorbar overlay tracks the FIXED base
     // under axis_zoom (the colorbar is furniture outside the panel, so it stays put).
