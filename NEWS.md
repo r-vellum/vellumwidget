@@ -15,6 +15,13 @@
   a selection outline in the detail tier. Marks under a blend mode, more than
   8 runs, or an older vellum: unchanged.
 
+* **The navigator's mini-map draws gridlines, ticks and reference lines
+  visibly (VW-31).** It squashes the whole plot into a short strip, and the
+  strokes squashed with it, so horizontal gridlines and thin rules shrank to
+  a fraction of a pixel and nearly disappeared. The mini-map's strokes now keep
+  their own width on screen (`vector-effect: non-scaling-stroke`), with a
+  1 px minimum.
+
 * **SVG and PNG exports from SVG mode show condition dimming and selection
   outlines (VW-28).** The widget styles these through CSS classes, and the
   page stylesheet does not travel with an exported SVG, so a `condition()`
@@ -22,6 +29,17 @@
   now writes those styles inline (dim opacity, selection stroke, legend mute,
   hidden filtered marks), resolved from the live theme, so the export matches
   the screen. Hover and keyboard focus stay out of the export.
+
+* **Raster mode: a point or circle keeps its size when zooming crosses from
+  the canvas tier to the SVG detail tier (VW-29).** Without axis zoom (raw
+  vellum scenes, polar and void panels), the whole scene zooms through its
+  viewBox, and the detail tier's nodes and the SVG mode grow with it. The mid
+  tier's canvas, however, drew point records and strokes at their unzoomed
+  pixel size, so a large `circle_grob()` disc jumped in size between tiers. The
+  canvas now follows the same rule: under viewBox zoom, glyphs and stroke
+  widths scale with the view; under axis zoom they keep their pixel size, as
+  before. Dense raw-scene scatters therefore show bigger dots at the mid zoom
+  than they used to, matching the SVG mode.
 
 * **Gradients, path clips and translucent groups no longer keep a raster plot
   out of the exact tiers (VW-23).** With a vellum that has display list

@@ -4779,6 +4779,40 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(!navNone.el.querySelector(".vellumwidget-nav-above"), "navigator: no above layer -> nothing folded in");
 }
 
+// ============ VW-31: the mini-map's strokes do not squash ============
+{
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const i = widgetDef.factory(e);
+  i.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<g data-vellum-panel="panel-1-1">' +
+      '<path class="grid" d="M0 50H200" fill="none" stroke="#fff" stroke-width="0.5"/>' +
+      '<path class="rule" d="M0 30H200" fill="none" stroke="#f00" stroke-width="2.5"/>' +
+      '<g stroke="#333" stroke-width="0.25"><line class="tick" x1="0" y1="90" x2="5" y2="90"/></g>' +
+      '<rect class="bg" x="0" y="0" width="200" height="100" fill="#eee"/>' +
+      '<rect class="nostroke" x="0" y="0" width="10" height="10" fill="#000" stroke="none"/>' +
+      '<path data-key="k" d="M40 15h20v10z" fill="#00f"/>' +
+      '</g></svg>',
+    elements: { key: ["k"], x0: [40], y0: [15], x1: [60], y1: [25] },
+    options: { hover: true, select: true, zoom: true, navigator: true }
+  });
+  const mini = e.querySelector(".vellumwidget-nav-mini svg");
+  const q = (sel) => mini.querySelector(sel);
+  ok(mini.getAttribute("preserveAspectRatio") === "none", "VW-31: the mini-map still stretches to fill the strip");
+  ok(q(".grid").getAttribute("vector-effect") === "non-scaling-stroke" && q(".grid").getAttribute("stroke-width") === "1",
+    "VW-31: a thin stroke is non-scaling and raised to the 1 px minimum");
+  ok(q(".rule").getAttribute("vector-effect") === "non-scaling-stroke" && q(".rule").getAttribute("stroke-width") === "2.5",
+    "VW-31: a stroke above the minimum keeps its own width");
+  ok(q(".tick").getAttribute("vector-effect") === "non-scaling-stroke" && q(".tick").getAttribute("stroke-width") === "1",
+    "VW-31: a stroke inherited from a group is found and raised too");
+  ok(!q(".bg").hasAttribute("vector-effect") && !q(".nostroke").hasAttribute("vector-effect") && !q(".bg").hasAttribute("stroke-width"),
+    "VW-31: unstroked shapes are left alone");
+  ok(!e.querySelector(".vellumwidget-svg-holder svg .grid").hasAttribute("vector-effect") &&
+    e.querySelector(".vellumwidget-svg-holder svg .grid").getAttribute("stroke-width") === "0.5",
+    "VW-31: the live plot's strokes are untouched");
+}
+
 // ============ VW-26: unkeyed panel furniture keeps its size under axis zoom ============
 {
   const panel = {
@@ -5047,6 +5081,84 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   const cleared = exportSvgS('[data-act="svg"]');
   ok(!cleared.querySelector('[data-key="s2"]').style.opacity && !cleared.querySelector('[data-key="s1"]').style.stroke,
     "VW-28 export: with no selection the nodes export unstyled");
+}
+
+// ============ VW-29: one glyph-size rule for the mid and detail tiers ============
+{
+  const b64 = (Arr, xs) => Buffer.from(new Arr(xs).buffer).toString("base64");
+  const f32 = (xs) => ({ type: "f32", n: xs.length, data: b64(Float32Array, xs) });
+  function recCtx() {
+    const log = [];
+    let arcs = [];
+    return {
+      log: log, fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1, _stack: [],
+      save() {}, restore() {}, setTransform() {}, clearRect() { log.length = 0; }, rect() {}, clip() {},
+      moveTo() {}, lineTo() {}, closePath() {}, setLineDash() {},
+      beginPath() { arcs = []; }, arc(x, y, r) { arcs.push(r); },
+      fill() { log.push({ op: "fill", rs: arcs.slice() }); },
+      stroke() { log.push({ op: "stroke", rs: arcs.slice(), lw: this.lineWidth }); }
+    };
+  }
+  // A raw scene: no panels (so no axis zoom), two stroked discs of radius 3.
+  const dl = {
+    format: "vellum-display-list", version: 1, width: 200, height: 100, n: 2,
+    record: { kind: { type: "u8", n: 2, const: 0 }, paint: { type: "u8", n: 2, const: 0 }, key: { type: "u32", n: 2, seq: [0, 1] },
+      flags: { type: "u8", n: 2, const: 0 }, clip: { type: "u8", n: 2, const: 0 }, panel: { type: "u8", n: 2, const: 0 } },
+    point: { cx: f32([60, 140]), cy: { type: "f32", n: 2, const: 50 }, r: { type: "f32", n: 2, const: 3 }, shape: { type: "u8", n: 2, const: 0 } },
+    rect: { x: f32([]), y: f32([]), w: f32([]), h: f32([]) },
+    path: { xy: { type: "f32", n: 0, data: "" }, run_offset: { type: "u8", n: 1, const: 0 }, path_offset: { type: "u8", n: 1, const: 0 },
+      closed: { type: "u8", n: 0, data: "" }, evenodd: { type: "u8", n: 0, data: "" } },
+    paints: { fill: ["#ff0000ff"], stroke: ["#000000ff"], stroke_width: [1], dash: [null], linecap: ["round"], linejoin: ["round"] },
+    clips: null, keys: ["p1", "p2"], panels: ""
+  };
+  const proto = window.HTMLCanvasElement.prototype;
+  const ctx = recCtx();
+  const orig = proto.getContext;
+  proto.getContext = function () { return ctx; };
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const inst = widgetDef.factory(e, 200, 100);
+  inst.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><rect width="200" height="100" fill="#fff"/></svg>',
+    elements: { key: ["p1", "p2"], mark: ["point", "point"], x0: [57, 137], y0: [47, 47], x1: [63, 143], y1: [53, 53] },
+    marks: { href: "data:image/png;base64,ORIGINAL", width: 400, height: 200 },
+    displayList: dl,
+    options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple", detailMarks: 1 }
+  });
+  const radii = () => ctx.log.filter((r) => r.op === "fill").flatMap((r) => r.rs);
+  const widths = () => ctx.log.filter((r) => r.op === "stroke").map((r) => r.lw);
+  inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); inst._test.evalTier();
+  ok(inst._test.markTier() === "mid", "VW-29 setup: a 2x viewBox zoom with two marks in view is the mid tier");
+  ok(radii().length === 2 && radii().every((r) => Math.abs(r - 6) < 1e-6),
+    "VW-29: under viewBox zoom the canvas draws a disc at 2x its radius, as the zoomed SVG node is");
+  ok(widths().length > 0 && widths().every((w) => Math.abs(w - 2) < 1e-6),
+    "VW-29: under viewBox zoom the canvas stroke scales with the view too");
+  inst._test.setView({ x: 0, y: 0, w: 200, h: 100 }); inst._test.evalTier();
+  inst._test.setView({ x: 25, y: 37.5, w: 150, h: 25 }); inst._test.evalTier();
+  ok(radii().length === 2 && radii().every((r) => Math.abs(r - 3 * 200 / 150) < 1e-6),
+    "VW-29: a disc follows the viewBox's fit scale (min of the two axes, as SVG's meet does)");
+  // the detail tier's node for the same record: an unscaled circle in the zoomed viewBox
+  const d = mountDetailNoPanel();
+  function mountDetailNoPanel() {
+    proto.getContext = function () { return recCtx(); };
+    const e2 = document.createElement("div");
+    document.body.appendChild(e2);
+    const i2 = widgetDef.factory(e2, 200, 100);
+    i2.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><rect width="200" height="100" fill="#fff"/></svg>',
+      elements: { key: ["p1", "p2"], mark: ["point", "point"], x0: [57, 137], y0: [47, 47], x1: [63, 143], y1: [53, 53] },
+      marks: { href: "data:image/png;base64,ORIGINAL", width: 400, height: 200 },
+      displayList: dl,
+      options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple", detailMarks: 100 }
+    });
+    i2.inst = i2;
+    return { el: e2, inst: i2 };
+  }
+  d.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); d.inst._test.evalTier();
+  const node = d.el.querySelector('.vellumwidget-detail [data-key="p1"]');
+  ok(d.inst._test.markTier() === "detail" && node && !/scale\(var/.test(node.style.transform || "") && !node.hasAttribute("vector-effect"),
+    "VW-29: the detail node is not counter-scaled under viewBox zoom (it grows with the view, as the canvas now does)");
+  proto.getContext = orig;
 }
 
 // ============ VW-30: the mixed tier (flagged runs as rasters) ============

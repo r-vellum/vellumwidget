@@ -177,12 +177,11 @@ export function rasterFeature(
       }
       return;
     }
-    // "fixed" (default): draw each point at its full-view pixel size (scale from
-    // vb0), so zooming re-maps positions without growing the dots — parity with
-    // the SVG axis_zoom constant-size glyphs. "scale": grow with the view (vb).
-    const rScale = ws.opts.zoomMarks === "scale"
-      ? Math.min(W / ws.vb.w, H / ws.vb.h)
-      : Math.min(W / ws.vb0.w, H / ws.vb0.h);
+    // ViewBox zoom (no axis zoom: raw scenes, polar and void panels) scales
+    // the whole scene, glyphs included, as the SVG mode and the mark image do,
+    // so the dots grow with the view (VW-29). Constant-size glyphs
+    // (`zoomMarks`) are an axis-zoom rule, handled above.
+    const rScale = Math.min(W / ws.vb.w, H / ws.vb.h);
     const x0 = ws.vb.x, y0 = ws.vb.y, x1 = ws.vb.x + ws.vb.w, y1 = ws.vb.y + ws.vb.h;
     for (let i = 0; i < n; i++) {
       const px = cx[i], py = cy[i];
@@ -269,6 +268,14 @@ export function rasterFeature(
   // Where the list's records land on a W x H canvas covering the svg's current
   // frame (vb0 under axis zoom, else the zoomed viewBox): per display-list
   // panel its affine, its glyph scale and (axis zoom) its fixed canvas clip.
+  // `base` is the stroke scale (canvas px per scene px of stroke width).
+  //
+  // One rule for the mid (canvas) and detail (SVG node) tiers, matching the
+  // SVG mode (VW-29): under axis zoom, glyphs keep their pixel size (unless
+  // zoomMarks = "scale") and strokes their width, as the constant-size glyphs
+  // and non-scaling strokes do; under viewBox zoom the whole scene scales,
+  // glyph radii and stroke widths with it, as the detail tier's nodes (and
+  // the SVG mode's) do in the zoomed viewBox.
   interface ListLayout { aff: Affine[]; gs: number[]; pclip: (number[] | null)[]; base: number; }
   function listLayout(dl: DisplayList, W: number, H: number): ListLayout {
     const vb = ws.vb!, vb0 = ws.vb0!;
@@ -282,7 +289,7 @@ export function rasterFeature(
     const aff: Affine[] = [], gs: number[] = [], pclip: (number[] | null)[] = [];
     const ident: Affine = { ax: kx, bx: q0.px, ay: ky, by: q0.py };
     for (let p = 0; p <= np; p++) {
-      let A = ident, g = scaleMarks ? kx : base, c: number[] | null = null;
+      let A = ident, g = az && !scaleMarks ? base : kx, c: number[] | null = null;
       const a = az && p > 0 ? ws.azPanels.filter((q) => q.p.name === dl.panels[p - 1])[0] : null;
       if (a) {
         const t = ws.fx.azT(a);
@@ -292,7 +299,7 @@ export function rasterFeature(
       }
       aff.push(A); gs.push(g); pclip.push(c);
     }
-    return { aff: aff, gs: gs, pclip: pclip, base: base };
+    return { aff: aff, gs: gs, pclip: pclip, base: az ? base : kx };
   }
 
   // Paint every unflagged record onto `ctx` (W x H backing px) through layout

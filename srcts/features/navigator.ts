@@ -4,6 +4,42 @@ import { SVGNS } from "./constants";
 import type { WidgetFns, WidgetState } from "../state";
 import { fmtViewBox } from "../viewbox";
 
+// The thinnest stroke the mini-map draws, in screen px (VW-31).
+export const NAV_MIN_STROKE = 1;
+
+// Nearest value of a presentation attribute (or inline style) on `el` or an
+// ancestor up to `top`, as stroke and stroke-width inherit.
+function inherited(el: Element, top: Element, attr: string, prop: string): string | null {
+  for (let n: Element | null = el; n; n = n === top ? null : n.parentElement) {
+    const st = (n as SVGElement).style ? (n as SVGElement).style.getPropertyValue(prop) : "";
+    if (st) return st;
+    const a = n.getAttribute(attr);
+    if (a !== null && a !== "inherit") return a;
+  }
+  return null;
+}
+
+// The mini-map squashes the whole scene into a short strip with
+// preserveAspectRatio="none", so every stroke shrinks with the (mostly
+// vertical) squash: a 0.5 px gridline or a thin reference rule ends up a
+// small fraction of a pixel and all but vanishes. Draw the clone's strokes
+// at their own width in screen px instead (vector-effect:
+// non-scaling-stroke), never thinner than NAV_MIN_STROKE. Fills still
+// stretch with the strip.
+export function navStrokes(clone: Element): void {
+  const shapes = clone.querySelectorAll("path,line,polyline,polygon,rect,circle,ellipse");
+  for (let i = 0; i < shapes.length; i++) {
+    const el = shapes[i] as SVGElement;
+    const stroke = inherited(el, clone, "stroke", "stroke");
+    if (!stroke || stroke === "none" || stroke === "transparent") continue;
+    const w = parseFloat(inherited(el, clone, "stroke-width", "stroke-width") || "1");
+    const sw = String(Math.max(isFinite(w) ? w : 1, NAV_MIN_STROKE));
+    el.setAttribute("vector-effect", "non-scaling-stroke");
+    el.setAttribute("stroke-width", sw);
+    if (el.style && el.style.getPropertyValue("stroke-width")) el.style.setProperty("stroke-width", sw);
+  }
+}
+
 export function navigatorFeature(
   ws: WidgetState
 ): Pick<
@@ -47,7 +83,7 @@ export function navigatorFeature(
 
   // Build the navigator strip once: a squashed mini-render of the whole scene
   // (an inert clone of the base svg at the full viewBox, with the above-marks
-  // overlay folded in) plus a draggable window
+  // overlay folded in; its strokes do not squash, see navStrokes) plus a draggable window
   // with two resize handles. Drag body -> pan x; drag a handle -> zoom x.
   function buildNavigator(): void {
     if (ws.navEl) { ws.navEl.remove(); ws.navEl = null; ws.navWindow = null; }
@@ -95,6 +131,7 @@ export function navigatorFeature(
     // The overlay's copies keep ids that the live overlay still uses.
     const ided = clone.querySelectorAll(".vellumwidget-nav-above [id]");
     for (let i = 0; i < ided.length; i++) ided[i].removeAttribute("id");
+    navStrokes(clone);
     mini.appendChild(clone);
     ws.navEl.appendChild(mini);
     ws.navWindow = document.createElement("div");
