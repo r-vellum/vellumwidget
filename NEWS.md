@@ -1,4 +1,4 @@
-# vellumwidget 0.13.0.9000
+# vellumwidget 0.13.1
 
 * Raster widgets ship vellumplot's new default keys (`"p1-1:l2:7"`, VP-55)
   as compactly as plain row numbers: the key column's delta encoding now also
