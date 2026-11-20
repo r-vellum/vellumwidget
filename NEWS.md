@@ -1,5 +1,9 @@
 # vellumwidget 0.13.1.9000
 
+* The navigator's mini-map now shows the furniture painted after the marks
+  (a reference line or annotation drawn over the points in raster mode,
+  VW-21). It cloned only the base svg, so that layer was missing (VW-27).
+
 # vellumwidget 0.13.1
 
 * Raster widgets ship vellumplot's new default keys (`"p1-1:l2:7"`, VP-55)
