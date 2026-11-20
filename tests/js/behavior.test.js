@@ -4829,6 +4829,23 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(f.q(".vellumwidget-retick-grid line") && f.q(".vellumwidget-retick-layer text"), "furniture: the re-tick still draws gridlines and labels");
   const sc = mountFurn({ zoomMarks: "scale" });
   ok(!sc.q("path.rule").hasAttribute("vector-effect") && !sc.q("text.note").style.transform, "furniture: zoom_marks = \"scale\" keeps the old scaling");
+  // PNG export at scale 2: a non-scaling stroke is widened to match (else it
+  // would be rasterised at half its on-screen width)
+  {
+    const k2 = mountFurn({ export: { scale: 2 } });
+    let captured = null;
+    const saved = { Blob: global.Blob, XS: global.XMLSerializer, Image: global.Image, cou: URL.createObjectURL, rou: URL.revokeObjectURL };
+    global.Blob = function (parts) { captured = parts.join(""); };
+    global.XMLSerializer = window.XMLSerializer;
+    global.Image = function () {}; // never loads: only the serialised SVG is checked
+    URL.createObjectURL = function () { return "blob:x"; };
+    URL.revokeObjectURL = function () {};
+    k2.el.querySelector('[data-act="png"]').click();
+    global.Blob = saved.Blob; global.XMLSerializer = saved.XS; global.Image = saved.Image;
+    URL.createObjectURL = saved.cou; URL.revokeObjectURL = saved.rou;
+    ok(captured && /class="rule"[^>]*stroke-width="4"/.test(captured), "furniture: a PNG export at scale 2 doubles the non-scaling rule's width");
+    ok(k2.q("path.rule").getAttribute("stroke-width") === "2", "furniture: the live rule keeps its width");
+  }
   const noaz = mountFurn({ axisZoom: false });
   ok(!noaz.q("path.rule").hasAttribute("vector-effect") && !noaz.q("text.note").style.transform, "furniture: no axis zoom, nothing changes");
 }

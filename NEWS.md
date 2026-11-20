@@ -10,6 +10,9 @@
   and the mark PNG are left out of the export, and the above-marks furniture
   and re-ticked labels still go on top. Without an exact list (older vellum,
   above `max_marks`, flagged marks) the export keeps the mark PNG.
+* PNG exports at `export_options(scale)` above 1 keep non-scaling strokes
+  (axis-zoomed lines, rules and outlines) at their on-screen weight. Before,
+  they came out `scale` times too thin.
 
 * Under axis zoom, unkeyed panel furniture keeps its size, as the keyed marks
   do (VW-26). A reference rule no longer thickens, an annotation's text stays

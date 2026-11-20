@@ -73,7 +73,11 @@ export function toolbarFeature(
   // replaces the PNG copies and the detail tier's nodes (the same marks) and
   // sits over the base furniture, where the canvas sits on screen. Without an
   // exact list the PNG is kept.
-  function exportSvgString(): string {
+  //
+  // `strokeK` (the PNG path's resolution scale): a non-scaling stroke keeps
+  // its width in device px, so when the image is rasterised at k x it would
+  // come out k times too thin; its width and dashes are scaled by k instead.
+  function exportSvgString(strokeK?: number): string {
     const svg = ws.svgEl!.cloneNode(true) as SVGSVGElement;
     svg.classList.remove("vellumwidget-marks-off");
     const listed = ws.rasterMode ? ws.fx.exportMarksImage(exportScale()) : null;
@@ -105,6 +109,17 @@ export function toolbarFeature(
       for (let c = ws.retickLayer.firstChild; c; c = c.nextSibling) g.appendChild(c.cloneNode(true));
       svg.appendChild(g);
     }
+    if (strokeK && strokeK !== 1) {
+      const ns = svg.querySelectorAll('[vector-effect="non-scaling-stroke"]');
+      for (let i = 0; i < ns.length; i++) {
+        const w = parseFloat(ns[i].getAttribute("stroke-width") || "1");
+        ns[i].setAttribute("stroke-width", String((isFinite(w) ? w : 1) * strokeK));
+        const d = ns[i].getAttribute("stroke-dasharray");
+        if (d && d !== "none") {
+          ns[i].setAttribute("stroke-dasharray", d.split(/[\s,]+/).filter(Boolean).map((v) => String(parseFloat(v) * strokeK)).join(" "));
+        }
+      }
+    }
     return new XMLSerializer().serializeToString(svg);
   }
 
@@ -118,7 +133,7 @@ export function toolbarFeature(
   // if the canvas is tainted/unsupported. Shared by savePng + copyPng.
   function toCanvas(then: (c: HTMLCanvasElement) => void, fail: () => void): void {
     if (!ws.svgEl) return fail();
-    const s = exportSvgString();
+    const s = exportSvgString(exportScale());
     const url = URL.createObjectURL(new Blob([s], { type: "image/svg+xml;charset=utf-8" }));
     const img = new Image();
     img.onload = function () {

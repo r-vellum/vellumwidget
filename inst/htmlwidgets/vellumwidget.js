@@ -6163,7 +6163,7 @@
       const s = ws.opts.export && ws.opts.export.scale;
       return s && s > 0 ? s : 1;
     }
-    function exportSvgString() {
+    function exportSvgString(strokeK) {
       const svg = ws.svgEl.cloneNode(true);
       svg.classList.remove("vellumwidget-marks-off");
       const listed = ws.rasterMode ? ws.fx.exportMarksImage(exportScale()) : null;
@@ -6195,6 +6195,17 @@
         for (let c = ws.retickLayer.firstChild; c; c = c.nextSibling) g.appendChild(c.cloneNode(true));
         svg.appendChild(g);
       }
+      if (strokeK && strokeK !== 1) {
+        const ns = svg.querySelectorAll('[vector-effect="non-scaling-stroke"]');
+        for (let i = 0; i < ns.length; i++) {
+          const w = parseFloat(ns[i].getAttribute("stroke-width") || "1");
+          ns[i].setAttribute("stroke-width", String((isFinite(w) ? w : 1) * strokeK));
+          const d = ns[i].getAttribute("stroke-dasharray");
+          if (d && d !== "none") {
+            ns[i].setAttribute("stroke-dasharray", d.split(/[\s,]+/).filter(Boolean).map((v) => String(parseFloat(v) * strokeK)).join(" "));
+          }
+        }
+      }
       return new XMLSerializer().serializeToString(svg);
     }
     function saveSvg() {
@@ -6204,7 +6215,7 @@
     }
     function toCanvas(then, fail) {
       if (!ws.svgEl) return fail();
-      const s = exportSvgString();
+      const s = exportSvgString(exportScale());
       const url = URL.createObjectURL(new Blob([s], { type: "image/svg+xml;charset=utf-8" }));
       const img = new Image();
       img.onload = function() {
