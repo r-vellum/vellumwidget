@@ -2,6 +2,25 @@
 
 ## vellumwidget 0.11.0.9000
 
+- **A brush no longer blanks out a line it only partly covers (VW-19).**
+  A line, path or area drawn as one keyed element spans a whole series.
+  A brush over part of it (a
+  [`select_interval()`](https://r-vellum.github.io/vellumplot/reference/select_interval.html)
+  brush, a plain brush or a lasso) used to select it, and the selected
+  style restroked the line in the selection colour. With a dark colour
+  scheme on a light plot that colour is near-white, so the overview line
+  of an overview + detail disappeared. The partly covered line is now
+  left as it is, much as Vega-Lite leaves a line under an interval brush
+  unless a
+  [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+  styles it. It is still a member of the interval, so
+  [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html),
+  [`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html),
+  binds and `input$<id>_brush` keys see it as before, but it is not
+  selected and not in `input$<id>_selected`. A brush that covers the
+  whole line still selects it. Points, bars and segments keep today’s
+  behaviour.
+
 - **Linked views zoom per cell (VW-18).** In a composition with a
   [`bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html)
   or a `select_interval(bind = "scales")`, every cell used to share one

@@ -3605,6 +3605,37 @@
     }
     return isFinite(minGap) ? minGap / 2 : 1;
   }
+  function finite(v) {
+    return typeof v === "number" && isFinite(v);
+  }
+  function isSeriesElem(e) {
+    if (e.mark !== "line" && e.mark !== "polygon") return false;
+    return finite(e.ixh) && finite(e.ix) && e.ixh !== e.ix || finite(e.iyh) && finite(e.iy) && e.iyh !== e.iy;
+  }
+  function dropPartialSeries(elems, keys, inside) {
+    if (!keys.length) return keys;
+    const want = {};
+    for (let i = 0; i < keys.length; i++) want[keys[i]] = true;
+    const partial = {};
+    let any = false;
+    for (let i = 0; i < elems.length; i++) {
+      const e = elems[i];
+      if (!want[e.key] || !isSeriesElem(e)) continue;
+      if (!hasBbox(e) || !inside(e)) {
+        partial[e.key] = true;
+        any = true;
+      }
+    }
+    return any ? keys.filter(function(k) {
+      return !partial[k];
+    }) : keys;
+  }
+  function bboxInRect(e, r) {
+    return e.x0 >= r.x0 - 0.5 && e.x1 <= r.x1 + 0.5 && e.y0 >= r.y0 - 0.5 && e.y1 <= r.y1 + 0.5;
+  }
+  function bboxInPolygon(e, poly) {
+    return pointInPolygon(e.x0, e.y0, poly) && pointInPolygon(e.x1, e.y0, poly) && pointInPolygon(e.x0, e.y1, poly) && pointInPolygon(e.x1, e.y1, poly);
+  }
 
   // srcts/features/picking.ts
   function pickingFeature(ws) {
@@ -3766,7 +3797,15 @@
       }
       return out;
     }
-    return { buildSpatialIndex, buildGeometry, distToElem, buildHoverAxis, nearestAxisKey, columnKeys, nearestKeyAt, brushKeysIn, lassoKeysIn };
+    function brushSelectable(keys, region) {
+      const inside = Array.isArray(region) ? function(e) {
+        return bboxInPolygon(e, region);
+      } : function(e) {
+        return bboxInRect(e, region);
+      };
+      return dropPartialSeries(ws.elements, keys, inside);
+    }
+    return { buildSpatialIndex, buildGeometry, distToElem, buildHoverAxis, nearestAxisKey, columnKeys, nearestKeyAt, brushKeysIn, lassoKeysIn, brushSelectable };
   }
 
   // srcts/features/pointer.ts
@@ -3960,7 +3999,7 @@
         const iv = ws.fx.applyIntervalBrush(rect);
         ws.lastBrush = iv ? iv.band : rect;
         const hitKeys = iv ? iv.keys : ws.fx.dropInert(ws.fx.brushKeysIn(rect));
-        if (ws.opts.select) ws.fx.setSelection(hitKeys);
+        if (ws.opts.select) ws.fx.setSelection(ws.fx.brushSelectable(hitKeys, iv ? iv.band : rect));
         else if (iv) ws.fx.reevaluateInteractions();
         ws.fx.shinyInput("brush", Object.assign(
           { keys: hitKeys, x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 },
@@ -3974,7 +4013,7 @@
         if (poly.length >= 3) {
           const b = polyBounds(poly);
           ws.lastBrush = b;
-          if (ws.opts.select) ws.fx.setSelection(hitKeys);
+          if (ws.opts.select) ws.fx.setSelection(ws.fx.brushSelectable(hitKeys, poly));
           ws.fx.shinyInput("brush", Object.assign(
             { keys: hitKeys, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, lasso: true },
             ws.fx.brushDataFields(b)
@@ -5395,7 +5434,7 @@
             const iv = ws.fx.applyIntervalBrush(rect);
             if (!iv) return null;
             ws.lastBrush = iv.band;
-            if (ws.opts.select) ws.fx.setSelection(iv.keys);
+            if (ws.opts.select) ws.fx.setSelection(ws.fx.brushSelectable(iv.keys, iv.band));
             else ws.fx.reevaluateInteractions();
             return iv;
           },
@@ -5516,6 +5555,8 @@
     distToSegment2,
     distToGeom,
     brushKeys,
+    dropPartialSeries,
+    isSeriesElem,
     nearestKey,
     zoomViewBox,
     parseViewBox,
