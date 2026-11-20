@@ -684,25 +684,12 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   # if no element carries it. Exact `[[` access (not `$`, which partial-matches, so
   # `m$legend` would wrongly pick up a swatch's `legend_for`). `transform` maps a
   # present value (e.g. a colour name -> CSS hex); absent -> NA.
+  ix <- if (any_meta) .meta_index(meta) else NULL
   meta_col <- function(field, transform = as.character) {
     if (!any_meta) {
       return(NULL)
     }
-    present <- FALSE
-    out <- vapply(
-      meta,
-      function(m) {
-        v <- if (is.null(m)) NULL else m[[field]]
-        if (is.null(v)) {
-          NA_character_
-        } else {
-          present <<- TRUE
-          as.character(transform(v))[[1L]]
-        }
-      },
-      character(1)
-    )
-    if (present) out else NULL
+    .meta_chr(ix, field, transform)
   }
 
   cols <- list(
@@ -732,10 +719,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   # Legend membership is ragged (a mark may belong to several series) -> a
   # list-column; each entry is a character vector, or `character(0)` when absent.
   if (any_meta) {
-    legend <- lapply(meta, function(m) {
-      v <- if (is.null(m)) NULL else m[["legend"]]
-      if (is.null(v)) character(0) else as.character(v)
-    })
+    legend <- .meta_ragged(ix, "legend")
     if (any(lengths(legend) > 0L)) cols$legend <- legend
   }
 
@@ -743,10 +727,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   # ragged like `legend`, so a list-column. The JS runtime styles non-members of
   # an active selection by these tags.
   if (any_meta) {
-    cond <- lapply(meta, function(m) {
-      v <- if (is.null(m)) NULL else m[["cond"]]
-      if (is.null(v)) character(0) else as.character(v)
-    })
+    cond <- .meta_ragged(ix, "cond")
     if (any(lengths(cond) > 0L)) cols$cond <- cond
   }
 
@@ -754,10 +735,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   # like `cond`. The runtime hides a tagged element when its `join` is not in the
   # filtering selection's members, scoped to this view.
   if (any_meta) {
-    filt <- lapply(meta, function(m) {
-      v <- if (is.null(m)) NULL else m[["filt"]]
-      if (is.null(v)) character(0) else as.character(v)
-    })
+    filt <- .meta_ragged(ix, "filt")
     if (any(lengths(filt) > 0L)) cols$filt <- filt
   }
 
@@ -768,21 +746,8 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   # Continuous colorbar filter value: numeric per element (or the column absent).
   # Kept numeric (unlike the character meta columns) so the runtime can range-test it.
   if (any_meta) {
-    present <- FALSE
-    fv <- vapply(
-      meta,
-      function(m) {
-        v <- if (is.null(m)) NULL else m[["filter_value"]]
-        if (is.null(v)) {
-          NA_real_
-        } else {
-          present <<- TRUE
-          as.numeric(v)[[1L]]
-        }
-      },
-      numeric(1)
-    )
-    if (present) cols$filter_value <- fv
+    fv <- .meta_num(ix, "filter_value")
+    if (!is.null(fv)) cols$filter_value <- fv
   }
 
   # Interval-selection data values (from a vellumplot `select_interval()`): the
@@ -792,7 +757,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   # against the brushed data range.
   if (any_meta) {
     for (f in c("ix", "ixh", "iy", "iyh")) {
-      cols[[f]] <- meta_num(meta, f)
+      cols[[f]] <- .meta_num(ix, f)
     }
     cols$ixd <- meta_col("ixd")
     cols$iyd <- meta_col("iyd")
@@ -902,24 +867,119 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   )
 }
 
-# One numeric meta field across all elements (NA where absent), or NULL when no
-# element carries it.
-meta_num <- function(meta, field) {
-  present <- FALSE
-  out <- vapply(
-    meta,
-    function(m) {
-      v <- if (is.null(m)) NULL else m[[field]]
-      if (is.null(v) || !length(v)) {
-        NA_real_
-      } else {
-        present <<- TRUE
-        as.numeric(v)[[1L]]
-      }
-    },
-    numeric(1)
-  )
-  if (present) out else NULL
+# Per-element meta fields, read column-wise. `meta` is a list with one record
+# (a named list, or NULL) per element; `scene_model()` hands over one per keyed
+# mark, so a big plot has hundreds of thousands. Scanning that list once per
+# field with an R closure per element dominated the raster build (VR-16), so
+# it is flattened once: every (element, field, value) triple, from which a field
+# is a `which()` away. Semantics match exact `m[[field]]` access: the first
+# entry of a name wins, and a NULL value counts as absent.
+.meta_index <- function(meta) {
+  flat <- unlist(meta, recursive = FALSE, use.names = TRUE)
+  owner <- rep.int(seq_along(meta), lengths(meta))
+  nm <- names(flat)
+  # Records that are not plain named lists (an atomic vector, unnamed values)
+  # would flatten differently from `[[`: keep the per-element path for them.
+  ok <- all(vapply(meta, is.list, logical(1)) | vapply(meta, is.null, logical(1))) &&
+    length(owner) == length(flat) &&
+    (!length(flat) || !is.null(nm))
+  list(meta = meta, flat = flat, owner = owner, names = nm, n = length(meta), ok = ok)
+}
+
+# The values of `field` (first per element, NULLs dropped) and the elements
+# they belong to; NULL when no element carries it.
+.meta_hits <- function(ix, field) {
+  if (!ix$ok) {
+    vals <- lapply(ix$meta, function(m) if (is.null(m)) NULL else m[[field]])
+    own <- which(!vapply(vals, is.null, logical(1)))
+    if (!length(own)) {
+      return(NULL)
+    }
+    return(list(owner = own, vals = vals[own]))
+  }
+  hit <- which(ix$names == field)
+  if (!length(hit)) {
+    return(NULL)
+  }
+  hit <- hit[!duplicated(ix$owner[hit])]
+  vals <- ix$flat[hit]
+  own <- ix$owner[hit]
+  empty <- which(lengths(vals) == 0L)
+  nul <- empty[vapply(vals[empty], is.null, logical(1))]
+  if (length(nul)) {
+    nul <- seq_along(vals) %in% nul
+    vals <- vals[!nul]
+    own <- own[!nul]
+  }
+  if (!length(own)) {
+    return(NULL)
+  }
+  list(owner = own, vals = unname(vals))
+}
+
+# Whether every value is one plain (non-factor) atomic scalar, so the whole
+# column can be built with one vectorised call.
+.meta_scalars <- function(vals) {
+  all(lengths(vals) == 1L) &&
+    all(vapply(vals, is.atomic, logical(1))) &&
+    !any(vapply(vals, is.object, logical(1)))
+}
+
+# One character meta field across all elements (NA where absent), or NULL when
+# no element carries it. `transform` maps a present value (e.g. a colour name
+# -> CSS hex) and must be vectorised.
+.meta_chr <- function(ix, field, transform = as.character) {
+  h <- .meta_hits(ix, field)
+  if (is.null(h)) {
+    return(NULL)
+  }
+  out <- rep(NA_character_, ix$n)
+  out[h$owner] <- if (.meta_scalars(h$vals)) {
+    as.character(transform(unlist(h$vals, use.names = FALSE)))
+  } else {
+    vapply(h$vals, function(v) as.character(transform(v))[[1L]], character(1))
+  }
+  out
+}
+
+# One numeric meta field across all elements (NA where absent, or empty), or
+# NULL when no element carries it.
+.meta_num <- function(ix, field) {
+  if (is.null(ix)) {
+    return(NULL)
+  }
+  h <- .meta_hits(ix, field)
+  if (is.null(h)) {
+    return(NULL)
+  }
+  keep <- lengths(h$vals) > 0L
+  if (!any(keep)) {
+    return(NULL)
+  }
+  vals <- h$vals[keep]
+  out <- rep(NA_real_, ix$n)
+  out[h$owner[keep]] <- if (.meta_scalars(vals)) {
+    as.numeric(unlist(vals, use.names = FALSE))
+  } else {
+    vapply(vals, function(v) as.numeric(v)[[1L]], numeric(1))
+  }
+  out
+}
+
+# A ragged meta field (a character vector per element, `character(0)` where
+# absent) as a list-column; all `character(0)` when no element carries it.
+.meta_ragged <- function(ix, field) {
+  out <- rep(list(character(0)), ix$n)
+  h <- .meta_hits(ix, field)
+  if (is.null(h)) {
+    return(out)
+  }
+  out[h$owner] <- if (.meta_scalars(h$vals)) {
+    as.list(as.character(unlist(h$vals, use.names = FALSE)))
+  } else {
+    lapply(h$vals, as.character)
+  }
+  out
 }
 
 # The interactive colorbar descriptor (continuous colour scales): the gradient
