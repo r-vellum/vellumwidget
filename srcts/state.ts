@@ -34,7 +34,7 @@ export interface WidgetState {
   colorbar: ColorbarInfo | null;
   colorbarLayer: SVGSVGElement | null;
   // Declarative interactivity (spec-driven): the interaction block + derived
-  // indexes. `condTagElems` maps a "<sel>:<aes>" tag to the keys carrying it;
+  // indexes. `condTagElems` maps a condition tag ("<sel>:<aes>", or "<sel>:<aes>@<layer>") to the keys carrying it;
   // `lastHoverKeys` is the current hover set (a hover-triggered selection reads
   // it). Reset per render; empty when the plot declares no interaction.
   interactions: InteractionSpec | null;

@@ -118,7 +118,11 @@ export function declarativeFeature(
     (ws.interactions.selections || []).forEach((s) => (selByName[s.name] = s));
     for (let ci = 0; ci < ws.interactions.conditions.length; ci++) {
       const c = ws.interactions.conditions[ci];
-      const tag = c.selection + ":" + c.aes;
+      // The tag the condition's elements carry: vellumplot sends it (VP-72:
+      // "<sel>:<aes>@<layer>" when two layers condition one aesthetic on one
+      // selection, each with its own if_false); an older one doesn't, and its
+      // tags are always "<sel>:<aes>".
+      const tag = c.tag || c.selection + ":" + c.aes;
       const tagged = ws.condTagElems[tag] || [];
       const sel = selByName[c.selection];
       const members = sel ? selectionMembers(sel) : {};

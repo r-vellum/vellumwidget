@@ -95,6 +95,9 @@ export interface CondDef {
   aes: string; // "color" | "fill" | ...
   if_false?: string | null; // a constant style for non-members, or null = theme dim
   empty?: boolean;
+  // The element tag this condition styles; absent from an older vellumplot,
+  // whose tags are "<sel>:<aes>" (VP-72).
+  tag?: string;
 }
 export interface InteractionSpec {
   selections?: SelDef[];
