@@ -155,24 +155,27 @@ ships as SVG (`payload$flagged$svg`, VW-33): when per-key state
 (`ws.msFlags`/`msColor`, kept in every raster tier with a list, the
 detail tier included) touches a run’s keys, `features/runStyle.ts`
 applies it to a copy of the run’s SVG (hidden: removed; a condition
-colour: inline fill/stroke; dim/mute: opacity), rasterises that as an
-image and `runImage()`/`runHref()` hand it to `paintList` and the detail
-run `<image>`s instead of the PNG (`restyleRuns()`, from
-`updateMarkStates()`). Under axis zoom (unless `zoom_marks = "scale"`),
-a run’s text and point glyphs keep their pixel size (VW-35):
-`runSplit()` (`runStyle.ts`) takes the run apart per zoomed panel into
-constant-size marks (each a cell of the run PNG, or of an atlas
-rasterised from the run’s SVG when marks overlap or state restyles one)
-drawn at their anchor through T, plus the rest of the run (the PNG with
-those boxes cleared). `paintList` (`drawSplit`) and the detail tier
-(`placeSplit`, counter-scaled from `--vw-ix`/`--vw-iy`) draw it; until
-its images load, the run draws scaled as before. Blend modes (VW-32):
-with a vellum whose v2 list has `run_blend` (runs split at blend roots),
-a flag-32 run composites with its mode. `paintList` takes a `LayerSink`:
-on screen, stacked `canvas.vellumwidget-canvas-layer`s after
-`ws.canvasEl` (the blend run alone on one with `mix-blend-mode`, the
-marks after it on the next; the stage gets `vellumwidget-blend-iso` =
-`isolation: isolate`; `hideCanvas()` hides them all); in the export,
+colour: inline fill/stroke; dim/mute: opacity) and rasterises that as an
+image (`restyleRuns()`, from `updateMarkStates()`). Only the touched
+marks’ boxes (grown by any mark whose box meets them) take it (VW-37):
+`runPatch()` is the PNG with those boxes cut plus the restyled image
+inside them, drawn by `paintRun` (`raster.ts`) and the detail tier’s
+`patchInto`; every other mark keeps vellum’s pixels, and a lone hidden
+mark just has its box cleared. Under axis zoom (unless
+`zoom_marks = "scale"`), a run’s text and point glyphs keep their pixel
+size (VW-35): `runSplit()` (`runStyle.ts`) takes the run apart per
+zoomed panel into constant-size marks (each a cell of the run PNG, or of
+an atlas rasterised from the run’s SVG when marks overlap or state
+restyles one) drawn at their anchor through T, plus the rest of the run
+(the PNG with those boxes cleared). `paintList` (`drawSplit`) and the
+detail tier (`placeSplit`, counter-scaled from `--vw-ix`/`--vw-iy`) draw
+it; until its images load, the run draws scaled as before. Blend modes
+(VW-32): with a vellum whose v2 list has `run_blend` (runs split at
+blend roots), a flag-32 run composites with its mode. `paintList` takes
+a `LayerSink`: on screen, stacked `canvas.vellumwidget-canvas-layer`s
+after `ws.canvasEl` (the blend run alone on one with `mix-blend-mode`,
+the marks after it on the next; the stage gets `vellumwidget-blend-iso`
+= `isolation: isolate`; `hideCanvas()` hides them all); in the export,
 extra images (`exportMarksImage().layers`) stacked with
 `mix-blend-mode`. The canvas also replaces the mark PNG at the overview
 while blend runs exist. Blend modes (flag 32), a flagged record outside
