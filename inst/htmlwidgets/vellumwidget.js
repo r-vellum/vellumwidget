@@ -944,6 +944,7 @@
   var TIP_MULTI_CAP = 30;
   var MODE_ICON = { brush: "\u25AD", lasso: "\u25CC", pan: "\u270B" };
   var MODE_LABEL = { brush: "brush-select", lasso: "lasso-select", pan: "pan" };
+  var RUN_BOX_PAD = 2;
 
   // srcts/scales.ts
   var INVERTIBLE = { identity: true, log10: true, sqrt: true, reverse: true };
@@ -2599,8 +2600,34 @@
       };
       const runIds = {};
       const placed = {};
+      const panHost = [false];
+      for (let p = 1; p <= dl.panels.length; p++) {
+        panHost.push(!!svg.querySelector('[data-vellum-pan="' + cssEscape(dl.panels[p - 1]) + '"]'));
+      }
+      const anyPan = panHost.some((h) => h);
+      const rootClip = function(r) {
+        if (!anyPan || !D) return null;
+        const id = D.pre + "runclip" + r;
+        if (D.el.querySelector("#" + id)) return id;
+        const cp = document.createElementNS(SVGNS, "clipPath");
+        cp.setAttribute("id", id);
+        cp.setAttribute("clipPathUnits", "userSpaceOnUse");
+        for (let i = 0; i < dl.n; i++) {
+          if (dl.run[i] !== r) continue;
+          const p = dl.panel[i] <= dl.panels.length ? dl.panel[i] : 0;
+          if (panHost[p]) continue;
+          const rc = document.createElementNS(SVGNS, "rect");
+          rc.setAttribute("x", String(dl.bx0[i] - RUN_BOX_PAD));
+          rc.setAttribute("y", String(dl.by0[i] - RUN_BOX_PAD));
+          rc.setAttribute("width", String(dl.bx1[i] - dl.bx0[i] + 2 * RUN_BOX_PAD));
+          rc.setAttribute("height", String(dl.by1[i] - dl.by0[i] + 2 * RUN_BOX_PAD));
+          cp.appendChild(rc);
+        }
+        D.el.appendChild(cp);
+        return id;
+      };
       const placeRun = function(p, r) {
-        const tag = p + ":" + r;
+        const tag = (panHost[p] ? p : "root") + ":" + r;
         if (placed[tag] || !D || !dl.runHref) return;
         placed[tag] = true;
         if (!runIds[r]) {
@@ -2618,6 +2645,10 @@
         const u = document.createElementNS(SVGNS, "use");
         u.setAttribute("class", "vellumwidget-detail-run");
         u.setAttribute("href", "#" + runIds[r]);
+        if (!panHost[p]) {
+          const cid = rootClip(r);
+          if (cid) u.setAttribute("clip-path", "url(#" + cid + ")");
+        }
         groupFor(p).appendChild(u);
         if (chains[p]) chains[p].length = 0;
       };
@@ -5593,10 +5624,22 @@
       };
       const runImgs = dl.runImgs;
       const drawnRun = [];
+      const runPanels = [];
+      const runLoose = [];
+      const anyPclip = pclip.some((c) => !!c);
+      if (runImgs && anyPclip) {
+        for (let i = 0; i < dl.n; i++) {
+          const r = dl.run[i];
+          if (!(r > 0)) continue;
+          const p = dl.panel[i] <= np ? dl.panel[i] : 0;
+          if (pclip[p]) (runPanels[r] = runPanels[r] || {})[p] = true;
+          else (runLoose[r] = runLoose[r] || []).push(dl.bx0[i], dl.by0[i], dl.bx1[i], dl.by1[i]);
+        }
+      }
       const drawRun = function(r) {
         const img = runImgs[r - 1];
         if (!img) return;
-        const one = function(A, pc) {
+        const one = function(A, pc, boxes) {
           ctx.save();
           ctx.setTransform(1, 0, 0, 1, 0, 0);
           if (pc) {
@@ -5604,16 +5647,27 @@
             ctx.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]);
             ctx.clip();
           }
+          if (boxes) {
+            ctx.beginPath();
+            for (let q = 0; q < boxes.length; q += 4) {
+              const x0 = A.ax * (boxes[q] - RUN_BOX_PAD) + A.bx, y0 = A.ay * (boxes[q + 1] - RUN_BOX_PAD) + A.by;
+              ctx.rect(x0, y0, A.ax * (boxes[q + 2] - boxes[q] + 2 * RUN_BOX_PAD), A.ay * (boxes[q + 3] - boxes[q + 1] + 2 * RUN_BOX_PAD));
+            }
+            ctx.clip();
+          }
           ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
           ctx.drawImage(img, 0, 0, dl.runW, dl.runH);
           ctx.restore();
         };
-        let any = false;
-        for (let p = 1; p <= np; p++) if (pclip[p]) {
-          one(aff[p], pclip[p]);
-          any = true;
+        if (!anyPclip) {
+          one(aff[0], null);
+          return;
         }
-        if (!any) one(aff[0], null);
+        const hosted = runPanels[r];
+        if (hosted) {
+          for (let p = 1; p <= np; p++) if (hosted[p]) one(aff[p], pclip[p]);
+        }
+        if (runLoose[r]) one(aff[0], null, runLoose[r]);
       };
       let curGroup = 0;
       tgt.save();
