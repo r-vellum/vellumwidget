@@ -1126,6 +1126,42 @@ test_that("a blend-mode mark ships its run with the run's blend mode (VW-32)", {
   }
 })
 
+test_that("a blend root inside a plain group gets the mixed tier with a vellum that doesn't isolate it (VR-21)", {
+  skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
+  # vellum's compile() never opens a group without a mask, opacity, blend or
+  # effect; wrap the blend viewport in one by hand (the compiled backend is
+  # cached by content id, so the cache is off)
+  withr::local_options(vellum.cache = FALSE)
+  orig <- get("compile", asNamespace("vellum"))
+  testthat::local_mocked_bindings(
+    compile = function(node, scene) {
+      blend <- isTRUE(tryCatch(!is.null(node@vp@blend), error = function(e) FALSE))
+      if (!blend) {
+        return(orig(node, scene))
+      }
+      scene$group_start(-1L, 1, 0L, 0, numeric(0))
+      orig(node, scene)
+      scene$group_end()
+    },
+    .package = "vellum"
+  )
+  blend <- vellum::vl_scene(2, 2, dpi = 72) |>
+    vellum::draw(vellum::points_grob(0.3, 0.5, key = "a")) |>
+    vellum::push(vellum::vl_viewport(blend = "multiply")) |>
+    vellum::draw(vellum::circle_grob(0.5, 0.5, r = 0.2, key = "m")) |>
+    vellum::pop()
+  rb <- vellum::scene_display_list(blend, version = 2L)$run_blend
+  skip_if(is.null(rb), "vellum without run_blend")
+  w <- as_widget(blend, render = render_options(mode = "raster"))
+  if (identical(rb, "")) {
+    # vellum before VR-21 isolates the plain group: not compositable, the PNG path
+    expect_null(w$x$flagged)
+  } else {
+    expect_identical(w$x$displayList$run_blend, "multiply")
+    expect_length(w$x$flagged$runs, 1L)
+  }
+})
+
 test_that("the flagged runs' SVGs are dropped past the size cap, with a message (VW-33)", {
   skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
   local_mocked_bindings(.MAX_FLAGGED_SVG_CHARS = 10)

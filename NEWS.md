@@ -1,5 +1,11 @@
 # vellumwidget 0.15.0.9000
 
+* With a vellum whose raster backend no longer isolates plain groups (VR-21),
+  a blend-mode layer wrapped in a group without opacity, mask, blend or effect
+  gets the mixed tier and composites with its mode, instead of falling back to
+  the full mark PNG. vellumplot doesn't emit such groups today; nothing changes
+  in the runtime, which already composites any blend mode vellum reports.
+
 * **State on one flagged mark leaves the rest of its run untouched
   (VW-37).** When a condition, filter, dimming or legend hide/mute touched a
   mark drawn from a run image (VW-33), the browser re-rendered the whole run
