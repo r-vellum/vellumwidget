@@ -291,7 +291,7 @@ as_widget <- function(
     dlist <- .raster_display_list(scene, model, panel_names, render$max_marks)
     # The mixed tier (VW-30): the marks the display list flags, as one PNG per
     # run in paint order, so the runtime draws the rest exactly around them.
-    flagged <- .raster_flagged(scene, panel_names, dlist, marks)
+    flagged <- .raster_flagged(scene, panel_names, dlist, marks, render$text)
   } else if (use_raster) {
     # Raster mode bakes the marks (text included) into a single PNG, so the SVG
     # `text` control has nothing to act on. Flag it only when the caller asked
@@ -1410,6 +1410,10 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # keep today's behaviour: every mark stays on the PNG.
 .MAX_FLAGGED_RUNS <- 8L
 
+# The runs' SVGs (VW-33) ship only up to this many characters in all: past
+# it, the flagged marks keep their own look under interactive state.
+.MAX_FLAGGED_SVG_CHARS <- 4e6
+
 # The flagged keyed marks for the mixed tier (VW-30): when the display list
 # flags some marks (masks, blend modes, effects, hatches, patterns, repeating
 # gradients, gradient strokes, text) and numbers them into runs, one PNG of
@@ -1417,7 +1421,14 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # the exact marks itself and composites each run where it falls in paint
 # order. NULL with no flagged mark, an older vellum, a list without runs, or
 # more than `.MAX_FLAGGED_RUNS` runs.
-.raster_flagged <- function(scene, panels, dl, marks) {
+#
+# Each run also ships as SVG (`svg`, VW-33): the same layer as vector nodes
+# carrying their `data-key`s. A run's PNG bakes its marks' look in; the
+# runtime applies a condition(), a filter, dimming or a legend hide/mute to
+# the run's SVG instead and draws that, so the state reaches the flagged
+# marks in every raster tier and in exports. Past `.MAX_FLAGGED_SVG_CHARS`
+# the SVGs are dropped, with a message.
+.raster_flagged <- function(scene, panels, dl, marks, text = "native") {
   if (is.null(dl) || is.null(marks) || !.flagged_layer_supported()) {
     return(NULL)
   }
@@ -1449,7 +1460,32 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     },
     character(1)
   )
-  list(runs = I(hrefs), width = marks$width, height = marks$height)
+  svgs <- vapply(
+    seq_len(runs),
+    function(k) {
+      vellum::scene_svg(
+        scene,
+        text = text,
+        layer = "keyed_flagged",
+        panels = panels,
+        run = k
+      )
+    },
+    character(1)
+  )
+  if (sum(nchar(svgs, type = "bytes")) > .MAX_FLAGGED_SVG_CHARS) {
+    cli::cli_inform(c(
+      "i" = "The marks this widget draws from images (masked, patterned or blended marks, text) are too many to restyle in the browser.",
+      "*" = "Conditions, filters, dimming and legend hide/mute will not change how they look; the other marks follow them as usual."
+    ))
+    svgs <- NULL
+  }
+  list(
+    runs = I(hrefs),
+    svg = if (is.null(svgs)) NULL else I(svgs),
+    width = marks$width,
+    height = marks$height
+  )
 }
 
 # The marks-only display list for raster mode (VW-15): each keyed mark of the

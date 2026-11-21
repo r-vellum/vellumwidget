@@ -18,6 +18,7 @@ import { decodeDisplayList, fillBboxes, tracePoint, traceShape } from "./dlist";
 import { a11yFeature } from "./features/a11y";
 import { axisZoomFeature } from "./features/axisZoom";
 import { markStateFeature } from "./features/markState";
+import { runStyleFeature } from "./features/runStyle";
 import { detailFeature } from "./features/detail";
 import { bindScalesFeature } from "./features/bindScales";
 import { colorbarFeature } from "./features/colorbar";
@@ -79,7 +80,8 @@ HTMLWidgets.widget({
       renderFeature(ws),
       a11yFeature(ws),
       detailFeature(ws),
-      markStateFeature(ws)
+      markStateFeature(ws),
+      runStyleFeature(ws)
     );
 
     ensureStyle();
@@ -120,6 +122,8 @@ HTMLWidgets.widget({
         markTier: function () { return ws.markTier; },
         listExact: function () { return ws.dl ? ws.dl.exact : null; },
         runsAttached: function () { return !!(ws.dl && ws.dl.runImgs); },
+        runStyled: ws.fx.runStyled,
+        exportMarksImage: ws.fx.exportMarksImage,
         condTags: function () { return Object.keys(ws.condTagElems).map(function (k) { return k + "=" + ws.condTagElems[k].length; }).join(","); },
         selectedKeys: ws.fx.selectedKeys,
         evalTier: ws.fx.evalTier,

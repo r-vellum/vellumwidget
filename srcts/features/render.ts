@@ -4,6 +4,7 @@
 import { asColumn, normalizeElements, normalizePanels } from "../elements";
 import { attachRuns, decodeDisplayList, fillBboxes } from "../dlist";
 import { isScalesBound } from "./bindScales";
+import { runSvgsOf } from "./runStyle";
 import { DIM_OVERLAY_MIN, SVGNS } from "./constants";
 import { cssEscape } from "../css";
 import { isDarkBg, sceneBackgrounds } from "../ink";
@@ -190,6 +191,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     if (!dl || !dl.covered || !dl.nRuns) return;
     const hrefs = asColumn(f.runs).map(String);
     if (hrefs.length !== dl.nRuns) return;
+    ws.runSvg = runSvgsOf(f.svg, dl.nRuns);
     const imgs: HTMLImageElement[] = [];
     let left = hrefs.length;
     for (let k = 0; k < hrefs.length; k++) {
@@ -197,6 +199,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       im.onload = function () {
         if (--left > 0 || ws.dl !== dl) return;
         if (attachRuns(dl, imgs, hrefs, Number(f.width), Number(f.height))) {
+          ws.fx.restyleRuns(); // state active before the runs loaded (VW-33)
           ws.fx.drawPoints();
           ws.fx.scheduleTier();
         }
@@ -218,6 +221,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     // The marks-only display list (raster mode, VW-15): the covered marks ship
     // without bboxes, which are derived here from their exact geometry.
     ws.dl = x.options && x.options.raster && x.displayList ? decodeDisplayList(x.displayList) : null;
+    ws.runSvg = null;
     if (ws.dl) fillBboxes(ws.elements, ws.dl);
     ws.panels = normalizePanels(x.panels);
     ws.colorbar = x.colorbar || null;

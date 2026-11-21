@@ -243,9 +243,11 @@ export interface Payload {
 // inside each listed panel's pan group (or over the whole scene when `panels` is
 // absent) under SVG furniture. See `.raster_marks()` on the R side.
 // The flagged keyed marks (vellum's `layer = "keyed_flagged"`), one raster per
-// run of the display list, in the scene px frame `width` x `height` (VW-30).
+// run of the display list, in the scene px frame `width` x `height` (VW-30),
+// and with a vellum/vellumwidget that ship them, each run as SVG (VW-33).
 export interface FlaggedLayer {
   runs: string[] | string;
+  svg?: string[] | string | null; // each run as SVG, for restyling (VW-33)
   width: number;
   height: number;
 }

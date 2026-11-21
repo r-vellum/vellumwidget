@@ -5231,7 +5231,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     const e = document.createElement("div");
     document.body.appendChild(e);
     const inst = widgetDef.factory(e, 200, 100);
-    const flagged = o.noFlagged ? null : { runs: o.runHrefs || ["data:image/png;base64,RUN1", "data:image/png;base64,RUN2"], width: 200, height: 100 };
+    const flagged = o.noFlagged ? null : { runs: o.runHrefs || ["data:image/png;base64,RUN1", "data:image/png;base64,RUN2"], svg: o.runSvg, width: 200, height: 100 };
     inst.renderValue({
       svg: o.svg || (o.panels ? below : raw),
       elements: { key: ["p1", "p2", "p3", "p4"], mark: ["point", "point", "point", "text"], cond: [["pick:color"], ["pick:color"], ["pick:color"], ["pick:color"]],
@@ -5338,6 +5338,71 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(Array.from(dr.el.querySelectorAll("use.vellumwidget-detail-run")).every((u) => !u.hasAttribute("clip-path")),
     "VW-34: without pan groups the run <use>s stay unclipped");
   dr.restore();
+
+  // VW-33: state on a flagged mark re-renders its run from the run's SVG
+  const RUN_SVG = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><circle data-key="p2" cx="80" cy="50" r="3" fill="#ff0000"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><g><text data-key="p4" x="160" y="50" fill="#000000">lab</text></g></svg>'
+  ];
+  const svgOf = (src) => /^data:image\/svg\+xml/.test(src || "") ? decodeURIComponent(src.slice(src.indexOf(",") + 1)) : null;
+  const runImgs = (ctx) => ctx.log.filter((r) => r.op === "img");
+  const st = mount({ runSvg: RUN_SVG });
+  st.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); st.inst._test.evalTier();
+  ok(st.inst._test.runStyled().join(",") === "false,false" && seq(st.ctx) === "fill:25,img:RUN1,fill:125,img:RUN2",
+    "VW-33: no active state -> the runs draw their PNGs");
+  st.inst._call("select", ["p1"]); // the condition dims every non-member: p2 (run 1) and p4 (run 2) too
+  {
+    const ims = runImgs(st.ctx), s1 = svgOf(ims[0] && ims[0].src), s2 = svgOf(ims[1] && ims[1].src);
+    ok(st.inst._test.runStyled().join(",") === "true,true" && s1 && s2,
+      "VW-33: a condition touching the flagged marks re-renders both runs from their SVGs");
+    ok(s1 && /data-key="p2"[^>]*style="opacity:0.28"/.test(s1) && s2 && /data-key="p4"[^>]*style="opacity:0.28"/.test(s2),
+      "VW-33: ... with the dimmed marks at the dim opacity, as SVG mode's class would");
+    ok(s1 && /width="400" height="200" viewBox="0 0 200 100"/.test(s1) && ims[0].w === 200,
+      "VW-33: ... rasterised at the PNG's resolution, drawn in the scene frame");
+  }
+  st.inst._call("clearSelection", []);
+  ok(st.inst._test.runStyled().join(",") === "false,false" && seq(st.ctx) === "fill:25,img:RUN1,fill:125,img:RUN2",
+    "VW-33: clearing the state puts the PNGs back");
+  st.inst._call("filter", ["p1", "p3", "p4"]); // a cross-filter hides p2 only
+  {
+    const ims = runImgs(st.ctx), s1 = svgOf(ims[0] && ims[0].src);
+    ok(st.inst._test.runStyled().join(",") === "true,false" && s1 && !/data-key="p2"/.test(s1) && /RUN2$/.test(ims[1].src),
+      "VW-33: a filter hiding a flagged mark removes it from its run; the untouched run keeps its PNG");
+  }
+  st.inst._call("clearFilter", []);
+  // an export redraws with the restyled runs
+  st.inst._call("select", ["p1"]);
+  {
+    const exp = recCtx();
+    const saved = { gc: proto.getContext, tdu: proto.toDataURL };
+    proto.getContext = function () { return exp; };
+    proto.toDataURL = function () { return "data:image/png;base64,REDRAWN"; };
+    const r = st.inst._test.exportMarksImage ? st.inst._test.exportMarksImage(2) : null;
+    proto.getContext = saved.gc; proto.toDataURL = saved.tdu;
+    const ims = runImgs(exp);
+    ok(r && ims.length === 2 && ims.every((i) => /opacity:0.28/.test(svgOf(i.src) || "")),
+      "VW-33: the export redraw draws the restyled runs");
+  }
+  st.restore();
+  // the detail tier's run images follow the state
+  const sd = mount({ runSvg: RUN_SVG, detailMarks: 100 });
+  sd.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); sd.inst._test.evalTier();
+  ok(sd.inst._test.markTier() === "detail", "VW-33 setup: detail tier");
+  const runImgEl = (r) => sd.el.querySelector('defs.vellumwidget-detail image[data-run="' + r + '"]');
+  ok(/RUN1$/.test(runImgEl(1).getAttribute("href")), "VW-33: detail: no state -> the run image is the PNG");
+  sd.inst._call("select", ["p1"]);
+  ok(/opacity:0.28/.test(svgOf(runImgEl(1).getAttribute("href")) || "") && /opacity:0.28/.test(svgOf(runImgEl(2).getAttribute("href")) || ""),
+    "VW-33: detail: a condition swaps the run images for restyled ones");
+  sd.inst._call("clearSelection", []);
+  ok(/RUN1$/.test(runImgEl(1).getAttribute("href")), "VW-33: detail: clearing it swaps the PNGs back");
+  sd.restore();
+  // a payload without the SVGs (an older vellumwidget R side): the PNGs stay
+  const ns = mount({});
+  ns.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); ns.inst._test.evalTier();
+  ns.inst._call("select", ["p1"]);
+  ok(ns.inst._test.runStyled().join(",") === "false,false" && /RUN1$/.test(runImgs(ns.ctx)[0].src),
+    "VW-33: without run SVGs the runs keep their PNGs");
+  ns.restore();
 
   // export (VW-25 path): the redraw includes the runs
   const x = mount({});

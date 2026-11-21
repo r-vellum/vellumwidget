@@ -400,7 +400,8 @@ export function rasterFeature(
       }
     }
     const drawRun = function (r: number): void {
-      const img = runImgs![r - 1];
+      // its PNG, or re-rendered with the state of its marks (VW-33)
+      const img = ws.fx.runImage(r);
       if (!img) return;
       const one = function (A: Affine, pc: number[] | null, boxes?: number[]): void {
         ctx.save();

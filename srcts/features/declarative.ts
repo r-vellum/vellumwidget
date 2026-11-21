@@ -109,7 +109,11 @@ export function declarativeFeature(
   function applyConditions(): void {
     if (!ws.interactions || !ws.interactions.conditions) return;
     const ring = ws.fx.ringMode();
-    if (ring && !ws.fx.condStatesBegin()) return; // no display list: the image stays as drawn
+    // The per-key state is kept in every raster tier with a display list:
+    // the node-less tiers draw from it, and the detail tier's flagged runs
+    // (images, VW-33) are restyled from it.
+    const ms = ws.rasterMode && ws.fx.condStatesBegin();
+    if (ring && !ms) return; // no display list: the image stays as drawn
     const selByName: Record<string, SelDef> = {};
     (ws.interactions.selections || []).forEach((s) => (selByName[s.name] = s));
     for (let ci = 0; ci < ws.interactions.conditions.length; ci++) {
@@ -119,7 +123,8 @@ export function declarativeFeature(
       const sel = selByName[c.selection];
       const members = sel ? selectionMembers(sel) : {};
       const active = Object.keys(members).length > 0 || c.empty === false;
-      if (ring) { ws.fx.condStateSet(tag, tagged, members, active, c.if_false); continue; }
+      if (ms) ws.fx.condStateSet(tag, tagged, members, active, c.if_false);
+      if (ring) continue;
       for (let i = 0; i < tagged.length; i++) {
         const nodes = ws.fx.elementsForKey(tagged[i]);
         const member = !!members[tagged[i]];

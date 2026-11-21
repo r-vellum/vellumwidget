@@ -1060,6 +1060,11 @@ test_that("raster mode ships one PNG per flagged run when vellum has the layer (
   expect_length(f$runs, 2L)
   expect_true(all(startsWith(f$runs, "data:image/png;base64,")))
   expect_identical(c(f$width, f$height), c(w$x$marks$width, w$x$marks$height))
+  # each run also as SVG, its marks keyed, for restyling in the browser (VW-33)
+  expect_length(f$svg, 2L)
+  expect_true(all(grepl("<svg", f$svg, fixed = TRUE)))
+  expect_true(grepl('data-key="m"', f$svg[[1]], fixed = TRUE) && !grepl('data-key="t"', f$svg[[1]], fixed = TRUE))
+  expect_true(grepl('data-key="t"', f$svg[[2]], fixed = TRUE) && !grepl('data-key="a1"', f$svg[[2]], fixed = TRUE))
   # no flagged mark: no layer
   plain <- vellum::vl_scene(2, 2, dpi = 72) |>
     vellum::draw(vellum::points_grob(0.5, 0.5, key = "a"))
@@ -1092,6 +1097,17 @@ test_that("the flagged layer falls back to the PNG path when it can't be used (V
     vellum::draw(vellum::circle_grob(0.5, 0.5, r = 0.2, key = "m")) |>
     vellum::pop()
   expect_null(as_widget(blend, render = render_options(mode = "raster"))$x$flagged)
+})
+
+test_that("the flagged runs' SVGs are dropped past the size cap, with a message (VW-33)", {
+  skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
+  local_mocked_bindings(.MAX_FLAGGED_SVG_CHARS = 10)
+  expect_message(
+    w <- as_widget(.flagged_scene(), render = render_options(mode = "raster")),
+    "too many to restyle"
+  )
+  expect_length(w$x$flagged$runs, 2L)
+  expect_null(w$x$flagged$svg)
 })
 
 test_that("render_options(detail_marks) reaches the runtime (VW-16)", {

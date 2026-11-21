@@ -132,6 +132,9 @@ export interface WidgetState {
   msPalette: string[];
   msActive: boolean; // any mark dimmed, recoloured, muted or hidden
   msDimAlpha: number;
+  // The flagged runs' SVGs (VW-33, payload$flagged$svg), restyled into images
+  // by features/runStyle.ts; null without them.
+  runSvg: string[] | null;
   detailGroups: SVGGElement[]; // the detail tier's node groups (one per pan group)
   detailKeys: string[]; // the keys materialised in the detail tier
   selGroup: SVGGElement | null; // persistent selection rings
@@ -276,6 +279,10 @@ export interface WidgetFns {
   condStateSet: (tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, color: string | null | undefined) => void;
   updateMarkStates: () => void;
   keyIds: (keys: string[]) => Int32Array;
+  restyleRuns: () => boolean;
+  runImage: (r: number) => CanvasImageSource | null;
+  runHref: (r: number) => string;
+  runStyled: () => boolean[];
   drawSelFeedback: () => void;
   refreshSelected: () => void;
   showMarksLayer: (on: boolean) => void;
@@ -411,6 +418,7 @@ export function createState(el: HTMLElement): WidgetState {
     msPalette: [],
     msActive: false,
     msDimAlpha: 0.28,
+    runSvg: null,
     detailGroups: [],
     detailKeys: [],
     selGroup: null,
