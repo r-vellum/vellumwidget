@@ -1,4 +1,4 @@
-# vellumwidget 0.14.0.9000
+# vellumwidget 0.14.1
 
 * **Raster mode: a blend mode no longer keeps the whole plot on the mark
   image (VW-32).** One mark under a blend mode (a layer `blend = "multiply"`,
