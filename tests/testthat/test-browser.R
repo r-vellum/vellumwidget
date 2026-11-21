@@ -683,3 +683,37 @@ test_that("VW-35: flagged text keeps its pixel size under axis zoom in the mid a
     expect_lt(abs(w4 / w1 - 1), 0.15)
   }
 })
+
+test_that("VW-37: a state on one flagged label leaves the other labels' pixels as they were", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
+  set.seed(8)
+  df <- data.frame(x = rnorm(300), y = rnorm(300), id = paste0("p", 1:300))
+  lab <- data.frame(x = c(-1.2, 0, 1.2), y = c(1, -1, 0.5), id = c("L1", "L2", "L3"), l = c("alpha label", "beta label", "gamma label"))
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id, color = "grey80") |>
+    vellumplot::mark_text(data = lab, x = x, y = y, label = l, data_id = id, size = 13)
+  w <- as_widget(p, elementId = "w1", render = render_options(mode = "raster", detail_marks = 0))
+  skip_if(is.null(w$x$flagged$svg), "no run SVGs")
+  b <- open_widget(w)
+  ev <- function(js) b$Runtime$evaluate(js)$result$value
+  grab <- function() {
+    r <- panel_rect(b, 1)
+    shot <- b$Page$captureScreenshot(format = "png", clip = list(x = r[1], y = r[2], width = r[3], height = r[4], scale = 1))
+    png::readPNG(jsonlite::base64_dec(shot$data))[, , 1:3]
+  }
+  v <- as.numeric(strsplit(ev("document.querySelector('#w1 svg').getAttribute('viewBox')"), "[ ,]+")[[1]])
+  ev(sprintf("HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f})", v[1] + v[3] / 6, v[2] + v[4] / 6, v[3] / 1.5, v[4] / 1.5))
+  Sys.sleep(0.8)
+  expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), "mid")
+  a <- grab()
+  ev(sprintf("HTMLWidgets.find('#w1')._call('filter', %s)", jsonlite::toJSON(c(df$id, "L2", "L3"))))
+  Sys.sleep(0.8)
+  f <- grab()
+  # the labels still shown (dark text in the filtered frame) are pixel-identical
+  txt <- apply(f, c(1, 2), mean) < 0.6
+  expect_gt(sum(txt), 200)
+  expect_lt(max(abs(a - f)[cbind(which(txt, arr.ind = TRUE), 1)]), 1 / 255)
+  # and the hidden label is gone: its dark pixels changed
+  expect_gt(sum(apply(abs(a - f), c(1, 2), max) > 0.3), 100)
+})

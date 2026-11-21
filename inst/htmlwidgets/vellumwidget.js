@@ -2553,28 +2553,64 @@
       }
       return rasterise(svg, dl.runW, dl.runH, pngScale(r), done);
     }
-    function render(r, sig) {
-      return rasterRun(r, null, function(s) {
+    function closure(g, seed, among) {
+      const inn = [];
+      const out = [];
+      for (let q = 0; q < seed.length; q++) if (!inn[seed[q]]) {
+        inn[seed[q]] = true;
+        out.push(seed[q]);
+      }
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (let j = 0; j < g.k.length; j++) {
+          if (inn[j] || !among(j)) continue;
+          for (let q = 0; q < out.length; q++) {
+            const i = out[q];
+            if (g.x0[j] < g.x1[i] && g.x1[j] > g.x0[i] && g.y0[j] < g.y1[i] && g.y1[j] > g.y0[i]) {
+              inn[j] = true;
+              out.push(j);
+              grew = true;
+              break;
+            }
+          }
+        }
+      }
+      return out;
+    }
+    function makePatch(r, sig) {
+      const g = geoOf(r);
+      const flags = ws.msFlags, color = ws.msColor;
+      const touched = [];
+      for (let j = 0; j < g.k.length; j++) if (flags[g.k[j]] || color[g.k[j]]) touched.push(j);
+      if (!touched.length) return { parts: [], patch: null };
+      const region = closure(g, touched, () => true);
+      const cut = [];
+      let draw = false;
+      for (let q = 0; q < region.length; q++) {
+        const j = region[q];
+        cut.push(g.x0[j], g.y0[j], g.x1[j], g.y1[j]);
+        if (!(flags[g.k[j]] & MS_HIDDEN)) draw = true;
+      }
+      const patch = { cut, fill: null };
+      if (!draw) return { parts: [], patch };
+      const f = rasterRun(r, null, function(s) {
         if (s.failed || want[r] !== sig) return;
-        cur[r] = s;
+        cur[r] = patch;
         refresh();
       });
+      if (!f) return { parts: [], patch: null };
+      patch.fill = { img: f.img, href: f.href };
+      return { parts: [f], patch };
     }
     let rebuilding = false;
     function refresh() {
-      if (ws.markTier === "detail" && splitInDetail) {
+      if (ws.markTier === "detail") {
         if (rebuilding) return;
         rebuilding = true;
         try {
           ws.fx.evalTier();
         } finally {
           rebuilding = false;
-        }
-      } else if (ws.markTier === "detail") {
-        const ims = ws.svgEl ? ws.svgEl.querySelectorAll("defs.vellumwidget-detail image[data-run]") : [];
-        for (let i = 0; i < ims.length; i++) {
-          const r = Number(ims[i].getAttribute("data-run"));
-          ims[i].setAttribute("href", runHref(r));
         }
       } else if (ws.fx.ringMode()) {
         ws.fx.drawPoints(true);
@@ -2598,17 +2634,17 @@
         const list = cache[r] || (cache[r] = []);
         let hit = null;
         for (let q = 0; q < list.length; q++) if (list[q].sig === sig) {
-          hit = list[q].s;
+          hit = list[q];
           break;
         }
         if (!hit) {
-          hit = render(r, sig);
-          if (!hit) continue;
-          list.push({ sig, s: hit });
+          const m = makePatch(r, sig);
+          hit = { sig, parts: m.parts, patch: m.patch };
+          list.push(hit);
           if (list.length > CACHE_PER_RUN) list.shift();
         }
-        if (hit.ready && cur[r] !== hit) {
-          cur[r] = hit;
+        if (hit.parts.every((p) => !p || p.ready) && cur[r] !== hit.patch) {
+          cur[r] = hit.patch;
           changed = true;
         }
       }
@@ -2759,6 +2795,21 @@
       const s = rasterise(svg, W, H, ks, done);
       return s ? { s, w: W, h: H, cx, cy, ks } : null;
     }
+    let pngCopies = [];
+    function pngCanvas(r) {
+      const dl = ws.dl, img = dl.runImgs[r];
+      if (pngCopies[r]) return pngCopies[r];
+      const im = img;
+      const w = im.naturalWidth || 0, h = im.naturalHeight || 0;
+      const c = w > 0 && h > 0 ? document.createElement("canvas") : null;
+      const x = c && typeof c.getContext === "function" ? c.getContext("2d") : null;
+      if (!c || !x) return img;
+      c.width = w;
+      c.height = h;
+      x.drawImage(im, 0, 0);
+      pngCopies[r] = c;
+      return c;
+    }
     function runSplit(r1) {
       sync();
       const dl = ws.dl;
@@ -2768,6 +2819,7 @@
         geos = [];
         splits = [];
         svgBroken = [];
+        pngCopies = [];
       }
       const r = r1 - 1;
       if (r < 0 || r >= dl.nRuns) return null;
@@ -2781,16 +2833,15 @@
       } else if (hit && hit.sig === sig) return hit.parts.every((s) => !s || s.ready) ? hit.split : null;
       const flags = ws.msActive ? ws.msFlags : null, color = ws.msActive ? ws.msColor : null;
       const hasSvg = forDl === dl && !svgBroken[r] && !!docFor(r);
-      const png = dl.runImgs[r], pngHref = dl.runHref[r] || "";
+      const png = pngCanvas(r), pngHref = dl.runHref[r] || "";
       const marks = [], atl = [], atlAt = [];
       const cut = [];
       const isCst = {};
-      let restAny = false, restTouched = false;
+      let restAny = false;
       for (let j = 0; j < g.k.length; j++) {
         const k = g.k[j], f = flags ? flags[k] : 0, c = color ? color[k] : 0;
         if (!g.cst[j]) {
           restAny = true;
-          if (f || c) restTouched = true;
           continue;
         }
         isCst[k] = true;
@@ -2846,25 +2897,32 @@
       }
       let rest = null;
       if (restAny) {
-        let overlap = false;
-        for (let j = 0; j < g.k.length && !overlap; j++) {
-          if (g.cst[j]) continue;
-          for (let q = 0; q < cut.length; q += 4) {
-            if (g.x0[j] < cut[q + 2] && g.x1[j] > cut[q] && g.y0[j] < cut[q + 3] && g.y1[j] > cut[q + 1]) {
-              overlap = true;
-              break;
+        rest = { cut: cut.slice(), fill: null };
+        if (hasSvg) {
+          const meets = function(j) {
+            for (let q = 0; q < cut.length; q += 4) {
+              if (g.x0[j] < cut[q + 2] && g.x1[j] > cut[q] && g.y0[j] < cut[q + 3] && g.y1[j] > cut[q + 1]) return true;
             }
+            return false;
+          };
+          const seed = [];
+          for (let j = 0; j < g.k.length; j++) {
+            if (g.cst[j]) continue;
+            const k = g.k[j];
+            if (flags && flags[k] || color && color[k] || meets(j)) seed.push(j);
           }
-        }
-        rest = { png: true, cut, fill: null };
-        if (hasSvg && (overlap || restTouched)) {
-          const f = rasterRun(r, isCst, redraw);
-          if (f) {
-            parts.push(f);
-            rest.fill = { img: f.img, href: f.href };
-            if (restTouched) {
-              rest.png = false;
-              rest.cut = null;
+          const region = closure(g, seed, (j) => !g.cst[j]);
+          let draw = false;
+          for (let q = 0; q < region.length; q++) {
+            const j = region[q];
+            rest.cut.push(g.x0[j], g.y0[j], g.x1[j], g.y1[j]);
+            if (!(flags && flags[g.k[j]] & MS_HIDDEN)) draw = true;
+          }
+          if (draw) {
+            const f = rasterRun(r, isCst, redraw);
+            if (f) {
+              parts.push(f);
+              rest.fill = { img: f.img, href: f.href };
             }
           }
         }
@@ -2872,17 +2930,10 @@
       split.rest = rest;
       return parts.every((s) => !s || s.ready) ? split : null;
     }
-    function runImage(r) {
+    function runPatch(r) {
       const dl = ws.dl;
-      if (!dl || !dl.runImgs) return null;
-      const s = forDl === dl ? cur[r - 1] : null;
-      return s ? s.img : dl.runImgs[r - 1] || null;
-    }
-    function runHref(r) {
-      const dl = ws.dl;
-      if (!dl || !dl.runHref) return "";
-      const s = forDl === dl ? cur[r - 1] : null;
-      return s ? s.href : dl.runHref[r - 1] || "";
+      if (!dl || !dl.runImgs || forDl !== dl) return null;
+      return cur[r - 1] || null;
     }
     function runStyled() {
       const dl = ws.dl;
@@ -2894,7 +2945,7 @@
     function markSplitInDetail(on) {
       splitInDetail = on;
     }
-    return { restyleRuns, runImage, runHref, runStyled, runSplit, markSplitInDetail };
+    return { restyleRuns, runPatch, runStyled, runSplit, markSplitInDetail };
   }
   function runSvgsOf(svg, n) {
     if (svg == null) return null;
@@ -3251,6 +3302,41 @@
           el.appendChild(rc);
         }
       };
+      const patchInto = function(g, r, R, tag) {
+        const u = document.createElementNS(SVGNS, "use");
+        u.setAttribute("href", "#" + imgDef(D.pre + "runpng" + r, dl.runHref[r - 1], dl.runW, dl.runH));
+        if (R.cut.length) {
+          const mid = D.pre + "runcut" + tag + r;
+          if (!D.el.querySelector("#" + mid)) {
+            const mk = document.createElementNS(SVGNS, "mask");
+            mk.setAttribute("id", mid);
+            mk.setAttribute("maskUnits", "userSpaceOnUse");
+            mk.setAttribute("x", "0");
+            mk.setAttribute("y", "0");
+            mk.setAttribute("width", String(dl.runW));
+            mk.setAttribute("height", String(dl.runH));
+            rectsInto(mk, [0, 0, dl.runW, dl.runH], "#fff");
+            rectsInto(mk, R.cut, "#000");
+            D.el.appendChild(mk);
+          }
+          u.setAttribute("mask", "url(#" + mid + ")");
+        }
+        g.appendChild(u);
+        if (R.fill) {
+          const f = document.createElementNS(SVGNS, "use");
+          f.setAttribute("href", "#" + imgDef(D.pre + "runfill" + tag + r, R.fill.href, dl.runW, dl.runH));
+          const cid = D.pre + "runin" + tag + r;
+          if (!D.el.querySelector("#" + cid)) {
+            const c = document.createElementNS(SVGNS, "clipPath");
+            c.setAttribute("id", cid);
+            c.setAttribute("clipPathUnits", "userSpaceOnUse");
+            rectsInto(c, R.cut);
+            D.el.appendChild(c);
+          }
+          f.setAttribute("clip-path", "url(#" + cid + ")");
+          g.appendChild(f);
+        }
+      };
       let usedSplit = false;
       const placeSplit = function(p, r, sp) {
         const g = document.createElementNS(SVGNS, "g");
@@ -3260,44 +3346,7 @@
         if (mode && mode !== "normal") g.style.setProperty("mix-blend-mode", mode);
         const cp = ws.fx.panelClip(dl.panels[p - 1]);
         if (cp) g.setAttribute("clip-path", cp);
-        const R = sp.rest;
-        if (R && R.png) {
-          const u = document.createElementNS(SVGNS, "use");
-          u.setAttribute("href", "#" + imgDef(D.pre + "runpng" + r, dl.runHref[r - 1], dl.runW, dl.runH));
-          if (R.cut && R.cut.length) {
-            const mid = D.pre + "runcut" + r;
-            if (!D.el.querySelector("#" + mid)) {
-              const mk = document.createElementNS(SVGNS, "mask");
-              mk.setAttribute("id", mid);
-              mk.setAttribute("maskUnits", "userSpaceOnUse");
-              mk.setAttribute("x", "0");
-              mk.setAttribute("y", "0");
-              mk.setAttribute("width", String(dl.runW));
-              mk.setAttribute("height", String(dl.runH));
-              rectsInto(mk, [0, 0, dl.runW, dl.runH], "#fff");
-              rectsInto(mk, R.cut, "#000");
-              D.el.appendChild(mk);
-            }
-            u.setAttribute("mask", "url(#" + mid + ")");
-          }
-          g.appendChild(u);
-        }
-        if (R && R.fill) {
-          const u = document.createElementNS(SVGNS, "use");
-          u.setAttribute("href", "#" + imgDef(D.pre + "runfill" + r, R.fill.href, dl.runW, dl.runH));
-          if (R.cut) {
-            const cid = D.pre + "runin" + r;
-            if (!D.el.querySelector("#" + cid)) {
-              const c = document.createElementNS(SVGNS, "clipPath");
-              c.setAttribute("id", cid);
-              c.setAttribute("clipPathUnits", "userSpaceOnUse");
-              rectsInto(c, R.cut);
-              D.el.appendChild(c);
-            }
-            u.setAttribute("clip-path", "url(#" + cid + ")");
-          }
-          g.appendChild(u);
-        }
+        if (sp.rest) patchInto(g, r, sp.rest, "s");
         for (let q = 0; q < sp.marks.length; q++) {
           const m = sp.marks[q];
           if (m.p !== p) continue;
@@ -3335,22 +3384,31 @@
           placeSplit(p, r, sp);
           return;
         }
-        if (!runIds[r]) {
-          const im = document.createElementNS(SVGNS, "image");
-          runIds[r] = D.pre + "run" + r;
-          im.setAttribute("id", runIds[r]);
-          im.setAttribute("x", "0");
-          im.setAttribute("y", "0");
-          im.setAttribute("width", String(dl.runW));
-          im.setAttribute("height", String(dl.runH));
-          im.setAttribute("preserveAspectRatio", "none");
-          im.setAttribute("data-run", String(r));
-          im.setAttribute("href", ws.fx.runHref(r));
-          D.el.appendChild(im);
+        const patch = ws.fx.runPatch(r);
+        let u;
+        if (patch) {
+          u = document.createElementNS(SVGNS, "g");
+          u.setAttribute("class", "vellumwidget-detail-run vellumwidget-detail-patch");
+          u.setAttribute("data-run", String(r));
+          patchInto(u, r, patch, "p");
+        } else {
+          if (!runIds[r]) {
+            const im = document.createElementNS(SVGNS, "image");
+            runIds[r] = D.pre + "run" + r;
+            im.setAttribute("id", runIds[r]);
+            im.setAttribute("x", "0");
+            im.setAttribute("y", "0");
+            im.setAttribute("width", String(dl.runW));
+            im.setAttribute("height", String(dl.runH));
+            im.setAttribute("preserveAspectRatio", "none");
+            im.setAttribute("data-run", String(r));
+            im.setAttribute("href", dl.runHref[r - 1] || "");
+            D.el.appendChild(im);
+          }
+          u = document.createElementNS(SVGNS, "use");
+          u.setAttribute("class", "vellumwidget-detail-run");
+          u.setAttribute("href", "#" + runIds[r]);
         }
-        const u = document.createElementNS(SVGNS, "use");
-        u.setAttribute("class", "vellumwidget-detail-run");
-        u.setAttribute("href", "#" + runIds[r]);
         const mode = dl.runBlend ? dl.runBlend[r - 1] : "normal";
         if (mode && mode !== "normal") u.style.setProperty("mix-blend-mode", mode);
         if (!panHost[p]) {
@@ -6418,6 +6476,51 @@
         return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
       };
       let op = "";
+      const paintRun = function(r, A, clip, patch) {
+        const png = dl.runImgs[r - 1];
+        if (!png) return;
+        if (!patch || !patch.cut.length) {
+          ctx.save();
+          clip(ctx);
+          ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+          ctx.drawImage(png, 0, 0, dl.runW, dl.runH);
+          ctx.restore();
+          return;
+        }
+        const cut = patch.cut;
+        const lc = layerPool.pop() || document.createElement("canvas");
+        if (lc.width !== W || lc.height !== H) {
+          lc.width = W;
+          lc.height = H;
+        }
+        const x = typeof lc.getContext === "function" ? lc.getContext("2d") : null;
+        if (x) {
+          x.setTransform(1, 0, 0, 1, 0, 0);
+          x.clearRect(0, 0, W, H);
+          x.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+          x.drawImage(png, 0, 0, dl.runW, dl.runH);
+          for (let q = 0; q < cut.length; q += 4) x.clearRect(cut[q], cut[q + 1], cut[q + 2] - cut[q], cut[q + 3] - cut[q + 1]);
+          ctx.save();
+          clip(ctx);
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.drawImage(lc, 0, 0);
+          ctx.restore();
+        }
+        layerPool.push(lc);
+        if (patch.fill) {
+          ctx.save();
+          clip(ctx);
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.beginPath();
+          for (let q = 0; q < cut.length; q += 4) {
+            ctx.rect(A.ax * cut[q] + A.bx, A.ay * cut[q + 1] + A.by, A.ax * (cut[q + 2] - cut[q]), A.ay * (cut[q + 3] - cut[q + 1]));
+          }
+          ctx.clip();
+          ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+          ctx.drawImage(patch.fill.img, 0, 0, dl.runW, dl.runH);
+          ctx.restore();
+        }
+      };
       const drawSplit = function(r, sp, p, c) {
         const A = aff[p];
         const clipTo = function(x) {
@@ -6427,50 +6530,7 @@
           x.clip();
           if (op) x.globalCompositeOperation = op;
         };
-        const R = sp.rest;
-        if (R && R.png) {
-          const png = dl.runImgs[r - 1];
-          if (R.cut && R.cut.length) {
-            const lc = layerPool.pop() || document.createElement("canvas");
-            if (lc.width !== W || lc.height !== H) {
-              lc.width = W;
-              lc.height = H;
-            }
-            const x = typeof lc.getContext === "function" ? lc.getContext("2d") : null;
-            if (x) {
-              x.setTransform(1, 0, 0, 1, 0, 0);
-              x.clearRect(0, 0, W, H);
-              x.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
-              x.drawImage(png, 0, 0, dl.runW, dl.runH);
-              for (let q = 0; q < R.cut.length; q += 4) x.clearRect(R.cut[q], R.cut[q + 1], R.cut[q + 2] - R.cut[q], R.cut[q + 3] - R.cut[q + 1]);
-              ctx.save();
-              clipTo(ctx);
-              ctx.drawImage(lc, 0, 0);
-              ctx.restore();
-            }
-            layerPool.push(lc);
-          } else {
-            ctx.save();
-            clipTo(ctx);
-            ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
-            ctx.drawImage(png, 0, 0, dl.runW, dl.runH);
-            ctx.restore();
-          }
-        }
-        if (R && R.fill) {
-          ctx.save();
-          clipTo(ctx);
-          if (R.cut) {
-            ctx.beginPath();
-            for (let q = 0; q < R.cut.length; q += 4) {
-              ctx.rect(A.ax * R.cut[q] + A.bx, A.ay * R.cut[q + 1] + A.by, A.ax * (R.cut[q + 2] - R.cut[q]), A.ay * (R.cut[q + 3] - R.cut[q + 1]));
-            }
-            ctx.clip();
-          }
-          ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
-          ctx.drawImage(R.fill.img, 0, 0, dl.runW, dl.runH);
-          ctx.restore();
-        }
+        if (sp.rest) paintRun(r, A, clipTo, sp.rest);
         ctx.save();
         clipTo(ctx);
         const kx = L.kx, ky = L.ky;
@@ -6485,28 +6545,25 @@
         ctx.restore();
       };
       const drawRun = function(r) {
-        const img = ws.fx.runImage(r);
-        if (!img) return;
+        const patch = ws.fx.runPatch(r);
         const one = function(A, pc, boxes) {
-          ctx.save();
-          ctx.setTransform(1, 0, 0, 1, 0, 0);
-          if (pc) {
-            ctx.beginPath();
-            ctx.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]);
-            ctx.clip();
-          }
-          if (boxes) {
-            ctx.beginPath();
-            for (let q = 0; q < boxes.length; q += 4) {
-              const x0 = A.ax * (boxes[q] - RUN_BOX_PAD) + A.bx, y0 = A.ay * (boxes[q + 1] - RUN_BOX_PAD) + A.by;
-              ctx.rect(x0, y0, A.ax * (boxes[q + 2] - boxes[q] + 2 * RUN_BOX_PAD), A.ay * (boxes[q + 3] - boxes[q + 1] + 2 * RUN_BOX_PAD));
+          paintRun(r, A, function(x) {
+            x.setTransform(1, 0, 0, 1, 0, 0);
+            if (pc) {
+              x.beginPath();
+              x.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]);
+              x.clip();
             }
-            ctx.clip();
-          }
-          ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
-          if (op) ctx.globalCompositeOperation = op;
-          ctx.drawImage(img, 0, 0, dl.runW, dl.runH);
-          ctx.restore();
+            if (boxes) {
+              x.beginPath();
+              for (let q = 0; q < boxes.length; q += 4) {
+                const x0 = A.ax * (boxes[q] - RUN_BOX_PAD) + A.bx, y0 = A.ay * (boxes[q + 1] - RUN_BOX_PAD) + A.by;
+                x.rect(x0, y0, A.ax * (boxes[q + 2] - boxes[q] + 2 * RUN_BOX_PAD), A.ay * (boxes[q + 3] - boxes[q + 1] + 2 * RUN_BOX_PAD));
+              }
+              x.clip();
+            }
+            if (op) x.globalCompositeOperation = op;
+          }, patch);
         };
         if (!anyPclip) {
           one(aff[0], null);

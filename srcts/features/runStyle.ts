@@ -1,20 +1,27 @@
-// Per-key state on the flagged runs of the mixed tier (VW-33).
+// Per-key state on the flagged runs of the mixed tier (VW-33, VW-37).
 //
 // A run's PNG (VW-30) bakes its marks' look in, so a condition(), a filter or
 // cross-filter, dimming or a legend hide/mute could not reach a flagged mark
 // (a keyed text label, a masked shape) in the overview, mid and detail tiers
 // or in an export. With the run's SVG alongside its PNG (`payload$flagged$svg`,
-// the same vellum layer as vector nodes with their `data-key`s), a run whose
-// marks some active state touches is re-rendered here, server-free: the state
-// is applied to a copy of the run's SVG as SVG mode applies it to its nodes
+// the same vellum layer as vector nodes with their `data-key`s), the marks
+// some active state touches are re-rendered here, server-free: the state is
+// applied to a copy of the run's SVG as SVG mode applies it to its nodes
 // (hidden: removed; a condition colour: inline fill/stroke; dim and mute: the
-// node's opacity), and the copy is rasterised by the browser as an image. That
-// image stands in for the run's PNG on the canvas (`runImage()`, painted by
-// raster.ts `paintList`, so the export redraw has it too) and in the detail
-// tier's run <image> (`runHref()`). A run no state touches keeps its PNG.
+// node's opacity), and the copy is rasterised by the browser as an image.
+//
+// Only the touched marks' boxes take that image (VW-37): a run with state is
+// drawn as its PNG with those boxes cleared (`runPatch()`'s `cut`), plus the
+// re-rendered run drawn inside them (`fill`). Every other mark of the run
+// keeps vellum's pixels. A mark whose box overlaps a touched one's comes from
+// the re-rendered run in full, so no mark is half one and half the other.
+// A touched mark that is only hidden, with no other mark in its box, needs no
+// re-render at all: its box is just cleared. raster.ts `paintRun` (canvas and
+// export redraw) and the detail tier draw the patch; a run no state touches
+// draws its PNG.
 //
 // The image loads asynchronously (a few ms); until it has, the run keeps the
-// image it showed before, then the tier redraws.
+// patch it showed before, then the tier redraws.
 //
 // Constant-size flagged marks under axis zoom (VW-35). SVG mode keeps keyed
 // text and point glyphs at their pixel size under axis zoom (VW-26), while a
@@ -49,14 +56,18 @@ export interface ConstMark {
   src: CanvasImageSource | null; href: string; atlas: boolean; fw: number; fh: number; sx: number; sy: number; ks: number;
 }
 // A run taken apart for a zoomed panel (VW-35). `rest` (null: nothing else
-// in the run) is the run without its constant marks: the PNG (`png`) with
-// the `cut` boxes cleared, and `fill` (the run's SVG without the constant
-// marks, rasterised) drawn inside the cut boxes, or everywhere when `cut`
-// is null.
+// in the run) is the run without its constant marks: the PNG with their
+// boxes (and those of state-touched marks) cut, and the run's SVG without
+// the constant marks, styled, drawn inside the cut.
 export interface RunSplit {
   marks: ConstMark[];
-  rest: { png: boolean; cut: number[] | null; fill: { img: CanvasImageSource; href: string } | null } | null;
+  rest: RunPatch | null;
 }
+
+// A run's PNG with the `cut` boxes (scene px, x0 y0 x1 y1 each) cleared,
+// and `fill` (the run's SVG with the state applied, rasterised; null when
+// nothing in the boxes is left to draw) drawn inside them (VW-37).
+export interface RunPatch { cut: number[]; fill: { img: CanvasImageSource; href: string } | null }
 
 // Per run (0-based): its keys with their panel, padded box, whether the mark
 // keeps a constant size (text, point glyphs), its anchor, and whether no
@@ -75,14 +86,14 @@ const ATLAS_MAX = 4000;
 // a few states).
 const CACHE_PER_RUN = 4;
 
-export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" | "runImage" | "runHref" | "runStyled" | "runSplit" | "markSplitInDetail"> {
+export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" | "runPatch" | "runStyled" | "runSplit" | "markSplitInDetail"> {
   let forDl: unknown = null;
   let keyIdx: Map<string, number> = new Map();
   let runKeys: Uint32Array[] = []; // per run (0-based): the distinct key ids of its records
   let svgs: string[] = [];
   let docs: (Element | null | undefined)[] = [];
-  let cache: { sig: string; s: Styled }[][] = [];
-  let cur: (Styled | null)[] = []; // per run: the re-rendered image shown, or null = its PNG
+  let cache: { sig: string; parts: (Styled | null)[]; patch: RunPatch | null }[][] = [];
+  let cur: (RunPatch | null)[] = []; // per run: the patch shown, or null = its PNG
   let want: string[] = []; // per run: the state signature it should show
   let geos: (Geo | null)[] = [];
   let geoDl: unknown = null;
@@ -210,29 +221,64 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
     return rasterise(svg, dl.runW, dl.runH, pngScale(r), done);
   }
 
-  // Run r's SVG with the current state applied, as an image (VW-33).
-  function render(r: number, sig: string): Styled | null {
-    return rasterRun(r, null, function (s) {
-      if (s.failed || want[r] !== sig) return; // a failed load keeps the PNG
-      cur[r] = s;
+  // Grow the boxes of the marks `seed` (indices into run r's Geo) by every
+  // mark of the run (among `among`) whose box meets one already in, until
+  // none is added: the region whose marks a patch re-renders (VW-37).
+  function closure(g: Geo, seed: number[], among: (j: number) => boolean): number[] {
+    const inn: boolean[] = [];
+    const out: number[] = [];
+    for (let q = 0; q < seed.length; q++) if (!inn[seed[q]]) { inn[seed[q]] = true; out.push(seed[q]); }
+    for (let grew = true; grew;) {
+      grew = false;
+      for (let j = 0; j < g.k.length; j++) {
+        if (inn[j] || !among(j)) continue;
+        for (let q = 0; q < out.length; q++) {
+          const i = out[q];
+          if (g.x0[j] < g.x1[i] && g.x1[j] > g.x0[i] && g.y0[j] < g.y1[i] && g.y1[j] > g.y0[i]) {
+            inn[j] = true; out.push(j); grew = true; break;
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  // Run r's patch for state signature `sig`: the touched marks' region cut
+  // from the PNG, and the run re-rendered with the state inside it.
+  function makePatch(r: number, sig: string): { parts: (Styled | null)[]; patch: RunPatch | null } {
+    const g = geoOf(r);
+    const flags = ws.msFlags!, color = ws.msColor!;
+    const touched: number[] = [];
+    for (let j = 0; j < g.k.length; j++) if (flags[g.k[j]] || color[g.k[j]]) touched.push(j);
+    if (!touched.length) return { parts: [], patch: null };
+    const region = closure(g, touched, () => true);
+    const cut: number[] = [];
+    let draw = false; // is anything left to draw in the region?
+    for (let q = 0; q < region.length; q++) {
+      const j = region[q];
+      cut.push(g.x0[j], g.y0[j], g.x1[j], g.y1[j]);
+      if (!(flags[g.k[j]] & MS_HIDDEN)) draw = true;
+    }
+    const patch: RunPatch = { cut: cut, fill: null };
+    if (!draw) return { parts: [], patch: patch };
+    const f = rasterRun(r, null, function (s) {
+      if (s.failed || want[r] !== sig) return; // a failed load keeps what showed
+      cur[r] = patch;
       refresh();
     });
+    if (!f) return { parts: [], patch: null }; // no usable SVG: the PNG stays
+    patch.fill = { img: f.img, href: f.href };
+    return { parts: [f], patch: patch };
   }
 
   // Redraw whatever shows the runs now.
   let rebuilding = false;
   function refresh(): void {
-    if (ws.markTier === "detail" && splitInDetail) {
-      // the detail tier's split runs are nodes of their own: rebuild them
+    if (ws.markTier === "detail") {
+      // the detail tier's runs are nodes of their own: rebuild them
       if (rebuilding) return;
       rebuilding = true;
       try { ws.fx.evalTier(); } finally { rebuilding = false; }
-    } else if (ws.markTier === "detail") {
-      const ims = ws.svgEl ? ws.svgEl.querySelectorAll("defs.vellumwidget-detail image[data-run]") : [];
-      for (let i = 0; i < ims.length; i++) {
-        const r = Number(ims[i].getAttribute("data-run"));
-        ims[i].setAttribute("href", runHref(r));
-      }
     } else if (ws.fx.ringMode()) {
       ws.fx.drawPoints(true);
     }
@@ -240,7 +286,7 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
 
   // Bring every run in line with the current per-key state (after
   // updateMarkStates, and once the runs attach). Returns whether a run's
-  // image changed synchronously.
+  // patch changed synchronously.
   function restyleRuns(): boolean {
     if (!sync()) return false;
     const dl = ws.dl!;
@@ -251,23 +297,22 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
       want[r] = sig;
       if (!sig) { if (cur[r]) { cur[r] = null; changed = true; } continue; }
       const list = cache[r] || (cache[r] = []);
-      let hit: Styled | null = null;
-      for (let q = 0; q < list.length; q++) if (list[q].sig === sig) { hit = list[q].s; break; }
+      let hit: { sig: string; parts: (Styled | null)[]; patch: RunPatch | null } | null = null;
+      for (let q = 0; q < list.length; q++) if (list[q].sig === sig) { hit = list[q]; break; }
       if (!hit) {
-        hit = render(r, sig);
-        if (!hit) continue; // no usable SVG: the PNG stays
-        list.push({ sig: sig, s: hit });
+        const m = makePatch(r, sig);
+        hit = { sig: sig, parts: m.parts, patch: m.patch };
+        list.push(hit);
         if (list.length > CACHE_PER_RUN) list.shift();
       }
-      if (hit.ready && cur[r] !== hit) { cur[r] = hit; changed = true; }
+      // until its image loads, the run keeps the patch it showed
+      if (hit.parts.every((p) => !p || p.ready) && cur[r] !== hit.patch) { cur[r] = hit.patch; changed = true; }
     }
-    // The canvas tiers redraw from the caller; the detail tier's run images
-    // are swapped here.
-    // (a split run there is rebuilt for any new state, VW-35)
+    // The canvas tiers redraw from the caller; the detail tier is rebuilt
+    // here (as for a split run, VW-35, for any new state).
     if ((changed || (sigChanged && splitInDetail)) && ws.markTier === "detail") refresh();
     return changed;
   }
-
 
   // --- constant-size flagged marks under axis zoom (VW-35) ---
 
@@ -407,6 +452,25 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
     return s ? { s: s, w: W, h: H, cx: cx, cy: cy, ks: ks } : null;
   }
 
+  // Run r's (0-based) PNG copied once onto a canvas at its full size, the
+  // source of the constant marks' slices. Drawn straight from the <img>, a
+  // first slice may come from a decode the browser made at the drawn (smaller)
+  // size, softer and a pixel off from later draws of the same view.
+  let pngCopies: (CanvasImageSource | null)[] = [];
+  function pngCanvas(r: number): CanvasImageSource {
+    const dl = ws.dl!, img = dl.runImgs![r];
+    if (pngCopies[r]) return pngCopies[r]!;
+    const im = img as HTMLImageElement;
+    const w = im.naturalWidth || 0, h = im.naturalHeight || 0;
+    const c = w > 0 && h > 0 ? document.createElement("canvas") : null;
+    const x = c && typeof c.getContext === "function" ? c.getContext("2d") : null;
+    if (!c || !x) return img;
+    c.width = w; c.height = h;
+    x.drawImage(im, 0, 0);
+    pngCopies[r] = c;
+    return c;
+  }
+
   // Run r (1-based) taken apart for a zoomed panel, or null: no constant
   // marks in it, or an image it needs hasn't loaded yet (the caller then
   // draws the run as one scaled image, and is redrawn once it has).
@@ -414,7 +478,7 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
     sync();
     const dl = ws.dl;
     if (!dl || !dl.runImgs || !dl.runHref) return null;
-    if (geoDl !== dl) { geoDl = dl; geos = []; splits = []; svgBroken = []; }
+    if (geoDl !== dl) { geoDl = dl; geos = []; splits = []; svgBroken = []; pngCopies = []; }
     const r = r1 - 1;
     if (r < 0 || r >= dl.nRuns) return null;
     const g = geoOf(r);
@@ -426,14 +490,14 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
     else if (hit && hit.sig === sig) return hit.parts.every((s) => !s || s.ready) ? hit.split : null;
     const flags = ws.msActive ? ws.msFlags : null, color = ws.msActive ? ws.msColor : null;
     const hasSvg = forDl === dl && !svgBroken[r] && !!docFor(r);
-    const png = dl.runImgs[r], pngHref = dl.runHref[r] || "";
+    const png = pngCanvas(r), pngHref = dl.runHref[r] || "";
     const marks: ConstMark[] = [], atl: number[] = [], atlAt: number[] = [];
     const cut: number[] = [];
     const isCst: Record<number, boolean> = {};
-    let restAny = false, restTouched = false;
+    let restAny = false;
     for (let j = 0; j < g.k.length; j++) {
       const k = g.k[j], f = flags ? flags[k] : 0, c = color ? color[k] : 0;
-      if (!g.cst[j]) { restAny = true; if (f || c) restTouched = true; continue; }
+      if (!g.cst[j]) { restAny = true; continue; }
       isCst[k] = true;
       cut.push(g.x0[j], g.y0[j], g.x1[j], g.y1[j]);
       const m: ConstMark = { k: k, p: g.p[j], x0: g.x0[j], y0: g.y0[j], x1: g.x1[j], y1: g.y1[j], ax: g.ax[j], ay: g.ay[j],
@@ -460,22 +524,34 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
     }
     let rest: RunSplit["rest"] = null;
     if (restAny) {
-      // does another mark of the run show inside the constant marks' boxes?
-      let overlap = false;
-      for (let j = 0; j < g.k.length && !overlap; j++) {
-        if (g.cst[j]) continue;
-        for (let q = 0; q < cut.length; q += 4) {
-          if (g.x0[j] < cut[q + 2] && g.x1[j] > cut[q] && g.y0[j] < cut[q + 3] && g.y1[j] > cut[q + 1]) { overlap = true; break; }
+      // The rest is the PNG with the constant marks' boxes cut. Its marks
+      // inside them, and those a state touches (VW-37), with every mark
+      // whose box meets theirs, are drawn from the SVG without the constant
+      // marks, inside their boxes too.
+      rest = { cut: cut.slice(), fill: null };
+      if (hasSvg) {
+        const meets = function (j: number): boolean {
+          for (let q = 0; q < cut.length; q += 4) {
+            if (g.x0[j] < cut[q + 2] && g.x1[j] > cut[q] && g.y0[j] < cut[q + 3] && g.y1[j] > cut[q + 1]) return true;
+          }
+          return false;
+        };
+        const seed: number[] = [];
+        for (let j = 0; j < g.k.length; j++) {
+          if (g.cst[j]) continue;
+          const k = g.k[j];
+          if ((flags && flags[k]) || (color && color[k]) || meets(j)) seed.push(j);
         }
-      }
-      rest = { png: true, cut: cut, fill: null };
-      if (hasSvg && (overlap || restTouched)) {
-        const f = rasterRun(r, isCst, redraw);
-        if (f) {
-          parts.push(f);
-          rest.fill = { img: f.img, href: f.href };
-          // a restyled rest (VW-33) comes from the SVG everywhere
-          if (restTouched) { rest.png = false; rest.cut = null; }
+        const region = closure(g, seed, (j) => !g.cst[j]);
+        let draw = false;
+        for (let q = 0; q < region.length; q++) {
+          const j = region[q];
+          rest.cut.push(g.x0[j], g.y0[j], g.x1[j], g.y1[j]);
+          if (!(flags && flags[g.k[j]] & MS_HIDDEN)) draw = true;
+        }
+        if (draw) {
+          const f = rasterRun(r, isCst, redraw);
+          if (f) { parts.push(f); rest.fill = { img: f.img, href: f.href }; }
         }
       }
     }
@@ -483,22 +559,14 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
     return parts.every((s) => !s || s.ready) ? split : null;
   }
 
-  // The image to draw for run r (1-based): re-rendered for the state, or its PNG.
-  function runImage(r: number): CanvasImageSource | null {
+  // Run r's (1-based) patch for the current state, or null: draw its PNG.
+  function runPatch(r: number): RunPatch | null {
     const dl = ws.dl;
-    if (!dl || !dl.runImgs) return null;
-    const s = forDl === dl ? cur[r - 1] : null;
-    return s ? s.img : dl.runImgs[r - 1] || null;
+    if (!dl || !dl.runImgs || forDl !== dl) return null;
+    return cur[r - 1] || null;
   }
 
-  function runHref(r: number): string {
-    const dl = ws.dl;
-    if (!dl || !dl.runHref) return "";
-    const s = forDl === dl ? cur[r - 1] : null;
-    return s ? s.href : dl.runHref[r - 1] || "";
-  }
-
-  // Test seam: per run, whether it shows a re-rendered image.
+  // Test seam: per run, whether it shows a patch.
   function runStyled(): boolean[] {
     const dl = ws.dl;
     const out: boolean[] = [];
@@ -509,7 +577,7 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
 
   function markSplitInDetail(on: boolean): void { splitInDetail = on; }
 
-  return { restyleRuns, runImage, runHref, runStyled, runSplit, markSplitInDetail };
+  return { restyleRuns, runPatch, runStyled, runSplit, markSplitInDetail };
 }
 
 // The run SVGs of a flagged payload (VW-33), or null when absent or the

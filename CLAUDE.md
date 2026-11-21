@@ -133,9 +133,12 @@ into the PNG, so each run also ships as SVG (`payload$flagged$svg`, VW-33):
 when per-key state (`ws.msFlags`/`msColor`, kept in every raster tier with a
 list, the detail tier included) touches a run's keys, `features/runStyle.ts`
 applies it to a copy of the run's SVG (hidden: removed; a condition colour:
-inline fill/stroke; dim/mute: opacity), rasterises that as an image and
-`runImage()`/`runHref()` hand it to `paintList` and the detail run `<image>`s
-instead of the PNG (`restyleRuns()`, from `updateMarkStates()`).
+inline fill/stroke; dim/mute: opacity) and rasterises that as an image
+(`restyleRuns()`, from `updateMarkStates()`). Only the touched marks' boxes
+(grown by any mark whose box meets them) take it (VW-37): `runPatch()` is
+the PNG with those boxes cut plus the restyled image inside them, drawn by
+`paintRun` (`raster.ts`) and the detail tier's `patchInto`; every other mark
+keeps vellum's pixels, and a lone hidden mark just has its box cleared.
 Under axis zoom (unless `zoom_marks = "scale"`), a run's text and point
 glyphs keep their pixel size (VW-35): `runSplit()` (`runStyle.ts`) takes the
 run apart per zoomed panel into constant-size marks (each a cell of the run

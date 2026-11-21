@@ -7,7 +7,7 @@ import { DL_POINT, DL_RECT, fillGradient, traceClipPath, tracePoint, traceShape 
 import { MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
 import type { Affine, DisplayList } from "../dlist";
 import type { WidgetFns, WidgetState } from "../state";
-import type { RunSplit } from "./runStyle";
+import type { RunPatch, RunSplit } from "./runStyle";
 import { isZoomedIn, userToCanvas } from "../viewbox";
 
 export function rasterFeature(
@@ -485,6 +485,43 @@ export function rasterFeature(
       return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
     };
     let op = ""; // a blend mode drawn straight onto ctx (no sink)
+    // Run r's PNG through A, after `clip` (which also sets the composite
+    // operation) -- or, with a patch (VW-37, runStyle.ts runPatch), the PNG
+    // with the patch's boxes cleared (on a scratch layer), then the patch's
+    // re-rendered run inside those boxes.
+    const paintRun = function (r: number, A: Affine, clip: (x: CanvasRenderingContext2D) => void, patch: RunPatch | null): void {
+      const png = dl.runImgs![r - 1];
+      if (!png) return;
+      if (!patch || !patch.cut.length) {
+        ctx.save(); clip(ctx); ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by); ctx.drawImage(png, 0, 0, dl.runW, dl.runH); ctx.restore();
+        return;
+      }
+      const cut = patch.cut;
+      const lc = layerPool.pop() || document.createElement("canvas");
+      if (lc.width !== W || lc.height !== H) { lc.width = W; lc.height = H; }
+      const x = typeof lc.getContext === "function" ? lc.getContext("2d") : null;
+      if (x) {
+        x.setTransform(1, 0, 0, 1, 0, 0);
+        x.clearRect(0, 0, W, H);
+        x.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+        x.drawImage(png, 0, 0, dl.runW, dl.runH);
+        for (let q = 0; q < cut.length; q += 4) x.clearRect(cut[q], cut[q + 1], cut[q + 2] - cut[q], cut[q + 3] - cut[q + 1]);
+        ctx.save(); clip(ctx); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(lc, 0, 0); ctx.restore();
+      }
+      layerPool.push(lc);
+      if (patch.fill) {
+        ctx.save(); clip(ctx);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.beginPath();
+        for (let q = 0; q < cut.length; q += 4) {
+          ctx.rect(A.ax * cut[q] + A.bx, A.ay * cut[q + 1] + A.by, A.ax * (cut[q + 2] - cut[q]), A.ay * (cut[q + 3] - cut[q + 1]));
+        }
+        ctx.clip();
+        ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+        ctx.drawImage(patch.fill.img, 0, 0, dl.runW, dl.runH);
+        ctx.restore();
+      }
+    };
     // A run taken apart for zoomed panel p (VW-35, runStyle.ts runSplit):
     // the rest of the run scaled through the panel's transform, then each
     // constant-size mark's cell at its anchor (mapped through the transform)
@@ -496,40 +533,7 @@ export function rasterFeature(
         x.beginPath(); x.rect(c[0], c[1], c[2] - c[0], c[3] - c[1]); x.clip();
         if (op) x.globalCompositeOperation = op as GlobalCompositeOperation;
       };
-      const R = sp.rest;
-      if (R && R.png) {
-        const png = dl.runImgs![r - 1];
-        if (R.cut && R.cut.length) {
-          // the PNG on a scratch layer with the constant marks' boxes cleared
-          const lc = layerPool.pop() || document.createElement("canvas");
-          if (lc.width !== W || lc.height !== H) { lc.width = W; lc.height = H; }
-          const x = typeof lc.getContext === "function" ? lc.getContext("2d") : null;
-          if (x) {
-            x.setTransform(1, 0, 0, 1, 0, 0);
-            x.clearRect(0, 0, W, H);
-            x.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
-            x.drawImage(png, 0, 0, dl.runW, dl.runH);
-            for (let q = 0; q < R.cut.length; q += 4) x.clearRect(R.cut[q], R.cut[q + 1], R.cut[q + 2] - R.cut[q], R.cut[q + 3] - R.cut[q + 1]);
-            ctx.save(); clipTo(ctx); ctx.drawImage(lc, 0, 0); ctx.restore();
-          }
-          layerPool.push(lc);
-        } else {
-          ctx.save(); clipTo(ctx); ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by); ctx.drawImage(png, 0, 0, dl.runW, dl.runH); ctx.restore();
-        }
-      }
-      if (R && R.fill) {
-        ctx.save(); clipTo(ctx);
-        if (R.cut) {
-          ctx.beginPath();
-          for (let q = 0; q < R.cut.length; q += 4) {
-            ctx.rect(A.ax * R.cut[q] + A.bx, A.ay * R.cut[q + 1] + A.by, A.ax * (R.cut[q + 2] - R.cut[q]), A.ay * (R.cut[q + 3] - R.cut[q + 1]));
-          }
-          ctx.clip();
-        }
-        ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
-        ctx.drawImage(R.fill.img, 0, 0, dl.runW, dl.runH);
-        ctx.restore();
-      }
+      if (sp.rest) paintRun(r, A, clipTo, sp.rest);
       ctx.save(); clipTo(ctx);
       const kx = L.kx, ky = L.ky;
       for (let q = 0; q < sp.marks.length; q++) {
@@ -543,25 +547,22 @@ export function rasterFeature(
       ctx.restore();
     };
     const drawRun = function (r: number): void {
-      // its PNG, or re-rendered with the state of its marks (VW-33)
-      const img = ws.fx.runImage(r);
-      if (!img) return;
+      // its PNG, patched with the state of its marks (VW-37)
+      const patch = ws.fx.runPatch(r);
       const one = function (A: Affine, pc: number[] | null, boxes?: number[]): void {
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        if (pc) { ctx.beginPath(); ctx.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]); ctx.clip(); }
-        if (boxes) {
-          ctx.beginPath();
-          for (let q = 0; q < boxes.length; q += 4) {
-            const x0 = A.ax * (boxes[q] - RUN_BOX_PAD) + A.bx, y0 = A.ay * (boxes[q + 1] - RUN_BOX_PAD) + A.by;
-            ctx.rect(x0, y0, A.ax * (boxes[q + 2] - boxes[q] + 2 * RUN_BOX_PAD), A.ay * (boxes[q + 3] - boxes[q + 1] + 2 * RUN_BOX_PAD));
+        paintRun(r, A, function (x: CanvasRenderingContext2D): void {
+          x.setTransform(1, 0, 0, 1, 0, 0);
+          if (pc) { x.beginPath(); x.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]); x.clip(); }
+          if (boxes) {
+            x.beginPath();
+            for (let q = 0; q < boxes.length; q += 4) {
+              const x0 = A.ax * (boxes[q] - RUN_BOX_PAD) + A.bx, y0 = A.ay * (boxes[q + 1] - RUN_BOX_PAD) + A.by;
+              x.rect(x0, y0, A.ax * (boxes[q + 2] - boxes[q] + 2 * RUN_BOX_PAD), A.ay * (boxes[q + 3] - boxes[q + 1] + 2 * RUN_BOX_PAD));
+            }
+            x.clip();
           }
-          ctx.clip();
-        }
-        ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
-        if (op) ctx.globalCompositeOperation = op as GlobalCompositeOperation;
-        ctx.drawImage(img, 0, 0, dl.runW, dl.runH);
-        ctx.restore();
+          if (op) x.globalCompositeOperation = op as GlobalCompositeOperation;
+        }, patch);
       };
       if (!anyPclip) { one(aff[0], null); return; }
       const hosted = runPanels[r];

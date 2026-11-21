@@ -6,6 +6,17 @@
   the full mark PNG. vellumplot doesn't emit such groups today; nothing changes
   in the runtime, which already composites any blend mode vellum reports.
 
+* **State on one flagged mark leaves the rest of its run untouched
+  (VW-37).** When a condition, filter, dimming or legend hide/mute touched a
+  mark drawn from a run image (VW-33), the browser re-rendered the whole run
+  from its SVG, so the run's other labels shifted slightly against vellum's
+  rendering. Now only the touched marks' boxes (and those of marks
+  overlapping them) are re-rendered and composited over the run's PNG; every
+  other mark keeps vellum's pixels. A hidden mark with nothing else in its box
+  is simply cleared, with no re-render. Also, constant-size marks under axis
+  zoom (VW-35) take their slices from a full-size copy of the run PNG, so the
+  first frame after a zoom is as sharp as later ones.
+
 * **Flagged text and glyphs keep their size under axis zoom (VW-35).** In
   raster mode, the marks drawn from a run image (keyed text, masked or
   patterned point glyphs; VW-30) used to grow with the zoom, while SVG mode
