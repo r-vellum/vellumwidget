@@ -1,5 +1,15 @@
 # vellumwidget 0.15.0.9000
 
+* **Flagged text and glyphs keep their size under axis zoom (VW-35).** In
+  raster mode, the marks drawn from a run image (keyed text, masked or
+  patterned point glyphs; VW-30) used to grow with the zoom, while SVG mode
+  keeps text and glyphs at their pixel size. In the mid and detail tiers and
+  in exports, each such mark is now drawn at its anchor at constant size: from
+  its slice of vellum's run PNG, or, where marks overlap or a condition
+  restyles one, from an atlas the browser rasterises once from the run's SVG.
+  The rest of a run (masked shapes, say) still scales with the zoom.
+  `render_options(zoom_marks = "scale")` keeps the old behaviour.
+
 * **Facets panned past their data stay empty in raster mode (VW-36).**
   Panning isn't clamped, so under axis zoom a facet or composition cell can
   be panned beyond its own data. In raster mode each panel drew the whole

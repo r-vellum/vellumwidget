@@ -647,3 +647,39 @@ test_that("VW-36: a facet panned past its own data shows none of its neighbour's
     expect_lt(red_in_a(b), 0.001)
   }
 })
+
+test_that("VW-35: flagged text keeps its pixel size under axis zoom in the mid and detail tiers", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
+  set.seed(4)
+  df <- data.frame(x = runif(200), y = runif(200), id = paste0("p", 1:200))
+  lab <- data.frame(x = 0.5, y = 0.5, l = "MMMM", id = "L1")
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id, color = "grey80") |>
+    vellumplot::mark_text(data = lab, x = x, y = y, label = l, data_id = id, size = 14, color = "blue")
+  # width (px) of the label's blue ink in the panel
+  ink_w <- function(b) {
+    r <- panel_rect(b, 1)
+    shot <- b$Page$captureScreenshot(format = "png", clip = list(x = r[1] + 2, y = r[2] + 2, width = r[3] - 4, height = r[4] - 4, scale = 1))
+    img <- png::readPNG(jsonlite::base64_dec(shot$data))
+    dark <- which(colSums(img[, , 1] < 0.4 & img[, , 2] < 0.4 & img[, , 3] > 0.6) > 0)
+    if (length(dark)) diff(range(dark)) + 1 else 0
+  }
+  for (dm in c(0, 5000)) {
+    w <- as_widget(p, elementId = "w1", render = render_options(mode = "raster", detail_marks = dm))
+    pn <- w$x$panels[[1]]
+    b <- open_widget(w)
+    ev <- function(js) b$Runtime$evaluate(js)$result$value
+    w1 <- ink_w(b)
+    v <- as.numeric(strsplit(ev("document.querySelector('#w1 svg').getAttribute('viewBox')"), "[ ,]+")[[1]])
+    cx <- (pn$px0 + pn$px1) / 2
+    cy <- (pn$py0 + pn$py1) / 2
+    z <- 4
+    ev(sprintf("HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f})", cx - (cx - v[1]) / z, cy - (cy - v[2]) / z, v[3] / z, v[4] / z))
+    Sys.sleep(0.8)
+    expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), if (dm) "detail" else "mid")
+    w4 <- ink_w(b)
+    expect_gt(w1, 10)
+    expect_lt(abs(w4 / w1 - 1), 0.15)
+  }
+})

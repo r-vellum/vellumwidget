@@ -14,6 +14,7 @@ import { DL_FLAG_PICK, DL_POINT, DL_RECT, isLineGlyph, markerRing } from "../dli
 import type { DisplayList } from "../dlist";
 import { cssEscape } from "../css";
 import type { WidgetFns, WidgetState } from "../state";
+import type { RunSplit } from "./runStyle";
 import { isZoomedIn } from "../viewbox";
 
 export const DETAIL_DEFAULT = 3000;
@@ -355,10 +356,123 @@ export function detailFeature(
       D.el.appendChild(cp);
       return id;
     };
+    // Constant-size flagged marks (VW-35): in an axis-zoomed panel a run is
+    // taken apart (runStyle.ts runSplit). The rest of it is the run's PNG
+    // with the constant marks' boxes masked out (plus, inside them, the rest
+    // re-rendered from its SVG), scaled by the pan group; each constant mark
+    // is its cell of the PNG or the atlas in a nested <svg> viewport,
+    // counter-scaled about its anchor from the pan group's --vw-ix/--vw-iy,
+    // as SVG mode's text (constantText) and glyphs are.
+    const cstPanel = function (p: number): boolean {
+      if (!panHost[p] || !ws.axisZoomActive || ws.opts.zoomMarks === "scale") return false;
+      return ws.azPanels.some((a) => a.p.name === dl.panels[p - 1]);
+    };
+    const constAt: Record<number, { ax: number; ay: number }> = {}; // key id -> anchor, for the stand-ins
+    const counter = function (el: Element, ax: number, ay: number): void {
+      const st = (el as SVGElement).style;
+      st.setProperty("transform-box", "view-box");
+      st.setProperty("transform-origin", "0px 0px");
+      st.setProperty("transform", "translate(" + ax + "px," + ay + "px) scale(var(--vw-ix,1),var(--vw-iy,1)) translate(" + -ax + "px," + -ay + "px)");
+    };
+    const imgDef = function (id: string, href: string, w: number, h: number): string {
+      if (!D!.el.querySelector("#" + id)) {
+        const im = document.createElementNS(SVGNS, "image");
+        im.setAttribute("id", id);
+        im.setAttribute("x", "0"); im.setAttribute("y", "0");
+        im.setAttribute("width", String(w)); im.setAttribute("height", String(h));
+        im.setAttribute("preserveAspectRatio", "none");
+        im.setAttribute("href", href);
+        D!.el.appendChild(im);
+      }
+      return id;
+    };
+    const rectsInto = function (el: Element, cut: number[], fill?: string): void {
+      for (let q = 0; q < cut.length; q += 4) {
+        const rc = document.createElementNS(SVGNS, "rect");
+        rc.setAttribute("x", String(cut[q])); rc.setAttribute("y", String(cut[q + 1]));
+        rc.setAttribute("width", String(cut[q + 2] - cut[q])); rc.setAttribute("height", String(cut[q + 3] - cut[q + 1]));
+        if (fill) rc.setAttribute("fill", fill);
+        el.appendChild(rc);
+      }
+    };
+    let usedSplit = false;
+    const placeSplit = function (p: number, r: number, sp: RunSplit): void {
+      const g = document.createElementNS(SVGNS, "g");
+      g.setAttribute("class", "vellumwidget-detail-run vellumwidget-detail-split");
+      g.setAttribute("data-run", String(r));
+      const mode = dl.runBlend ? dl.runBlend[r - 1] : "normal";
+      if (mode && mode !== "normal") (g as unknown as SVGElement).style.setProperty("mix-blend-mode", mode);
+      const cp = ws.fx.panelClip(dl.panels[p - 1]);
+      if (cp) g.setAttribute("clip-path", cp);
+      const R = sp.rest;
+      if (R && R.png) {
+        const u = document.createElementNS(SVGNS, "use");
+        u.setAttribute("href", "#" + imgDef(D!.pre + "runpng" + r, dl.runHref![r - 1], dl.runW, dl.runH));
+        if (R.cut && R.cut.length) {
+          const mid = D!.pre + "runcut" + r;
+          if (!D!.el.querySelector("#" + mid)) {
+            const mk = document.createElementNS(SVGNS, "mask");
+            mk.setAttribute("id", mid);
+            mk.setAttribute("maskUnits", "userSpaceOnUse");
+            mk.setAttribute("x", "0"); mk.setAttribute("y", "0");
+            mk.setAttribute("width", String(dl.runW)); mk.setAttribute("height", String(dl.runH));
+            rectsInto(mk, [0, 0, dl.runW, dl.runH], "#fff");
+            rectsInto(mk, R.cut, "#000");
+            D!.el.appendChild(mk);
+          }
+          u.setAttribute("mask", "url(#" + mid + ")");
+        }
+        g.appendChild(u);
+      }
+      if (R && R.fill) {
+        const u = document.createElementNS(SVGNS, "use");
+        u.setAttribute("href", "#" + imgDef(D!.pre + "runfill" + r, R.fill.href, dl.runW, dl.runH));
+        if (R.cut) {
+          const cid = D!.pre + "runin" + r;
+          if (!D!.el.querySelector("#" + cid)) {
+            const c = document.createElementNS(SVGNS, "clipPath");
+            c.setAttribute("id", cid);
+            c.setAttribute("clipPathUnits", "userSpaceOnUse");
+            rectsInto(c, R.cut);
+            D!.el.appendChild(c);
+          }
+          u.setAttribute("clip-path", "url(#" + cid + ")");
+        }
+        g.appendChild(u);
+      }
+      for (let q = 0; q < sp.marks.length; q++) {
+        const m = sp.marks[q];
+        if (m.p !== p) continue;
+        constAt[m.k] = { ax: m.ax, ay: m.ay };
+        if (!m.src) continue;
+        const id = m.atlas ? imgDef(D!.pre + "atlas" + r, m.href, m.fw, m.fh) : imgDef(D!.pre + "runpng" + r, m.href, m.fw, m.fh);
+        const w = m.x1 - m.x0, h = m.y1 - m.y0;
+        const box = document.createElementNS(SVGNS, "svg");
+        box.setAttribute("x", String(m.x0)); box.setAttribute("y", String(m.y0));
+        box.setAttribute("width", String(w)); box.setAttribute("height", String(h));
+        box.setAttribute("viewBox", m.sx + " " + m.sy + " " + w + " " + h);
+        box.setAttribute("preserveAspectRatio", "none");
+        const u = document.createElementNS(SVGNS, "use");
+        u.setAttribute("href", "#" + id);
+        box.appendChild(u);
+        const cg = document.createElementNS(SVGNS, "g");
+        cg.setAttribute("class", "vellumwidget-detail-const");
+        counter(cg, m.ax, m.ay);
+        cg.appendChild(box);
+        g.appendChild(cg);
+      }
+      groupFor(p).appendChild(g);
+      if (chains[p]) chains[p].length = 0;
+    };
     const placeRun = function (p: number, r: number): void {
       const tag = (panHost[p] ? p : "root") + ":" + r;
       if (placed[tag] || !D || !dl.runHref) return;
       placed[tag] = true;
+      // (tried here: once a split's images load, the tier is rebuilt)
+      const cp0 = cstPanel(p);
+      if (cp0) usedSplit = true;
+      const sp = cp0 ? ws.fx.runSplit(r) : null;
+      if (sp) { placeSplit(p, r, sp); return; }
       if (!runIds[r]) {
         const im = document.createElementNS(SVGNS, "image");
         runIds[r] = D.pre + "run" + r;
@@ -418,6 +532,8 @@ export function detailFeature(
         n.setAttribute("fill", "#000"); n.setAttribute("fill-opacity", "0");
         n.removeAttribute("stroke"); n.removeAttribute("stroke-opacity"); n.removeAttribute("stroke-dasharray");
         n.setAttribute("class", "vellumwidget-detail-proxy");
+        const ca = constAt[dl.key[i]];
+        if (ca) counter(n, ca.ax, ca.ay); // the stand-in sits where its constant-size mark shows
         groupFor(p).appendChild(n);
         const k = dl.keys[dl.key[i]];
         (ws.nodesByKey[k] = ws.nodesByKey[k] || []).push(n);
@@ -431,6 +547,7 @@ export function detailFeature(
       (ws.nodesByKey[k] = ws.nodesByKey[k] || []).push(n);
       if (!seen[k]) { seen[k] = true; ws.detailKeys.push(k); }
     }
+    ws.fx.markSplitInDetail(usedSplit);
     const was = ws.markTier;
     ws.markTier = "detail";
     ws.calib = null;
@@ -454,6 +571,7 @@ export function detailFeature(
   function leaveDetail(): void {
     if (ws.markTier !== "detail") return;
     dropNodes();
+    ws.fx.markSplitInDetail(false);
     ws.markTier = "mid";
     ws.calib = null;
     ws.hoverSig = "";
