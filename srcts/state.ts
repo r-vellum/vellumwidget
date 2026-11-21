@@ -285,6 +285,8 @@ export interface WidgetFns {
   runStyled: () => boolean[];
   runSplit: (r: number) => RunSplit | null;
   markSplitInDetail: (on: boolean) => void;
+  constAnchor: (key: string) => { x: number; y: number } | null;
+  constBox: (e: ElemMeta) => (Bbox & { sx: number; sy: number }) | null;
   drawSelFeedback: () => void;
   refreshSelected: () => void;
   showMarksLayer: (on: boolean) => void;

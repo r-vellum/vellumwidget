@@ -1,5 +1,17 @@
 # vellumwidget 0.15.0.9000
 
+* **Constant-size marks are hit and ringed where they are drawn (VW-42).**
+  Under axis zoom, text and point glyphs keep their pixel size, but hover,
+  click picking and the hover and selection rings of raster mode's canvas
+  tiers used their record boxes scaled by the zoom: at 4x a label answered
+  the pointer far past its ink and its ring was four times too big. The hit
+  test and the rings now use each mark's box at its 1x size about its anchor
+  (a label's anchor from its run's SVG, a glyph's centre). The nearest-mark
+  fallback in SVG mode uses the same boxes. Known limit: a glyph cut by a
+  mask (`clip_layer()`) keeps its 1x cut in raster mode, where SVG mode
+  moves the mask edge with the zoom; brushing and lasso still test the
+  record boxes.
+
 * **Two layers' conditions on one selection keep apart (VP-72).** A point
   layer and a text layer each colouring by `condition(sel, ..., if_false)`
   shared one condition tag, so a non-selected point took the text layer's

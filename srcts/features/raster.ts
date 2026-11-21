@@ -785,16 +785,28 @@ export function rasterFeature(
 
   // A ring marking element `k`'s bbox, or null if it has no geometry. Drawn in the
   // overlay's viewBox space; `non-scaling-stroke` keeps it crisp under zoom.
-  function ringFor(k: string, cls: string): SVGCircleElement | null {
+  // A constant-size mark under axis zoom (VW-42) is ringed where it is drawn,
+  // at its pixel size: an ellipse whose radii undo the panel's scale, so it is
+  // a circle of the 1x radius on screen.
+  function ringFor(k: string, cls: string): SVGElement | null {
     const m = ws.meta[k];
     if (!m || !hasBbox(m)) return null;
-    const cx = (m.x0 + m.x1) / 2;
-    const cy = (m.y0 + m.y1) / 2;
+    const cb = ws.fx.constBox(m);
+    const b = cb || m;
+    const cx = (b.x0 + b.x1) / 2;
+    const cy = (b.y0 + b.y1) / 2;
     const r = Math.max(m.x1 - m.x0, m.y1 - m.y0) / 2 + 2;
-    const c = document.createElementNS(SVGNS, "circle") as SVGCircleElement;
+    let c: SVGElement;
+    if (cb) {
+      c = document.createElementNS(SVGNS, "ellipse") as SVGElement;
+      c.setAttribute("rx", String(r / cb.sx));
+      c.setAttribute("ry", String(r / cb.sy));
+    } else {
+      c = document.createElementNS(SVGNS, "circle") as SVGElement;
+      c.setAttribute("r", String(r));
+    }
     c.setAttribute("cx", String(cx));
     c.setAttribute("cy", String(cy));
-    c.setAttribute("r", String(r));
     c.setAttribute("class", cls);
     c.setAttribute("vector-effect", "non-scaling-stroke");
     return c;

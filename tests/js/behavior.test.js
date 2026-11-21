@@ -5759,7 +5759,42 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       "VW-35: a flagged glyph is its slice of the run PNG, at its centre under T and at constant size");
     ok(ci.length === 1 && ci[0].clip && ci[0].clip.length === 1 && ci[0].clip[0].join(",") === "20,10,160,80",
       "VW-35: ... clipped to the panel");
+    // VW-42: the glyph is hit where it is drawn: its 6 px disc about (80, 50)
+    // stays 6 screen px, so 3 scene px at 2x (a 1.5 radius in the frame the
+    // pointer is mapped into), not the record box
+    ok(Math.abs(c1.inst._test.distToKey(82.5, 50, "p2") - 1) < 1e-9,
+      "VW-42: a constant glyph's hit distance is to its constant-size disc [" + c1.inst._test.distToKey(82.5, 50, "p2") + "]");
+    ok(c1.inst._test.nearestKeyAt(82.5, 50, 0.5) === null && c1.inst._test.nearestKeyAt(81, 50, 0.5) === "p2",
+      "VW-42: ... so a pointer just outside it no longer picks it");
+    // ... and ringed there, at its 1x size: radius (6 / 2 + 2) screen px = 2.5 scene px
+    c1.inst._call("select", ["p2"]);
+    const ring = c1.el.querySelector(".vellumwidget-fb-sel");
+    ok(ring && ring.tagName.toLowerCase() === "ellipse" && ring.getAttribute("cx") === "80" && ring.getAttribute("cy") === "50" &&
+       ring.getAttribute("rx") === "2.5" && ring.getAttribute("ry") === "2.5",
+      "VW-42: the selection ring of a constant glyph keeps its 1x size under axis zoom");
     c1.restore();
+    // a start-anchored label (anchor 150, 50 from the run's SVG) keeps its
+    // size about the anchor: at 2x its box 150..170 x 45..55 is 150..160 x 47.5..52.5
+    {
+      const lab = [RUN_SVG[0], '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><text data-key="p4" x="150" y="50">lab</text></svg>'];
+      const c9 = mount({ panels: true, marks: GL, runSvg: lab, options: { axisZoom: true } });
+      c9.inst._test.setView({ x: 100, y: 25, w: 100, h: 50 }); c9.inst._test.evalTier();
+      const d1 = c9.inst._test.distToKey(158, 50, "p4"), d2 = c9.inst._test.distToKey(165, 50, "p4");
+      ok(d1 === 0 && Math.abs(d2 - 5) < 1e-9, "VW-42: a constant label's hit box shrinks about its anchor [" + d1 + "," + d2 + "]");
+      c9.inst._call("select", ["p4"]);
+      const r9 = c9.el.querySelector(".vellumwidget-fb-sel");
+      ok(r9 && r9.getAttribute("cx") === "155" && r9.getAttribute("rx") === "6", "VW-42: ... and its ring sits on the drawn label");
+      c9.restore();
+    }
+    // at 1x nothing changes: the record box, a circle ring
+    {
+      const c0 = mount({ panels: true, marks: GL, options: { axisZoom: true } });
+      c0.inst._call("select", ["p2"]);
+      const r0 = c0.el.querySelector(".vellumwidget-fb-sel");
+      ok(c0.inst._test.distToKey(82.5, 50, "p2") === 0 && (!r0 || (r0.tagName.toLowerCase() === "circle" && r0.getAttribute("r") === "5")),
+        "VW-42: at 1x the record box and ring are used as before");
+      c0.restore();
+    }
     // zoom_marks = "scale" keeps the run scaling with the zoom
     const c2 = mount({ panels: true, marks: GL, options: { axisZoom: true, zoomMarks: "scale" } });
     c2.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c2.inst._test.evalTier();
