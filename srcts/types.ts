@@ -294,7 +294,7 @@ export interface ViewBox {
 // for an x axis, anchor x for a y axis) and the text alignment, scraped from the
 // static axis group vellum drew for that panel. `gap` > 0 when vellum wrapped the
 // static labels onto two lines (a long datetime label): the line spacing to reuse.
-export interface AxisAnchor { pos: number; anchor: string; baseline: string; gap: number; }
+export interface AxisAnchor { pos: number; anchor: string; baseline: string; gap: number; rot?: number; }
 // A secondary axis (sec_axis()/dup_axis()), read back from its static labels:
 // matched (primary native, secondary value) pairs, ascending in native, and the
 // label decoration to reuse (a shared prefix/suffix, thousands commas). The

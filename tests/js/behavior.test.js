@@ -2406,6 +2406,29 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(wl && wl.getAttribute("text-anchor") === "middle" && wl.querySelector("tspan").textContent === "2020-01-01",
     "axis_zoom datetime: wrapped labels are centred, date on the first line");
 
+  // VW-41: rotated static tick labels (element_text(angle = 45, hjust = 1))
+  // re-tick rotated about their anchor, with vellum's own end anchoring.
+  const rotSvg = svgOne.replace(
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">x</text></g>',
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90) rotate(-45 20 4)" text-anchor="end" dominant-baseline="text-before-edge" font-size="12">x</text></g>');
+  const e3 = document.createElement("div");
+  document.body.appendChild(e3);
+  const rotW = widgetDef.factory(e3, 200, 100);
+  rotW.renderValue({
+    svg: rotSvg,
+    elements: { key: ["a"], x0: [100], y0: [50], x1: [102], y1: [52] },
+    panels: { name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90, y: yLin,
+      x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 } },
+    options: { axisZoom: true, zoom: true }
+  });
+  const rl = [...e3.querySelectorAll(".vellumwidget-retick-layer text")].filter((t) => Math.abs(parseFloat(t.getAttribute("y")) - 94) < 1e-6);
+  const rtr = rl.length ? rl[0].getAttribute("transform") : "";
+  ok(rl.length > 0 && rl.every((t) => /^rotate\(-45 [-\d.e]+ 94\)$/.test(t.getAttribute("transform") || "") &&
+       (t.getAttribute("transform") || "").indexOf(" " + t.getAttribute("x") + " ") > 0),
+    "axis_zoom: rotated static tick labels re-tick rotated about their own anchor (VW-41) [" + rtr + "]");
+  ok(rl.length > 0 && rl[0].getAttribute("text-anchor") === "end" && rl[0].getAttribute("dominant-baseline") === "text-before-edge",
+    "axis_zoom: rotated tick labels keep vellum's anchoring (VW-41)");
+
   // --- integration: multi-panel (facets) zoom together, each re-ticked
   const facetSvg =
     '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">' +
@@ -5047,7 +5070,9 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     '<g data-vellum-id="layer-1-point-g1" role="presentation"><circle data-key="a" cx="60" cy="50" r="3"/></g>' +
     '<g data-vellum-id="layer-2-rule-g2" role="presentation"><path class="rule" d="M20 30 L180 30" stroke="#f00" stroke-width="2"/></g>' +
     '<g data-vellum-id="layer-3-text-g3" role="presentation"><text class="note" x="40" y="20" transform="matrix(1 0 0 1 20 10)" font-size="10">note</text>' +
-    '<text class="rot" x="0" y="0" transform="rotate(-90 50 50)">r</text></g>' +
+    '<text class="rot" x="0" y="0" transform="rotate(-90 50 50)">r</text>' +
+    '<text class="mrot" x="40" y="20" transform="matrix(1 0 0 1 20 10) rotate(-40 40 20)" font-size="10">tilted</text>' +
+    '<text class="odd" x="0" y="0" transform="perspective(3)">p</text></g>' +
     '<g data-vellum-id="layer-4-point-g4" role="presentation"><circle class="up" cx="100" cy="60" r="5"/></g>' +
     '</g></g>' +
     '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">50</text></g>' +
@@ -5071,7 +5096,19 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(note.style.transformBox === "view-box" && /^translate\(60px, ?30px\) scale\(var\(--vw-ix/.test(note.style.transform) &&
      /translate\(-60px, ?-30px\) matrix\(1, ?0, ?0, ?1, ?20, ?10\)$/.test(note.style.transform),
     "furniture: annotation text counter-scales about its anchor and keeps its placement");
-  ok(!f.q("text.rot").style.transform, "furniture: text with a transform it can't restate (rotate) is left alone");
+  // VW-41: a rotated label (vellum's `matrix(...) rotate(a x y)`) counter-scales
+  // about its anchor and keeps its rotation: the whole list is composed.
+  const rotT = f.q("text.rot").style.transform;
+  ok(/^translate\(0px, ?100px\) scale\(var\(--vw-ix/.test(rotT) && /translate\(-?0px, ?-100px\) matrix\(/.test(rotT),
+    "furniture: a bare rotate() text counter-scales about its rotated anchor (VW-41) [" + rotT + "]");
+  const mrot = f.q("text.mrot").style.transform;
+  const mm = /matrix\(([^)]*)\)$/.exec(mrot);
+  const mv = mm ? mm[1].split(",").map(Number) : [];
+  const c40 = Math.cos(40 * Math.PI / 180), s40 = Math.sin(40 * Math.PI / 180);
+  ok(/^translate\(60px, ?30px\) scale\(var\(--vw-ix/.test(mrot) && mv.length === 6 &&
+     Math.abs(mv[0] - c40) < 1e-9 && Math.abs(mv[1] + s40) < 1e-9 && Math.abs(mv[2] - s40) < 1e-9 && Math.abs(mv[3] - c40) < 1e-9,
+    "furniture: matrix(...) rotate(...) text keeps its rotation under the counter-scale (VW-41)");
+  ok(!f.q("text.odd").style.transform, "furniture: text with a transform it can't read is left alone");
   const up = f.q("circle.up");
   ok(/scale\(var\(--vw-ix/.test(up.style.transform) && up.style.transformBox === "fill-box" && !up.hasAttribute("vector-effect"),
     "furniture: an unkeyed glyph layer keeps its pixel size");

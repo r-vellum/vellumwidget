@@ -8,6 +8,17 @@
   (`"<sel>:<aes>@<layer>"` for such layers), and falls back to
   `"<sel>:<aes>"` for an older vellumplot.
 
+* **Rotated text keeps its rotation under axis zoom (VW-41).** In SVG mode,
+  with axis zoom active (even at 1x), rotated `mark_text(angle =)` labels
+  and rotated annotation text were drawn unrotated: the constant-size text
+  code read only the `matrix()` of vellum's `matrix(...) rotate(...)`
+  transform. The whole transform list is now composed, so a label keeps its
+  rotation and still holds its pixel size about its anchor. Rotated axis
+  tick labels (`theme(axis.text.x = element_text(angle =))`) are re-ticked
+  rotated, with vellum's anchoring, in SVG and raster mode alike, instead of
+  flat and centred; exports follow. Raster mode's text marks were already
+  rotated (they are images).
+
 * **Compact coordinates in raster mode (VR-18).** With a vellum whose
   `scene_display_list()` takes `precision`, the display list's coordinates
   ship quantised: each column (point centres and radii, rects, path
