@@ -2,6 +2,13 @@
 
 ## vellumwidget 0.14.1.9000
 
+- **Faster raster widget builds (VW-39).** The legend membership (and
+  the condition and filter tags) of a raster widget is built in its
+  final, flat form instead of as one list entry per mark that was then
+  flattened again. Building a 200,000-point scatter with a colour legend
+  went from 1.12 s to 0.99 s, and 1,000,000 points from 4.7 s to 4.1 s.
+  The payload is unchanged.
+
 - **Smaller raster payloads: each key ships once (VR-22).** With a
   vellum whose `scene_display_list()` takes `keys =` (feature-detected),
   the display list’s records point into the element table’s keys instead
