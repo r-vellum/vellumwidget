@@ -54,6 +54,38 @@ jobs:
           http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: true
 
+      # X-9: a PR that needs an unmerged vellum or vellumplot branch says so
+      # with a line `vellum-ref: <branch, tag or sha>` (or `vellumplot-ref:`)
+      # in its description; this step points that `Remotes:` entry at the ref,
+      # in this checkout only (nothing is committed). The body is read live,
+      # so editing it and re-running the job picks the change up. Without the
+      # line, on pushes and nightly, or when the ref no longer exists (the
+      # branch was merged and deleted), the build uses the repos' main. See
+      # CONTRIBUTING.md.
+      - name: Dependency refs from the PR description
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          body=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.body // ""' | tr -d '\r')
+          for pkg in vellum vellumplot; do
+            ref=$(printf '%s\n' "$body" | sed -n "s/^[[:space:]]*$pkg-ref:[[:space:]]*\([^[:space:]]*\)[[:space:]]*\$/\1/p" | head -n 1)
+            [ -n "$ref" ] || continue
+            if ! printf '%s' "$ref" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$'; then
+              echo "::error::$pkg-ref '$ref' is not a valid git ref name"
+              exit 1
+            fi
+            if ! git ls-remote --exit-code "https://github.com/r-vellum/$pkg" "$ref" > /dev/null &&
+               ! printf '%s' "$ref" | grep -Eq '^[0-9a-f]{7,40}$'; then
+              echo "::warning::$pkg-ref '$ref' is not on r-vellum/$pkg (merged and deleted?): building against its main"
+              continue
+            fi
+            sed -i -E "s#r-vellum/$pkg([,[:space:]]|\$)#r-vellum/$pkg@$ref\1#" DESCRIPTION
+            echo "::notice::Building against r-vellum/$pkg@$ref (from the PR description)"
+          done
+          sed -n '/^Remotes:/,/^[^[:space:]]/p' DESCRIPTION
+
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: any::rcmdcheck
