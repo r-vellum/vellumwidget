@@ -299,7 +299,8 @@ as_widget <- function(
       model,
       panel_names,
       render$max_marks,
-      keys = elements$key
+      keys = elements$key,
+      precision = render$precision
     )
     # The mixed tier (VW-30): the marks the display list flags, as one PNG per
     # run in paint order, so the runtime draws the rest exactly around them.
@@ -1585,6 +1586,19 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     "keys" %in% names(formals(getExportedValue("vellum", "scene_display_list")))
 }
 
+# Can it ship the geometry as quantised integer columns (`precision =`,
+# VR-18)?
+.display_list_precision_supported <- function() {
+  .display_list_keys_supported() &&
+    "precision" %in% names(formals(getExportedValue("vellum", "scene_display_list")))
+}
+
+# The coordinate error `render_options(precision = "compact")` asks vellum
+# for, in device px: half the 0.01 px grid of vellum's SVG coordinates, so
+# the display list's marks are as precise as SVG mode's and as the axes and
+# gridlines drawn around them (16 bits for a column up to 655 px across).
+.COMPACT_COORD_ERROR <- 0.005
+
 # Does it list gradients, path clips and opacity groups exactly (display list
 # version 2, VW-23)? Older vellum has no `version` argument.
 .display_list_v2_supported <- function() {
@@ -1709,8 +1723,17 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # older vellum, or above `max_marks` (with a message: the list would be big,
 # and a plot that size reads better as density). `keys`: the element table's
 # key column; with a vellum that takes it (VR-22) the records index it
-# (`keys_given`) instead of a key table of the list's own.
-.raster_display_list <- function(scene, model, panels, max_marks, keys = NULL) {
+# (`keys_given`) instead of a key table of the list's own. `precision`
+# (`render_options()`): `"compact"` asks a vellum that can (VR-18) for
+# quantised coordinates; `"f32"`, or an older vellum, ships floats.
+.raster_display_list <- function(
+  scene,
+  model,
+  panels,
+  max_marks,
+  keys = NULL,
+  precision = "compact"
+) {
   if (!.display_list_supported()) {
     return(NULL)
   }
@@ -1731,7 +1754,19 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     ))
     return(NULL)
   }
-  if (!is.null(keys) && length(keys) && .display_list_keys_supported()) {
+  given <- !is.null(keys) && length(keys) && .display_list_keys_supported()
+  # (A vellum with `precision` has `keys` and version 2 too.)
+  if (identical(precision, "compact") && .display_list_precision_supported()) {
+    return(vellum::scene_display_list(
+      scene,
+      what = "keyed",
+      panels = panels,
+      version = 2L,
+      keys = if (given) keys,
+      precision = .COMPACT_COORD_ERROR
+    ))
+  }
+  if (given) {
     return(vellum::scene_display_list(
       scene,
       what = "keyed",
@@ -1763,6 +1798,12 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     return(rep(col$rle$values, col$rle$lengths))
   }
   raw <- base64enc::base64decode(col$data)
+  if (!is.null(col$step)) {
+    # Quantised coordinates (VR-18): lo + u * step, u of 1, 2 or 3 bytes.
+    w <- switch(col$type, u8 = 1L, u16 = 2L, u24 = 3L)
+    u <- colSums(matrix(as.integer(raw), nrow = w) * 256^(seq_len(w) - 1L))
+    return(col$lo + u * col$step)
+  }
   switch(
     col$type,
     f32 = readBin(raw, "double", n, size = 4, endian = "little"),

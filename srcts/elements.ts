@@ -12,9 +12,13 @@ export function asColumn<T>(v: T[] | T | null | undefined): T[] {
 
 // One encoded numeric column: `list(type, n, data | const | seq | rle)`.
 export interface DLColumn {
-  type: "f32" | "u8" | "u16" | "u32";
+  type: "f32" | "u8" | "u16" | "u24" | "u32";
   n: number;
   data?: string;
+  // Quantised coordinates (VR-18): value i is `lo + u[i] * step`, `u` the
+  // little-endian unsigned integers of the type's width in `data`.
+  lo?: number;
+  step?: number;
   bits?: number; // bit-packed `data`: each value in `bits` bits, LSB first (VW-38)
   const?: number;
   seq?: number[];
@@ -49,6 +53,16 @@ export function dlColumn(c: DLColumn | null | undefined): Float32Array | Uint8Ar
     return a;
   }
   const bytes = b64bytes(c.data || "");
+  if (c.step != null) {
+    // Quantised coordinates (VR-18): integers of 1, 2 or 3 bytes on the grid
+    // `lo + u * step`, decoded to floats (computed in f64, stored as f32).
+    const w = c.type === "u8" ? 1 : c.type === "u16" ? 2 : 3;
+    const lo = Number(c.lo) || 0, step = Number(c.step), a = new Float32Array(n);
+    if (w === 1) for (let i = 0; i < n; i++) a[i] = lo + bytes[i] * step;
+    else if (w === 2) for (let i = 0, p = 0; i < n; i++, p += 2) a[i] = lo + (bytes[p] | (bytes[p + 1] << 8)) * step;
+    else for (let i = 0, p = 0; i < n; i++, p += 3) a[i] = lo + (bytes[p] | (bytes[p + 1] << 8) | (bytes[p + 2] << 16)) * step;
+    return a;
+  }
   if (c.bits) {
     const k = Number(c.bits), a = make(n);
     let pos = 0;

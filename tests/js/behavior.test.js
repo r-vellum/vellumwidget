@@ -4543,6 +4543,36 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   const EK2 = ["legend:a", "p1", "p2", "p3", "p4", "p1"];
   const t2 = mountKeyed(mkDl(6, u8([1, 2, 3, 4, 1]), []), EK2);
   ok(t2.inst._test.keyIds(["p1"]).join(",") === "1" && t2.inst._test.displayListSize() === 5, "VR-22: a repeated element key maps to its first position");
+
+  // ---- VR-18: quantised coordinates (lo + u * step) ----
+  // Quantise like vellum: within the column's range on 2^bits - 1 steps.
+  const quant = (xs, bits) => {
+    const lo = Math.min(...xs), hi = Math.max(...xs), top = 2 ** bits - 1, step = (hi - lo) / top;
+    const w = bits / 8, bytes = Buffer.alloc(xs.length * w);
+    xs.forEach((x, i) => { const u = Math.round((x - lo) / step); for (let b = 0; b < w; b++) bytes[i * w + b] = (u >> (8 * b)) & 255; });
+    return { type: bits === 8 ? "u8" : bits === 16 ? "u16" : "u24", n: xs.length, lo: lo, step: step, data: bytes.toString("base64") };
+  };
+  const xsq = [60, 64.3, 62.123, 170.98765, 13.5];
+  for (const bits of [8, 16, 24]) {
+    const qc = quant(xsq, bits), got = T3.dlColumn(qc);
+    ok(got instanceof Float32Array && got.length === 5 && xsq.every((x, i) => Math.abs(got[i] - x) <= qc.step / 2 + 1e-4),
+      "VR-18: a " + qc.type + " quantised column decodes to floats within half a step");
+  }
+  ok(T3.dlColumn({ type: "u16", n: 3, lo: 10, step: 0.5, data: b64(Uint16Array, [0, 1, 65535]) }).join() === "10,10.5,32777.5",
+    "VR-18: lo + u * step, the top of the u16 range included");
+  ok(T3.dlColumn({ type: "u24", n: 2, lo: -1, step: 1, data: Buffer.from([0, 0, 0, 255, 255, 255]).toString("base64") }).join() === "-1,16777214",
+    "VR-18: u24 reads three little-endian bytes per value");
+  // A list with quantised point and rect columns decodes and hit-tests as the f32 one.
+  const qDl = mkDl(6, { type: "u8", n: 5, seq: [1, 1] }, []);
+  qDl.point.cx = quant([60, 64, 62, 170], 16); qDl.point.cy = quant([50, 50, 54, 50], 16);
+  qDl.rect.x = { type: "f32", n: 1, const: 66 };
+  const fq = T3.decodeDisplayList(qDl, EK), ff = T3.decodeDisplayList(mkDl(6, { type: "u8", n: 5, seq: [1, 1] }, []), EK);
+  ok(fq && ff && Array.from(fq.cx).every((v, i) => Math.abs(v - ff.cx[i]) < 0.002) && Array.from(fq.by1).every((v, i) => Math.abs(v - ff.by1[i]) < 0.002),
+    "VR-18: a quantised list decodes to the f32 list's geometry and bboxes");
+  const tq = mountKeyed(qDl, EK, { detailMarks: 4 });
+  ok(tq.inst._test.displayListSize() === 5 && tq.inst._test.nearestKeyAt(60.5, 50, 10) === "p1" &&
+     tq.inst._test.brushKeysIn({ x0: 55, y0: 45, x1: 65, y1: 51 }).sort().join(",") === "p1,p2",
+    "VR-18: the widget hit-tests a quantised list like the f32 one");
 }
 
 // ============ VW-22: conditions / filters in the node-less raster tiers ============
