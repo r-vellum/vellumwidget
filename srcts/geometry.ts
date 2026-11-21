@@ -171,3 +171,77 @@ export function unionBbox(elems: ElemMeta[], keys: Record<string, boolean>): Bbo
   }
   return out;
 }
+
+// ---- SVG transform lists (VW-41) -------------------------------------------
+//
+// vellum places a rotated label with a transform LIST, `matrix(...) rotate(a
+// cx cy)`. Code that restates a node's transform (as a CSS transform, or to
+// find its anchor) has to compose the whole list, or the rotation is lost.
+
+export type Affine6 = [number, number, number, number, number, number];
+
+function mul6(m: Affine6, n: Affine6): Affine6 {
+  return [
+    m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1],
+    m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3],
+    m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]
+  ];
+}
+
+// An SVG `transform` attribute composed into one affine (a, b, c, d, e, f),
+// applied right to left as SVG does. `null` for an empty attribute or one this
+// can't read (an unknown function, a non-finite number).
+export function parseTransformList(t: string | null | undefined): Affine6 | null {
+  const s = (t || "").trim();
+  if (!s) return null;
+  const re = /([a-zA-Z]+)\s*\(([^)]*)\)/g;
+  let m: Affine6 = [1, 0, 0, 1, 0, 0];
+  let any = false, rest = s, f: RegExpExecArray | null;
+  while ((f = re.exec(s)) !== null) {
+    rest = rest.replace(f[0], "");
+    const v = f[2].trim() === "" ? [] : f[2].trim().split(/[\s,]+/).map(Number);
+    if (v.some((x) => !isFinite(x))) return null;
+    let n: Affine6;
+    switch (f[1]) {
+      case "matrix":
+        if (v.length !== 6) return null;
+        n = [v[0], v[1], v[2], v[3], v[4], v[5]];
+        break;
+      case "translate":
+        if (v.length < 1 || v.length > 2) return null;
+        n = [1, 0, 0, 1, v[0], v.length > 1 ? v[1] : 0];
+        break;
+      case "scale":
+        if (v.length < 1 || v.length > 2) return null;
+        n = [v[0], 0, 0, v.length > 1 ? v[1] : v[0], 0, 0];
+        break;
+      case "rotate": {
+        if (v.length !== 1 && v.length !== 3) return null;
+        const r = (v[0] * Math.PI) / 180, co = Math.cos(r), si = Math.sin(r);
+        const cx = v.length === 3 ? v[1] : 0, cy = v.length === 3 ? v[2] : 0;
+        // translate(cx, cy) rotate(a) translate(-cx, -cy)
+        n = [co, si, -si, co, cx - co * cx + si * cy, cy - si * cx - co * cy];
+        break;
+      }
+      case "skewX":
+        if (v.length !== 1) return null;
+        n = [1, 0, Math.tan((v[0] * Math.PI) / 180), 1, 0, 0];
+        break;
+      case "skewY":
+        if (v.length !== 1) return null;
+        n = [1, Math.tan((v[0] * Math.PI) / 180), 0, 1, 0, 0];
+        break;
+      default:
+        return null;
+    }
+    m = mul6(m, n);
+    any = true;
+  }
+  if (!any || rest.replace(/[\s,]/g, "") !== "") return null;
+  return m;
+}
+
+// A point through an affine.
+export function applyAffine6(m: Affine6, x: number, y: number): { x: number; y: number } {
+  return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
+}

@@ -42,6 +42,7 @@
 import { MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
 import { RUN_BOX_PAD } from "./constants";
 import { asColumn } from "../elements";
+import { applyAffine6, parseTransformList } from "../geometry";
 import { GLYPH_MARKS } from "../scales";
 import type { WidgetFns, WidgetState } from "../state";
 
@@ -320,21 +321,18 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
   // state by a rebuild, not by swapping an image).
   let splitInDetail = false;
 
+  // A text mark's anchor: its (x, y) through its whole transform list (a
+  // rotated label is `matrix(...) rotate(a x y)`, VW-41).
   function anchorOf(n: Element): { x: number; y: number } | null {
     const t = n.tagName.toLowerCase() === "text" ? n : n.querySelector("text");
     if (!t) return null;
     const x = parseFloat(t.getAttribute("x") || "") || 0, y = parseFloat(t.getAttribute("y") || "") || 0;
-    const tr = t.getAttribute("transform") || "";
-    const N = "([-+\\d.eE]+)";
-    const m = new RegExp("matrix\\(\\s*" + [N, N, N, N, N, N].join("[\\s,]+") + "\\s*\\)").exec(tr);
-    if (m) {
-      const v = m.slice(1, 7).map(Number);
-      const X = v[0] * x + v[2] * y + v[4], Y = v[1] * x + v[3] * y + v[5];
-      return isFinite(X) && isFinite(Y) ? { x: X, y: Y } : null;
-    }
-    const tt = new RegExp("translate\\(\\s*" + N + "(?:[\\s,]+" + N + ")?\\s*\\)").exec(tr);
-    if (tt) return { x: x + Number(tt[1]), y: y + (tt[2] === undefined ? 0 : Number(tt[2])) };
-    return { x: x, y: y };
+    const tr = (t.getAttribute("transform") || "").trim();
+    if (!tr) return { x: x, y: y };
+    const m = parseTransformList(tr);
+    if (!m) return null;
+    const A = applyAffine6(m, x, y);
+    return isFinite(A.x) && isFinite(A.y) ? A : null;
   }
 
   // Run r's (0-based) keys and their geometry (see Geo).
