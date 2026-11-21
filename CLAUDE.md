@@ -129,7 +129,13 @@ marks in paint order (`record$run`). Once the images load (`attachRuns()`), the
 list counts as exact: `paintList` draws each run's image where it starts, and
 the detail tier places a `<use>` of it there, with a transparent stand-in node
 per flagged mark (pointer + selection outline). The runs' own styling is baked
-in. Blend modes (flag 32), a flagged record outside every run, more than
+into the PNG, so each run also ships as SVG (`payload$flagged$svg`, VW-33):
+when per-key state (`ws.msFlags`/`msColor`, kept in every raster tier with a
+list, the detail tier included) touches a run's keys, `features/runStyle.ts`
+applies it to a copy of the run's SVG (hidden: removed; a condition colour:
+inline fill/stroke; dim/mute: opacity), rasterises that as an image and
+`runImage()`/`runHref()` hand it to `paintList` and the detail run `<image>`s
+instead of the PNG (`restyleRuns()`, from `updateMarkStates()`). Blend modes (flag 32), a flagged record outside every run, more than
 `.MAX_FLAGGED_RUNS` runs or an older vellum keep the old behaviour.
 Exports (`exportSvgString()`) redraw an exact display list at export
 resolution with that state (`exportMarksImage()`, raster.ts `paintList`, the

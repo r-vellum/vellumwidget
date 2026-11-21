@@ -129,6 +129,9 @@ export function markStateFeature(
     }
     ws.msActive = active;
     ws.msDimAlpha = dimAlpha();
+    // The flagged runs bake their marks' look in: re-render the ones this
+    // state touches (VW-33), before the canvas redraws with them.
+    ws.fx.restyleRuns();
     if (ws.fx.ringMode()) ws.fx.drawPoints(true);
   }
 

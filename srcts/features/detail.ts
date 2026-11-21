@@ -366,7 +366,8 @@ export function detailFeature(
         im.setAttribute("x", "0"); im.setAttribute("y", "0");
         im.setAttribute("width", String(dl.runW)); im.setAttribute("height", String(dl.runH));
         im.setAttribute("preserveAspectRatio", "none");
-        im.setAttribute("href", dl.runHref[r - 1]);
+        im.setAttribute("data-run", String(r));
+        im.setAttribute("href", ws.fx.runHref(r)); // its PNG, or restyled (VW-33)
         D.el.appendChild(im);
       }
       const u = document.createElementNS(SVGNS, "use");

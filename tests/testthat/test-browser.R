@@ -513,3 +513,38 @@ test_that("VW-34: a run spanning a pan-group panel and a root panel is drawn onc
   hosts <- ev("Array.from(document.querySelectorAll('use.vellumwidget-detail-run')).map(function(u){return (u.closest('[data-vellum-pan]') ? 'pan' : 'root') + (u.hasAttribute('clip-path') ? '+clip' : '')}).sort().join(',')")
   expect_identical(hosts, "pan,root+clip")
 })
+
+test_that("VW-33: a filter hides a flagged mark in the mid and detail tiers and the export", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
+  # an exact blue disc, a masked gold disc over it (flagged), an exact red disc over that
+  s <- vellum::vl_scene(4, 3, dpi = 96, bg = "white") |>
+    vellum::draw(vellum::circle_grob(0.35, 0.5, r = 0.2, gp = vellum::vl_gpar(fill = "blue", col = NA), key = "a")) |>
+    vellum::push(vellum::vl_viewport(mask = vellum::as_mask(vellum::rect_grob(gp = vellum::vl_gpar(fill = "black"))))) |>
+    vellum::draw(vellum::circle_grob(0.5, 0.5, r = 0.2, gp = vellum::vl_gpar(fill = "gold", col = NA), key = "m")) |>
+    vellum::pop() |>
+    vellum::draw(vellum::circle_grob(0.65, 0.5, r = 0.2, gp = vellum::vl_gpar(fill = "red", col = NA), key = "c"))
+  for (dm in c(1L, 100L)) {
+    w <- as_widget(s, elementId = "w1", render = render_options(mode = "raster", detail_marks = dm))
+    expect_length(w$x$flagged$svg, 1L)
+    b <- open_widget(w)
+    ev <- function(js) b$Runtime$evaluate(js)$result$value
+    ev("HTMLWidgets.find('#w1')._test.setView({x:96,y:72,w:192,h:144})")
+    Sys.sleep(0.6)
+    expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), if (dm == 1L) "mid" else "detail")
+    ev("HTMLWidgets.find('#w1')._call('filter', ['a', 'c'])")
+    Sys.sleep(0.6)
+    r <- as.numeric(strsplit(ev("(function(){var r=document.querySelector('.vellumwidget-stage').getBoundingClientRect();return [r.left,r.top,r.width,r.height].join(',')})()"), ",")[[1]])
+    shot <- b$Page$captureScreenshot(format = "png", clip = list(x = r[1], y = r[2], width = r[3], height = r[4], scale = 1))
+    img <- png::readPNG(jsonlite::base64_dec(shot$data))
+    px <- function(fx, fy) img[round(fy * dim(img)[1]), round(fx * dim(img)[2]), 1:3]
+    # scene x 0.425, where the gold disc covered the blue one: blue again
+    expect_true(all(abs(px(0.35, 0.5) - c(0, 0, 1)) < 0.1))
+    if (dm == 1L) {
+      # the export redraw hides it too
+      out <- ev("(function(){var e=HTMLWidgets.find('#w1')._test.exportMarksImage(2); return e ? e.href.length : 0})()")
+      expect_gt(out, 100)
+    }
+    b$close()
+  }
+})
