@@ -290,10 +290,115 @@
     if (v == null) return [];
     return Array.isArray(v) ? v : [v];
   }
-  function decodeColumn(v, n) {
+  function b64bytes(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function dlColumn(c) {
+    const n = c ? c.n || 0 : 0;
+    const make = (len) => {
+      const t = c ? c.type : "u32";
+      return t === "f32" ? new Float32Array(len) : t === "u8" ? new Uint8Array(len) : t === "u16" ? new Uint16Array(len) : new Uint32Array(len);
+    };
+    if (!c || !n) return make(0);
+    if (c.const != null) {
+      const a = make(n);
+      a.fill(c.const);
+      return a;
+    }
+    if (c.seq != null) {
+      const s = asColumn(c.seq), a = make(n);
+      for (let i = 0; i < n; i++) a[i] = s[0] + s[1] * i;
+      return a;
+    }
+    if (c.rle != null) {
+      const v = asColumn(c.rle.values), l = asColumn(c.rle.lengths), a = make(n);
+      let o = 0;
+      for (let i = 0; i < v.length; i++) {
+        a.fill(v[i], o, o + l[i]);
+        o += l[i];
+      }
+      return a;
+    }
+    const bytes = b64bytes(c.data || "");
+    if (c.bits) {
+      const k = Number(c.bits), a = make(n);
+      let pos = 0;
+      for (let i = 0; i < n; i++) {
+        let v = 0;
+        for (let b = 0; b < k; b++, pos++) if (bytes[pos >> 3] & 1 << (pos & 7)) v += 2 ** b;
+        a[i] = v;
+      }
+      return a;
+    }
+    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    if (c.type === "f32") return new Float32Array(buf, 0, n);
+    if (c.type === "u16") return new Uint16Array(buf, 0, n);
+    if (c.type === "u32") return new Uint32Array(buf, 0, n);
+    return new Uint8Array(buf, 0, n);
+  }
+  var KEY_INT = /(0|[1-9][0-9]{0,14})$/;
+  function decodeTemplate(o, n, keys) {
+    const tpl = asColumn(o.tpl).map((p) => asColumn(p).map(String));
+    const tc = dlColumn(o.tc);
+    const streams = asColumn(o.tn).map((st) => {
+      if (st === "key") return null;
+      const s = st;
+      if (s.d != null) {
+        const d = asColumn(s.d), out2 = new Array(d.length);
+        let run = 0;
+        for (let i = 0; i < d.length; i++) {
+          run += d[i];
+          out2[i] = String(run);
+        }
+        return out2;
+      }
+      return asColumn(s.v).map(String);
+    });
+    const at = new Array(streams.length).fill(0);
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const c = tc[i];
+      if (!c || c > tpl.length) {
+        out[i] = null;
+        continue;
+      }
+      const parts = tpl[c - 1];
+      let s = parts[0];
+      for (let j = 1; j < parts.length; j++) {
+        const st = streams[j - 1];
+        let num = "";
+        if (st === null) {
+          const m = keys && keys[i] != null ? KEY_INT.exec(keys[i]) : null;
+          num = m ? m[1] : "";
+        } else if (st) {
+          num = st[at[j - 1]++];
+        }
+        s += num + parts[j];
+      }
+      out[i] = s;
+    }
+    return out;
+  }
+  function decodeColumn(v, n, keys) {
     if (v == null) return null;
     if (typeof v === "object" && !Array.isArray(v)) {
+      if (v.tpl !== void 0 && v.tc !== void 0) {
+        return decodeTemplate(v, n, keys);
+      }
       const o = v;
+      if (o.levels !== void 0 && o.cb !== void 0) {
+        const levels = asColumn(o.levels);
+        const cb = dlColumn(o.cb);
+        const out = new Array(n);
+        for (let i = 0; i < n; i++) {
+          const c = cb[i];
+          out[i] = c ? levels[c - 1] : null;
+        }
+        return out;
+      }
       if (o.at !== void 0 && o.v !== void 0) {
         const at = asColumn(o.at);
         const vals = asColumn(o.v);
@@ -357,7 +462,7 @@
     const y0 = asColumn(c.y0);
     const x1 = asColumn(c.x1);
     const y1 = asColumn(c.y1);
-    const col = (f) => decodeColumn(c[f], n);
+    const col = (f) => decodeColumn(c[f], n, key);
     const mark = col("mark");
     const tooltip = col("tooltip");
     const hoverGroup = col("hover_group");
@@ -446,45 +551,6 @@
     color: true,
     luminosity: true
   };
-  function b64bytes(s) {
-    const bin = atob(s);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  }
-  function dlColumn(c) {
-    const n = c ? c.n || 0 : 0;
-    const make = (len) => {
-      const t = c ? c.type : "u32";
-      return t === "f32" ? new Float32Array(len) : t === "u8" ? new Uint8Array(len) : t === "u16" ? new Uint16Array(len) : new Uint32Array(len);
-    };
-    if (!c || !n) return make(0);
-    if (c.const != null) {
-      const a = make(n);
-      a.fill(c.const);
-      return a;
-    }
-    if (c.seq != null) {
-      const s = asColumn(c.seq), a = make(n);
-      for (let i = 0; i < n; i++) a[i] = s[0] + s[1] * i;
-      return a;
-    }
-    if (c.rle != null) {
-      const v = asColumn(c.rle.values), l = asColumn(c.rle.lengths), a = make(n);
-      let o = 0;
-      for (let i = 0; i < v.length; i++) {
-        a.fill(v[i], o, o + l[i]);
-        o += l[i];
-      }
-      return a;
-    }
-    const bytes = b64bytes(c.data || "");
-    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-    if (c.type === "f32") return new Float32Array(buf, 0, n);
-    if (c.type === "u16") return new Uint16Array(buf, 0, n);
-    if (c.type === "u32") return new Uint32Array(buf, 0, n);
-    return new Uint8Array(buf, 0, n);
-  }
   var u32 = (a) => a instanceof Uint32Array ? a : Uint32Array.from(a);
   var f32 = (a) => a instanceof Float32Array ? a : Float32Array.from(a);
   var u8 = (a) => a instanceof Uint8Array ? a : Uint8Array.from(a);
@@ -7767,6 +7833,7 @@
     tracePoint,
     traceShape,
     decodeKeys,
+    dlColumn,
     bus: vellumwidgetBus
   };
 })();
