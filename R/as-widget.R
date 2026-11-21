@@ -259,7 +259,9 @@ as_widget <- function(
   )
   marks <- NULL
   dlist <- NULL
-  elements <- .vellumwidget_elements(model)
+  # Raster mode ships the compact wire encoding, which wants single-valued
+  # ragged columns (legend, cond, filt) flat (VW-39).
+  elements <- .vellumwidget_elements(model, flat_ragged = use_raster)
   above <- NULL
   flagged <- NULL
   if (use_raster && .split_render_supported()) {
@@ -676,7 +678,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # Absent meta columns are omitted entirely; within a present column, elements
 # lacking that field carry `NA` (serialised as `null`). `legend` is ragged (a mark
 # may belong to several series) so it stays a list-column.
-.vellumwidget_elements <- function(model) {
+.vellumwidget_elements <- function(model, flat_ragged = FALSE) {
   el <- model$elements
   if (is.null(el) || !nrow(el)) {
     return(list())
@@ -732,15 +734,15 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     # Legend membership: the series a mark belongs to. A mark may belong to
     # several (one per legend aesthetic), so this is ragged -- a list-column of
     # character vectors, `character(0)` for none.
-    legend = .meta_ragged(field("legend")),
+    legend = .meta_ragged(field("legend"), flat_ragged),
     # Conditional-encoding tags ("<sel>:<aes>") this element participates in --
     # ragged like `legend`. The JS runtime styles non-members of an active
     # selection by these tags.
-    cond = .meta_ragged(field("cond")),
+    cond = .meta_ragged(field("cond"), flat_ragged),
     # Filter selection tags (a view filtered by `filter_by()`) -- ragged like
     # `cond`. The runtime hides a tagged element when its `join` is not in the
     # filtering selection's members, scoped to this view.
-    filt = .meta_ragged(field("filt")),
+    filt = .meta_ragged(field("filt"), flat_ragged),
     # Cross-view join id (a composition cell's original id; keys are per-cell
     # unique). Absent for a single plot.
     join = meta_col("join"),
@@ -782,7 +784,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # A ragged list-column (`legend`, `cond`, `filt`) whose entries all hold at most
 # one value is first flattened to a character column (`NA` for empty), which the
 # runtime already reads as "one value" / "none"; one with several values somewhere
-# can still go sparse.
+# can still go sparse. (`as_widget()` builds such columns flat in raster mode,
+# `.vellumwidget_elements(flat_ragged = TRUE)`, VW-39, so this is for callers
+# that hand over the list form.)
 .encode_elements <- function(cols) {
   n <- length(cols$key)
   if (!n) {
@@ -802,6 +806,12 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   cols$key <- .encode_keys(cols$key)
   for (f in setdiff(names(cols), "key")) {
     v <- cols[[f]]
+    # A single-valued ragged column built flat (VW-39): its list form ships
+    # when neither compact form applies, as for a list-column below.
+    ragged <- isTRUE(attr(v, "ragged"))
+    if (ragged) {
+      attr(v, "ragged") <- NULL
+    }
     if (is.list(v)) {
       flat <- if (all(lengths(v) <= 1L)) .meta_flatten(v, NA_character_)
       if (!is.null(flat)) {
@@ -842,7 +852,13 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
         } else {
           list(levels = lv, codes = codes)
         }
+        next
       }
+    }
+    if (ragged) {
+      out <- rep(list(character(0)), n)
+      out[set] <- as.list(v[set])
+      cols[[f]] <- out
     }
   }
   cols
@@ -963,8 +979,13 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 }
 
 # A ragged meta field as a list-column of character vectors (`character(0)`
-# for none), or NULL when no element carries it.
-.meta_ragged <- function(v) {
+# for none), or NULL when no element carries it. With `flat = TRUE` (raster
+# mode, VW-39) a field whose every element holds at most one value comes as a
+# character vector instead (`NA` for none): the form `.encode_elements()`
+# would flatten the list-column to, built directly. It carries
+# `attr(, "ragged")`, so `.encode_elements()` can still ship the list form
+# when no compact form applies.
+.meta_ragged <- function(v, flat = FALSE) {
   if (is.null(v)) {
     return(NULL)
   }
@@ -972,17 +993,31 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     if (!any(lengths(v) > 0L)) {
       return(NULL)
     }
-    flat <- if (all(lengths(v) <= 1L)) .meta_flatten(v, NA_character_)
-    if (is.null(flat)) {
+    one <- all(lengths(v) <= 1L)
+    scalar <- if (one) .meta_flatten(v, NA_character_)
+    if (is.null(scalar)) {
+      if (flat && one) {
+        out <- vapply(
+          v,
+          function(x) if (length(x)) as.character(x) else NA_character_,
+          character(1)
+        )
+        return(structure(out, ragged = TRUE))
+      }
       return(lapply(v, function(x) {
         if (is.null(x)) character(0) else as.character(x)
       }))
     }
-    v <- flat
+    v <- scalar
   }
   set <- !is.na(v)
   if (!any(set)) {
     return(NULL)
+  }
+  if (flat) {
+    out <- rep(NA_character_, length(v))
+    out[set] <- as.character(v[set])
+    return(structure(out, ragged = TRUE))
   }
   out <- rep(list(character(0)), length(v))
   out[set] <- as.list(as.character(v[set]))
