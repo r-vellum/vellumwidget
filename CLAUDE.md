@@ -154,6 +154,12 @@ VW-23) the list also carries gradient fills, clip paths and opacity groups:
 composites it at the group's alpha; the detail tier builds `<defs>`
 gradients, chained `<clipPath>`s and `<g opacity>` wrappers. The decoder
 (`srcts/dlist.ts`) accepts versions 1 and 2 and feature-detects the tables.
+With a vellum whose `scene_display_list()` takes `keys =` (VR-22,
+`.display_list_keys_supported()`), R passes the element table's key column
+and the list's records index it (`keys_given`; the list's own `keys` holds
+only keys the table lacks): `dl.keys` is then the element keys followed by
+those extras, so a key id (`ws.msFlags` etc.) is an element position, and a
+repeated key maps to its first position.
 
 ## Build and test
 

@@ -70,6 +70,9 @@ export interface DLPayload {
   clip_paths?: { xy: DLColumn; run_offset: DLColumn; path_offset: DLColumn; evenodd: DLColumn } | null;
   groups?: { alpha: number[] | number; parent: number[] | number } | null;
   keys: string[] | string | DLColumn;
+  // VR-22: `record$key` indexes the element table's keys (this many) and then
+  // `keys`, which lists only the keys the element table lacks.
+  keys_given?: number | null;
   panels: string[] | string | null;
 }
 
@@ -200,9 +203,13 @@ function opaqueHex(s: string | null): boolean {
   return s == null || !/^#[0-9a-fA-F]{8}$/.test(s) || /ff$/i.test(s);
 }
 
-// Decode the payload. Returns null for an unknown format/version.
-export function decodeDisplayList(raw: DLPayload | null | undefined): DisplayList | null {
+// Decode the payload. Returns null for an unknown format/version, or for a
+// list whose records index the element table's keys (`keys_given`, VR-22)
+// when `elemKeys` is not that table.
+export function decodeDisplayList(raw: DLPayload | null | undefined, elemKeys?: string[]): DisplayList | null {
   if (!raw || raw.format !== "vellum-display-list" || (raw.version !== 1 && raw.version !== 2) || !raw.record) return null;
+  const given = raw.keys_given != null ? Number(raw.keys_given) : -1;
+  if (given >= 0 && (!elemKeys || elemKeys.length !== given)) return null;
   const n = raw.n || 0;
   const kind = u8(dlColumn(raw.record.kind));
   const pt = raw.point, rc = raw.rect, pa = raw.path;
@@ -237,15 +244,18 @@ export function decodeDisplayList(raw: DLPayload | null | undefined): DisplayLis
       }
     }
   }
-  // keys: a character vector, or an integer column.
+  // keys: a character vector, or an integer column; after the element
+  // table's keys when the records index those (VR-22).
   const k = raw.keys as unknown;
+  let own: string[];
   if (k && typeof k === "object" && !Array.isArray(k) && "type" in (k as object)) {
     const kc = dlColumn(k as DLColumn);
-    dl.keys = new Array(kc.length);
-    for (let i = 0; i < kc.length; i++) dl.keys[i] = String(kc[i]);
+    own = new Array(kc.length);
+    for (let i = 0; i < kc.length; i++) own[i] = String(kc[i]);
   } else {
-    dl.keys = asColumn(raw.keys as string[] | string).map(String);
+    own = asColumn(raw.keys as string[] | string).map(String);
   }
+  dl.keys = given >= 0 && elemKeys ? (own.length ? elemKeys.concat(own) : elemKeys.slice()) : own;
   const P = raw.paints;
   const fill = asColumn(P.fill), stroke = asColumn(P.stroke), sw = asColumn(P.stroke_width);
   const dash = asColumn(P.dash), cap = asColumn(P.linecap), join = asColumn(P.linejoin);

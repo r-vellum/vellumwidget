@@ -1,5 +1,14 @@
 # vellumwidget 0.14.1.9000
 
+* **Smaller raster payloads: each key ships once (VR-22).** With a vellum
+  whose `scene_display_list()` takes `keys =` (feature-detected), the display
+  list's records point into the element table's keys instead of carrying a
+  second copy of every key. A 200,000-point keyed scatter in raster mode
+  shrinks from 3.78 MB to 2.72 MB (6.07 MB to 5.01 MB with tooltips). Hover,
+  selection, conditions, filters, the detail and mixed tiers and export work
+  as before. With an older vellum the list keeps its own keys. Integer keys
+  of 100,000 or more no longer keep a redundant bounding box in the payload.
+
 * **Faster widget builds for big keyed plots (VR-19).** `as_widget()` reads
   the element meta (tooltips, legend membership, conditions, interval values,
   ...) as columns from `vellum::scene_model(meta = "columns")` instead of one

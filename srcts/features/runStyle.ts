@@ -43,7 +43,9 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
     forDl = dl;
     svgs = ws.runSvg;
     keyIdx = new Map();
-    for (let i = 0; i < dl.keys.length; i++) keyIdx.set(dl.keys[i], i);
+    // First index of each key: the one the records use when the table is
+    // the element table's keys (VR-22), which may repeat a key.
+    for (let i = 0; i < dl.keys.length; i++) if (!keyIdx.has(dl.keys[i])) keyIdx.set(dl.keys[i], i);
     const sets: Record<number, boolean>[] = [];
     for (let r = 0; r < dl.nRuns; r++) sets.push({});
     for (let i = 0; i < dl.n; i++) {

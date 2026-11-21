@@ -259,6 +259,7 @@ as_widget <- function(
   )
   marks <- NULL
   dlist <- NULL
+  elements <- .vellumwidget_elements(model)
   above <- NULL
   flagged <- NULL
   if (use_raster && .split_render_supported()) {
@@ -289,7 +290,15 @@ as_widget <- function(
     }
     dims <- .svg_dims(svg)
     marks <- .raster_marks(scene, panel_names)
-    dlist <- .raster_display_list(scene, model, panel_names, render$max_marks)
+    # The list's records index the element table's keys (VR-22), so the
+    # payload carries each key once.
+    dlist <- .raster_display_list(
+      scene,
+      model,
+      panel_names,
+      render$max_marks,
+      keys = elements$key
+    )
     # The mixed tier (VW-30): the marks the display list flags, as one PNG per
     # run in paint order, so the runtime draws the rest exactly around them.
     flagged <- .raster_flagged(scene, panel_names, dlist, marks, render$text)
@@ -318,9 +327,9 @@ as_widget <- function(
     # Raster mode is the big-N path, where the element index is most of the
     # payload: ship it in the compact wire encoding (`.encode_elements()`).
     elements = if (use_raster) {
-      .encode_elements(.drop_listed_bboxes(.vellumwidget_elements(model), dlist))
+      .encode_elements(.drop_listed_bboxes(elements, dlist))
     } else {
-      .vellumwidget_elements(model)
+      elements
     },
     geometry = .vellumwidget_geometry(scene),
     panels = .vellumwidget_panels(model),
@@ -1365,6 +1374,13 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   ))
 }
 
+# Can its records index a key table the widget already ships (`keys =`,
+# VR-22)? Then the list carries only the keys the element table lacks.
+.display_list_keys_supported <- function() {
+  .display_list_v2_supported() &&
+    "keys" %in% names(formals(getExportedValue("vellum", "scene_display_list")))
+}
+
 # Does it list gradients, path clips and opacity groups exactly (display list
 # version 2, VW-23)? Older vellum has no `version` argument.
 .display_list_v2_supported <- function() {
@@ -1487,8 +1503,10 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # private columnar payload. The runtime draws the zoomed-in tier from it and
 # derives the hit-test bboxes, so the covered marks ship no bbox. NULL with an
 # older vellum, or above `max_marks` (with a message: the list would be big,
-# and a plot that size reads better as density).
-.raster_display_list <- function(scene, model, panels, max_marks) {
+# and a plot that size reads better as density). `keys`: the element table's
+# key column; with a vellum that takes it (VR-22) the records index it
+# (`keys_given`) instead of a key table of the list's own.
+.raster_display_list <- function(scene, model, panels, max_marks, keys = NULL) {
   if (!.display_list_supported()) {
     return(NULL)
   }
@@ -1508,6 +1526,15 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
       "*" = "Or raise the cap with {.code render_options(max_marks = )}."
     ))
     return(NULL)
+  }
+  if (!is.null(keys) && length(keys) && .display_list_keys_supported()) {
+    return(vellum::scene_display_list(
+      scene,
+      what = "keyed",
+      panels = panels,
+      version = 2L,
+      keys = keys
+    ))
   }
   if (.display_list_v2_supported()) {
     return(vellum::scene_display_list(scene, what = "keyed", panels = panels, version = 2L))
@@ -1544,15 +1571,30 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   )
 }
 
-# The keys whose every display-list record is drawn exactly (no flag, or only
-# pick-only, 16: it paints nothing): the runtime derives their bboxes from the
-# list, so they ship none.
-.dl_exact_keys <- function(dl) {
-  keys <- if (is.list(dl$keys)) {
-    as.character(.dl_col(dl$keys))
+# The display list's key table: its own `keys`, after the element table's
+# keys (`given`) when its records index those (`keys_given`, VR-22).
+.dl_key_table <- function(dl, given = NULL) {
+  own <- if (is.list(dl$keys)) {
+    # Integer keys: as text without scientific notation ("100000", not
+    # "1e+05").
+    format(.dl_col(dl$keys), scientific = FALSE, trim = TRUE)
   } else {
     as.character(dl$keys)
   }
+  if (is.null(dl$keys_given)) {
+    return(own)
+  }
+  if (length(given) != dl$keys_given) {
+    cli::cli_abort("Internal error: the display list indexes a different key table.")
+  }
+  c(as.character(given), own)
+}
+
+# The keys whose every display-list record is drawn exactly (no flag, or only
+# pick-only, 16: it paints nothing): the runtime derives their bboxes from the
+# list, so they ship none. `given`: the element keys the list indexes.
+.dl_exact_keys <- function(dl, given = NULL) {
+  keys <- .dl_key_table(dl, given)
   k <- keys[.dl_col(dl$record$key) + 1L]
   flagged <- .dl_col(dl$record$flags) %% 16 != 0
   setdiff(unique(k[!flagged]), unique(k[flagged]))
@@ -1565,7 +1607,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   if (is.null(dl) || !length(cols$key)) {
     return(cols)
   }
-  hit <- cols$key %in% .dl_exact_keys(dl)
+  hit <- cols$key %in% .dl_exact_keys(dl, cols$key)
   for (f in c("x0", "y0", "x1", "y1")) {
     if (!is.null(cols[[f]])) cols[[f]][hit] <- NA_real_
   }

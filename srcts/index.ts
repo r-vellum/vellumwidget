@@ -119,6 +119,8 @@ HTMLWidgets.widget({
         rasterMode: function () { return ws.rasterMode; },
         hasCanvas: function () { return !!ws.canvasEl; },
         displayListSize: function () { return ws.dl ? ws.dl.n : 0; },
+        displayListKeys: function () { return ws.dl ? ws.dl.keys.slice() : null; },
+        keyIds: function (keys: string[]) { return Array.from(ws.fx.keyIds(keys)); },
         markTier: function () { return ws.markTier; },
         listExact: function () { return ws.dl ? ws.dl.exact : null; },
         runsAttached: function () { return !!(ws.dl && ws.dl.runImgs); },

@@ -4411,6 +4411,90 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(off.inst._test.markTier() === "mid" && !off.el.querySelector(".vellumwidget-detail"), "tier: detailMarks = 0 never materialises nodes");
 }
 
+// ============ VR-22: display-list records index the element table's keys ============
+{
+  const T3 = window.__vellumwidgetTest;
+  const b64 = (Arr, xs) => Buffer.from(new Arr(xs).buffer).toString("base64");
+  const f32 = (xs) => ({ type: "f32", n: xs.length, data: b64(Float32Array, xs) });
+  const u8 = (xs) => ({ type: "u8", n: xs.length, data: b64(Uint8Array, xs) });
+  // The VW-16 scene, but the records index the element table (a legend key
+  // first, so the indices are 1..5) and the list ships no keys of its own.
+  const mkDl = (keysGiven, key, keys) => ({
+    format: "vellum-display-list", version: 2, width: 200, height: 100, n: 5,
+    record: { kind: u8([0, 0, 0, 0, 1]), paint: u8([0, 0, 1, 0, 0]), key: key,
+      flags: { type: "u8", n: 5, const: 0 }, clip: { type: "u8", n: 5, const: 0 }, panel: { type: "u8", n: 5, const: 1 },
+      group: { type: "u8", n: 5, const: 0 }, run: { type: "u8", n: 5, const: 0 } },
+    runs: 0, run_blend: [],
+    point: { cx: f32([60, 64, 62, 170]), cy: f32([50, 50, 54, 50]), r: { type: "f32", n: 4, const: 2 }, shape: u8([0, 1, 0, 0]) },
+    rect: { x: f32([66]), y: f32([46]), w: f32([4]), h: f32([4]) },
+    path: { xy: { type: "f32", n: 0, data: "" }, run_offset: { type: "u8", n: 1, const: 0 }, path_offset: { type: "u8", n: 1, const: 0 },
+      closed: { type: "u8", n: 0, data: "" }, evenodd: { type: "u8", n: 0, data: "" } },
+    paints: { fill: ["#ff0000ff", "#0000ff80"], stroke: ["#ff0000ff", null], stroke_width: [1, 0], dash: [null, null], linecap: ["round", "round"], linejoin: ["round", "round"], fill_gradient: [0, 0] },
+    clips: null, gradients: null, clip_paths: null, groups: null,
+    keys: keys, keys_given: keysGiven, panels: "panel-1-1"
+  });
+  const EK = ["legend:a", "p1", "p2", "p3", "p4", "r1"];
+  // decode: the table is the element keys, then the keys they lack
+  const d1 = T3.decodeDisplayList(mkDl(6, u8([1, 2, 3, 4, 6]), ["x9"]), EK);
+  ok(d1 && d1.keys.join(",") === EK.join(",") + ",x9" && d1.keys[d1.key[4]] === "x9" && d1.keys[d1.key[0]] === "p1",
+    "VR-22: records index the element keys, then the list's own extra keys");
+  const d2 = T3.decodeDisplayList(mkDl(6, { type: "u8", n: 5, seq: [1, 1] }, []), EK);
+  ok(d2 && d2.keys.length === 6 && d2.keys !== EK && d2.keys[d2.key[3]] === "p4", "VR-22: no extra keys: the element keys alone (copied)");
+  ok(T3.decodeDisplayList(mkDl(6, u8([1, 2, 3, 4, 5]), []), EK.slice(1)) === null && T3.decodeDisplayList(mkDl(6, u8([1, 2, 3, 4, 5]), [])) === null,
+    "VR-22: a list indexing a different (or no) element table is not decoded");
+  // without keys_given, the list's own key table, as before
+  const d3 = T3.decodeDisplayList(mkDl(null, { type: "u8", n: 5, seq: [0, 1] }, ["p1", "p2", "p3", "p4", "r1"]), EK);
+  ok(d3 && d3.keys.join(",") === "p1,p2,p3,p4,r1", "VR-22: a list with its own key table ignores the element keys");
+
+  const panel = {
+    name: "panel-1-1", px0: 20, py0: 10, px1: 180, py1: 90,
+    x: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100 },
+    y: { type: "continuous", transform: "identity", data_lo: 0, data_hi: 50, native_lo: 0, native_hi: 50 }
+  };
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"><g role="grid"><path d="M0 0 L0 80"/></g></g></g>' +
+    '<g data-vellum-panel="legend"><rect data-key="legend:a" x="185" y="5" width="5" height="5"/></g></svg>';
+  function mountKeyed(dl, keys, opts) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    inst.renderValue({
+      svg: svg,
+      elements: {
+        key: keys, mark: ["rect", "point", "point", "point", "point", "rect"],
+        x0: [185, null, null, null, null, null], y0: [5, null, null, null, null, null],
+        x1: [190, null, null, null, null, null], y1: [10, null, null, null, null, null],
+        tooltip: ["a", "pt 1", "pt 2", "<b>pt</b> 3", "pt 4", "box"], legend_for: ["a", null, null, null, null, null],
+        legend: [null, "a", "a", "a", "a", "a"]
+      },
+      panels: [panel],
+      marks: { href: "data:image/png;base64,", width: 200, height: 100, panels: "panel-1-1" },
+      displayList: dl,
+      options: Object.assign({ raster: true, hover: true, select: true, zoom: true, selectMode: "multiple", a11y: true }, opts || {})
+    });
+    return { el: e, inst: inst };
+  }
+  const t = mountKeyed(mkDl(6, { type: "u8", n: 5, seq: [1, 1] }, []), EK, { detailMarks: 4 });
+  ok(t.inst._test.displayListSize() === 5 && t.inst._test.displayListKeys().join(",") === EK.join(","), "VR-22: the widget decodes a list keyed by its element table");
+  const b1 = t.inst._test.bboxOf("p1");
+  ok(b1 && b1[0] === 58 && b1[2] === 62 && t.inst._test.bboxOf("r1")[0] === 66, "VR-22: covered elements take their bboxes from the list");
+  ok(t.inst._test.nearestKeyAt(60.5, 50, 10) === "p1" && t.inst._test.brushKeysIn({ x0: 55, y0: 45, x1: 65, y1: 51 }).sort().join(",") === "p1,p2",
+    "VR-22: nearest and brush hit-testing find the list's keys");
+  // markState key ids are the element positions, for every key the list draws
+  ok(t.inst._test.keyIds(["p1", "r1", "legend:a", "nope"]).join(",") === "1,5,0,-1", "VR-22: per-key state is indexed by element position");
+  // detail tier: nodes carry the element keys; clicking one selects it
+  t.inst._test.setView({ x: 46, y: 40, w: 19, h: 20 });
+  t.inst._test.evalTier();
+  const det = Array.from(t.el.querySelectorAll(".vellumwidget-detail [data-key]")).map((n) => n.getAttribute("data-key")).sort();
+  ok(t.inst._test.markTier() === "detail" && det.join(",") === "p1,p2,p3", "VR-22: the detail tier's nodes carry the element keys");
+  fireOn(t.el.querySelector("svg"), "click", t.el.querySelector('.vellumwidget-detail [data-key="p3"]'));
+  ok(t.inst._test.selectedKeys().join(",") === "p3", "VR-22: a detail node selects its element");
+  // a repeated element key: the first position wins, as in vellum
+  const EK2 = ["legend:a", "p1", "p2", "p3", "p4", "p1"];
+  const t2 = mountKeyed(mkDl(6, u8([1, 2, 3, 4, 1]), []), EK2);
+  ok(t2.inst._test.keyIds(["p1"]).join(",") === "1" && t2.inst._test.displayListSize() === 5, "VR-22: a repeated element key maps to its first position");
+}
+
 // ============ VW-22: conditions / filters in the node-less raster tiers ============
 const slowChecks = []; // promises resolved after timers (settle redraws)
 {
