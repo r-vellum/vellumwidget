@@ -2424,6 +2424,8 @@
   }
 
   // srcts/features/runStyle.ts
+  var ATLAS_GAP = 4;
+  var ATLAS_MAX = 4e3;
   var CACHE_PER_RUN = 4;
   function runStyleFeature(ws) {
     let forDl = null;
@@ -2434,6 +2436,10 @@
     let cache = [];
     let cur = [];
     let want = [];
+    let geos = [];
+    let geoDl = null;
+    let svgBroken = [];
+    let splits = [];
     function sync() {
       const dl = ws.dl;
       if (!dl || !dl.runImgs || !ws.runSvg) {
@@ -2456,6 +2462,8 @@
       cache = [];
       cur = [];
       want = [];
+      geos = [];
+      splits = [];
       return true;
     }
     function sigOf(r) {
@@ -2481,36 +2489,32 @@
       docs[r] = el;
       return el;
     }
-    function render(r, sig) {
-      const dl = ws.dl, root = docFor(r);
-      if (!root) return null;
-      const svg = root.cloneNode(true);
+    function styleNode(n, k) {
       const flags = ws.msFlags, color = ws.msColor, pal = ws.msPalette;
-      const nodes = Array.prototype.slice.call(svg.querySelectorAll("[data-key]"));
-      for (let i = 0; i < nodes.length; i++) {
-        const n = nodes[i];
-        const k2 = keyIdx.get(n.getAttribute("data-key") || "");
-        if (k2 == null) continue;
-        const f = flags[k2], c = color[k2];
-        if (f & MS_HIDDEN) {
-          if (n.parentNode) n.parentNode.removeChild(n);
-          continue;
-        }
-        let st = n.getAttribute("style") || "";
-        if (c) {
-          const col = pal[c - 1];
-          const fa = n.getAttribute("fill"), sa = n.getAttribute("stroke");
-          if (fa && fa !== "none") st += ";fill:" + col;
-          if (sa && sa !== "none") st += ";stroke:" + col;
-        }
-        if (f & MS_DIM) st += ";opacity:" + ws.msDimAlpha;
-        else if (f & MS_MUTED) st += ";opacity:" + MUTED_ALPHA;
-        if (st) n.setAttribute("style", st.replace(/^;/, ""));
+      if (!flags || !color) return true;
+      const f = flags[k], c = color[k];
+      if (f & MS_HIDDEN) return false;
+      let st = n.getAttribute("style") || "";
+      if (c) {
+        const col = pal[c - 1];
+        const fa = n.getAttribute("fill"), sa = n.getAttribute("stroke");
+        if (fa && fa !== "none") st += ";fill:" + col;
+        if (sa && sa !== "none") st += ";stroke:" + col;
       }
+      if (f & MS_DIM) st += ";opacity:" + ws.msDimAlpha;
+      else if (f & MS_MUTED) st += ";opacity:" + MUTED_ALPHA;
+      if (st) n.setAttribute("style", st.replace(/^;/, ""));
+      return true;
+    }
+    function pngScale(r) {
+      const dl = ws.dl;
       const png = dl.runImgs[r];
-      const k = png && png.naturalWidth > 0 && dl.runW > 0 ? png.naturalWidth / dl.runW : 2;
-      svg.setAttribute("width", String(Math.round(dl.runW * k)));
-      svg.setAttribute("height", String(Math.round(dl.runH * k)));
+      return png && png.naturalWidth > 0 && dl.runW > 0 ? png.naturalWidth / dl.runW : 2;
+    }
+    function rasterise(svg, w, h, k, done) {
+      const dl = ws.dl;
+      svg.setAttribute("width", String(Math.round(w * k)));
+      svg.setAttribute("height", String(Math.round(h * k)));
       let text = "";
       try {
         const W = window;
@@ -2523,15 +2527,50 @@
       const s = { img, href, ready: false };
       img.onload = function() {
         s.ready = true;
-        if (ws.dl !== dl || want[r] !== sig) return;
-        cur[r] = s;
-        refresh();
+        if (ws.dl !== dl) return;
+        done(s);
+      };
+      img.onerror = function() {
+        s.failed = true;
+        if (ws.dl !== dl) return;
+        done(s);
       };
       img.src = href;
       return s;
     }
+    function rasterRun(r, drop, done) {
+      const dl = ws.dl, root = docFor(r);
+      if (!root) return null;
+      const svg = root.cloneNode(true);
+      const nodes = Array.prototype.slice.call(svg.querySelectorAll("[data-key]"));
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const k = keyIdx.get(n.getAttribute("data-key") || "");
+        if (k == null) continue;
+        if (drop && drop[k] || !styleNode(n, k)) {
+          if (n.parentNode) n.parentNode.removeChild(n);
+        }
+      }
+      return rasterise(svg, dl.runW, dl.runH, pngScale(r), done);
+    }
+    function render(r, sig) {
+      return rasterRun(r, null, function(s) {
+        if (s.failed || want[r] !== sig) return;
+        cur[r] = s;
+        refresh();
+      });
+    }
+    let rebuilding = false;
     function refresh() {
-      if (ws.markTier === "detail") {
+      if (ws.markTier === "detail" && splitInDetail) {
+        if (rebuilding) return;
+        rebuilding = true;
+        try {
+          ws.fx.evalTier();
+        } finally {
+          rebuilding = false;
+        }
+      } else if (ws.markTier === "detail") {
         const ims = ws.svgEl ? ws.svgEl.querySelectorAll("defs.vellumwidget-detail image[data-run]") : [];
         for (let i = 0; i < ims.length; i++) {
           const r = Number(ims[i].getAttribute("data-run"));
@@ -2544,9 +2583,10 @@
     function restyleRuns() {
       if (!sync()) return false;
       const dl = ws.dl;
-      let changed = false;
+      let changed = false, sigChanged = false;
       for (let r = 0; r < dl.nRuns; r++) {
         const sig = sigOf(r);
+        if (want[r] !== sig) sigChanged = true;
         want[r] = sig;
         if (!sig) {
           if (cur[r]) {
@@ -2572,8 +2612,265 @@
           changed = true;
         }
       }
-      if (changed && ws.markTier === "detail") refresh();
+      if ((changed || sigChanged && splitInDetail) && ws.markTier === "detail") refresh();
       return changed;
+    }
+    let splitInDetail = false;
+    function anchorOf(n) {
+      const t = n.tagName.toLowerCase() === "text" ? n : n.querySelector("text");
+      if (!t) return null;
+      const x = parseFloat(t.getAttribute("x") || "") || 0, y = parseFloat(t.getAttribute("y") || "") || 0;
+      const tr = t.getAttribute("transform") || "";
+      const N = "([-+\\d.eE]+)";
+      const m = new RegExp("matrix\\(\\s*" + [N, N, N, N, N, N].join("[\\s,]+") + "\\s*\\)").exec(tr);
+      if (m) {
+        const v = m.slice(1, 7).map(Number);
+        const X = v[0] * x + v[2] * y + v[4], Y = v[1] * x + v[3] * y + v[5];
+        return isFinite(X) && isFinite(Y) ? { x: X, y: Y } : null;
+      }
+      const tt = new RegExp("translate\\(\\s*" + N + "(?:[\\s,]+" + N + ")?\\s*\\)").exec(tr);
+      if (tt) return { x: x + Number(tt[1]), y: y + (tt[2] === void 0 ? 0 : Number(tt[2])) };
+      return { x, y };
+    }
+    function geoOf(r) {
+      if (geos[r]) return geos[r];
+      const dl = ws.dl;
+      const at = {};
+      const g = { k: [], p: [], x0: [], y0: [], x1: [], y1: [], cst: [], ax: [], ay: [], iso: [], nCst: 0 };
+      for (let i = 0; i < dl.n; i++) {
+        if (dl.run[i] !== r + 1) continue;
+        const k = dl.key[i];
+        let j = at[k];
+        if (j === void 0) {
+          j = at[k] = g.k.length;
+          g.k.push(k);
+          g.p.push(dl.panel[i] <= dl.panels.length ? dl.panel[i] : 0);
+          g.x0.push(dl.bx0[i]);
+          g.y0.push(dl.by0[i]);
+          g.x1.push(dl.bx1[i]);
+          g.y1.push(dl.by1[i]);
+        } else {
+          g.x0[j] = Math.min(g.x0[j], dl.bx0[i]);
+          g.y0[j] = Math.min(g.y0[j], dl.by0[i]);
+          g.x1[j] = Math.max(g.x1[j], dl.bx1[i]);
+          g.y1[j] = Math.max(g.y1[j], dl.by1[i]);
+        }
+      }
+      const root = ws.runSvg ? docFor(r) : null;
+      const nodeOf = {};
+      if (root) {
+        const nodes = root.querySelectorAll("[data-key]");
+        for (let i = 0; i < nodes.length; i++) {
+          const kk = nodes[i].getAttribute("data-key") || "";
+          if (!nodeOf[kk]) nodeOf[kk] = nodes[i];
+        }
+      }
+      for (let j = 0; j < g.k.length; j++) {
+        g.x0[j] -= RUN_BOX_PAD;
+        g.y0[j] -= RUN_BOX_PAD;
+        g.x1[j] += RUN_BOX_PAD;
+        g.y1[j] += RUN_BOX_PAD;
+        const key = dl.keys[g.k[j]];
+        const e = ws.meta[key];
+        const mark = e && e.mark ? e.mark : "";
+        const text = mark === "text";
+        const c = (text || GLYPH_MARKS[mark] === true) && g.p[j] > 0 && isFinite(g.x0[j]) && g.x1[j] > g.x0[j] && g.y1[j] > g.y0[j];
+        g.cst.push(c);
+        let ax = (g.x0[j] + g.x1[j]) / 2, ay = (g.y0[j] + g.y1[j]) / 2;
+        if (c && text && nodeOf[key]) {
+          const a = anchorOf(nodeOf[key]);
+          if (a) {
+            ax = a.x;
+            ay = a.y;
+          }
+        }
+        g.ax.push(ax);
+        g.ay.push(ay);
+        if (c) g.nCst++;
+      }
+      const ord = g.k.map((_, j) => j).sort((a, b) => g.x0[a] - g.x0[b]);
+      const iso = g.k.map(() => true);
+      for (let a = 0; a < ord.length; a++) {
+        const i = ord[a];
+        for (let b = a + 1; b < ord.length; b++) {
+          const j = ord[b];
+          if (g.x0[j] >= g.x1[i]) break;
+          if (g.y0[j] < g.y1[i] && g.y1[j] > g.y0[i]) {
+            iso[i] = false;
+            iso[j] = false;
+          }
+        }
+      }
+      g.iso = iso;
+      geos[r] = g;
+      return g;
+    }
+    function atlasOf(r, g, js, done) {
+      const dl = ws.dl, root = docFor(r);
+      if (!root) return null;
+      const want_ = {};
+      for (let q = 0; q < js.length; q++) want_[dl.keys[g.k[js[q]]]] = q;
+      let wmax = 0;
+      for (let q = 0; q < js.length; q++) wmax = Math.max(wmax, g.x1[js[q]] - g.x0[js[q]]);
+      const W = Math.max(512, Math.ceil(wmax) + 2 * ATLAS_GAP);
+      const cx = [], cy = [];
+      let x = ATLAS_GAP, y = ATLAS_GAP, rowH = 0;
+      for (let q = 0; q < js.length; q++) {
+        const j = js[q], w = g.x1[j] - g.x0[j], h = g.y1[j] - g.y0[j];
+        if (x + w + ATLAS_GAP > W) {
+          x = ATLAS_GAP;
+          y += rowH + ATLAS_GAP;
+          rowH = 0;
+        }
+        cx.push(x);
+        cy.push(y);
+        x += Math.ceil(w) + ATLAS_GAP;
+        rowH = Math.max(rowH, Math.ceil(h));
+      }
+      const H = y + rowH + ATLAS_GAP;
+      const NS = "http://www.w3.org/2000/svg";
+      const doc = root.ownerDocument;
+      const svg = doc.createElementNS(NS, "svg");
+      svg.setAttribute("xmlns", NS);
+      svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+      const defs = root.querySelectorAll("defs");
+      for (let i = 0; i < defs.length; i++) svg.appendChild(defs[i].cloneNode(true));
+      const nodes = root.querySelectorAll("[data-key]");
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const q = want_[n.getAttribute("data-key") || ""];
+        if (q === void 0) continue;
+        const j = js[q];
+        const copy = n.cloneNode(true);
+        if (!styleNode(copy, g.k[j])) continue;
+        let top = copy;
+        for (let up = n.parentNode; up && up !== root; up = up.parentNode) {
+          if (up.nodeType !== 1 || up.tagName.toLowerCase() === "defs") break;
+          const sh = up.cloneNode(false);
+          sh.appendChild(top);
+          top = sh;
+        }
+        const cell = doc.createElementNS(NS, "g");
+        cell.setAttribute("transform", "translate(" + (cx[q] - g.x0[j]) + " " + (cy[q] - g.y0[j]) + ")");
+        cell.appendChild(top);
+        svg.appendChild(cell);
+      }
+      const ks = Math.max(2, pngScale(r));
+      const s = rasterise(svg, W, H, ks, done);
+      return s ? { s, w: W, h: H, cx, cy, ks } : null;
+    }
+    function runSplit(r1) {
+      sync();
+      const dl = ws.dl;
+      if (!dl || !dl.runImgs || !dl.runHref) return null;
+      if (geoDl !== dl) {
+        geoDl = dl;
+        geos = [];
+        splits = [];
+        svgBroken = [];
+      }
+      const r = r1 - 1;
+      if (r < 0 || r >= dl.nRuns) return null;
+      const g = geoOf(r);
+      if (!g.nCst) return null;
+      const sig = forDl === dl ? sigOf(r) : "";
+      const hit = splits[r];
+      if (hit && hit.parts.some((s) => !!s && !!s.failed)) {
+        svgBroken[r] = true;
+        splits[r] = void 0;
+      } else if (hit && hit.sig === sig) return hit.parts.every((s) => !s || s.ready) ? hit.split : null;
+      const flags = ws.msActive ? ws.msFlags : null, color = ws.msActive ? ws.msColor : null;
+      const hasSvg = forDl === dl && !svgBroken[r] && !!docFor(r);
+      const png = dl.runImgs[r], pngHref = dl.runHref[r] || "";
+      const marks = [], atl = [], atlAt = [];
+      const cut = [];
+      const isCst = {};
+      let restAny = false, restTouched = false;
+      for (let j = 0; j < g.k.length; j++) {
+        const k = g.k[j], f = flags ? flags[k] : 0, c = color ? color[k] : 0;
+        if (!g.cst[j]) {
+          restAny = true;
+          if (f || c) restTouched = true;
+          continue;
+        }
+        isCst[k] = true;
+        cut.push(g.x0[j], g.y0[j], g.x1[j], g.y1[j]);
+        const m = {
+          k,
+          p: g.p[j],
+          x0: g.x0[j],
+          y0: g.y0[j],
+          x1: g.x1[j],
+          y1: g.y1[j],
+          ax: g.ax[j],
+          ay: g.ay[j],
+          src: png,
+          href: pngHref,
+          atlas: false,
+          fw: dl.runW,
+          fh: dl.runH,
+          sx: g.x0[j],
+          sy: g.y0[j],
+          ks: pngScale(r)
+        };
+        if (f & MS_HIDDEN) m.src = null;
+        else if (hasSvg && (!g.iso[j] || f || c) && atl.length < ATLAS_MAX) {
+          atlAt.push(marks.length);
+          atl.push(j);
+        }
+        marks.push(m);
+      }
+      const parts = [];
+      const split = { marks, rest: null };
+      const entry = { sig, parts, split };
+      splits[r] = entry;
+      const redraw = function() {
+        if (ws.dl === dl && splits[r] === entry) refresh();
+      };
+      if (atl.length) {
+        const a = atlasOf(r, g, atl, redraw);
+        if (a) {
+          parts.push(a.s);
+          for (let q = 0; q < atl.length; q++) {
+            const m = marks[atlAt[q]];
+            m.src = a.s.img;
+            m.href = a.s.href;
+            m.atlas = true;
+            m.fw = a.w;
+            m.fh = a.h;
+            m.sx = a.cx[q];
+            m.sy = a.cy[q];
+            m.ks = a.ks;
+          }
+        }
+      }
+      let rest = null;
+      if (restAny) {
+        let overlap = false;
+        for (let j = 0; j < g.k.length && !overlap; j++) {
+          if (g.cst[j]) continue;
+          for (let q = 0; q < cut.length; q += 4) {
+            if (g.x0[j] < cut[q + 2] && g.x1[j] > cut[q] && g.y0[j] < cut[q + 3] && g.y1[j] > cut[q + 1]) {
+              overlap = true;
+              break;
+            }
+          }
+        }
+        rest = { png: true, cut, fill: null };
+        if (hasSvg && (overlap || restTouched)) {
+          const f = rasterRun(r, isCst, redraw);
+          if (f) {
+            parts.push(f);
+            rest.fill = { img: f.img, href: f.href };
+            if (restTouched) {
+              rest.png = false;
+              rest.cut = null;
+            }
+          }
+        }
+      }
+      split.rest = rest;
+      return parts.every((s) => !s || s.ready) ? split : null;
     }
     function runImage(r) {
       const dl = ws.dl;
@@ -2594,7 +2891,10 @@
       for (let r = 0; r < dl.nRuns; r++) out.push(forDl === dl && !!cur[r]);
       return out;
     }
-    return { restyleRuns, runImage, runHref, runStyled };
+    function markSplitInDetail(on) {
+      splitInDetail = on;
+    }
+    return { restyleRuns, runImage, runHref, runStyled, runSplit, markSplitInDetail };
   }
   function runSvgsOf(svg, n) {
     if (svg == null) return null;
@@ -2915,10 +3215,126 @@
         D.el.appendChild(cp);
         return id;
       };
+      const cstPanel = function(p) {
+        if (!panHost[p] || !ws.axisZoomActive || ws.opts.zoomMarks === "scale") return false;
+        return ws.azPanels.some((a) => a.p.name === dl.panels[p - 1]);
+      };
+      const constAt = {};
+      const counter = function(el, ax, ay) {
+        const st = el.style;
+        st.setProperty("transform-box", "view-box");
+        st.setProperty("transform-origin", "0px 0px");
+        st.setProperty("transform", "translate(" + ax + "px," + ay + "px) scale(var(--vw-ix,1),var(--vw-iy,1)) translate(" + -ax + "px," + -ay + "px)");
+      };
+      const imgDef = function(id, href, w, h) {
+        if (!D.el.querySelector("#" + id)) {
+          const im = document.createElementNS(SVGNS, "image");
+          im.setAttribute("id", id);
+          im.setAttribute("x", "0");
+          im.setAttribute("y", "0");
+          im.setAttribute("width", String(w));
+          im.setAttribute("height", String(h));
+          im.setAttribute("preserveAspectRatio", "none");
+          im.setAttribute("href", href);
+          D.el.appendChild(im);
+        }
+        return id;
+      };
+      const rectsInto = function(el, cut, fill) {
+        for (let q = 0; q < cut.length; q += 4) {
+          const rc = document.createElementNS(SVGNS, "rect");
+          rc.setAttribute("x", String(cut[q]));
+          rc.setAttribute("y", String(cut[q + 1]));
+          rc.setAttribute("width", String(cut[q + 2] - cut[q]));
+          rc.setAttribute("height", String(cut[q + 3] - cut[q + 1]));
+          if (fill) rc.setAttribute("fill", fill);
+          el.appendChild(rc);
+        }
+      };
+      let usedSplit = false;
+      const placeSplit = function(p, r, sp) {
+        const g = document.createElementNS(SVGNS, "g");
+        g.setAttribute("class", "vellumwidget-detail-run vellumwidget-detail-split");
+        g.setAttribute("data-run", String(r));
+        const mode = dl.runBlend ? dl.runBlend[r - 1] : "normal";
+        if (mode && mode !== "normal") g.style.setProperty("mix-blend-mode", mode);
+        const cp = ws.fx.panelClip(dl.panels[p - 1]);
+        if (cp) g.setAttribute("clip-path", cp);
+        const R = sp.rest;
+        if (R && R.png) {
+          const u = document.createElementNS(SVGNS, "use");
+          u.setAttribute("href", "#" + imgDef(D.pre + "runpng" + r, dl.runHref[r - 1], dl.runW, dl.runH));
+          if (R.cut && R.cut.length) {
+            const mid = D.pre + "runcut" + r;
+            if (!D.el.querySelector("#" + mid)) {
+              const mk = document.createElementNS(SVGNS, "mask");
+              mk.setAttribute("id", mid);
+              mk.setAttribute("maskUnits", "userSpaceOnUse");
+              mk.setAttribute("x", "0");
+              mk.setAttribute("y", "0");
+              mk.setAttribute("width", String(dl.runW));
+              mk.setAttribute("height", String(dl.runH));
+              rectsInto(mk, [0, 0, dl.runW, dl.runH], "#fff");
+              rectsInto(mk, R.cut, "#000");
+              D.el.appendChild(mk);
+            }
+            u.setAttribute("mask", "url(#" + mid + ")");
+          }
+          g.appendChild(u);
+        }
+        if (R && R.fill) {
+          const u = document.createElementNS(SVGNS, "use");
+          u.setAttribute("href", "#" + imgDef(D.pre + "runfill" + r, R.fill.href, dl.runW, dl.runH));
+          if (R.cut) {
+            const cid = D.pre + "runin" + r;
+            if (!D.el.querySelector("#" + cid)) {
+              const c = document.createElementNS(SVGNS, "clipPath");
+              c.setAttribute("id", cid);
+              c.setAttribute("clipPathUnits", "userSpaceOnUse");
+              rectsInto(c, R.cut);
+              D.el.appendChild(c);
+            }
+            u.setAttribute("clip-path", "url(#" + cid + ")");
+          }
+          g.appendChild(u);
+        }
+        for (let q = 0; q < sp.marks.length; q++) {
+          const m = sp.marks[q];
+          if (m.p !== p) continue;
+          constAt[m.k] = { ax: m.ax, ay: m.ay };
+          if (!m.src) continue;
+          const id = m.atlas ? imgDef(D.pre + "atlas" + r, m.href, m.fw, m.fh) : imgDef(D.pre + "runpng" + r, m.href, m.fw, m.fh);
+          const w = m.x1 - m.x0, h = m.y1 - m.y0;
+          const box = document.createElementNS(SVGNS, "svg");
+          box.setAttribute("x", String(m.x0));
+          box.setAttribute("y", String(m.y0));
+          box.setAttribute("width", String(w));
+          box.setAttribute("height", String(h));
+          box.setAttribute("viewBox", m.sx + " " + m.sy + " " + w + " " + h);
+          box.setAttribute("preserveAspectRatio", "none");
+          const u = document.createElementNS(SVGNS, "use");
+          u.setAttribute("href", "#" + id);
+          box.appendChild(u);
+          const cg = document.createElementNS(SVGNS, "g");
+          cg.setAttribute("class", "vellumwidget-detail-const");
+          counter(cg, m.ax, m.ay);
+          cg.appendChild(box);
+          g.appendChild(cg);
+        }
+        groupFor(p).appendChild(g);
+        if (chains[p]) chains[p].length = 0;
+      };
       const placeRun = function(p, r) {
         const tag = (panHost[p] ? p : "root") + ":" + r;
         if (placed[tag] || !D || !dl.runHref) return;
         placed[tag] = true;
+        const cp0 = cstPanel(p);
+        if (cp0) usedSplit = true;
+        const sp = cp0 ? ws.fx.runSplit(r) : null;
+        if (sp) {
+          placeSplit(p, r, sp);
+          return;
+        }
         if (!runIds[r]) {
           const im = document.createElementNS(SVGNS, "image");
           runIds[r] = D.pre + "run" + r;
@@ -2981,6 +3397,8 @@
           n2.removeAttribute("stroke-opacity");
           n2.removeAttribute("stroke-dasharray");
           n2.setAttribute("class", "vellumwidget-detail-proxy");
+          const ca = constAt[dl.key[i]];
+          if (ca) counter(n2, ca.ax, ca.ay);
           groupFor(p).appendChild(n2);
           const k2 = dl.keys[dl.key[i]];
           (ws.nodesByKey[k2] = ws.nodesByKey[k2] || []).push(n2);
@@ -3000,6 +3418,7 @@
           ws.detailKeys.push(k);
         }
       }
+      ws.fx.markSplitInDetail(usedSplit);
       const was = ws.markTier;
       ws.markTier = "detail";
       ws.calib = null;
@@ -3020,6 +3439,7 @@
     function leaveDetail() {
       if (ws.markTier !== "detail") return;
       dropNodes();
+      ws.fx.markSplitInDetail(false);
       ws.markTier = "mid";
       ws.calib = null;
       ws.hoverSig = "";
@@ -5874,7 +6294,7 @@
       const base = Math.min(W / vb0.w, H / vb0.h);
       const scaleMarks = ws.opts.zoomMarks === "scale";
       const np = dl.panels.length;
-      const aff = [], gs = [], pclip = [];
+      const aff = [], gs = [], pclip = [], cst = [];
       const ident = { ax: kx, bx: q0.px, ay: ky, by: q0.py };
       for (let p = 0; p <= np; p++) {
         let A = ident, g = az && !scaleMarks ? base : kx, c = null;
@@ -5888,8 +6308,14 @@
         aff.push(A);
         gs.push(g);
         pclip.push(c);
+        let k = false;
+        if (a && !scaleMarks) {
+          const t = ws.fx.azT(a);
+          k = Math.abs(t.sx - 1) > 1e-9 || Math.abs(t.sy - 1) > 1e-9;
+        }
+        cst.push(k);
       }
-      return { aff, gs, pclip, base: az ? base : kx };
+      return { aff, gs, pclip, base: az ? base : kx, cst, kx, ky };
     }
     function paintList(ctx0, dl, W, H, L, styled, sink) {
       const aff = L.aff, gs = L.gs, pclip = L.pclip, base = L.base, np = dl.panels.length;
@@ -5992,6 +6418,72 @@
         return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
       };
       let op = "";
+      const drawSplit = function(r, sp, p, c) {
+        const A = aff[p];
+        const clipTo = function(x) {
+          x.setTransform(1, 0, 0, 1, 0, 0);
+          x.beginPath();
+          x.rect(c[0], c[1], c[2] - c[0], c[3] - c[1]);
+          x.clip();
+          if (op) x.globalCompositeOperation = op;
+        };
+        const R = sp.rest;
+        if (R && R.png) {
+          const png = dl.runImgs[r - 1];
+          if (R.cut && R.cut.length) {
+            const lc = layerPool.pop() || document.createElement("canvas");
+            if (lc.width !== W || lc.height !== H) {
+              lc.width = W;
+              lc.height = H;
+            }
+            const x = typeof lc.getContext === "function" ? lc.getContext("2d") : null;
+            if (x) {
+              x.setTransform(1, 0, 0, 1, 0, 0);
+              x.clearRect(0, 0, W, H);
+              x.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+              x.drawImage(png, 0, 0, dl.runW, dl.runH);
+              for (let q = 0; q < R.cut.length; q += 4) x.clearRect(R.cut[q], R.cut[q + 1], R.cut[q + 2] - R.cut[q], R.cut[q + 3] - R.cut[q + 1]);
+              ctx.save();
+              clipTo(ctx);
+              ctx.drawImage(lc, 0, 0);
+              ctx.restore();
+            }
+            layerPool.push(lc);
+          } else {
+            ctx.save();
+            clipTo(ctx);
+            ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+            ctx.drawImage(png, 0, 0, dl.runW, dl.runH);
+            ctx.restore();
+          }
+        }
+        if (R && R.fill) {
+          ctx.save();
+          clipTo(ctx);
+          if (R.cut) {
+            ctx.beginPath();
+            for (let q = 0; q < R.cut.length; q += 4) {
+              ctx.rect(A.ax * R.cut[q] + A.bx, A.ay * R.cut[q + 1] + A.by, A.ax * (R.cut[q + 2] - R.cut[q]), A.ay * (R.cut[q + 3] - R.cut[q + 1]));
+            }
+            ctx.clip();
+          }
+          ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+          ctx.drawImage(R.fill.img, 0, 0, dl.runW, dl.runH);
+          ctx.restore();
+        }
+        ctx.save();
+        clipTo(ctx);
+        const kx = L.kx, ky = L.ky;
+        for (let q = 0; q < sp.marks.length; q++) {
+          const m = sp.marks[q];
+          if (m.p !== p || !m.src) continue;
+          const dx = A.ax * m.ax + A.bx + kx * (m.x0 - m.ax), dy = A.ay * m.ay + A.by + ky * (m.y0 - m.ay);
+          const dw = kx * (m.x1 - m.x0), dh = ky * (m.y1 - m.y0);
+          if (dx > c[2] || dy > c[3] || dx + dw < c[0] || dy + dh < c[1]) continue;
+          ctx.drawImage(m.src, m.sx * m.ks, m.sy * m.ks, (m.x1 - m.x0) * m.ks, (m.y1 - m.y0) * m.ks, dx, dy, dw, dh);
+        }
+        ctx.restore();
+      };
       const drawRun = function(r) {
         const img = ws.fx.runImage(r);
         if (!img) return;
@@ -6022,9 +6514,13 @@
         }
         const hosted = runPanels[r];
         if (hosted) {
-          for (let p = 1; p <= np; p++) if (hosted[p]) {
+          for (let p = 1; p <= np; p++) {
+            if (!hosted[p]) continue;
             const c = ownClip(p);
-            if (c) one(aff[p], c);
+            if (!c) continue;
+            const sp = L.cst[p] ? ws.fx.runSplit(r) : null;
+            if (sp) drawSplit(r, sp, p, c);
+            else one(aff[p], c);
           }
         }
         if (runLoose[r]) one(aff[0], null, runLoose[r]);

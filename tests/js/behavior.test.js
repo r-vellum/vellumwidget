@@ -5313,7 +5313,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       beginPath() { arcs = []; this._rects = []; }, arc(x) { arcs.push(Math.round(x)); },
       fill() { log.push({ op: "fill", xs: arcs.slice() }); },
       stroke() {},
-      drawImage(img, x, y, w, h) { log.push({ op: "img", src: img && img.src, w: w, h: h, t: this._t.slice(), clipped: this._clips > 0, clip: this._clip }); }
+      drawImage(img, x, y, w, h) { log.push({ op: "img", src: img && img.src, w: w, h: h, t: this._t.slice(), clipped: this._clips > 0, clip: this._clip, a: Array.prototype.slice.call(arguments, 1) }); }
     };
   }
   // p1 exact, p2 flagged (run 1, under a mask), p3 exact, p4 flagged (run 2, text)
@@ -5326,7 +5326,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     if (!o.noRuns) rec.run = u8(o.runs || [0, 1, 0, 2]);
     const dl = {
       format: "vellum-display-list", version: 2, width: 200, height: 100, n: 4, record: rec,
-      point: { cx: f32([40, 80, 120, 160]), cy: { type: "f32", n: 4, const: 50 }, r: { type: "f32", n: 4, const: 3 }, shape: { type: "u8", n: 4, const: 0 } },
+      point: { cx: f32(o.cx || [40, 80, 120, 160]), cy: { type: "f32", n: 4, const: 50 }, r: { type: "f32", n: 4, const: 3 }, shape: { type: "u8", n: 4, const: 0 } },
       rect: { x: f32([]), y: f32([]), w: f32([]), h: f32([]) },
       path: { xy: { type: "f32", n: 0, data: "" }, run_offset: { type: "u8", n: 1, const: 0 }, path_offset: { type: "u8", n: 1, const: 0 },
         closed: { type: "u8", n: 0, data: "" }, evenodd: { type: "u8", n: 0, data: "" } },
@@ -5374,7 +5374,9 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     const flagged = o.noFlagged ? null : { runs: o.runHrefs || ["data:image/png;base64,RUN1", "data:image/png;base64,RUN2"], svg: o.runSvg, width: 200, height: 100 };
     inst.renderValue({
       svg: o.svg || (o.panels ? below : raw),
-      elements: { key: ["p1", "p2", "p3", "p4"], mark: ["point", "point", "point", "text"], cond: [["pick:color"], ["pick:color"], ["pick:color"], ["pick:color"]],
+      // (the flagged p2 and p4 are shapes that scale with the zoom unless a
+      // test makes them text or glyphs, VW-35)
+      elements: { key: ["p1", "p2", "p3", "p4"], mark: o.marks || ["point", "polygon", "point", "path"], cond: [["pick:color"], ["pick:color"], ["pick:color"], ["pick:color"]],
         x0: [null, 77, null, 150], y0: [null, 47, null, 45], x1: [null, 83, null, 170], y1: [null, 53, null, 55] },
       panels: o.panels ? [panel] : undefined,
       marks: { href: "data:image/png;base64,ORIGINAL", width: 200, height: 100, panels: o.panels ? "panel-1-1" : null },
@@ -5446,7 +5448,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   zx.restore();
   // a run with marks in both kinds of panel: drawn once through T (clipped to
   // the panel) and once untransformed (clipped to the loose marks)
-  const zb = mount({ panels: true, options: { axisZoom: true }, dlPanels: ["panel-1-1", "panel-x"], recPanels: [1, 2, 1, 1], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2] });
+  const zb = mount({ panels: true, options: { axisZoom: true }, dlPanels: ["panel-1-1", "panel-x"], recPanels: [1, 2, 1, 1], marks: ["point", "polygon", "polygon", "path"], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2] });
   zb.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); zb.inst._test.evalTier();
   const zbi = zb.ctx.log.filter((r) => r.op === "img");
   ok(zbi.length === 3 && Math.abs(zbi[0].t[0] - 2) < 1e-6 && zbi[0].clip[0].join(",") === "20,10,160,80" &&
@@ -5581,6 +5583,85 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(ns.inst._test.runStyled().join(",") === "false,false" && /RUN1$/.test(runImgs(ns.ctx)[0].src),
     "VW-33: without run SVGs the runs keep their PNGs");
   ns.restore();
+
+  // VW-35: under axis zoom a run's text and point glyphs keep their pixel
+  // size, as SVG mode's do: each is drawn at its anchor (mapped through T)
+  // with its offsets unscaled, from its slice of the run's PNG, or from an
+  // atlas rasterised from the run's SVG when a state restyles it
+  {
+    const GL = ["point", "point", "point", "text"];
+    // 2x about (100, 50): T maps x -> 2(x - 50), y -> 2(y - 25); p2's box
+    // (77..83 x 47..53, padded by 2) keeps its 10 x 10 size at its centre
+    // (80, 50) -> (60, 50): drawn at 55..65 x 45..55 from the PNG at 2 px
+    // per scene px (75..85 -> 150..170); p4 maps to x = 220, out of view
+    const c1 = mount({ panels: true, marks: GL, options: { axisZoom: true } });
+    c1.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c1.inst._test.evalTier();
+    ok(c1.inst._test.markTier() === "mid", "VW-35 setup: mid tier at 2x");
+    const ci = c1.ctx.log.filter((r) => r.op === "img");
+    ok(ci.length === 1 && /RUN1$/.test(ci[0].src) && ci[0].a.join(",") === "150,90,20,20,55,45,10,10",
+      "VW-35: a flagged glyph is its slice of the run PNG, at its centre under T and at constant size");
+    ok(ci.length === 1 && ci[0].clip && ci[0].clip.length === 1 && ci[0].clip[0].join(",") === "20,10,160,80",
+      "VW-35: ... clipped to the panel");
+    c1.restore();
+    // zoom_marks = "scale" keeps the run scaling with the zoom
+    const c2 = mount({ panels: true, marks: GL, options: { axisZoom: true, zoomMarks: "scale" } });
+    c2.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c2.inst._test.evalTier();
+    const c2i = c2.ctx.log.filter((r) => r.op === "img");
+    ok(c2i.length === 2 && c2i.every((r) => r.a.length === 4 && Math.abs(r.t[0] - 2) < 1e-6),
+      "VW-35: zoom_marks = 'scale' draws the runs scaled by T, as before");
+    c2.restore();
+    // a restyled glyph comes from the atlas: alone in its cell, at the dim opacity
+    const c3 = mount({ panels: true, marks: GL, runSvg: RUN_SVG, options: { axisZoom: true } });
+    c3.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c3.inst._test.evalTier();
+    c3.inst._call("select", ["p1"]); // dims p2 and p4
+    const c3i = c3.ctx.log.filter((r) => r.op === "img");
+    const at = c3i.length ? svgOf(c3i[0].src) : null;
+    ok(c3i.length === 1 && at && /translate\(-71 -41\)/.test(at) && /data-key="p2"[^>]*style="opacity:0.28"/.test(at) && !/data-key="p4"/.test(at),
+      "VW-35: a restyled glyph is drawn from the atlas: its node alone in a cell, styled");
+    ok(c3i.length === 1 && c3i[0].a.join(",") === "8,8,20,20,55,45,10,10",
+      "VW-35: ... from its cell (at the atlas gap), at the same constant-size spot");
+    c3.inst._call("clearSelection", []);
+    const c3j = c3.ctx.log.filter((r) => r.op === "img");
+    ok(c3j.length === 1 && /RUN1$/.test(c3j[0].src), "VW-35: clearing the state goes back to the PNG slice");
+    c3.restore();
+    // overlapping marks of a run come from the atlas even without state, so
+    // no slice carries a neighbour's ink
+    const ov = ['<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><g mask="url(#m)"><circle data-key="p2" cx="80" cy="50" r="3"/><circle data-key="p3" cx="82" cy="50" r="3"/></g><defs><mask id="m"/></defs></svg>',
+      RUN_SVG[1]];
+    const c4 = mount({ panels: true, marks: GL, runSvg: ov, cx: [40, 80, 84, 160], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2], options: { axisZoom: true } });
+    c4.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c4.inst._test.evalTier();
+    c4.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); // (the mock loads images at once, mid-paint: redraw)
+    const c4i = c4.ctx.log.filter((r) => r.op === "img");
+    const a4 = c4i.length ? svgOf(c4i[0].src) : null;
+    ok(c4i.length === 2 && a4 && c4i.every((r) => r.src === c4i[0].src) && /<defs><mask id="m"/.test(a4) && (a4.match(/<g mask="url\(#m\)">/g) || []).length === 2,
+      "VW-35: overlapping marks are drawn from atlas cells, each with its ancestors' groups (the mask) and the defs");
+    c4.restore();
+    // a run with a mark that scales (a polygon): the PNG with the constant
+    // marks' boxes cleared, then the constant marks
+    const c5 = mount({ panels: true, marks: ["point", "point", "polygon", "path"], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2], options: { axisZoom: true } });
+    c5.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c5.inst._test.evalTier();
+    const c5i = c5.ctx.log.filter((r) => r.op === "img");
+    ok(c5i.length === 3 && !c5i[0].src && c5i[1].a.length === 8 && /RUN1$/.test(c5i[1].src),
+      "VW-35: a mixed run draws its scaled rest (the PNG minus the constant boxes, via a layer) then its constant marks");
+    c5.restore();
+    // detail tier: the constant mark is a cell in a nested viewport,
+    // counter-scaled about its anchor from the pan group's vars; its
+    // stand-in follows it
+    const c6 = mount({ panels: true, marks: GL, detailMarks: 100, options: { axisZoom: true } });
+    c6.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c6.inst._test.evalTier();
+    ok(c6.inst._test.markTier() === "detail", "VW-35 setup: detail tier");
+    const sp = c6.el.querySelector("g.vellumwidget-detail-split");
+    const cg = sp ? sp.querySelector("g.vellumwidget-detail-const") : null;
+    const vp = cg ? cg.querySelector("svg") : null;
+    ok(cg && /translate\(80px, ?50px\) scale\(var\(--vw-ix, ?1\), ?var\(--vw-iy, ?1\)\) translate\(-80px, ?-50px\)/.test(cg.style.transform),
+      "VW-35: detail: the constant mark is counter-scaled about its anchor");
+    ok(vp && vp.getAttribute("viewBox") === "75 45 10 10" && vp.getAttribute("x") === "75" && /runpng1$/.test(vp.querySelector("use").getAttribute("href")),
+      "VW-35: detail: ... showing its slice of the run PNG in a nested viewport");
+    const px = c6.el.querySelector('.vellumwidget-detail-proxy[data-key="p2"]');
+    ok(px && /scale\(var\(--vw-ix/.test(px.style.transform), "VW-35: detail: the stand-in is counter-scaled with it");
+    ok(!c6.el.querySelector("use.vellumwidget-detail-run"), "VW-35: detail: no scaled run image for a run of constant marks only");
+    c6.restore();
+  }
 
   // VW-32: a run under a blend mode is drawn on a canvas of its own, stacked
   // over the marks before it with the run's mix-blend-mode; the marks after it

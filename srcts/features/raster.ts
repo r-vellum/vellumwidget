@@ -7,6 +7,7 @@ import { DL_POINT, DL_RECT, fillGradient, traceClipPath, tracePoint, traceShape 
 import { MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
 import type { Affine, DisplayList } from "../dlist";
 import type { WidgetFns, WidgetState } from "../state";
+import type { RunSplit } from "./runStyle";
 import { isZoomedIn, userToCanvas } from "../viewbox";
 
 export function rasterFeature(
@@ -332,7 +333,11 @@ export function rasterFeature(
   // and non-scaling strokes do; under viewBox zoom the whole scene scales,
   // glyph radii and stroke widths with it, as the detail tier's nodes (and
   // the SVG mode's) do in the zoomed viewBox.
-  interface ListLayout { aff: Affine[]; gs: number[]; pclip: (number[] | null)[]; base: number; }
+  // `cst[p]`: panel p is axis-zoomed with constant-size marks at a scale
+  // other than 1, so a flagged run's text and glyphs are drawn at their
+  // pixel size there (VW-35); `kx`/`ky` are canvas px per scene px at the
+  // full view.
+  interface ListLayout { aff: Affine[]; gs: number[]; pclip: (number[] | null)[]; base: number; cst: boolean[]; kx: number; ky: number; }
   function listLayout(dl: DisplayList, W: number, H: number): ListLayout {
     const vb = ws.vb!, vb0 = ws.vb0!;
     const az = ws.axisZoomActive && ws.azPanels.length > 0;
@@ -342,7 +347,7 @@ export function rasterFeature(
     const base = Math.min(W / vb0.w, H / vb0.h); // canvas px per scene px at the full view
     const scaleMarks = ws.opts.zoomMarks === "scale";
     const np = dl.panels.length;
-    const aff: Affine[] = [], gs: number[] = [], pclip: (number[] | null)[] = [];
+    const aff: Affine[] = [], gs: number[] = [], pclip: (number[] | null)[] = [], cst: boolean[] = [];
     const ident: Affine = { ax: kx, bx: q0.px, ay: ky, by: q0.py };
     for (let p = 0; p <= np; p++) {
       let A = ident, g = az && !scaleMarks ? base : kx, c: number[] | null = null;
@@ -354,8 +359,11 @@ export function rasterFeature(
         c = [kx * a.p.px0 + q0.px, ky * a.p.py0 + q0.py, kx * a.p.px1 + q0.px, ky * a.p.py1 + q0.py];
       }
       aff.push(A); gs.push(g); pclip.push(c);
+      let k = false;
+      if (a && !scaleMarks) { const t = ws.fx.azT(a); k = Math.abs(t.sx - 1) > 1e-9 || Math.abs(t.sy - 1) > 1e-9; }
+      cst.push(k);
     }
-    return { aff: aff, gs: gs, pclip: pclip, base: az ? base : kx };
+    return { aff: aff, gs: gs, pclip: pclip, base: az ? base : kx, cst: cst, kx: kx, ky: ky };
   }
 
   // Paint every unflagged record onto `ctx` (W x H backing px) through layout
@@ -477,6 +485,63 @@ export function rasterFeature(
       return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
     };
     let op = ""; // a blend mode drawn straight onto ctx (no sink)
+    // A run taken apart for zoomed panel p (VW-35, runStyle.ts runSplit):
+    // the rest of the run scaled through the panel's transform, then each
+    // constant-size mark's cell at its anchor (mapped through the transform)
+    // with its offsets unscaled, all clipped to `c`.
+    const drawSplit = function (r: number, sp: RunSplit, p: number, c: number[]): void {
+      const A = aff[p];
+      const clipTo = function (x: CanvasRenderingContext2D): void {
+        x.setTransform(1, 0, 0, 1, 0, 0);
+        x.beginPath(); x.rect(c[0], c[1], c[2] - c[0], c[3] - c[1]); x.clip();
+        if (op) x.globalCompositeOperation = op as GlobalCompositeOperation;
+      };
+      const R = sp.rest;
+      if (R && R.png) {
+        const png = dl.runImgs![r - 1];
+        if (R.cut && R.cut.length) {
+          // the PNG on a scratch layer with the constant marks' boxes cleared
+          const lc = layerPool.pop() || document.createElement("canvas");
+          if (lc.width !== W || lc.height !== H) { lc.width = W; lc.height = H; }
+          const x = typeof lc.getContext === "function" ? lc.getContext("2d") : null;
+          if (x) {
+            x.setTransform(1, 0, 0, 1, 0, 0);
+            x.clearRect(0, 0, W, H);
+            x.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+            x.drawImage(png, 0, 0, dl.runW, dl.runH);
+            for (let q = 0; q < R.cut.length; q += 4) x.clearRect(R.cut[q], R.cut[q + 1], R.cut[q + 2] - R.cut[q], R.cut[q + 3] - R.cut[q + 1]);
+            ctx.save(); clipTo(ctx); ctx.drawImage(lc, 0, 0); ctx.restore();
+          }
+          layerPool.push(lc);
+        } else {
+          ctx.save(); clipTo(ctx); ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by); ctx.drawImage(png, 0, 0, dl.runW, dl.runH); ctx.restore();
+        }
+      }
+      if (R && R.fill) {
+        ctx.save(); clipTo(ctx);
+        if (R.cut) {
+          ctx.beginPath();
+          for (let q = 0; q < R.cut.length; q += 4) {
+            ctx.rect(A.ax * R.cut[q] + A.bx, A.ay * R.cut[q + 1] + A.by, A.ax * (R.cut[q + 2] - R.cut[q]), A.ay * (R.cut[q + 3] - R.cut[q + 1]));
+          }
+          ctx.clip();
+        }
+        ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+        ctx.drawImage(R.fill.img, 0, 0, dl.runW, dl.runH);
+        ctx.restore();
+      }
+      ctx.save(); clipTo(ctx);
+      const kx = L.kx, ky = L.ky;
+      for (let q = 0; q < sp.marks.length; q++) {
+        const m = sp.marks[q];
+        if (m.p !== p || !m.src) continue;
+        const dx = A.ax * m.ax + A.bx + kx * (m.x0 - m.ax), dy = A.ay * m.ay + A.by + ky * (m.y0 - m.ay);
+        const dw = kx * (m.x1 - m.x0), dh = ky * (m.y1 - m.y0);
+        if (dx > c[2] || dy > c[3] || dx + dw < c[0] || dy + dh < c[1]) continue;
+        ctx.drawImage(m.src, m.sx * m.ks, m.sy * m.ks, (m.x1 - m.x0) * m.ks, (m.y1 - m.y0) * m.ks, dx, dy, dw, dh);
+      }
+      ctx.restore();
+    };
     const drawRun = function (r: number): void {
       // its PNG, or re-rendered with the state of its marks (VW-33)
       const img = ws.fx.runImage(r);
@@ -500,7 +565,16 @@ export function rasterFeature(
       };
       if (!anyPclip) { one(aff[0], null); return; }
       const hosted = runPanels[r];
-      if (hosted) for (let p = 1; p <= np; p++) if (hosted[p]) { const c = ownClip(p); if (c) one(aff[p], c); }
+      if (hosted) {
+        for (let p = 1; p <= np; p++) {
+          if (!hosted[p]) continue;
+          const c = ownClip(p);
+          if (!c) continue;
+          // a zoomed panel: the run's text and glyphs at constant size (VW-35)
+          const sp = L.cst[p] ? ws.fx.runSplit(r) : null;
+          if (sp) drawSplit(r, sp, p, c); else one(aff[p], c);
+        }
+      }
       if (runLoose[r]) one(aff[0], null, runLoose[r]);
     };
     let curGroup = 0;

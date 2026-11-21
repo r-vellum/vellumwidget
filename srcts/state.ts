@@ -10,6 +10,7 @@ import type { IntervalRange } from "./scales";
 import type { Pt } from "./spatial";
 import type { AzPanel, Bbox, ColorbarInfo, ElemMeta, InteractionSpec, Options, PanelInfo, Payload, Provenance, ViewBox } from "./types";
 import type { PanTransform } from "./viewbox";
+import type { RunSplit } from "./features/runStyle";
 
 export interface WidgetState {
   // The widget's root element (the htmlwidgets container).
@@ -283,6 +284,8 @@ export interface WidgetFns {
   runImage: (r: number) => CanvasImageSource | null;
   runHref: (r: number) => string;
   runStyled: () => boolean[];
+  runSplit: (r: number) => RunSplit | null;
+  markSplitInDetail: (on: boolean) => void;
   drawSelFeedback: () => void;
   refreshSelected: () => void;
   showMarksLayer: (on: boolean) => void;

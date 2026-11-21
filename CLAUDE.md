@@ -136,6 +136,14 @@ applies it to a copy of the run's SVG (hidden: removed; a condition colour:
 inline fill/stroke; dim/mute: opacity), rasterises that as an image and
 `runImage()`/`runHref()` hand it to `paintList` and the detail run `<image>`s
 instead of the PNG (`restyleRuns()`, from `updateMarkStates()`).
+Under axis zoom (unless `zoom_marks = "scale"`), a run's text and point
+glyphs keep their pixel size (VW-35): `runSplit()` (`runStyle.ts`) takes the
+run apart per zoomed panel into constant-size marks (each a cell of the run
+PNG, or of an atlas rasterised from the run's SVG when marks overlap or state
+restyles one) drawn at their anchor through T, plus the rest of the run
+(the PNG with those boxes cleared). `paintList` (`drawSplit`) and the detail
+tier (`placeSplit`, counter-scaled from `--vw-ix`/`--vw-iy`) draw it; until
+its images load, the run draws scaled as before.
 Blend modes (VW-32): with a vellum whose v2 list has `run_blend` (runs split
 at blend roots), a flag-32 run composites with its mode. `paintList` takes a
 `LayerSink`: on screen, stacked `canvas.vellumwidget-canvas-layer`s after
