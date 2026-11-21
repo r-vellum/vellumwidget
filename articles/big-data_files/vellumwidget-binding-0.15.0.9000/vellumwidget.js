@@ -2940,6 +2940,9 @@
         if (!panHost[p]) {
           const cid = rootClip(r);
           if (cid) u.setAttribute("clip-path", "url(#" + cid + ")");
+        } else {
+          const cp = ws.fx.panelClip(dl.panels[p - 1]);
+          if (cp) u.setAttribute("clip-path", cp);
         }
         groupFor(p).appendChild(u);
         if (chains[p]) chains[p].length = 0;
@@ -5977,6 +5980,17 @@
           else (runLoose[r] = runLoose[r] || []).push(dl.bx0[i], dl.by0[i], dl.bx1[i], dl.by1[i]);
         }
       }
+      const ownClip = function(p) {
+        const pc = pclip[p], A = aff[p];
+        const nm = dl.panels[p - 1];
+        const pn = ws.panels.filter((q) => q.name === nm)[0];
+        if (!pc || !pn) return pc;
+        const x0 = Math.max(pc[0], Math.min(A.ax * pn.px0 + A.bx, A.ax * pn.px1 + A.bx));
+        const x1 = Math.min(pc[2], Math.max(A.ax * pn.px0 + A.bx, A.ax * pn.px1 + A.bx));
+        const y0 = Math.max(pc[1], Math.min(A.ay * pn.py0 + A.by, A.ay * pn.py1 + A.by));
+        const y1 = Math.min(pc[3], Math.max(A.ay * pn.py0 + A.by, A.ay * pn.py1 + A.by));
+        return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
+      };
       let op = "";
       const drawRun = function(r) {
         const img = ws.fx.runImage(r);
@@ -6008,7 +6022,10 @@
         }
         const hosted = runPanels[r];
         if (hosted) {
-          for (let p = 1; p <= np; p++) if (hosted[p]) one(aff[p], pclip[p]);
+          for (let p = 1; p <= np; p++) if (hosted[p]) {
+            const c = ownClip(p);
+            if (c) one(aff[p], c);
+          }
         }
         if (runLoose[r]) one(aff[0], null, runLoose[r]);
       };
@@ -6401,7 +6418,48 @@
   // srcts/features/render.ts
   var marksSeq = 0;
   var aboveSeq = 0;
+  var clipSeq = 0;
   function renderFeature(ws) {
+    let clipSvg = null;
+    let clipMade = {};
+    function panelClip(name) {
+      if (!ws.svgEl) return null;
+      if (clipSvg !== ws.svgEl) {
+        clipSvg = ws.svgEl;
+        clipMade = {};
+      }
+      if (clipMade[name]) return clipMade[name];
+      const pan = ws.svgEl.querySelector('[data-vellum-pan="' + cssEscape(name) + '"]');
+      if (!pan) return null;
+      for (let up = pan.parentNode; up && up !== ws.svgEl; up = up.parentNode) {
+        if (!up.hasAttribute || !up.hasAttribute("data-vellum-panel")) continue;
+        const c = up.getAttribute("clip-path");
+        if (c) return c;
+        break;
+      }
+      const p = ws.panels.filter(function(q) {
+        return q.name === name;
+      })[0];
+      if (!p || !(p.px1 > p.px0) || !(p.py1 > p.py0)) return null;
+      let defs = ws.svgEl.querySelector("defs.vellumwidget-clip-defs");
+      if (!defs) {
+        defs = document.createElementNS(SVGNS, "defs");
+        defs.setAttribute("class", "vellumwidget-clip-defs");
+        ws.svgEl.insertBefore(defs, ws.svgEl.firstChild);
+      }
+      const id = "vw-own-" + ++clipSeq;
+      const cp = document.createElementNS(SVGNS, "clipPath");
+      cp.setAttribute("id", id);
+      cp.setAttribute("clipPathUnits", "userSpaceOnUse");
+      const rc = document.createElementNS(SVGNS, "rect");
+      rc.setAttribute("x", String(p.px0));
+      rc.setAttribute("y", String(p.py0));
+      rc.setAttribute("width", String(p.px1 - p.px0));
+      rc.setAttribute("height", String(p.py1 - p.py0));
+      cp.appendChild(rc);
+      defs.appendChild(cp);
+      return clipMade[name] = "url(#" + id + ")";
+    }
     function placeAbove(src) {
       if (!ws.stage) return null;
       const pre = "vw-above" + ++aboveSeq + "-";
@@ -6463,6 +6521,8 @@
         const u = document.createElementNS(SVGNS, "use");
         u.setAttribute("class", "vellumwidget-marks");
         u.setAttribute("href", "#" + id);
+        const cp = panelClip(names[i]);
+        if (cp) u.setAttribute("clip-path", cp);
         pans[i].appendChild(u);
       }
       return "pans";
@@ -6721,7 +6781,7 @@
       ws.calib = null;
       ws.fx.drawPoints();
     }
-    return { renderValue, resize };
+    return { renderValue, resize, panelClip };
   }
 
   // srcts/linking.ts
