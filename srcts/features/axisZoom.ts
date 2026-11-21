@@ -2,6 +2,7 @@
 // client-side re-ticked axes and gridlines.
 
 import { cssEscape } from "../css";
+import { applyAffine6, parseTransformList } from "../geometry";
 import { SVGNS } from "./constants";
 import { GLYPH_MARKS } from "../scales";
 import type { WidgetFns, WidgetState } from "../state";
@@ -218,24 +219,18 @@ export function axisZoomFeature(
 
   // Counter-scale a text node about its anchor: T re-maps the anchor, the
   // inverse-scale vars cancel T's size change around it. The anchor is the
-  // node's (x, y) through its own placement transform (translate / matrix);
-  // a transform this can't restate (rotate(), skew()) leaves the node as is.
+  // node's (x, y) through its own placement transform, composed over the whole
+  // list (vellum rotates a label with `matrix(...) rotate(a x y)`, VW-41), and
+  // that transform is carried after the counter-scale so the label keeps its
+  // rotation. A transform this can't read leaves the node as is.
   function constantText(n: SVGElement): void {
     if (n.style.getPropertyValue("transform")) return;
     const own = (n.getAttribute("transform") || "").trim();
-    const place = transAsCss(n);
-    if (own && !place) return;
-    const x = parseFloat(n.getAttribute("x") || "") || 0, y = parseFloat(n.getAttribute("y") || "") || 0;
-    let X = x, Y = y;
-    const m = /matrix\(([^)]*)\)/.exec(place);
-    if (m) {
-      const v = m[1].split(",").map(Number);
-      X = v[0] * x + v[2] * y + v[4]; Y = v[1] * x + v[3] * y + v[5];
-    } else {
-      const t = /translate\(([-+\d.eE]+)px,([-+\d.eE]+)px\)/.exec(place);
-      if (t) { X = x + Number(t[1]); Y = y + Number(t[2]); }
-    }
+    if (own && !parseTransformList(own)) return;
+    const A = anchorThrough(n);
+    const X = A.x, Y = A.y;
     if (!isFinite(X) || !isFinite(Y)) return;
+    const place = transAsCss(n);
     // view-box origin 0 0 is the local origin for vellum's 0-based viewBox.
     n.style.setProperty("transform-box", "view-box");
     n.style.setProperty("transform-origin", "0px 0px");
@@ -248,36 +243,32 @@ export function axisZoomFeature(
   // A node's own `transform` attribute, restated as a CSS transform function so
   // an inline CSS transform can carry it forward instead of silently replacing
   // it. CSS needs comma-separated arguments and px units on lengths, neither of
-  // which the SVG attribute grammar requires. "" when there is nothing to carry.
+  // which the SVG attribute grammar requires. The whole list is composed into
+  // one matrix, so a `matrix(...) rotate(...)` keeps its rotation (VW-41); a
+  // translate-only list stays a px translate. "" when there is nothing to
+  // carry (or nothing this can read).
   function transAsCss(node: Element): string {
     const t = (node.getAttribute("transform") || "").trim();
-    if (!t) return "";
-    const N = "([-+\\d.eE]+)";
-    const m = new RegExp(
-      "matrix\\(\\s*" + [N, N, N, N, N, N].join("[\\s,]+") + "\\s*\\)"
-    ).exec(t);
-    if (m) {
-      const v = m.slice(1, 7).map(Number);
-      if (v.some(function (x) { return !isFinite(x); })) return "";
-      return "matrix(" + v.join(",") + ")";
-    }
-    const tr = new RegExp(
-      "translate\\(\\s*" + N + "(?:[\\s,]+" + N + ")?\\s*\\)"
-    ).exec(t);
-    if (tr) {
-      const tx = Number(tr[1]), ty = tr[2] === undefined ? 0 : Number(tr[2]);
-      if (!isFinite(tx) || !isFinite(ty)) return "";
-      return "translate(" + tx + "px," + ty + "px)";
-    }
-    return "";
+    const m = parseTransformList(t);
+    if (!m) return "";
+    if (/^(\s*translate\([^)]*\)\s*)+$/.test(t)) return "translate(" + m[4] + "px," + m[5] + "px)";
+    return "matrix(" + m.join(",") + ")";
   }
 
-  // Translate component of a node's `transform` (matrix e/f or translate x/y).
-  function transTranslate(node: Element): { tx: number; ty: number } {
-    const t = node.getAttribute("transform") || "";
-    const m = /matrix\(\s*[-\d.eE]+\s+[-\d.eE]+\s+[-\d.eE]+\s+[-\d.eE]+\s+([-\d.eE]+)\s+([-\d.eE]+)\s*\)/.exec(t) ||
-      /translate\(\s*([-\d.eE]+)[ ,]+([-\d.eE]+)\s*\)/.exec(t);
-    return m ? { tx: parseFloat(m[1]), ty: parseFloat(m[2]) } : { tx: 0, ty: 0 };
+  // A node's (x, y) anchor through its own transform list.
+  function anchorThrough(node: Element): { x: number; y: number } {
+    const x = parseFloat(node.getAttribute("x") || "") || 0, y = parseFloat(node.getAttribute("y") || "") || 0;
+    const m = parseTransformList(node.getAttribute("transform"));
+    return m ? applyAffine6(m, x, y) : { x: x, y: y };
+  }
+
+  // The rotation (degrees, SVG sense: clockwise in the y-down frame) a node's
+  // transform list applies; 0 when none.
+  function rotationOf(node: Element): number {
+    const m = parseTransformList(node.getAttribute("transform"));
+    if (!m) return 0;
+    const r = (Math.atan2(m[1], m[0]) * 180) / Math.PI;
+    return Math.abs(r) < 1e-6 ? 0 : Math.round(r * 1e6) / 1e6;
   }
 
   // Scrape the axis text + gridline presentation from vellum's own nodes, so the
@@ -321,9 +312,8 @@ export function axisZoomFeature(
       let first: { x: number; y: number } | null = null;
       const along: number[] = [], labs: string[] = [];
       for (let i = 0; i < texts.length; i++) {
-        const tr = transTranslate(texts[i]);
-        const x = tr.tx + (parseFloat(texts[i].getAttribute("x") || "") || 0);
-        const y = tr.ty + (parseFloat(texts[i].getAttribute("y") || "") || 0);
+        const at = anchorThrough(texts[i]);
+        const x = at.x, y = at.y;
         along.push(isX ? x : y);
         labs.push(texts[i].textContent || "");
         if (!first) first = { x: x, y: y };
@@ -352,13 +342,17 @@ export function axisZoomFeature(
       }
       if (!best) continue;
       const t0 = texts[0];
+      // Rotated tick labels (`axis.text.x = element_text(angle =)`) are re-drawn
+      // rotated about their anchor with vellum's own anchoring (VW-41).
+      const rot = rotationOf(t0);
       const anchor: AxisAnchor = {
         pos: isX ? first.y : first.x,
         // x labels centre on their tick (vellum centres wrapped lines itself, with
         // a start anchor and per-line offsets, so its anchor isn't reusable there).
-        anchor: isX ? "middle" : (t0.getAttribute("text-anchor") || "end"),
+        anchor: isX && !rot ? "middle" : (t0.getAttribute("text-anchor") || (isX ? "middle" : "end")),
         baseline: t0.getAttribute("dominant-baseline") || (isX ? "text-before-edge" : "central"),
-        gap: gap
+        gap: rot ? 0 : gap,
+        rot: rot
       };
       if (isSec) {
         // Read the secondary transform back off the static labels: each label sits
@@ -513,7 +507,7 @@ export function axisZoomFeature(
     return l;
   }
 
-  function axisLabel(text: string, x: number, y: number, anchor: string, baseline: string): SVGTextElement {
+  function axisLabel(text: string, x: number, y: number, anchor: string, baseline: string, rot?: number): SVGTextElement {
     const t = document.createElementNS(SVGNS, "text") as SVGTextElement;
     t.setAttribute("x", String(x)); t.setAttribute("y", String(y));
     t.setAttribute("fill", ws.axisStyle.textFill);
@@ -521,6 +515,7 @@ export function axisZoomFeature(
     t.setAttribute("font-size", String(ws.axisStyle.fontSize));
     t.setAttribute("text-anchor", anchor);
     t.setAttribute("dominant-baseline", baseline);
+    if (rot) t.setAttribute("transform", "rotate(" + rot + " " + x + " " + y + ")");
     t.textContent = text;
     return t;
   }
@@ -570,7 +565,7 @@ export function axisZoomFeature(
         grid.appendChild(gridLine(sx, p.py0, sx, p.py1));
         if (a.xTick) ticks_.push(tickLine(a.xTick, sx, p));
         if (a.xLab) {
-          const lab = axisLabel(ticks[i].label, sx, a.xLab.pos, a.xLab.anchor, a.xLab.baseline);
+          const lab = axisLabel(ticks[i].label, sx, a.xLab.pos, a.xLab.anchor, a.xLab.baseline, a.xLab.rot);
           if (a.xLab.gap > 0) wrapLabel(lab, ticks[i].label, sx, a.xLab.gap);
           layer.appendChild(lab);
         }
@@ -580,7 +575,7 @@ export function axisZoomFeature(
         for (let i = 0; i < st.length; i++) {
           const sx = t.sx * (p.px0 + (st[i].n - ax.native_lo) / k) + t.tx;
           if (!isFinite(sx) || sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
-          layer.appendChild(axisLabel(st[i].label, sx, a.x2Lab.pos, a.x2Lab.anchor, a.x2Lab.baseline));
+          layer.appendChild(axisLabel(st[i].label, sx, a.x2Lab.pos, a.x2Lab.anchor, a.x2Lab.baseline, a.x2Lab.rot));
         }
       }
     }
@@ -598,7 +593,7 @@ export function axisZoomFeature(
         grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
         if (a.yTick) ticks_.push(tickLine(a.yTick, sy, p));
         if (a.yLab) {
-          layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline));
+          layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline, a.yLab.rot));
         }
       }
       if (a.y2Lab && a.y2Map) {
@@ -606,7 +601,7 @@ export function axisZoomFeature(
         for (let i = 0; i < st.length; i++) {
           const sy = t.sy * (p.py0 + (ay.native_hi - st[i].n) / k) + t.ty;
           if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
-          layer.appendChild(axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline));
+          layer.appendChild(axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline, a.y2Lab.rot));
         }
       }
     }
