@@ -214,6 +214,12 @@ element position, and a repeated key maps to its first position.
   `node tests/js/behavior.test.js` (jsdom).
 - In a git worktree, **copy** `node_modules` from the main checkout
   (`cp -R`); never symlink it.
+- R-CMD-check installs vellum and vellumplot from their `main`. A PR
+  that needs an unmerged vellum branch names it with a
+  `vellum-ref: <branch>` line in the PR description (`vellumplot-ref:`
+  likewise); the workflow rewrites `Remotes:` in its checkout only (X-9,
+  `.github/CONTRIBUTING.md`). Edit the description, then re-run the job;
+  drop the line once vellum’s PR is merged.
 - Run R tests with `devtools::test()`. Never run
   [`testthat::test_dir()`](https://testthat.r-lib.org/reference/test_dir.html)
   against an installed build: it deletes snapshot files.

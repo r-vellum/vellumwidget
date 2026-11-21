@@ -90,6 +90,7 @@
 <li>
 <strong>Always commit the rebuilt bundle with the source change.</strong> The <code>js-runtime</code> CI job rebuilds it and fails if the committed copy is stale. It also runs <code>npx tsc --noEmit</code> and <code>node tests/js/behavior.test.js</code> (jsdom).</li>
 <li>In a git worktree, <strong>copy</strong> <code>node_modules</code> from the main checkout (<code>cp -R</code>); never symlink it.</li>
+<li>R-CMD-check installs vellum and vellumplot from their <code>main</code>. A PR that needs an unmerged vellum branch names it with a <code>vellum-ref: &lt;branch&gt;</code> line in the PR description (<code>vellumplot-ref:</code> likewise); the workflow rewrites <code>Remotes:</code> in its checkout only (X-9, <code>.github/CONTRIBUTING.md</code>). Edit the description, then re-run the job; drop the line once vellum’s PR is merged.</li>
 <li>Run R tests with <code>devtools::test()</code>. Never run <code><a href="https://testthat.r-lib.org/reference/test_dir.html" class="external-link">testthat::test_dir()</a></code> against an installed build: it deletes snapshot files.</li>
 </ul></div>
 </div>
