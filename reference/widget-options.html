@@ -66,7 +66,8 @@
 <span>  raster_threshold <span class="op">=</span> <span class="fl">20000L</span>,</span>
 <span>  text <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"native"</span>, <span class="st">"outline"</span><span class="op">)</span>,</span>
 <span>  max_marks <span class="op">=</span> <span class="fl">500000L</span>,</span>
-<span>  detail_marks <span class="op">=</span> <span class="fl">3000L</span></span>
+<span>  detail_marks <span class="op">=</span> <span class="fl">3000L</span>,</span>
+<span>  precision <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"compact"</span>, <span class="st">"f32"</span><span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -181,6 +182,18 @@ visible marks become real SVG nodes (the detail tier): hover, selection,
 them as in SVG mode. Zooming back out past 1.5 times this many returns to
 the canvas. <code>0</code> turns the detail tier off.</p></dd>
 
+
+<dt id="arg-precision">precision<a class="anchor" aria-label="anchor" href="#arg-precision"></a></dt>
+<dd><p>How the display list ships its marks' coordinates (see
+<code>max_marks</code>). <code>"compact"</code> (default), with a vellum that supports it,
+quantises each coordinate column within its range so that no coordinate
+is off by more than 0.005 px, the precision of the SVG vellum writes
+(SVG mode, and raster mode's axes and gridlines): 16 bits per value for a
+plot up to 655 px across, 24 above, instead of a 32-bit float. That
+halves the coordinates in the payload (a 200k-point scatter: 2.7 to
+1.7 MB) and keeps the error under half a pixel up to 100x zoom. <code>"f32"</code>
+ships 32-bit floats, as an older vellum always does.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -223,6 +236,7 @@ Calling a helper with no arguments gives the defaults.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   text: native</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   max_marks: 5e+05</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   detail_marks: 3000</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   precision: compact</span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="cn">FALSE</span><span class="op">)</span> <span class="op">{</span> <span class="co"># \dontrun{</span></span></span>
 <span class="r-in"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-vellum.github.io/vellumplot/" class="external-link">vellumplot</a></span><span class="op">)</span></span></span>

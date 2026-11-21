@@ -2,6 +2,18 @@
 
 ## vellumwidget 0.15.0.9000
 
+- **Compact coordinates in raster mode (VR-18).** With a vellum whose
+  `scene_display_list()` takes `precision`, the display list’s
+  coordinates ship quantised: each column (point centres and radii,
+  rects, path vertices) as 16-bit integers within its range (24-bit for
+  a column spanning more than 655 px), so no coordinate is off by more
+  than 0.005 px, the precision of the SVG vellum writes for SVG mode and
+  for raster mode’s axes. A 200k-point keyed scatter’s payload goes from
+  2.72 to 1.65 MB; decoding is no slower. The marks stay within half a
+  pixel of their float positions up to 100x zoom, and drift as in SVG
+  mode beyond. `render_options(precision = "f32")` keeps 32-bit floats,
+  and the runtime reads float lists from an older vellum as before.
+
 - With a vellum whose raster backend no longer isolates plain groups
   (VR-21), a blend-mode layer wrapped in a group without opacity, mask,
   blend or effect gets the mixed tier and composites with its mode,
