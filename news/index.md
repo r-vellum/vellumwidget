@@ -2,6 +2,17 @@
 
 ## vellumwidget 0.14.1.9000
 
+- **Faster widget builds for big keyed plots (VR-19).**
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  reads the element meta (tooltips, legend membership, conditions,
+  interval values, …) as columns from
+  `vellum::scene_model(meta = "columns")` instead of one record per
+  element. Building a raster widget of a 200,000-point scatter with
+  tooltips and a colour legend went from 1.5 s to 1.0 s, and 1,000,000
+  points from 8.4 s to 4.0 s (with vellumplot 0.17.0.9000, which writes
+  the meta as columns). The payload is unchanged. Needs vellum
+  0.11.1.9000 or later.
+
 ## vellumwidget 0.14.1
 
 - **Raster mode: a blend mode no longer keeps the whole plot on the mark

@@ -50,7 +50,9 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.14.1.9000" id="vellumwidget-01419000">vellumwidget 0.14.1.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-01419000"></a></h2>
-</div>
+<ul><li>
+<strong>Faster widget builds for big keyed plots (VR-19).</strong> <code><a href="../reference/as_widget.html">as_widget()</a></code> reads the element meta (tooltips, legend membership, conditions, interval values, …) as columns from <code>vellum::scene_model(meta = "columns")</code> instead of one record per element. Building a raster widget of a 200,000-point scatter with tooltips and a colour legend went from 1.5 s to 1.0 s, and 1,000,000 points from 8.4 s to 4.0 s (with vellumplot 0.17.0.9000, which writes the meta as columns). The payload is unchanged. Needs vellum 0.11.1.9000 or later.</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.14.1" id="vellumwidget-0141">vellumwidget 0.14.1<a class="anchor" aria-label="anchor" href="#vellumwidget-0141"></a></h2>
 <ul><li><p><strong>Raster mode: a blend mode no longer keeps the whole plot on the mark image (VW-32).</strong> One mark under a blend mode (a layer <code>blend = "multiply"</code>, <code>"screen"</code>, …) used to send every mark back to the PNG. The PNG also blended only against the other marks, not the panel beneath, so it didn’t match the static render. With a vellum that reports each run’s blend mode (<code>run_blend</code>, feature-detected), a blended run is drawn on a canvas layer of its own with that CSS <code>mix-blend-mode</code>, stacked between the marks before and after it. It blends with the furniture and marks beneath it, as SVG mode and <code>scene_png()</code> do, in every raster tier (the overview included, where the canvas now stands in for the PNG) and in PNG/SVG exports. In the detail tier the run’s <code>&lt;use&gt;</code> carries the blend mode. An older vellum, or a run vellum can’t composite, keeps the old behaviour.</p></li>
