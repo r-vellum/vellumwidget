@@ -5975,6 +5975,177 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   if (srcDesc) Object.defineProperty(imgProto, "src", srcDesc); else delete imgProto.src;
 }
 
+
+// ============ maximum zoom (VW-44): every zoom path stops at maxZoom ============
+{
+  const T = window.__vellumwidgetTest;
+  const near = (a, b, e) => Math.abs(a - b) < (e || 1e-9);
+  const vb0 = { x: 0, y: 0, w: 200, h: 100 };
+  // pure: the factor is cut so neither axis passes the cap, and lands on it
+  ok(T.clampZoomFactor(vb0, vb0, 1.2, 100) === 1.2, "max zoom: a step well inside the cap is unchanged");
+  ok(near(T.clampZoomFactor({ x: 0, y: 0, w: 2.2, h: 1.1 }, vb0, 1.2, 100), 1.1), "max zoom: the last step is cut to land on the cap");
+  ok(T.clampZoomFactor({ x: 0, y: 0, w: 2, h: 1 }, vb0, 1.2, 100) === 1, "max zoom: at the cap a zoom in is exactly 1");
+  ok(T.clampZoomFactor({ x: 0, y: 0, w: 2, h: 1 }, vb0, 1 / 1.2, 100) === 1 / 1.2, "max zoom: at the cap a zoom out is never cut");
+  ok(T.clampZoomFactor({ x: 0, y: 0, w: 2, h: 100 }, vb0, 1.2, 100) === 1, "max zoom: one axis at the cap stops the zoom");
+  ok(T.clampZoomFactor({ x: 0, y: 0, w: 1, h: 1 }, vb0, 1.2, 0) === 1.2 && T.clampZoomFactor({ x: 0, y: 0, w: 1, h: 1 }, vb0, 1.2, undefined) === 1.2,
+    "max zoom: no cap without a number >= 1");
+  const z = T.zoomViewBoxCapped({ x: 90, y: 45, w: 2.2, h: 1.1 }, vb0, 2, 91, 45.5, 100);
+  ok(near(z.w, 2) && near(z.h, 1) && near((91 - z.x) / z.w, 1 / 2.2) && near((45.5 - z.y) / z.h, 0.5 / 1.1),
+    "max zoom: the capped step keeps the anchor point fixed");
+  const atCap = { x: 90, y: 45, w: 2, h: 1 };
+  ok(T.zoomViewBoxCapped(atCap, vb0, 1.2, 91, 45.5, 100) === atCap, "max zoom: zooming in at the cap returns the same view (no creep)");
+  const cv = T.clampViewBox({ x: 10, y: 20, w: 0.5, h: 30 }, vb0, 100);
+  ok(near(cv.w, 2) && near(cv.x + cv.w / 2, 10.25) && cv.h === 30 && cv.y === 20,
+    "max zoom: clampViewBox widens only the too-narrow axis, about its centre");
+  const ok0 = { x: 1, y: 2, w: 3, h: 4 };
+  ok(T.clampViewBox(ok0, vb0, 100) === ok0, "max zoom: clampViewBox returns a view within the cap as is");
+  ok(T.atMaxZoom({ x: 0, y: 0, w: 2, h: 50 }, vb0, 100) && !T.atMaxZoom({ x: 0, y: 0, w: 2.1, h: 50 }, vb0, 100),
+    "max zoom: atMaxZoom detects the cap on either axis");
+  const lin = { type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100, aes: "x" };
+  const P = { name: "p", px0: 0, py0: 0, px1: 100, py1: 100, x: lin, y: Object.assign({}, lin, { aes: "y" }) };
+  const id = { sx: 1, sy: 1, tx: 0, ty: 0 };
+  const bp = T.boundPan(P, id, { h: [50, 50.01] }, 100);
+  ok(near(bp.sx, 100) && near(bp.sx * 50.005 + bp.tx, 50, 1e-6), "max zoom: boundPan caps a sliver of a domain at maxZoom about its centre");
+  ok(near(T.boundPan(P, id, { h: [50, 50.01] }).sx, 10000, 1e-6), "max zoom: boundPan without a cap is unchanged");
+  const rev = Object.assign({}, P, { x: { type: "continuous", transform: "reverse", native_lo: 100, native_hi: 0 } });
+  const br = T.boundPan(rev, id, { h: [50, 50.01] }, 100);
+  ok(near(br.sx, 100), "max zoom: boundPan caps a reversed axis too");
+
+  // integration: SVG mode, plain viewBox zoom
+  const mountZ = (opts) => {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    inst.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+        '<path data-key="a" d="M100 50h0.01v0.01z"/><path data-key="b" d="M10 10h10v10z"/></svg>',
+      elements: [{ key: "a", x0: 100, y0: 50, x1: 100.01, y1: 50.01 }, { key: "b", x0: 10, y0: 10, x1: 20, y1: 20 }],
+      options: Object.assign({ hover: true, select: true, brush: true, zoom: true, toolbar: true, nearest: true, selectMode: "multiple" }, opts)
+    });
+    const s = e.querySelector("svg");
+    s.getBoundingClientRect = () => ({ left: 0, top: 0, width: 200, height: 100, right: 200, bottom: 100 });
+    return { e: e, inst: inst, svg: s };
+  };
+  const wheelAt = (m, dy, x, y) => {
+    const ev = new window.WheelEvent("wheel", { deltaY: dy, bubbles: true, cancelable: true, clientX: x, clientY: y });
+    Object.defineProperty(ev, "target", { value: m.svg });
+    m.svg.dispatchEvent(ev);
+  };
+  const vbOf = (m) => T.parseViewBox(m.svg.getAttribute("viewBox"));
+  const w4 = mountZ({ maxZoom: 4 });
+  const anchor = w4.inst._test.toAnchor(150, 30);
+  for (let i = 0; i < 30; i++) wheelAt(w4, -120, 150, 30);
+  const v4 = vbOf(w4);
+  ok(near(v4.w, 50) && near(v4.h, 25), "max zoom: wheeling in stops at maxZoom (200 / 4 = 50 wide)");
+  ok(near(v4.x + anchor.x / 4, anchor.x, 1e-6) && near(v4.y + anchor.y / 4, anchor.y, 1e-6),
+    "max zoom: the point under the cursor stays put up to the cap");
+  ok(w4.e.classList.contains("vellumwidget-zoom-max"), "max zoom: the root carries vellumwidget-zoom-max at the cap");
+  const s4 = w4.svg.getAttribute("viewBox");
+  for (let i = 0; i < 5; i++) wheelAt(w4, -120, 20 + 30 * i, 10 + 15 * i);
+  ok(w4.svg.getAttribute("viewBox") === s4, "max zoom: more wheel at the cap, anywhere, leaves the view exactly still (no jitter)");
+  wheelAt(w4, 120, 150, 30);
+  ok(vbOf(w4).w > 50 && !w4.e.classList.contains("vellumwidget-zoom-max"), "max zoom: wheeling out leaves the cap at once");
+  // keyboard: "+" stops at the cap
+  w4.inst._test.resetZoom();
+  for (let i = 0; i < 30; i++) w4.e.dispatchEvent(new window.KeyboardEvent("keydown", { key: "+", bubbles: true }));
+  const vk = vbOf(w4);
+  ok(near(vk.w, 50) && near(vk.x + vk.w / 2, 100) && near(vk.y + vk.h / 2, 50), "max zoom: the + key stops at the cap, centred");
+  // pinch: spreading further at the cap holds still; pinching in zooms out at once
+  const pinch = (m, from, to) => {
+    firePointer(m.svg, "pointerdown", 11, 100 - from / 2, 50);
+    firePointer(m.svg, "pointerdown", 12, 100 + from / 2, 50);
+    firePointer(m.svg, "pointermove", 12, 100 - from / 2 + to, 50, true);
+    firePointer(m.svg, "pointerup", 11, 100 - from / 2, 50, true);
+    firePointer(m.svg, "pointerup", 12, 100 - from / 2 + to, 50, true);
+  };
+  const sk = w4.svg.getAttribute("viewBox");
+  pinch(w4, 20, 160);
+  ok(w4.svg.getAttribute("viewBox") === sk, "max zoom: a pinch spread at the cap leaves the view still");
+  pinch(w4, 160, 20);
+  ok(vbOf(w4).w > 50, "max zoom: a pinch in from the cap zooms out");
+  w4.inst._test.resetZoom();
+  pinch(w4, 10, 190);
+  ok(near(vbOf(w4).w, 50), "max zoom: one big pinch spread stops at the cap");
+  // box zoom / zoom-to-selection / vw_zoom(): a tiny element frames at the cap, centred on it
+  w4.inst._test.resetZoom();
+  w4.inst._call("zoom", ["a"]);
+  const vz = vbOf(w4);
+  ok(near(vz.w, 50) && near(vz.h, 25) && near(vz.x + vz.w / 2, 100.005) && near(vz.y + vz.h / 2, 50.005),
+    "max zoom: zoom-to on a sub-pixel element frames it at the cap, centred");
+  w4.inst._test.zoomTo({ x0: 10, y0: 10, x1: 10.001, y1: 90 }, 0);
+  const vt = vbOf(w4);
+  ok(near(vt.w, 50) && near(vt.h, 80), "max zoom: a box zoom too narrow in x is held in x only");
+  // setView: the default cap is 100
+  const wd = mountZ({});
+  wd.inst._test.setView({ x: 100, y: 50, w: 0.01, h: 0.005 });
+  const vd = vbOf(wd);
+  ok(near(vd.w, 2) && near(vd.h, 1) && near(vd.x + vd.w / 2, 100.005), "max zoom: the default cap is 100x (setView of 20000x lands at 100x)");
+  wd.inst._test.setView({ x: 0, y: 0, w: 1e-9, h: 1e-9 });
+  ok(near(vbOf(wd).w, 2), "max zoom: a degenerate view is held at the cap too");
+  // a higher cap is honoured
+  const w1k = mountZ({ maxZoom: 1000 });
+  w1k.inst._test.setView({ x: 100, y: 50, w: 0.01, h: 0.005 });
+  ok(near(vbOf(w1k).w, 0.2), "max zoom: maxZoom = 1000 allows 1000x");
+  // linked views: a peer that allows more zoom is held to our own cap
+  const g1 = mountZ({ maxZoom: 1000, group: "VW44" }), g2 = mountZ({ maxZoom: 10, group: "VW44" });
+  g1.inst._test.setView({ x: 99, y: 49.5, w: 0.4, h: 0.2 });
+  const vg = vbOf(g2);
+  ok(near(vbOf(g1).w, 0.4) && near(vg.w, 20) && near(vg.h, 10) && near(vg.x + vg.w / 2, 99.2),
+    "max zoom: a linked view is held to the receiver's cap, about the shared centre");
+  ok(g2.e.classList.contains("vellumwidget-zoom-max"), "max zoom: the linked receiver shows it is at the cap");
+
+  // raster mode: the same cap through the same paths
+  const eR = document.createElement("div");
+  document.body.appendChild(eR);
+  const iR = widgetDef.factory(eR, 120, 20);
+  iR.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="20" viewBox="0 0 120 20"><image width="120" height="20" href="data:,"/></svg>',
+    elements: { key: ["k0", "k1"], x0: [0, 10], y0: [0, 0], x1: [4, 10.001], y1: [4, 0.001] },
+    options: { hover: true, select: true, zoom: true, nearest: true, raster: true, maxZoom: 8, selectMode: "multiple" }
+  });
+  iR._call("zoom", ["k1"]);
+  const vr = T.parseViewBox(eR.querySelector("svg").getAttribute("viewBox"));
+  ok(iR._test.rasterMode() && near(vr.w, 15) && near(vr.h, 2.5), "max zoom: raster mode caps zoom-to at maxZoom too");
+
+  // axis-aware zoom: T's scale never passes the cap; bind_scale too
+  const lin100 = (aes) => ({ type: "continuous", transform: "identity", data_lo: 0, data_hi: 100, native_lo: 0, native_hi: 100, aes: aes });
+  const svgAZ =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">' +
+    '<g data-vellum-panel="cell-1-panel-1-1" clip-path="url(#c0)"><g data-vellum-pan="cell-1-panel-1-1">' +
+    '<path data-key="o1" d="M59 49h2v2z"/><path data-key="o2" d="M139 49h2v2z"/></g></g>' +
+    '<g data-vellum-panel="cell-2-panel-1-1" clip-path="url(#c1)"><g data-vellum-pan="cell-2-panel-1-1">' +
+    '<path data-key="d1" d="M259 49h2v2z"/><path data-key="d2" d="M339 49h2v2z"/></g></g>' +
+    '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-x-5"><text x="20" y="4" transform="matrix(1 0 0 1 220 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 90)" font-size="12">0</text></g>' +
+    '<g data-vellum-panel="axis-y-2"><text x="-4" y="0" transform="matrix(1 0 0 1 220 90)" font-size="12">0</text></g></svg>';
+  const eA = document.createElement("div");
+  document.body.appendChild(eA);
+  const iA = widgetDef.factory(eA, 400, 100);
+  iA.renderValue({
+    svg: svgAZ,
+    elements: { key: ["o1", "o2", "d1", "d2"], mark: ["point", "point", "point", "point"],
+      x0: [59, 139, 259, 339], y0: [49, 49, 49, 49], x1: [61, 141, 261, 341], y1: [51, 51, 51, 51], ix: [25, 75, 25, 75] },
+    panels: [
+      { name: "cell-1-panel-1-1", cell: "cell-1", px0: 20, py0: 10, px1: 180, py1: 90, x: lin100("x"), y: lin100("y") },
+      { name: "cell-2-panel-1-1", cell: "cell-2", px0: 220, py0: 10, px1: 380, py1: 90, x: lin100("x"), y: lin100("y") }
+    ],
+    interactions: {
+      selections: [{ name: "br", kind: "interval", on: "x", region: "rect", empty: true, encodings: "x", cells: "cell-1" }],
+      conditions: [], filters: [], binds: [{ selection: "br", aes: "x", cell: "cell-2" }]
+    },
+    options: { axisZoom: true, hover: true, select: true, brush: true, zoom: true, maxZoom: 50, selectMode: "multiple" }
+  });
+  eA.querySelector("svg").getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 100, right: 400, bottom: 100 });
+  ok(iA._test.axisZoomActive() === true, "max zoom: the axis-zoom fixture is axis-zoomable");
+  const sxOf = (name) => Number(/matrix\(([^ ]+)/.exec(iA._test.panTransforms().filter((p) => p.name === name)[0].transform)[1]);
+  iA._test.brushInterval({ x0: 99.9, y0: 20, x1: 100.0, y1: 80 }); // a 0.0625-unit sliver: 1600x unclamped
+  ok(near(sxOf("cell-2-panel-1-1"), 50, 1e-6), "max zoom: bind_scale zooms a bound panel no further than maxZoom");
+  iA._test.setView({ x: 100, y: 50, w: 0.001, h: 0.001 });
+  ok(near(sxOf("cell-1-panel-1-1"), 50, 1e-6), "max zoom: axis-aware zoom's transform stops at maxZoom");
+  ok(eA.querySelector("svg").getAttribute("viewBox") === "0 0 400 100", "max zoom: axis-aware zoom keeps the frame fixed at the cap");
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();

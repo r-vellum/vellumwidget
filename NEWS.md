@@ -1,5 +1,19 @@
 # vellumwidget 0.15.0.9000
 
+* **Zoom stops at a maximum (VW-44).** The view zoomed in without end, in
+  SVG and raster mode: past about 100x the marks drifted off their gridlines
+  (SVG coordinates sit on a 0.01 px grid and the compact display list is off
+  by up to 0.005 px, so about 5 px at 1000x), and past about 16,000x a 32-bit
+  float could no longer place them. `render_options(max_zoom = 100)` now caps
+  the zoom per axis, over the full view, on every path: the wheel, pinch,
+  `+`/`-` keys, box zoom and zoom-to-selection, `vw_zoom()`, linked views
+  (`group =`), `vellumplot::bind_scale()`, axis-aware and viewBox zoom. The
+  wheel, pinch and keys land exactly on the cap with the point under the
+  cursor fixed and then hold the view still; a view set whole (a tiny box,
+  a peer's view) is widened to the cap about its centre. The root takes the
+  class `vellumwidget-zoom-max` while at the cap. `max_zoom` takes 1 to
+  10000.
+
 * **Constant-size marks are hit and ringed where they are drawn (VW-42).**
   Under axis zoom, text and point glyphs keep their pixel size, but hover,
   click picking and the hover and selection rings of raster mode's canvas

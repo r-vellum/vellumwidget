@@ -134,6 +134,7 @@ export interface Options {
   navigatorHeight?: number; // strip height in px (default 56)
   axisZoom?: boolean; // axis-aware zoom: scale the data region + re-tick the axes, keeping the frame fixed (linear cartesian panels; SVG only)
   detailMarks?: number; // raster detail tier: materialise SVG nodes below this many visible marks (0 = off)
+  maxZoom?: number; // the most a view zooms in, per axis, over the original (VW-44; default 100, DEFAULT_MAX_ZOOM)
   zoomMarks?: "fixed" | "scale"; // under axis_zoom, keep glyph marks a constant pixel size ("fixed", default) or let them scale ("scale")
   tooltipDelay?: number; // ms to wait before showing the tooltip on hover (default 0)
   tooltipFollow?: boolean; // true (default): tip tracks the cursor; false: anchor above the mark
