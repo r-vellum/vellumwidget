@@ -13,7 +13,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.15.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.16.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -49,8 +49,9 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="0.15.0.9000" id="vellumwidget-01509000">vellumwidget 0.15.0.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-01509000"></a></h2>
-<ul><li><p><strong>Big raster widgets ship a quarter of the bytes (VW-43).</strong> Above <code>max_marks</code>, the bounding-box index went out as plain JSON numbers: 28.4 MB for a million-point scatter, 56.6 MB for two million. It now ships as integers on the same 1/100 px grid, bit-packed, with near-constant mark sizes taking a bit or two: 6.3 MB and 12.6 MB, with the very same boxes, and <code>toJSON()</code> drops from 1.1 s to 0.05 s at a million. <code>max_marks</code> now defaults to <code>2000000</code> (was <code>500000</code>): the compact display list is as small as the box index (6.2 MB at a million, 12.2 MB at two million), decodes faster (0.27 s against 0.43 s at a million, in jsdom), and draws the marks exactly. The <code>max_marks</code> documentation gives these sizes instead of the stale “about 8 MB”.</p></li>
+<h2 class="pkg-version" data-toc-text="0.16.0" id="vellumwidget-0160">vellumwidget 0.16.0<a class="anchor" aria-label="anchor" href="#vellumwidget-0160"></a></h2>
+<ul><li><p>Requires vellum (&gt;= 0.13.0).</p></li>
+<li><p><strong>Big raster widgets ship a quarter of the bytes (VW-43).</strong> Above <code>max_marks</code>, the bounding-box index went out as plain JSON numbers: 28.4 MB for a million-point scatter, 56.6 MB for two million. It now ships as integers on the same 1/100 px grid, bit-packed, with near-constant mark sizes taking a bit or two: 6.3 MB and 12.6 MB, with the very same boxes, and <code>toJSON()</code> drops from 1.1 s to 0.05 s at a million. <code>max_marks</code> now defaults to <code>2000000</code> (was <code>500000</code>): the compact display list is as small as the box index (6.2 MB at a million, 12.2 MB at two million), decodes faster (0.27 s against 0.43 s at a million, in jsdom), and draws the marks exactly. The <code>max_marks</code> documentation gives these sizes instead of the stale “about 8 MB”.</p></li>
 <li><p><strong>Legend swatches keep their boxes in raster mode.</strong> With a display list, the few elements it doesn’t cover (the legend’s keyed swatches) shipped their boxes as sparse columns, which the runtime read as no box at all, so box-based hit-testing skipped them. They now decode.</p></li>
 <li>
 <p><strong>Zoom stops at a maximum (VW-44).</strong> The view zoomed in without end, in SVG and raster mode: past about 100x the marks drifted off their gridlines (SVG coordinates sit on a 0.01 px grid and the compact display list is off by up to 0.005 px, so about 5 px at 1000x), and past about 16,000x a 32-bit float could no longer place them. <code>render_options(max_zoom = 100)</code> now caps the zoom per axis, over the full view, on every path: the wheel, pinch, <code>+</code>/<code>-</code> keys, box zoom and zoom-to-selection, <code><a href="../reference/vellumwidget-proxy-verbs.html">vw_zoom()</a></code>, linked views (<code>group =</code>), <code><a href="https://r-vellum.github.io/vellumplot/reference/bind_scale.html" class="external-link">vellumplot::bind_scale()</a></code>, axis-aware and viewBox zoom. The wheel, pinch and keys land exactly on the cap with the point under the cursor fixed and then hold the view still; a view set whole (a tiny box, a peer’s view) is widened to the cap about its centre. The root takes the class <code>vellumwidget-zoom-max</code> while at the cap. <code>max_zoom</code> takes 1 to</p>
