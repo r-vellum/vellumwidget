@@ -22,6 +22,9 @@ test_that("option helpers return classed objects with the defaults", {
   expect_identical(r$text, "native")
   expect_false(r$text_set)
   expect_true(render_options(text = "native")$text_set)
+  expect_identical(r$precision, "compact")
+  expect_identical(render_options(precision = "f32")$precision, "f32")
+  expect_error(render_options(precision = "u16"), "precision")
 })
 
 test_that("option helpers print", {

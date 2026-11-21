@@ -1351,7 +1351,8 @@ test_that("the display list indexes the element table's keys (VR-22)", {
   df$lbl <- paste0("pt ", df$id)
   p <- vellumplot::vplot(df) |>
     vellumplot::mark_point(x = x, y = y, color = g, data_id = id, tooltip = lbl)
-  ro <- render_options(mode = "raster")
+  # (f32 coordinates: an older vellum's list has no compact form, VR-18.)
+  ro <- render_options(mode = "raster", precision = "f32")
   w <- as_widget(p, render = ro)
   dl <- w$x$displayList
   ek <- .decode_keys_r(w$x$elements$key)
@@ -1375,6 +1376,55 @@ test_that("the display list indexes the element table's keys (VR-22)", {
     d
   }
   expect_identical(strip(dl), strip(dl_old))
+})
+
+test_that("the display list ships compact coordinates by default (VR-18)", {
+  skip_if_not(.split_render_supported(), "vellum without the split render")
+  skip_if_not(.display_list_precision_supported(), "vellum without scene_display_list(precision =)")
+  set.seed(1)
+  df <- data.frame(x = rnorm(300), y = rnorm(300), g = rep(c("a", "b", "c"), 100), id = 1:300)
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id, size = 1)
+  w <- as_widget(p, render = render_options(mode = "raster"))
+  w32 <- as_widget(p, render = render_options(mode = "raster", precision = "f32"))
+  dl <- w$x$displayList
+  dl32 <- w32$x$displayList
+  expect_identical(dl$point$cx$type, "u16")
+  expect_identical(dl$point$cy$type, "u16")
+  expect_identical(dl32$point$cx$type, "f32")
+  # Within 0.005 px of the floats; everything else (records, keys, paints,
+  # elements, panels) is the same.
+  for (f in c("cx", "cy")) {
+    expect_lte(max(abs(.dl_col(dl$point[[f]]) - .dl_col(dl32$point[[f]]))), 0.005 + 1e-4)
+    expect_lte(dl$point[[f]]$step / 2, .COMPACT_COORD_ERROR)
+  }
+  strip <- function(d) {
+    d$point[c("cx", "cy", "r")] <- NULL
+    d$rect[c("x", "y", "w", "h")] <- NULL
+    d$path$xy <- NULL
+    d
+  }
+  expect_identical(strip(dl), strip(dl32))
+  expect_identical(w$x$elements, w32$x$elements)
+  expect_identical(w$x$panels, w32$x$panels)
+  expect_lt(
+    nchar(htmlwidgets:::toJSON(dl), "bytes"),
+    nchar(htmlwidgets:::toJSON(dl32), "bytes")
+  )
+  # An older vellum (no `precision`) ships floats.
+  local_mocked_bindings(.display_list_precision_supported = function() FALSE)
+  expect_identical(as_widget(p, render = render_options(mode = "raster"))$x$displayList, dl32)
+})
+
+test_that(".dl_col() decodes quantised columns (VR-18)", {
+  u <- c(0L, 1L, 300L, 65535L)
+  col <- list(type = "u16", n = 4L, lo = 10, step = 0.25, data = base64enc::base64encode(
+    writeBin(u, raw(), size = 2, endian = "little")
+  ))
+  expect_equal(.dl_col(col), 10 + u * 0.25)
+  b <- as.raw(c(1, 0, 0, 255, 255, 255))
+  expect_equal(.dl_col(list(type = "u24", n = 2L, lo = 0, step = 1, data = base64enc::base64encode(b))), c(1, 2^24 - 1))
+  expect_equal(.dl_col(list(type = "u8", n = 2L, lo = -1, step = 2, data = base64enc::base64encode(as.raw(c(0, 3))))), c(-1, 5))
 })
 
 test_that("integer display-list keys read back without scientific notation", {

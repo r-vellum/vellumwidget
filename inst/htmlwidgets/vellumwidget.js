@@ -323,6 +323,14 @@
       return a;
     }
     const bytes = b64bytes(c.data || "");
+    if (c.step != null) {
+      const w = c.type === "u8" ? 1 : c.type === "u16" ? 2 : 3;
+      const lo = Number(c.lo) || 0, step = Number(c.step), a = new Float32Array(n);
+      if (w === 1) for (let i = 0; i < n; i++) a[i] = lo + bytes[i] * step;
+      else if (w === 2) for (let i = 0, p = 0; i < n; i++, p += 2) a[i] = lo + (bytes[p] | bytes[p + 1] << 8) * step;
+      else for (let i = 0, p = 0; i < n; i++, p += 3) a[i] = lo + (bytes[p] | bytes[p + 1] << 8 | bytes[p + 2] << 16) * step;
+      return a;
+    }
     if (c.bits) {
       const k = Number(c.bits), a = make(n);
       let pos = 0;

@@ -171,6 +171,13 @@ and the list's records index it (`keys_given`; the list's own `keys` holds
 only keys the table lacks): `dl.keys` is then the element keys followed by
 those extras, so a key id (`ws.msFlags` etc.) is an element position, and a
 repeated key maps to its first position.
+With a vellum whose `scene_display_list()` takes `precision` (VR-18,
+`.display_list_precision_supported()`), `render_options(precision =
+"compact")` (the default) asks for quantised geometry columns at
+`.COMPACT_COORD_ERROR` (0.005 px, half of vellum's SVG coordinate grid):
+`list(type = "u8"|"u16"|"u24", n, lo, step, data)`, which `dlColumn()`
+decodes to a `Float32Array` (`lo + u * step`). `"f32"` and older vellum
+ship floats.
 
 ## Build and test
 
@@ -189,8 +196,9 @@ repeated key maps to its first position.
   (`cp -R`); never symlink it.
 - R-CMD-check installs vellum and vellumplot from their `main`. A PR that
   needs an unmerged vellum branch names it with a `vellum-ref: <branch>` line
-  in the PR description (`vellumplot-ref:` likewise); the workflow rewrites
-  `Remotes:` in its checkout only (X-9, `.github/CONTRIBUTING.md`). Edit the
+  in the PR description (`vellumplot-ref:` likewise); the workflow installs
+  that ref over the main-built dependencies, in the job only (X-9,
+  `.github/CONTRIBUTING.md`). Edit the
   description, then re-run the job; drop the line once vellum's PR is merged.
 - Run R tests with `devtools::test()`. Never run `testthat::test_dir()` against
   an installed build: it deletes snapshot files.

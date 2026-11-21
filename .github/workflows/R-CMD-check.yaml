@@ -54,14 +54,20 @@ jobs:
           http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: true
 
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck
+          needs: check
+
       # X-9: a PR that needs an unmerged vellum or vellumplot branch says so
-      # with a line `vellum-ref: <branch, tag or sha>` (or `vellumplot-ref:`)
-      # in its description; this step points that `Remotes:` entry at the ref,
-      # in this checkout only (nothing is committed). The body is read live,
-      # so editing it and re-running the job picks the change up. Without the
-      # line, on pushes and nightly, or when the ref no longer exists (the
-      # branch was merged and deleted), the build uses the repos' main. See
-      # CONTRIBUTING.md.
+      # with a line `vellum-ref: <branch, tag or full sha>` (or
+      # `vellumplot-ref:`) in its description. The dependencies above come from
+      # main as always (rewriting `Remotes:` instead makes pak refuse the plan:
+      # vellumplot's own `Remotes:` names vellum's main); this step then
+      # installs that ref over them. The description is read live, so editing
+      # it and re-running the job picks the change up. Without the line, on
+      # pushes and nightly, or when the ref no longer exists (the branch was
+      # merged and deleted), nothing changes. See .github/CONTRIBUTING.md.
       - name: Dependency refs from the PR description
         if: github.event_name == 'pull_request'
         env:
@@ -76,20 +82,20 @@ jobs:
               echo "::error::$pkg-ref '$ref' is not a valid git ref name"
               exit 1
             fi
-            if ! git ls-remote --exit-code "https://github.com/r-vellum/$pkg" "$ref" > /dev/null &&
-               ! printf '%s' "$ref" | grep -Eq '^[0-9a-f]{7,40}$'; then
+            url="https://github.com/r-vellum/$pkg"
+            dir="$RUNNER_TEMP/override-$pkg"
+            if printf '%s' "$ref" | grep -Eq '^[0-9a-f]{40}$'; then
+              git init -q "$dir" && git -C "$dir" fetch -q --depth 1 "$url" "$ref" && git -C "$dir" checkout -q FETCH_HEAD || {
+                echo "::warning::$pkg-ref '$ref' is not on r-vellum/$pkg: building against its main"; continue; }
+            elif git ls-remote --exit-code "$url" "$ref" > /dev/null; then
+              git clone -q --depth 1 --branch "$ref" "$url" "$dir"
+            else
               echo "::warning::$pkg-ref '$ref' is not on r-vellum/$pkg (merged and deleted?): building against its main"
               continue
             fi
-            sed -i -E "s#r-vellum/$pkg([,[:space:]]|\$)#r-vellum/$pkg@$ref\1#" DESCRIPTION
-            echo "::notice::Building against r-vellum/$pkg@$ref (from the PR description)"
+            R CMD INSTALL "$dir"
+            echo "::notice::Built against r-vellum/$pkg@$ref ($(git -C "$dir" rev-parse --short HEAD), from the PR description)"
           done
-          sed -n '/^Remotes:/,/^[^[:space:]]/p' DESCRIPTION
-
-      - uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: any::rcmdcheck
-          needs: check
 
       - uses: r-lib/actions/check-r-package@v2
         with:
