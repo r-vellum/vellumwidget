@@ -1,4 +1,6 @@
-# vellumwidget 0.15.0.9000
+# vellumwidget 0.16.0
+
+* Requires vellum (>= 0.13.0).
 
 * **Big raster widgets ship a quarter of the bytes (VW-43).** Above
   `max_marks`, the bounding-box index went out as plain JSON numbers: 28.4 MB
