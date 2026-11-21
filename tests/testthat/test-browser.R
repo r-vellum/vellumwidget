@@ -488,3 +488,28 @@ test_that("VW-30: flagged marks are composited in paint order in the mid and det
     expect_true(all(abs(px(0.65, 0.5) - c(1, 0, 0)) < 0.1)) # red, not gold
   }
 })
+
+test_that("VW-34: a run spanning a pan-group panel and a root panel is drawn once in the detail tier", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
+  # cartesian labels last in cell 1 and polar labels first in cell 2 make one
+  # run; the polar panel has no pan group, so its <use> goes into the root
+  set.seed(1)
+  df <- data.frame(x = rnorm(200), y = rnorm(200), id = paste0("p", 1:200))
+  lab <- data.frame(x = c(-1, 0, 1), y = c(1, -1, 0.5), id = c("L1", "L2", "L3"), l = c("alpha", "beta", "gamma"))
+  cart <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id) |>
+    vellumplot::mark_text(data = lab, x = x, y = y, label = l, data_id = id)
+  polar <- vellumplot::vplot(lab) |>
+    vellumplot::mark_text(x = x, y = y, label = l, data_id = id) |>
+    vellumplot::coord_polar()
+  w <- as_widget(vellumplot::concat(cart, polar), elementId = "w1", render = render_options(mode = "raster", detail_marks = 1000))
+  expect_identical(w$x$displayList$runs, 1L)
+  b <- open_widget(w)
+  ev <- function(js) b$Runtime$evaluate(js)$result$value
+  ev("HTMLWidgets.find('#w1')._test.setView({x:40,y:40,w:300,h:200})")
+  Sys.sleep(0.6)
+  expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), "detail")
+  hosts <- ev("Array.from(document.querySelectorAll('use.vellumwidget-detail-run')).map(function(u){return (u.closest('[data-vellum-pan]') ? 'pan' : 'root') + (u.hasAttribute('clip-path') ? '+clip' : '')}).sort().join(',')")
+  expect_identical(hosts, "pan,root+clip")
+})

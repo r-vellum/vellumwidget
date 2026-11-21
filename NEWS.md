@@ -1,5 +1,15 @@
 # vellumwidget 0.14.0.9000
 
+* **Raster mode: a flagged run's image is placed once per panel (VW-34).** In
+  the detail tier, a run of flagged marks (e.g. text labels) spanning a panel
+  with a pan group and one without (a polar or `coord_trans()` panel in a
+  composition) was drawn twice over the first panel, so its labels came out
+  heavier. The root copy is now clipped to the marks it stands for. Under axis
+  zoom, a run's marks in a panel the zoom does not transform are drawn
+  untransformed, like the exact marks there, instead of not at all. vellumplot
+  does not produce that case today (raster axis zoom needs every mark panel to
+  have a pan group), so this is a safeguard.
+
 # vellumwidget 0.14.0
 
 * **Raster mode: one mark the display list can't draw no longer keeps every

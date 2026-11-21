@@ -9,7 +9,7 @@
 // settles (SETTLE_MS without a view change), never per wheel tick, and with
 // hysteresis: enter below `detailMarks` visible marks, leave above 1.5x that.
 
-import { SETTLE_MS, SVGNS } from "./constants";
+import { RUN_BOX_PAD, SETTLE_MS, SVGNS } from "./constants";
 import { DL_FLAG_PICK, DL_POINT, DL_RECT, isLineGlyph, markerRing } from "../dlist";
 import type { DisplayList } from "../dlist";
 import { cssEscape } from "../css";
@@ -322,10 +322,41 @@ export function detailFeature(
     // and show a selection outline; their dimming and colours are baked into
     // the image. Every run is placed, in view or not (its ink, a blur or a
     // label, can reach past the record boxes).
+    //
+    // A panel without a pan group draws into the svg root, untransformed. A
+    // root <use> shows the whole image, so it is placed once per run, and
+    // when some panel does have a pan group (its own <use> draws the image's
+    // part there) it is clipped to the boxes of the run's root-drawn marks,
+    // so no mark is drawn twice (VW-34).
     const runIds: Record<number, string> = {};
     const placed: Record<string, boolean> = {};
+    const panHost: boolean[] = [false];
+    for (let p = 1; p <= dl.panels.length; p++) {
+      panHost.push(!!svg.querySelector('[data-vellum-pan="' + cssEscape(dl.panels[p - 1]) + '"]'));
+    }
+    const anyPan = panHost.some((h) => h);
+    const rootClip = function (r: number): string | null {
+      if (!anyPan || !D) return null;
+      const id = D.pre + "runclip" + r;
+      if (D.el.querySelector("#" + id)) return id;
+      const cp = document.createElementNS(SVGNS, "clipPath");
+      cp.setAttribute("id", id);
+      cp.setAttribute("clipPathUnits", "userSpaceOnUse");
+      for (let i = 0; i < dl.n; i++) {
+        if (dl.run[i] !== r) continue;
+        const p = dl.panel[i] <= dl.panels.length ? dl.panel[i] : 0;
+        if (panHost[p]) continue;
+        const rc = document.createElementNS(SVGNS, "rect");
+        rc.setAttribute("x", String(dl.bx0[i] - RUN_BOX_PAD)); rc.setAttribute("y", String(dl.by0[i] - RUN_BOX_PAD));
+        rc.setAttribute("width", String(dl.bx1[i] - dl.bx0[i] + 2 * RUN_BOX_PAD));
+        rc.setAttribute("height", String(dl.by1[i] - dl.by0[i] + 2 * RUN_BOX_PAD));
+        cp.appendChild(rc);
+      }
+      D.el.appendChild(cp);
+      return id;
+    };
     const placeRun = function (p: number, r: number): void {
-      const tag = p + ":" + r;
+      const tag = (panHost[p] ? p : "root") + ":" + r;
       if (placed[tag] || !D || !dl.runHref) return;
       placed[tag] = true;
       if (!runIds[r]) {
@@ -341,6 +372,10 @@ export function detailFeature(
       const u = document.createElementNS(SVGNS, "use");
       u.setAttribute("class", "vellumwidget-detail-run");
       u.setAttribute("href", "#" + runIds[r]);
+      if (!panHost[p]) {
+        const cid = rootClip(r);
+        if (cid) u.setAttribute("clip-path", "url(#" + cid + ")");
+      }
       groupFor(p).appendChild(u);
       if (chains[p]) chains[p].length = 0;
     };

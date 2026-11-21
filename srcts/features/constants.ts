@@ -31,3 +31,6 @@ export const TIP_MULTI_CAP = 30;
 // adjacent, then pan). The toolbar's mode button cycles through this list.
 export const MODE_ICON: Record<string, string> = { brush: "▭", lasso: "◌", pan: "✋" };
 export const MODE_LABEL: Record<string, string> = { brush: "brush-select", lasso: "lasso-select", pan: "pan" };
+// A flagged run's marks in a panel with no transform of its own are clipped
+// to their record boxes, grown by this many scene px for antialiasing (VW-34).
+export const RUN_BOX_PAD = 2;

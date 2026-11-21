@@ -5170,14 +5170,16 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     const log = [];
     let arcs = [];
     return {
-      log: log, fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1, _stack: [], _clips: 0,
-      save() { this._stack.push(this._clips); }, restore() { this._clips = this._stack.pop() || 0; },
+      log: log, fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1, _stack: [], _clips: 0, _rects: [], _clip: [],
+      save() { this._stack.push([this._clips, this._clip]); },
+      restore() { const s = this._stack.pop() || [0, []]; this._clips = s[0]; this._clip = s[1]; },
       setTransform(a, b, c, d, e, f) { this._t = [a, d, e, f]; }, clearRect() { log.length = 0; },
-      rect() {}, clip() { this._clips++; }, moveTo() {}, lineTo() {}, closePath() {}, setLineDash() {},
-      beginPath() { arcs = []; }, arc(x) { arcs.push(Math.round(x)); },
+      rect(x, y, w, h) { this._rects.push([x, y, w, h].map(Math.round)); },
+      clip() { this._clips++; this._clip = this._rects.slice(); }, moveTo() {}, lineTo() {}, closePath() {}, setLineDash() {},
+      beginPath() { arcs = []; this._rects = []; }, arc(x) { arcs.push(Math.round(x)); },
       fill() { log.push({ op: "fill", xs: arcs.slice() }); },
       stroke() {},
-      drawImage(img, x, y, w, h) { log.push({ op: "img", src: img && img.src, w: w, h: h, t: this._t.slice(), clipped: this._clips > 0 }); }
+      drawImage(img, x, y, w, h) { log.push({ op: "img", src: img && img.src, w: w, h: h, t: this._t.slice(), clipped: this._clips > 0, clip: this._clip }); }
     };
   }
   // p1 exact, p2 flagged (run 1, under a mask), p3 exact, p4 flagged (run 2, text)
@@ -5185,9 +5187,9 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     o = o || {};
     const flags = o.flags || [0, 4, 0, 8];
     const rec = { kind: { type: "u8", n: 4, const: 0 }, paint: { type: "u8", n: 4, const: 0 }, key: { type: "u32", n: 4, seq: [0, 1] },
-      flags: u8(flags), clip: { type: "u8", n: 4, const: 0 }, panel: { type: "u8", n: 4, const: o.panels ? 1 : 0 },
+      flags: u8(flags), clip: { type: "u8", n: 4, const: 0 }, panel: o.recPanels ? u8(o.recPanels) : { type: "u8", n: 4, const: o.panels ? 1 : 0 },
       group: { type: "u8", n: 4, const: 0 } };
-    if (!o.noRuns) rec.run = u8([0, 1, 0, 2]);
+    if (!o.noRuns) rec.run = u8(o.runs || [0, 1, 0, 2]);
     const dl = {
       format: "vellum-display-list", version: 2, width: 200, height: 100, n: 4, record: rec,
       point: { cx: f32([40, 80, 120, 160]), cy: { type: "f32", n: 4, const: 50 }, r: { type: "f32", n: 4, const: 3 }, shape: { type: "u8", n: 4, const: 0 } },
@@ -5195,10 +5197,10 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       path: { xy: { type: "f32", n: 0, data: "" }, run_offset: { type: "u8", n: 1, const: 0 }, path_offset: { type: "u8", n: 1, const: 0 },
         closed: { type: "u8", n: 0, data: "" }, evenodd: { type: "u8", n: 0, data: "" } },
       paints: { fill: ["#ff0000ff"], stroke: [null], stroke_width: [0], dash: [null], linecap: ["round"], linejoin: ["round"], fill_gradient: [0] },
-      clips: null, keys: ["p1", "p2", "p3", "p4"], panels: o.panels ? "panel-1-1" : null,
+      clips: null, keys: ["p1", "p2", "p3", "p4"], panels: o.dlPanels || (o.panels ? "panel-1-1" : null),
       gradients: null, clip_paths: null, groups: null
     };
-    if (!o.noRuns) dl.runs = 2;
+    if (!o.noRuns) dl.runs = o.nRuns || 2;
     return dl;
   }
   const panel = {
@@ -5231,7 +5233,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     const inst = widgetDef.factory(e, 200, 100);
     const flagged = o.noFlagged ? null : { runs: o.runHrefs || ["data:image/png;base64,RUN1", "data:image/png;base64,RUN2"], width: 200, height: 100 };
     inst.renderValue({
-      svg: o.panels ? below : raw,
+      svg: o.svg || (o.panels ? below : raw),
       elements: { key: ["p1", "p2", "p3", "p4"], mark: ["point", "point", "point", "text"], cond: [["pick:color"], ["pick:color"], ["pick:color"], ["pick:color"]],
         x0: [null, 77, null, 150], y0: [null, 47, null, 45], x1: [null, 83, null, 170], y1: [null, 53, null, 55] },
       panels: o.panels ? [panel] : undefined,
@@ -5287,6 +5289,55 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(zi.length === 2 && zi.every((r) => r.clipped) && Math.abs(zi[0].t[0] - 2) < 1e-6,
     "VW-30: under axis zoom a run raster goes through the panel's T and is clipped to the panel");
   z.restore();
+
+  // VW-34: under axis zoom a run's marks in a display-list panel with no
+  // axis-zoom entry (here p2, run 1, in "panel-x") are drawn untransformed,
+  // clipped to their record boxes; the rest of the image does not show there.
+  const zx = mount({ panels: true, options: { axisZoom: true }, dlPanels: ["panel-1-1", "panel-x"], recPanels: [1, 2, 1, 1] });
+  ok(zx.inst._test.axisZoomActive() && zx.inst._test.runsAttached(), "VW-34 setup: axis zoom, runs attached");
+  zx.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); zx.inst._test.evalTier();
+  const zxi = zx.ctx.log.filter((r) => r.op === "img");
+  ok(zxi.length === 2 && /RUN1$/.test(zxi[0].src) && Math.abs(zxi[0].t[0] - 1) < 1e-6 && Math.abs(zxi[0].t[2]) < 1e-6,
+    "VW-34: a run in a panel missing from the axis-zoom table is still drawn, untransformed");
+  ok(zxi.length === 2 && zxi[0].clip.length === 1 && zxi[0].clip[0].join(",") === "75,45,10,10",
+    "VW-34: ... clipped to its marks' boxes (p2: 77..83 x 47..53, padded)");
+  ok(zxi.length === 2 && /RUN2$/.test(zxi[1].src) && Math.abs(zxi[1].t[0] - 2) < 1e-6 && zxi[1].clip.length === 1 && zxi[1].clip[0].join(",") === "20,10,160,80",
+    "VW-34: a run in an axis-zoom panel still goes through the panel's T, clipped to the panel");
+  zx.restore();
+  // a run with marks in both kinds of panel: drawn once through T (clipped to
+  // the panel) and once untransformed (clipped to the loose marks)
+  const zb = mount({ panels: true, options: { axisZoom: true }, dlPanels: ["panel-1-1", "panel-x"], recPanels: [1, 2, 1, 1], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2] });
+  zb.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); zb.inst._test.evalTier();
+  const zbi = zb.ctx.log.filter((r) => r.op === "img");
+  ok(zbi.length === 3 && Math.abs(zbi[0].t[0] - 2) < 1e-6 && zbi[0].clip[0].join(",") === "20,10,160,80" &&
+    Math.abs(zbi[1].t[0] - 1) < 1e-6 && zbi[1].clip.length === 1 && /RUN2$/.test(zbi[2].src),
+    "VW-34: a run spanning both kinds of panel is drawn per panel and once for its loose marks");
+  zb.restore();
+
+  // VW-34, detail tier: a run whose marks sit in a panel with a pan group and
+  // in one without gets one <use> in the pan group and one in the root,
+  // clipped to the root panels' marks, so nothing is drawn twice
+  const twoPan = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+    '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"></g></g><g data-vellum-panel="panel-x"></g></svg>';
+  const dd = mount({ detailMarks: 100, svg: twoPan, dlPanels: ["panel-1-1", "panel-x", "panel-y"], recPanels: [1, 1, 2, 3], flags: [0, 4, 4, 4], runs: [0, 1, 1, 1], nRuns: 1, runHrefs: ["data:image/png;base64,RUN1"], options: { axisZoom: false } });
+  dd.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); dd.inst._test.evalTier();
+  ok(dd.inst._test.markTier() === "detail", "VW-34 setup: detail tier");
+  const uses = Array.from(dd.el.querySelectorAll("use.vellumwidget-detail-run"));
+  const inPan = uses.filter((u) => u.closest("[data-vellum-pan]"));
+  const atRoot = uses.filter((u) => !u.closest("[data-vellum-pan]"));
+  ok(uses.length === 2 && inPan.length === 1 && !inPan[0].hasAttribute("clip-path") && atRoot.length === 1,
+    "VW-34: one run <use> in the pan group, one at the root for both root-drawn panels");
+  const cpId = atRoot.length ? (atRoot[0].getAttribute("clip-path") || "").replace(/^url\(#|\)$/g, "") : "";
+  const cp = cpId ? dd.el.querySelector("clipPath#" + cpId) : null;
+  ok(cp && cp.querySelectorAll("rect").length === 2 && cp.querySelector("rect").getAttribute("x") === "115",
+    "VW-34: the root <use> is clipped to the boxes of the root panels' marks");
+  dd.restore();
+  // a raw scene (no pan groups at all) keeps one unclipped root <use> per run
+  const dr = mount({ detailMarks: 100 });
+  dr.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); dr.inst._test.evalTier();
+  ok(Array.from(dr.el.querySelectorAll("use.vellumwidget-detail-run")).every((u) => !u.hasAttribute("clip-path")),
+    "VW-34: without pan groups the run <use>s stay unclipped");
+  dr.restore();
 
   // export (VW-25 path): the redraw includes the runs
   const x = mount({});

@@ -1,7 +1,7 @@
 // Raster mode: the crisp-zoom canvas point layer and the overlay rings that
 // stand in for per-node selection / hover classes.
 
-import { LIVE_DRAW_MAX, OVERLAY_MARK_CAP, SETTLE_MS, SVGNS } from "./constants";
+import { LIVE_DRAW_MAX, OVERLAY_MARK_CAP, RUN_BOX_PAD, SETTLE_MS, SVGNS } from "./constants";
 import { hasBbox, isRoundMark } from "../geometry";
 import { DL_POINT, DL_RECT, fillGradient, traceClipPath, tracePoint, traceShape } from "../dlist";
 import { MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
@@ -379,24 +379,49 @@ export function rasterFeature(
       curState = -1; curPaint = -1; curAlpha = 1; tgt.globalAlpha = 1;
     };
     // A flagged run (VW-30) as its raster, in the scene px frame, through
-    // each panel's transform and clipped to its fixed rect (as the mark
-    // image's <use> in each pan group), or once through the view's.
+    // the transform of each panel holding its marks and clipped to the
+    // panel's fixed rect (as the mark image's <use> in each pan group), or
+    // once through the view's. Under axis zoom, the run's marks in a panel
+    // without a transform of its own (no axis-zoom entry, or no panel) are
+    // drawn untransformed, as the exact records there are, clipped to their
+    // boxes so the image's other panels don't show through twice (VW-34).
     const runImgs = dl.runImgs;
     const drawnRun: boolean[] = [];
+    const runPanels: Record<number, boolean>[] = [];
+    const runLoose: number[][] = [];
+    const anyPclip = pclip.some((c) => !!c);
+    if (runImgs && anyPclip) {
+      for (let i = 0; i < dl.n; i++) {
+        const r = dl.run[i];
+        if (!(r > 0)) continue;
+        const p = dl.panel[i] <= np ? dl.panel[i] : 0;
+        if (pclip[p]) (runPanels[r] = runPanels[r] || {})[p] = true;
+        else (runLoose[r] = runLoose[r] || []).push(dl.bx0[i], dl.by0[i], dl.bx1[i], dl.by1[i]);
+      }
+    }
     const drawRun = function (r: number): void {
       const img = runImgs![r - 1];
       if (!img) return;
-      const one = function (A: Affine, pc: number[] | null): void {
+      const one = function (A: Affine, pc: number[] | null, boxes?: number[]): void {
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         if (pc) { ctx.beginPath(); ctx.rect(pc[0], pc[1], pc[2] - pc[0], pc[3] - pc[1]); ctx.clip(); }
+        if (boxes) {
+          ctx.beginPath();
+          for (let q = 0; q < boxes.length; q += 4) {
+            const x0 = A.ax * (boxes[q] - RUN_BOX_PAD) + A.bx, y0 = A.ay * (boxes[q + 1] - RUN_BOX_PAD) + A.by;
+            ctx.rect(x0, y0, A.ax * (boxes[q + 2] - boxes[q] + 2 * RUN_BOX_PAD), A.ay * (boxes[q + 3] - boxes[q + 1] + 2 * RUN_BOX_PAD));
+          }
+          ctx.clip();
+        }
         ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
         ctx.drawImage(img, 0, 0, dl.runW, dl.runH);
         ctx.restore();
       };
-      let any = false;
-      for (let p = 1; p <= np; p++) if (pclip[p]) { one(aff[p], pclip[p]); any = true; }
-      if (!any) one(aff[0], null);
+      if (!anyPclip) { one(aff[0], null); return; }
+      const hosted = runPanels[r];
+      if (hosted) for (let p = 1; p <= np; p++) if (hosted[p]) one(aff[p], pclip[p]);
+      if (runLoose[r]) one(aff[0], null, runLoose[r]);
     };
     let curGroup = 0;
     tgt.save();
