@@ -14,16 +14,31 @@ local_single_raster <- function(env = parent.frame()) {
   if (!is.list(key)) {
     return(as.character(key))
   }
-  n <- length(key$delta) + length(key$at)
+  delta <- key$delta
+  if (!is.null(key$db)) {
+    delta <- as.numeric(.uint_column_r(key$db))
+    delta[key$dx + 1L] <- key$dv
+  }
+  n <- length(delta) + length(key$at)
   out <- character(n)
   other <- key$at + 1L
   out[other] <- key$v
-  num <- format(cumsum(key$delta), scientific = FALSE, trim = TRUE)
+  num <- format(cumsum(delta), scientific = FALSE, trim = TRUE)
   if (!is.null(key$pre)) {
     num <- paste0(rep(key$pre$levels[key$pre$rv + 1L], key$pre$rl), num)
   }
   out[setdiff(seq_len(n), other)] <- num
   out
+}
+
+# The key column's integer differences, whatever their form (VW-40).
+.key_deltas_r <- function(key) {
+  if (is.null(key$db)) {
+    return(key$delta)
+  }
+  d <- as.numeric(.uint_column_r(key$db))
+  d[key$dx + 1L] <- key$dv
+  d
 }
 
 # A typed column (`.uint_column()`, the runtime's `dlColumn()`) as integers.
@@ -85,12 +100,29 @@ local_single_raster <- function(env = parent.frame()) {
       if (length(p) > 1L) ki <- ki + 1L
       for (j in seq_len(length(p) - 1L)) {
         st <- tn[[j]]
-        num <- if (identical(st, "key")) {
-          sub(".*?(0|[1-9][0-9]{0,14})$", "\\1", keys[i], perl = TRUE)
+        num <- if (identical(st, "key") || (is.list(st) && !is.null(st$key))) {
+          v <- sub(".*?(0|[1-9][0-9]{0,14})$", "\\1", keys[i], perl = TRUE)
+          if (is.list(st)) {
+            at[j] <- at[j] + 1L
+            w <- if (is.list(st$w)) .uint_column_r(st$w)[at[j]] else st$w
+            if (nchar(v) < w) v <- paste0(strrep("0", w - nchar(v)), v)
+          }
+          v
         } else {
           at[j] <- at[j] + 1L
-          vals <- if (!is.null(st$d)) cumsum(st$d) else st$v
-          format(vals[at[j]], scientific = FALSE)
+          vals <- if (!is.null(st$d) || !is.null(st$db)) {
+            cumsum(.key_deltas_r(list(delta = st$d, db = st$db, dx = st$dx, dv = st$dv)))
+          } else if (!is.null(st$vb)) {
+            .uint_column_r(st$vb)
+          } else {
+            st$v
+          }
+          v <- format(vals[at[j]], scientific = FALSE)
+          w <- if (is.list(st$w)) .uint_column_r(st$w)[at[j]] else st$w
+          if (!is.null(w) && nchar(v) < w) {
+            v <- paste0(strrep("0", w - nchar(v)), v)
+          }
+          v
         }
         s <- paste0(s, num, p[j + 1L])
       }
