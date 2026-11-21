@@ -1252,6 +1252,7 @@
   var PICK_CANDIDATES = 256;
   var LIVE_DRAW_MAX = 5e4;
   var SETTLE_MS = 120;
+  var DEFAULT_MAX_ZOOM = 100;
   var SVGNS = "http://www.w3.org/2000/svg";
   var TIP_MULTI_CAP = 30;
   var MODE_ICON = { brush: "\u25AD", lasso: "\u25CC", pan: "\u270B" };
@@ -1938,6 +1939,43 @@
     const w = vb.w / factor;
     const h = vb.h / factor;
     return { x: cx - (cx - vb.x) / factor, y: cy - (cy - vb.y) / factor, w, h };
+  }
+  function zoomCap(maxZoom) {
+    return typeof maxZoom === "number" && isFinite(maxZoom) && maxZoom >= 1 ? maxZoom : 0;
+  }
+  var CAP_EPS = 1e-9;
+  function clampZoomFactor(vb, vb0, factor, maxZoom) {
+    const cap = zoomCap(maxZoom);
+    if (!cap || !(factor > 1) || !(vb0.w > 0) || !(vb0.h > 0)) return factor;
+    const room = Math.min(vb.w * cap / vb0.w, vb.h * cap / vb0.h);
+    if (!(room > 1 + CAP_EPS)) return 1;
+    return Math.min(factor, room);
+  }
+  function zoomViewBoxCapped(vb, vb0, factor, cx, cy, maxZoom) {
+    const f = vb0 ? clampZoomFactor(vb, vb0, factor, maxZoom) : factor;
+    return f === 1 ? vb : zoomViewBox(vb, f, cx, cy);
+  }
+  function clampViewBox(vb, vb0, maxZoom) {
+    const cap = zoomCap(maxZoom);
+    if (!cap || !vb0 || !(vb0.w > 0) || !(vb0.h > 0)) return vb;
+    const wMin = vb0.w / cap, hMin = vb0.h / cap;
+    const narrowW = vb.w < wMin * (1 - CAP_EPS), narrowH = vb.h < hMin * (1 - CAP_EPS);
+    if (!narrowW && !narrowH) return vb;
+    const out = { x: vb.x, y: vb.y, w: vb.w, h: vb.h };
+    if (narrowW) {
+      out.x = vb.x + vb.w / 2 - wMin / 2;
+      out.w = wMin;
+    }
+    if (narrowH) {
+      out.y = vb.y + vb.h / 2 - hMin / 2;
+      out.h = hMin;
+    }
+    return out;
+  }
+  function atMaxZoom(vb, vb0, maxZoom) {
+    const cap = zoomCap(maxZoom);
+    if (!cap || !vb0) return false;
+    return vb.w <= vb0.w / cap * (1 + CAP_EPS) || vb.h <= vb0.h / cap * (1 + CAP_EPS);
   }
   function parseViewBox(s) {
     if (!s) return null;
@@ -3737,12 +3775,18 @@
     if (!isFinite(na) || !isFinite(nb) || na === nb) return null;
     return [Math.min(na, nb), Math.max(na, nb)];
   }
-  function boundPan(p, t, b) {
+  function boundPan(p, t, b, maxZoom) {
     const out = { sx: t.sx, sy: t.sy, tx: t.tx, ty: t.ty };
+    const cap = typeof maxZoom === "number" && isFinite(maxZoom) && maxZoom >= 1 ? maxZoom : 0;
+    const capped = (d0, d1, span) => {
+      if (!cap || Math.abs(d1 - d0) * cap >= Math.abs(span)) return [d0, d1];
+      const mid = (d0 + d1) / 2, half = Math.abs(span) / cap / 2 * (d1 >= d0 ? 1 : -1);
+      return [mid - half, mid + half];
+    };
     if (b.h && p.x && p.px1 !== p.px0 && p.x.native_hi !== p.x.native_lo) {
       const ax = p.x;
       const rising = ax.native_hi > ax.native_lo;
-      const d0 = rising ? b.h[0] : b.h[1], d1 = rising ? b.h[1] : b.h[0];
+      const [d0, d1] = capped(rising ? b.h[0] : b.h[1], rising ? b.h[1] : b.h[0], ax.native_hi - ax.native_lo);
       const k = (p.px1 - p.px0) / (ax.native_hi - ax.native_lo);
       const k2 = (p.px1 - p.px0) / (d1 - d0);
       out.sx = k2 / k;
@@ -3751,7 +3795,7 @@
     if (b.v && p.y && p.py1 !== p.py0 && p.y.native_hi !== p.y.native_lo) {
       const ay = p.y;
       const rising = ay.native_hi > ay.native_lo;
-      const d0 = rising ? b.v[0] : b.v[1], d1 = rising ? b.v[1] : b.v[0];
+      const [d0, d1] = capped(rising ? b.v[0] : b.v[1], rising ? b.v[1] : b.v[0], ay.native_hi - ay.native_lo);
       const k = (p.py1 - p.py0) / (ay.native_hi - ay.native_lo);
       const k2 = (p.py1 - p.py0) / (d1 - d0);
       out.sy = k2 / k;
@@ -3838,7 +3882,7 @@
     }
     function boundT(a, t) {
       const b = ws.scaleBinds[a.p.name];
-      return b ? boundPan(a.p, t, b) : t;
+      return b ? boundPan(a.p, t, b, ws.opts.maxZoom) : t;
     }
     function applyScaleBinds() {
       const ix = ws.interactions;
@@ -5964,9 +6008,12 @@
         const d = Math.hypot(pts[0].cx - pts[1].cx, pts[0].cy - pts[1].cy);
         if (d > 0) {
           const u = ws.fx.toAnchor((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
-          ws.vb = zoomViewBox(ws.vb, d / ws.pinchDist, u.x, u.y);
-          ws.fx.applyViewBox();
+          const next = zoomViewBoxCapped(ws.vb, ws.vb0, d / ws.pinchDist, u.x, u.y, ws.opts.maxZoom);
           ws.pinchDist = d;
+          if (next !== ws.vb) {
+            ws.vb = next;
+            ws.fx.applyViewBox();
+          }
         }
         return;
       }
@@ -6118,7 +6165,9 @@
       ws.fx.focusCellAt(ev.clientX, ev.clientY);
       const u = ws.fx.toAnchor(ev.clientX, ev.clientY);
       const factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
-      ws.vb = zoomViewBox(ws.vb, factor, u.x, u.y);
+      const next = zoomViewBoxCapped(ws.vb, ws.vb0, factor, u.x, u.y, ws.opts.maxZoom);
+      if (next === ws.vb) return;
+      ws.vb = next;
       ws.fx.applyViewBox();
     }
     function onKey(ev) {
@@ -6182,12 +6231,18 @@
           ws.vb.y += dy;
           break;
         case "+":
-        case "=":
-          ws.vb = zoomViewBox(ws.vb, 1.2, cx, cy);
+        case "=": {
+          const next = zoomViewBoxCapped(ws.vb, ws.vb0, 1.2, cx, cy, ws.opts.maxZoom);
+          if (next === ws.vb) {
+            ev.preventDefault();
+            return;
+          }
+          ws.vb = next;
           break;
+        }
         case "-":
         case "_":
-          ws.vb = zoomViewBox(ws.vb, 1 / 1.2, cx, cy);
+          ws.vb = zoomViewBoxCapped(ws.vb, ws.vb0, 1 / 1.2, cx, cy, ws.opts.maxZoom);
           break;
         default:
           handled = false;
@@ -7336,7 +7391,7 @@
         // Interactive-by-default: hover/select/brush/lasso/zoom and axis-aware
         // zoom are on unless the payload overrides them. (as_widget() no longer
         // exposes these as flags; the defaults live here.)
-        { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false, navigator: false, axisZoom: true, zoomMarks: "fixed" },
+        { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false, navigator: false, axisZoom: true, zoomMarks: "fixed", maxZoom: DEFAULT_MAX_ZOOM },
         x.options || {}
       );
       ws.elements = normalizeElements(x.elements);
@@ -8070,13 +8125,14 @@
     }
     function applyLinkedView(v) {
       if (!ws.vb0) return;
-      const next = {
+      let next = {
         x: ws.vb0.x + v.x * ws.vb0.w,
         y: ws.vb0.y + v.y * ws.vb0.h,
         w: v.w * ws.vb0.w,
         h: v.h * ws.vb0.h
       };
       if (!(next.w > 0) || !(next.h > 0)) return;
+      next = clampViewBox(next, ws.vb0, ws.opts.maxZoom);
       if (ws.vb && Math.abs(next.x - ws.vb.x) < 1e-6 && Math.abs(next.y - ws.vb.y) < 1e-6 && Math.abs(next.w - ws.vb.w) < 1e-6 && Math.abs(next.h - ws.vb.h) < 1e-6) return;
       ws.receivingView = true;
       ws.vb = next;
@@ -8098,6 +8154,8 @@
         ws.vb.y = ws.vb0.y;
         ws.vb.h = ws.vb0.h;
       }
+      if (ws.vb) ws.vb = clampViewBox(ws.vb, ws.vb0, ws.opts.maxZoom);
+      if (ws.vb) ws.el.classList.toggle("vellumwidget-zoom-max", atMaxZoom(ws.vb, ws.vb0, ws.opts.maxZoom));
       if (ws.axisZoomActive && ws.panGroup && ws.vb && ws.vb0) {
         ws.fx.applyPanTransforms();
         if (ws.svgEl) ws.svgEl.setAttribute("viewBox", fmtViewBox(ws.vb0));
@@ -8144,7 +8202,7 @@
       const h = Math.max(rect.y1 - rect.y0, 1e-6);
       const px = w * pad;
       const py = h * pad;
-      ws.vb = { x: rect.x0 - px, y: rect.y0 - py, w: w + 2 * px, h: h + 2 * py };
+      ws.vb = clampViewBox({ x: rect.x0 - px, y: rect.y0 - py, w: w + 2 * px, h: h + 2 * py }, ws.vb0, ws.opts.maxZoom);
       applyViewBox();
     }
     return { reportView, applyLinkedView, applyAspect, applyViewBox, resetZoom, zoomTo };
@@ -8565,6 +8623,10 @@
     isSeriesElem,
     nearestKey,
     zoomViewBox,
+    zoomViewBoxCapped,
+    clampZoomFactor,
+    clampViewBox,
+    atMaxZoom,
     parseViewBox,
     fmtViewBox,
     unionBbox,

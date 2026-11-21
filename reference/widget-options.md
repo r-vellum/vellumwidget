@@ -19,7 +19,8 @@ render_options(
   text = c("native", "outline"),
   max_marks = 500000L,
   detail_marks = 3000L,
-  precision = c("compact", "f32")
+  precision = c("compact", "f32"),
+  max_zoom = 100
 )
 ```
 
@@ -158,6 +159,21 @@ render_options(
   keeps the error under half a pixel up to 100x zoom. `"f32"` ships
   32-bit floats, as an older vellum always does.
 
+- max_zoom:
+
+  The most the view zooms in, per axis, over the full view (default
+  `100`), in SVG and raster mode alike: the wheel, pinch, keys, box zoom
+  and zoom-to-selection,
+  [`vw_zoom()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md),
+  linked views (`group =`) and
+  [`vellumplot::bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html)
+  all stop there. At 100x the 0.01 px grid vellum writes SVG coordinates
+  on (and the 0.005 px error of `precision = "compact"`) is still within
+  half a screen pixel, so the marks stay on their gridlines; past it
+  they drift (a few pixels at 1000x) and show only the rounding. A
+  number from 1 (no zoom in) to `10000`: past about 16,000x a 32-bit
+  float can no longer place a mark at all.
+
 ## Value
 
 An object of class `vellumwidget_tooltip_options`,
@@ -207,6 +223,7 @@ render_options(mode = "raster")
 #>   max_marks: 5e+05
 #>   detail_marks: 3000
 #>   precision: compact
+#>   max_zoom: 100
 
 if (FALSE) { # \dontrun{
 library(vellumplot)
