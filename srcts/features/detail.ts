@@ -14,7 +14,7 @@ import { DL_FLAG_PICK, DL_POINT, DL_RECT, isLineGlyph, markerRing } from "../dli
 import type { DisplayList } from "../dlist";
 import { cssEscape } from "../css";
 import type { WidgetFns, WidgetState } from "../state";
-import type { RunSplit } from "./runStyle";
+import type { RunPatch, RunSplit } from "./runStyle";
 import { isZoomedIn } from "../viewbox";
 
 export const DETAIL_DEFAULT = 3000;
@@ -395,6 +395,42 @@ export function detailFeature(
         el.appendChild(rc);
       }
     };
+    // Run r's PNG with a patch's boxes masked out, then its re-rendered run
+    // clipped to them (VW-37), into `g`; `tag` keeps the mask and clip ids of
+    // a split run's rest apart from a whole run's patch.
+    const patchInto = function (g: Element, r: number, R: RunPatch, tag: string): void {
+      const u = document.createElementNS(SVGNS, "use");
+      u.setAttribute("href", "#" + imgDef(D!.pre + "runpng" + r, dl.runHref![r - 1], dl.runW, dl.runH));
+      if (R.cut.length) {
+        const mid = D!.pre + "runcut" + tag + r;
+        if (!D!.el.querySelector("#" + mid)) {
+          const mk = document.createElementNS(SVGNS, "mask");
+          mk.setAttribute("id", mid);
+          mk.setAttribute("maskUnits", "userSpaceOnUse");
+          mk.setAttribute("x", "0"); mk.setAttribute("y", "0");
+          mk.setAttribute("width", String(dl.runW)); mk.setAttribute("height", String(dl.runH));
+          rectsInto(mk, [0, 0, dl.runW, dl.runH], "#fff");
+          rectsInto(mk, R.cut, "#000");
+          D!.el.appendChild(mk);
+        }
+        u.setAttribute("mask", "url(#" + mid + ")");
+      }
+      g.appendChild(u);
+      if (R.fill) {
+        const f = document.createElementNS(SVGNS, "use");
+        f.setAttribute("href", "#" + imgDef(D!.pre + "runfill" + tag + r, R.fill.href, dl.runW, dl.runH));
+        const cid = D!.pre + "runin" + tag + r;
+        if (!D!.el.querySelector("#" + cid)) {
+          const c = document.createElementNS(SVGNS, "clipPath");
+          c.setAttribute("id", cid);
+          c.setAttribute("clipPathUnits", "userSpaceOnUse");
+          rectsInto(c, R.cut);
+          D!.el.appendChild(c);
+        }
+        f.setAttribute("clip-path", "url(#" + cid + ")");
+        g.appendChild(f);
+      }
+    };
     let usedSplit = false;
     const placeSplit = function (p: number, r: number, sp: RunSplit): void {
       const g = document.createElementNS(SVGNS, "g");
@@ -404,42 +440,7 @@ export function detailFeature(
       if (mode && mode !== "normal") (g as unknown as SVGElement).style.setProperty("mix-blend-mode", mode);
       const cp = ws.fx.panelClip(dl.panels[p - 1]);
       if (cp) g.setAttribute("clip-path", cp);
-      const R = sp.rest;
-      if (R && R.png) {
-        const u = document.createElementNS(SVGNS, "use");
-        u.setAttribute("href", "#" + imgDef(D!.pre + "runpng" + r, dl.runHref![r - 1], dl.runW, dl.runH));
-        if (R.cut && R.cut.length) {
-          const mid = D!.pre + "runcut" + r;
-          if (!D!.el.querySelector("#" + mid)) {
-            const mk = document.createElementNS(SVGNS, "mask");
-            mk.setAttribute("id", mid);
-            mk.setAttribute("maskUnits", "userSpaceOnUse");
-            mk.setAttribute("x", "0"); mk.setAttribute("y", "0");
-            mk.setAttribute("width", String(dl.runW)); mk.setAttribute("height", String(dl.runH));
-            rectsInto(mk, [0, 0, dl.runW, dl.runH], "#fff");
-            rectsInto(mk, R.cut, "#000");
-            D!.el.appendChild(mk);
-          }
-          u.setAttribute("mask", "url(#" + mid + ")");
-        }
-        g.appendChild(u);
-      }
-      if (R && R.fill) {
-        const u = document.createElementNS(SVGNS, "use");
-        u.setAttribute("href", "#" + imgDef(D!.pre + "runfill" + r, R.fill.href, dl.runW, dl.runH));
-        if (R.cut) {
-          const cid = D!.pre + "runin" + r;
-          if (!D!.el.querySelector("#" + cid)) {
-            const c = document.createElementNS(SVGNS, "clipPath");
-            c.setAttribute("id", cid);
-            c.setAttribute("clipPathUnits", "userSpaceOnUse");
-            rectsInto(c, R.cut);
-            D!.el.appendChild(c);
-          }
-          u.setAttribute("clip-path", "url(#" + cid + ")");
-        }
-        g.appendChild(u);
-      }
+      if (sp.rest) patchInto(g, r, sp.rest, "s");
       for (let q = 0; q < sp.marks.length; q++) {
         const m = sp.marks[q];
         if (m.p !== p) continue;
@@ -473,20 +474,30 @@ export function detailFeature(
       if (cp0) usedSplit = true;
       const sp = cp0 ? ws.fx.runSplit(r) : null;
       if (sp) { placeSplit(p, r, sp); return; }
-      if (!runIds[r]) {
-        const im = document.createElementNS(SVGNS, "image");
-        runIds[r] = D.pre + "run" + r;
-        im.setAttribute("id", runIds[r]);
-        im.setAttribute("x", "0"); im.setAttribute("y", "0");
-        im.setAttribute("width", String(dl.runW)); im.setAttribute("height", String(dl.runH));
-        im.setAttribute("preserveAspectRatio", "none");
-        im.setAttribute("data-run", String(r));
-        im.setAttribute("href", ws.fx.runHref(r)); // its PNG, or restyled (VW-33)
-        D.el.appendChild(im);
+      // its PNG, patched with the state of its marks (VW-37)
+      const patch = ws.fx.runPatch(r);
+      let u: Element;
+      if (patch) {
+        u = document.createElementNS(SVGNS, "g");
+        u.setAttribute("class", "vellumwidget-detail-run vellumwidget-detail-patch");
+        u.setAttribute("data-run", String(r));
+        patchInto(u, r, patch, "p");
+      } else {
+        if (!runIds[r]) {
+          const im = document.createElementNS(SVGNS, "image");
+          runIds[r] = D.pre + "run" + r;
+          im.setAttribute("id", runIds[r]);
+          im.setAttribute("x", "0"); im.setAttribute("y", "0");
+          im.setAttribute("width", String(dl.runW)); im.setAttribute("height", String(dl.runH));
+          im.setAttribute("preserveAspectRatio", "none");
+          im.setAttribute("data-run", String(r));
+          im.setAttribute("href", dl.runHref[r - 1] || "");
+          D.el.appendChild(im);
+        }
+        u = document.createElementNS(SVGNS, "use");
+        u.setAttribute("class", "vellumwidget-detail-run");
+        u.setAttribute("href", "#" + runIds[r]);
       }
-      const u = document.createElementNS(SVGNS, "use");
-      u.setAttribute("class", "vellumwidget-detail-run");
-      u.setAttribute("href", "#" + runIds[r]);
       // A run with a blend mode (VW-32) blends with what the panel group
       // (isolated by its clip) already holds: furniture and earlier nodes,
       // as the blended group does in SVG mode.
