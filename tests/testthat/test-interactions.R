@@ -38,6 +38,33 @@ test_that("condition membership tags reach the element metadata", {
   expect_true("cond" %in% names(els))
 })
 
+test_that("two layers' conditions on one selection and aesthetic keep their own tags (VP-72)", {
+  df <- data.frame(x = 1:6, y = 1:6, g = rep(c("a", "b"), 3))
+  lab <- data.frame(x = 2, y = 5, g = "a", l = "t")
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(
+      x = x,
+      y = y,
+      color = vellumplot::condition("pick", g, "grey85")
+    ) |>
+    vellumplot::mark_text(
+      data = lab,
+      x = x,
+      y = y,
+      label = l,
+      color = vellumplot::condition("pick", g, "tomato")
+    ) |>
+    vellumplot::select_point("pick", on = "click")
+  ix <- as_widget(p)$x$interactions
+  tags <- vapply(ix$conditions, function(cnd) cnd$tag %||% NA_character_, "")
+  skip_if(anyNA(tags), "vellumplot predates per-layer condition tags")
+  expect_identical(tags, c("pick:color@1", "pick:color@2"))
+  expect_identical(
+    vapply(ix$conditions, function(cnd) cnd$if_false, ""),
+    c("#d9d9d9", "#ff6347")
+  )
+})
+
 test_that("a cross-view composition carries join + filt for the target cell", {
   df <- data.frame(x = 1:4, y = 1:4)
   sel <- vellumplot::select_interval("br", on = "x")
