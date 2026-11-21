@@ -41,6 +41,15 @@
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 2; display: none;
 }
+/* Blend runs (VW-32): a run with a blend mode is a canvas of its own stacked
+   over the marks canvas (inline mix-blend-mode), the marks after it on the
+   next one up. While any is shown the stage isolates the blending, so it
+   mixes with the widget's own furniture and marks, not the page. */
+.vellumwidget-canvas-layer {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 2; display: none;
+}
+.vellumwidget-root .vellumwidget-stage.vellumwidget-blend-iso { isolation: isolate; }
 /* Paint-order split (VW-21): the furniture drawn after the marks (a reference
    line or annotation added after the points), over the marks canvas and under
    the re-ticked labels and rings. Never a pointer target, so picking still
@@ -420,6 +429,23 @@
   var DL_RECT = 1;
   var DL_FLAG_PICK = 16;
   var DL_FLAG_BLEND = 32;
+  var BLEND_MODES = {
+    multiply: true,
+    screen: true,
+    overlay: true,
+    darken: true,
+    lighten: true,
+    "color-dodge": true,
+    "color-burn": true,
+    "hard-light": true,
+    "soft-light": true,
+    difference: true,
+    exclusion: true,
+    hue: true,
+    saturation: true,
+    color: true,
+    luminosity: true
+  };
   function b64bytes(s) {
     const bin = atob(s);
     const out = new Uint8Array(bin.length);
@@ -512,6 +538,8 @@
       runHref: null,
       runW: 0,
       runH: 0,
+      runBlend: null,
+      blendRuns: false,
       gradients: [],
       groups: [],
       cpXy: new Float32Array(0),
@@ -523,6 +551,17 @@
     if (dl.run.length !== n) {
       dl.run = new Uint32Array(n);
       dl.nRuns = 0;
+    }
+    if (raw.run_blend != null && dl.nRuns > 0) {
+      const rb = asColumn(raw.run_blend).map((m) => m == null ? "" : String(m));
+      if (rb.length === dl.nRuns) {
+        dl.runBlend = rb;
+        for (let r = 0; r < rb.length; r++) {
+          if (rb[r] === "normal") continue;
+          if (BLEND_MODES[rb[r]]) dl.blendRuns = true;
+          else dl.covered = false;
+        }
+      }
     }
     const k = raw.keys;
     if (k && typeof k === "object" && !Array.isArray(k) && "type" in k) {
@@ -600,7 +639,7 @@
         dl.exact = false;
       }
       if (dl.flags[i] & ~DL_FLAG_PICK && !(dl.run[i] > 0 && dl.run[i] <= dl.nRuns)) dl.covered = false;
-      if (dl.flags[i] & DL_FLAG_BLEND) dl.covered = false;
+      if (dl.flags[i] & DL_FLAG_BLEND && !dl.runBlend) dl.covered = false;
       const kd = kind[i];
       if (kd === DL_POINT) {
         const j = ip++, r = dl.r[j];
@@ -2826,6 +2865,8 @@
         const u = document.createElementNS(SVGNS, "use");
         u.setAttribute("class", "vellumwidget-detail-run");
         u.setAttribute("href", "#" + runIds[r]);
+        const mode = dl.runBlend ? dl.runBlend[r - 1] : "normal";
+        if (mode && mode !== "normal") u.style.setProperty("mix-blend-mode", mode);
         if (!panHost[p]) {
           const cid = rootClip(r);
           if (cid) u.setAttribute("clip-path", "url(#" + cid + ")");
@@ -2890,7 +2931,7 @@
       ws.markTier = "detail";
       ws.calib = null;
       ws.hoverSig = "";
-      if (ws.canvasEl) ws.canvasEl.style.display = "none";
+      ws.fx.hideCanvas();
       ws.fx.showMarksLayer(false);
       ws.fx.clearGroup(ws.selGroup);
       ws.fx.clearGroup(ws.hovGroup);
@@ -5503,7 +5544,7 @@
       ws.ptRGB = null;
       ws.ptN = 0;
       ws.ptAllRound = false;
-      if (ws.canvasEl) ws.canvasEl.style.display = "none";
+      hideCanvas();
       showMarksLayer(true);
     }
     function sampleBaseRaster() {
@@ -5567,7 +5608,7 @@
       if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
       if (ws.dl) {
         if (ws.markTier === "detail") {
-          ws.canvasEl.style.display = "none";
+          hideCanvas();
           showMarksLayer(false);
           return;
         }
@@ -5666,8 +5707,9 @@
         return t.sx > 1.0001 || t.sy > 1.0001;
       }) : isZoomedIn(vb, vb0);
       const styled = ws.msActive && !!ws.msFlags && !!ws.msColor;
-      if (!(zoomed || styled && dl.exact) || !dl.n) {
-        ws.canvasEl.style.display = "none";
+      const blending = dl.exact && !!dl.runImgs && dl.blendRuns;
+      if (!(zoomed || styled && dl.exact || blending) || !dl.n) {
+        hideCanvas();
         showMarksLayer(true);
         return;
       }
@@ -5686,7 +5728,7 @@
         }
         if (vis > LIVE_DRAW_MAX) {
           if (!(stateOnly && wasShown)) {
-            ws.canvasEl.style.display = "none";
+            hideCanvas();
             showMarksLayer(true);
           }
           settleTimer = window.setTimeout(function() {
@@ -5700,7 +5742,55 @@
         }
       }
       showMarksLayer(!dl.exact);
-      paintList(ctx, dl, W, H, L, styled);
+      let used = 0;
+      const sink = blending ? {
+        next: function(mode) {
+          const c = blendLayer(used);
+          if (!c) return null;
+          const x = typeof c.getContext === "function" ? c.getContext("2d") : null;
+          if (!x) return null;
+          used++;
+          if (c.width !== W || c.height !== H) {
+            c.width = W;
+            c.height = H;
+          }
+          c.style.width = ws.canvasEl.style.width;
+          c.style.height = ws.canvasEl.style.height;
+          c.style.mixBlendMode = mode === "normal" ? "" : mode;
+          c.style.display = "block";
+          x.setTransform(1, 0, 0, 1, 0, 0);
+          x.clearRect(0, 0, W, H);
+          return x;
+        }
+      } : void 0;
+      paintList(ctx, dl, W, H, L, styled, sink);
+      hideLayers(used);
+    }
+    const layers = [];
+    function blendLayer(k) {
+      const base = ws.canvasEl;
+      if (!base || !base.parentNode) return null;
+      while (layers.length <= k) {
+        const c = document.createElement("canvas");
+        c.className = "vellumwidget-canvas-layer";
+        c.setAttribute("aria-hidden", "true");
+        const prev = layers.length ? layers[layers.length - 1] : base;
+        base.parentNode.insertBefore(c, prev.nextSibling);
+        layers.push(c);
+      }
+      return layers[k];
+    }
+    function hideLayers(keep) {
+      for (let k = keep; k < layers.length; k++) {
+        layers[k].style.display = "none";
+        layers[k].style.mixBlendMode = "";
+      }
+      const stage = ws.stage || ws.el;
+      if (stage && stage.classList) stage.classList.toggle("vellumwidget-blend-iso", keep > 0);
+    }
+    function hideCanvas() {
+      if (ws.canvasEl) ws.canvasEl.style.display = "none";
+      hideLayers(0);
     }
     function listLayout(dl, W, H) {
       const vb = ws.vb, vb0 = ws.vb0;
@@ -5728,8 +5818,9 @@
       }
       return { aff, gs, pclip, base: az ? base : kx };
     }
-    function paintList(ctx, dl, W, H, L, styled) {
+    function paintList(ctx0, dl, W, H, L, styled, sink) {
       const aff = L.aff, gs = L.gs, pclip = L.pclip, base = L.base, np = dl.panels.length;
+      let ctx = ctx0;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, W, H);
       const flags = styled ? ws.msFlags : null, recol = styled ? ws.msColor : null, pal = ws.msPalette;
@@ -5816,6 +5907,7 @@
           else (runLoose[r] = runLoose[r] || []).push(dl.bx0[i], dl.by0[i], dl.bx1[i], dl.by1[i]);
         }
       }
+      let op = "";
       const drawRun = function(r) {
         const img = ws.fx.runImage(r);
         if (!img) return;
@@ -5836,6 +5928,7 @@
             ctx.clip();
           }
           ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+          if (op) ctx.globalCompositeOperation = op;
           ctx.drawImage(img, 0, 0, dl.runW, dl.runH);
           ctx.restore();
         };
@@ -5862,7 +5955,18 @@
             }
             flush();
             tgt.restore();
-            drawRun(r);
+            const mode = dl.runBlend ? dl.runBlend[r - 1] : "normal";
+            const lay = mode !== "normal" && sink ? sink.next(mode) : null;
+            if (lay) {
+              ctx = lay;
+              drawRun(r);
+              ctx = sink.next("normal") || lay;
+              tgt = ctx;
+            } else {
+              op = mode !== "normal" ? mode : "";
+              drawRun(r);
+              op = "";
+            }
             tgt.save();
             curState = -1;
             curPaint = -1;
@@ -5986,15 +6090,47 @@
       c.width = W;
       c.height = H;
       const styled = ws.msActive && !!ws.msFlags && !!ws.msColor;
-      if (dl.n) paintList(ctx, dl, W, H, listLayout(dl, W, H), styled);
-      let href = "";
-      try {
-        href = c.toDataURL("image/png");
-      } catch (e) {
-        return null;
+      const extra = [];
+      let failed = false;
+      const sink = dl.blendRuns && dl.runImgs ? {
+        next: function(mode) {
+          const lc = document.createElement("canvas");
+          const lx = typeof lc.getContext === "function" ? lc.getContext("2d") : null;
+          if (!lx) {
+            failed = true;
+            return null;
+          }
+          lc.width = W;
+          lc.height = H;
+          lx.setTransform(1, 0, 0, 1, 0, 0);
+          lx.clearRect(0, 0, W, H);
+          extra.push({ c: lc, blend: mode });
+          return lx;
+        }
+      } : void 0;
+      if (dl.n) paintList(ctx, dl, W, H, listLayout(dl, W, H), styled, sink);
+      if (failed) return null;
+      const url = function(cv) {
+        let h = "";
+        try {
+          h = cv.toDataURL("image/png");
+        } catch (e) {
+          return null;
+        }
+        return /^data:image\/png/.test(h || "") ? h : null;
+      };
+      const href = url(c);
+      if (!href) return null;
+      const out = { href, x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+      if (extra.length) {
+        out.layers = [];
+        for (let k = 0; k < extra.length; k++) {
+          const h = url(extra[k].c);
+          if (!h) return null;
+          out.layers.push({ href: h, blend: extra[k].blend });
+        }
       }
-      if (!/^data:image\/png/.test(href || "")) return null;
-      return { href, x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+      return out;
     }
     function withAlphaOf(c, ref) {
       if (/^#[0-9a-fA-F]{6}$/.test(c) && /^#[0-9a-fA-F]{8}$/.test(ref)) {
@@ -6077,7 +6213,7 @@
     function setHover(k) {
       setHoverKeys(ws.fx.linkedKeys(k));
     }
-    return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover, showMarksLayer, exportMarksImage };
+    return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover, showMarksLayer, exportMarksImage, hideCanvas };
   }
 
   // srcts/ink.ts
@@ -6868,15 +7004,19 @@
       if (listed) {
         const old = svg.querySelectorAll(".vellumwidget-marks, .vellumwidget-marks-defs, .vellumwidget-detail");
         for (let i = 0; i < old.length; i++) old[i].remove();
-        const img = document.createElementNS(SVGNS, "image");
-        img.setAttribute("class", "vellumwidget-marks-export");
-        img.setAttribute("x", String(listed.x));
-        img.setAttribute("y", String(listed.y));
-        img.setAttribute("width", String(listed.w));
-        img.setAttribute("height", String(listed.h));
-        img.setAttribute("preserveAspectRatio", "none");
-        img.setAttribute("href", listed.href);
-        svg.appendChild(img);
+        const parts = [{ href: listed.href, blend: "normal" }].concat(listed.layers || []);
+        for (let k = 0; k < parts.length; k++) {
+          const img = document.createElementNS(SVGNS, "image");
+          img.setAttribute("class", "vellumwidget-marks-export");
+          img.setAttribute("x", String(listed.x));
+          img.setAttribute("y", String(listed.y));
+          img.setAttribute("width", String(listed.w));
+          img.setAttribute("height", String(listed.h));
+          img.setAttribute("preserveAspectRatio", "none");
+          if (parts[k].blend !== "normal") img.setAttribute("style", "mix-blend-mode:" + parts[k].blend);
+          img.setAttribute("href", parts[k].href);
+          svg.appendChild(img);
+        }
       } else {
         const drawn = svg.querySelectorAll(".vellumwidget-marks");
         for (let i = 0; i < drawn.length; i++) drawn[i].style.visibility = "";
