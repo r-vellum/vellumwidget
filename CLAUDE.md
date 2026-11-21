@@ -135,7 +135,15 @@ list, the detail tier included) touches a run's keys, `features/runStyle.ts`
 applies it to a copy of the run's SVG (hidden: removed; a condition colour:
 inline fill/stroke; dim/mute: opacity), rasterises that as an image and
 `runImage()`/`runHref()` hand it to `paintList` and the detail run `<image>`s
-instead of the PNG (`restyleRuns()`, from `updateMarkStates()`). Blend modes (flag 32), a flagged record outside every run, more than
+instead of the PNG (`restyleRuns()`, from `updateMarkStates()`).
+Blend modes (VW-32): with a vellum whose v2 list has `run_blend` (runs split
+at blend roots), a flag-32 run composites with its mode. `paintList` takes a
+`LayerSink`: on screen, stacked `canvas.vellumwidget-canvas-layer`s after
+`ws.canvasEl` (the blend run alone on one with `mix-blend-mode`, the marks
+after it on the next; the stage gets `vellumwidget-blend-iso` = `isolation:
+isolate`; `hideCanvas()` hides them all); in the export, extra images
+(`exportMarksImage().layers`) stacked with `mix-blend-mode`. The canvas also
+replaces the mark PNG at the overview while blend runs exist. Blend modes (flag 32), a flagged record outside every run, more than
 `.MAX_FLAGGED_RUNS` runs or an older vellum keep the old behaviour.
 Exports (`exportSvgString()`) redraw an exact display list at export
 resolution with that state (`exportMarksImage()`, raster.ts `paintList`, the

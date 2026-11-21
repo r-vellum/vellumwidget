@@ -1441,9 +1441,11 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   ) {
     return(NULL)
   }
-  # A mark under a blend mode (flag 32) mixes with the marks beneath it,
-  # which its run, rendered on its own, cannot: keep the PNG path.
-  if (any(bitwAnd(as.integer(.dl_col(dl$record$flags)), 32L) > 0L)) {
+  # A mark under a blend mode (flag 32) mixes with what is beneath it. Its
+  # run, rendered on its own, is its marks unblended, so the runtime can
+  # composite it only with the run's blend mode: with a vellum that reports
+  # it (`run_blend`, VW-32) and a mode it knows. Otherwise keep the PNG path.
+  if (!.run_blend_ok(dl, runs)) {
     return(NULL)
   }
   hrefs <- vapply(
@@ -1486,6 +1488,25 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     width = marks$width,
     height = marks$height
   )
+}
+
+# The CSS blend modes the runtime composites a run with (VW-32).
+.BLEND_MODES <- c(
+  "multiply", "screen", "overlay", "darken", "lighten", "color-dodge",
+  "color-burn", "hard-light", "soft-light", "difference", "exclusion", "hue",
+  "saturation", "color", "luminosity"
+)
+
+# Can every run be composited from its own raster? Without a blended mark,
+# always. With one, only when the list says per run how (`run_blend`, VW-32)
+# and every mode is "normal" or one the runtime knows.
+.run_blend_ok <- function(dl, runs) {
+  rb <- dl$run_blend
+  if (!is.null(rb) && (length(rb) != runs || !all(rb %in% c("normal", .BLEND_MODES)))) {
+    return(FALSE)
+  }
+  blended <- any(bitwAnd(as.integer(.dl_col(dl$record$flags)), 32L) > 0L)
+  !blended || !is.null(rb)
 }
 
 # The marks-only display list for raster mode (VW-15): each keyed mark of the

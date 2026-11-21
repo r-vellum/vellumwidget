@@ -5201,6 +5201,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       gradients: null, clip_paths: null, groups: null
     };
     if (!o.noRuns) dl.runs = o.nRuns || 2;
+    if (o.runBlend) dl.run_blend = o.runBlend;
     return dl;
   }
   const panel = {
@@ -5227,7 +5228,12 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     o = o || {};
     const ctx = recCtx();
     const orig = proto.getContext;
-    proto.getContext = function () { return ctx; };
+    // perCanvas: every canvas but the first gets a recorder of its own (the
+    // stacked blend layers, VW-32)
+    let first = true;
+    proto.getContext = o.perCanvas
+      ? function () { if (!this._rc) { this._rc = first ? ctx : recCtx(); first = false; } return this._rc; }
+      : function () { return ctx; };
     const e = document.createElement("div");
     document.body.appendChild(e);
     const inst = widgetDef.factory(e, 200, 100);
@@ -5403,6 +5409,70 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(ns.inst._test.runStyled().join(",") === "false,false" && /RUN1$/.test(runImgs(ns.ctx)[0].src),
     "VW-33: without run SVGs the runs keep their PNGs");
   ns.restore();
+
+  // VW-32: a run under a blend mode is drawn on a canvas of its own, stacked
+  // over the marks before it with the run's mix-blend-mode; the marks after it
+  // go on the next canvas up, composited normally
+  const bl = mount({ perCanvas: true, flags: [0, 36, 0, 8], runBlend: ["multiply", "normal"] });
+  const layersOf = (t) => Array.from(t.el.querySelectorAll("canvas.vellumwidget-canvas-layer"));
+  const shownLayers = (t) => layersOf(t).filter((c) => c.style.display === "block");
+  ok(bl.inst._test.runsAttached() && bl.inst._test.listExact() === true, "VW-32: a blend-mode run with its mode attaches: the list is exact");
+  {
+    const L = shownLayers(bl);
+    ok(bl.el.querySelector("canvas.vellumwidget-canvas").style.display === "block" && L.length === 2,
+      "VW-32: at the overview zoom the canvas and two stacked layers stand in for the mark PNG (it can't show the blend)");
+    ok(L.length === 2 && L[0].style.mixBlendMode === "multiply" && L[1].style.mixBlendMode === "",
+      "VW-32: the first layer blends (multiply), the next composites normally");
+    ok(L.length === 2 && seq(bl.ctx) === "fill:40" && seq(L[0]._rc) === "img:RUN1" && seq(L[1]._rc) === "fill:120,img:RUN2",
+      "VW-32: p1 on the marks canvas, run 1 alone on the blend layer, then p3 and run 2 above it");
+    ok(bl.el.querySelector(".vellumwidget-stage").classList.contains("vellumwidget-blend-iso"), "VW-32: the stage isolates the blending");
+    ok(!marksShown(bl), "VW-32: the mark PNG is hidden");
+  }
+  bl.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); bl.inst._test.evalTier();
+  {
+    const L = shownLayers(bl);
+    ok(bl.inst._test.markTier() === "mid" && L.length === 2 && seq(bl.ctx) === "fill:25" && seq(L[0]._rc) === "img:RUN1" && seq(L[1]._rc) === "fill:125,img:RUN2",
+      "VW-32: the mid tier stacks the same way");
+  }
+  {
+    const exp = recCtx();
+    const saved = { gc: proto.getContext, tdu: proto.toDataURL };
+    const made = [];
+    proto.getContext = function () { if (!this._rc) { this._rc = made.length ? recCtx() : exp; made.push(this); } return this._rc; };
+    proto.toDataURL = function () { return "data:image/png;base64,L" + made.indexOf(this); };
+    const r = bl.inst._test.exportMarksImage(2);
+    proto.getContext = saved.gc; proto.toDataURL = saved.tdu;
+    ok(r && r.href === "data:image/png;base64,L0" && r.layers && r.layers.length === 2 &&
+      r.layers[0].blend === "multiply" && r.layers[1].blend === "normal" && seq(made[1]._rc) === "img:RUN1",
+      "VW-32: the export redraw is split the same way: the marks, then each layer with its blend mode");
+  }
+  bl.restore();
+  const bd = mount({ perCanvas: true, flags: [0, 36, 0, 8], runBlend: ["multiply", "normal"], detailMarks: 100 });
+  bd.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); bd.inst._test.evalTier();
+  {
+    const uses = Array.from(bd.el.querySelectorAll("use.vellumwidget-detail-run"));
+    ok(bd.inst._test.markTier() === "detail" && uses.length === 2 &&
+      uses[0].style.getPropertyValue("mix-blend-mode") === "multiply" && !uses[1].style.getPropertyValue("mix-blend-mode"),
+      "VW-32: detail: the blend run's <use> carries its mix-blend-mode, the other none");
+    ok(shownLayers(bd).length === 0 && !bd.el.querySelector(".vellumwidget-stage").classList.contains("vellumwidget-blend-iso"),
+      "VW-32: detail: the stacked canvases are hidden with the marks canvas");
+  }
+  bd.restore();
+  // fallbacks: a run that can't be composited, or an unknown mode
+  const be = mount({ flags: [0, 36, 0, 8], runBlend: ["", "normal"] });
+  ok(!be.inst._test.runsAttached() && be.inst._test.listExact() === false, "VW-32 fallback: a run vellum can't composite (\"\") keeps the PNG path");
+  be.restore();
+  const bu = mount({ flags: [0, 36, 0, 8], runBlend: ["plus-lighter", "normal"] });
+  ok(!bu.inst._test.runsAttached(), "VW-32 fallback: an unknown blend mode keeps the PNG path");
+  bu.restore();
+  const bs = mount({ flags: [0, 36, 0, 8], runBlend: ["multiply"] });
+  ok(!bs.inst._test.runsAttached(), "VW-32 fallback: a run_blend that doesn't match the runs is ignored (flag 32 -> PNG path)");
+  bs.restore();
+  // no blend run: one canvas, no layers, and the overview keeps the mark PNG
+  const bn = mount({ perCanvas: true, runBlend: ["normal", "normal"] });
+  ok(bn.inst._test.listExact() === true && layersOf(bn).length === 0 && marksShown(bn),
+    "VW-32: runs without a blend mode: no stacked layers, the overview keeps the mark PNG");
+  bn.restore();
 
   // export (VW-25 path): the redraw includes the runs
   const x = mount({});

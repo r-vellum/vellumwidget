@@ -14,7 +14,7 @@ export function rasterFeature(
 ): Pick<
   WidgetFns,
   "ensureCanvas" | "clearPointData" | "sampleBaseRaster" | "drawPoints" | "clearGroup"
-  | "drawSelFeedback" | "setHoverKeys" | "setHover" | "showMarksLayer" | "exportMarksImage"
+  | "drawSelFeedback" | "setHoverKeys" | "setHover" | "showMarksLayer" | "exportMarksImage" | "hideCanvas"
 > {
   // --- crisp-zoom canvas point layer (raster mode, Phase 6) ---
   // Create the canvas once (sits above the base image, below the overlay rings).
@@ -36,7 +36,7 @@ export function rasterFeature(
     ws.ptRGB = null;
     ws.ptN = 0;
     ws.ptAllRound = false;
-    if (ws.canvasEl) ws.canvasEl.style.display = "none";
+    hideCanvas();
     showMarksLayer(true);
   }
 
@@ -115,7 +115,7 @@ export function rasterFeature(
     if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
     if (ws.dl) {
       // The detail tier's SVG nodes stand in for the canvas and the image.
-      if (ws.markTier === "detail") { ws.canvasEl.style.display = "none"; showMarksLayer(false); return; }
+      if (ws.markTier === "detail") { hideCanvas(); showMarksLayer(false); return; }
       drawList(ws.dl, false, !!stateOnly);
       return;
     }
@@ -228,8 +228,12 @@ export function rasterFeature(
       ? ws.azPanels.some(function (a) { const t = ws.fx.azT(a); return t.sx > 1.0001 || t.sy > 1.0001; })
       : isZoomedIn(vb, vb0);
     const styled = ws.msActive && !!ws.msFlags && !!ws.msColor;
-    if (!(zoomed || (styled && dl.exact)) || !dl.n) {
-      ws.canvasEl!.style.display = "none";
+    // Runs composited with a blend mode (VW-32) blend with the furniture
+    // beneath, which the mark PNG (blended against a transparent page) can't
+    // show: the canvas stands in for it at the overview zoom too.
+    const blending = dl.exact && !!dl.runImgs && dl.blendRuns;
+    if (!(zoomed || (styled && dl.exact) || blending) || !dl.n) {
+      hideCanvas();
       showMarksLayer(true);
       return;
     }
@@ -252,7 +256,7 @@ export function rasterFeature(
         // A style-only change leaves the view (and so a drawn canvas) where it
         // was: keep it up until the redraw rather than flash the plain image.
         if (!(stateOnly && wasShown)) {
-          ws.canvasEl!.style.display = "none";
+          hideCanvas();
           showMarksLayer(true);
         }
         settleTimer = window.setTimeout(function () { settleTimer = 0; if (ws.dl === dl) { fitCanvas(); drawList(dl, true); } }, SETTLE_MS);
@@ -262,7 +266,59 @@ export function rasterFeature(
     // Every mark is redrawn exactly, so the scaled mark image goes; flagged
     // marks (gradients, groups, text) are only in the image, which then stays.
     showMarksLayer(!dl.exact);
-    paintList(ctx, dl, W, H, L, styled);
+    // Blend runs (VW-32): each is drawn on a canvas of its own stacked over
+    // the marks before it, with the run's CSS mix-blend-mode, so it blends
+    // with the furniture and the marks beneath as in SVG mode; the marks
+    // after it go on the next canvas up. The stage isolates the blending.
+    let used = 0;
+    const sink: LayerSink | undefined = blending ? {
+      next: function (mode: string): CanvasRenderingContext2D | null {
+        const c = blendLayer(used);
+        if (!c) return null;
+        const x = typeof c.getContext === "function" ? c.getContext("2d") : null;
+        if (!x) return null;
+        used++;
+        if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+        c.style.width = ws.canvasEl!.style.width;
+        c.style.height = ws.canvasEl!.style.height;
+        c.style.mixBlendMode = mode === "normal" ? "" : mode;
+        c.style.display = "block";
+        x.setTransform(1, 0, 0, 1, 0, 0);
+        x.clearRect(0, 0, W, H);
+        return x;
+      }
+    } : undefined;
+    paintList(ctx, dl, W, H, L, styled, sink);
+    hideLayers(used);
+  }
+
+  // The stacked canvases for blend runs (VW-32), created on demand right
+  // above the marks canvas (under the above-marks furniture), in order.
+  const layers: HTMLCanvasElement[] = [];
+  function blendLayer(k: number): HTMLCanvasElement | null {
+    const base = ws.canvasEl;
+    if (!base || !base.parentNode) return null;
+    while (layers.length <= k) {
+      const c = document.createElement("canvas");
+      c.className = "vellumwidget-canvas-layer";
+      c.setAttribute("aria-hidden", "true");
+      const prev = layers.length ? layers[layers.length - 1] : base;
+      base.parentNode.insertBefore(c, prev.nextSibling);
+      layers.push(c);
+    }
+    return layers[k];
+  }
+  // Hide the stacked canvases from the `keep`-th on; with none in use the
+  // stage stops isolating its blending.
+  function hideLayers(keep: number): void {
+    for (let k = keep; k < layers.length; k++) { layers[k].style.display = "none"; layers[k].style.mixBlendMode = ""; }
+    const stage = ws.stage || ws.el;
+    if (stage && stage.classList) stage.classList.toggle("vellumwidget-blend-iso", keep > 0);
+  }
+  // Hide the marks canvas and its stacked layers.
+  function hideCanvas(): void {
+    if (ws.canvasEl) ws.canvasEl.style.display = "none";
+    hideLayers(0);
   }
 
   // Where the list's records land on a W x H canvas covering the svg's current
@@ -305,8 +361,14 @@ export function rasterFeature(
   // Paint every unflagged record onto `ctx` (W x H backing px) through layout
   // `L`, with the per-key style state when `styled`. Shared by the on-screen
   // canvas and the export image.
-  function paintList(ctx: CanvasRenderingContext2D, dl: DisplayList, W: number, H: number, L: ListLayout, styled: boolean): void {
+  //
+  // A run with a blend mode (VW-32) is drawn on a fresh layer from `sink`
+  // composited with that mode, and the records after it on another fresh
+  // layer composited normally. Without a sink it is drawn onto `ctx` with the
+  // mode as its composite operation (it then blends with `ctx` alone).
+  function paintList(ctx0: CanvasRenderingContext2D, dl: DisplayList, W: number, H: number, L: ListLayout, styled: boolean, sink?: LayerSink): void {
     const aff = L.aff, gs = L.gs, pclip = L.pclip, base = L.base, np = dl.panels.length;
+    let ctx = ctx0;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
     const flags = styled ? ws.msFlags! : null, recol = styled ? ws.msColor! : null, pal = ws.msPalette;
@@ -399,6 +461,7 @@ export function rasterFeature(
         else (runLoose[r] = runLoose[r] || []).push(dl.bx0[i], dl.by0[i], dl.bx1[i], dl.by1[i]);
       }
     }
+    let op = ""; // a blend mode drawn straight onto ctx (no sink)
     const drawRun = function (r: number): void {
       // its PNG, or re-rendered with the state of its marks (VW-33)
       const img = ws.fx.runImage(r);
@@ -416,6 +479,7 @@ export function rasterFeature(
           ctx.clip();
         }
         ctx.setTransform(A.ax, 0, 0, A.ay, A.bx, A.by);
+        if (op) ctx.globalCompositeOperation = op as GlobalCompositeOperation;
         ctx.drawImage(img, 0, 0, dl.runW, dl.runH);
         ctx.restore();
       };
@@ -437,7 +501,19 @@ export function rasterFeature(
           if (curGroup !== 0) { enterGroup(0); curGroup = 0; }
           flush();
           tgt.restore();
-          drawRun(r);
+          const mode = dl.runBlend ? dl.runBlend[r - 1] : "normal";
+          const lay = mode !== "normal" && sink ? sink.next(mode) : null;
+          if (lay) {
+            // the run alone on its blend layer, then a normal layer for what follows
+            ctx = lay;
+            drawRun(r);
+            ctx = sink!.next("normal") || lay;
+            tgt = ctx;
+          } else {
+            op = mode !== "normal" ? mode : "";
+            drawRun(r);
+            op = "";
+          }
           tgt.save();
           curState = -1; curPaint = -1; curAlpha = 1; tgt.globalAlpha = 1;
         }
@@ -524,6 +600,9 @@ export function rasterFeature(
     ctx.globalAlpha = 1;
   }
   const layerPool: HTMLCanvasElement[] = [];
+  // Hands paintList a fresh, cleared W x H layer stacked over the previous
+  // one, composited with `mode` ("normal" or a CSS blend mode), or null.
+  interface LayerSink { next: (mode: string) => CanvasRenderingContext2D | null }
 
   // The marks as currently drawn, for export (VW-25): the display list
   // redrawn at export resolution over the svg's current frame, with the
@@ -533,7 +612,12 @@ export function rasterFeature(
   // when the list can't stand in for the mark image (no list, or flagged
   // records that exist only in the image) or there is no 2D canvas: the
   // exporter then keeps the mark PNG.
-  function exportMarksImage(scale: number): { href: string; x: number; y: number; w: number; h: number } | null {
+  //
+  // With blend runs (VW-32) the redraw is split into stacked images like the
+  // screen's canvases: `href` holds the marks up to the first blend run, and
+  // `layers` the rest in order, each with its blend mode, for the exporter to
+  // stack with mix-blend-mode.
+  function exportMarksImage(scale: number): { href: string; x: number; y: number; w: number; h: number; layers?: { href: string; blend: string }[] } | null {
     const dl = ws.dl;
     if (!ws.rasterMode || !dl || !dl.exact || !ws.vb || !ws.vb0) return null;
     const vb0 = ws.vb0;
@@ -548,11 +632,40 @@ export function rasterFeature(
     if (!ctx) return null;
     c.width = W; c.height = H;
     const styled = ws.msActive && !!ws.msFlags && !!ws.msColor;
-    if (dl.n) paintList(ctx, dl, W, H, listLayout(dl, W, H), styled);
-    let href = "";
-    try { href = c.toDataURL("image/png"); } catch (e) { return null; }
-    if (!/^data:image\/png/.test(href || "")) return null;
-    return { href: href, x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+    const extra: { c: HTMLCanvasElement; blend: string }[] = [];
+    let failed = false;
+    const sink: LayerSink | undefined = dl.blendRuns && dl.runImgs ? {
+      next: function (mode: string): CanvasRenderingContext2D | null {
+        const lc = document.createElement("canvas");
+        const lx = typeof lc.getContext === "function" ? lc.getContext("2d") : null;
+        if (!lx) { failed = true; return null; }
+        lc.width = W; lc.height = H;
+        lx.setTransform(1, 0, 0, 1, 0, 0);
+        lx.clearRect(0, 0, W, H);
+        extra.push({ c: lc, blend: mode });
+        return lx;
+      }
+    } : undefined;
+    if (dl.n) paintList(ctx, dl, W, H, listLayout(dl, W, H), styled, sink);
+    if (failed) return null;
+    const url = function (cv: HTMLCanvasElement): string | null {
+      let h = "";
+      try { h = cv.toDataURL("image/png"); } catch (e) { return null; }
+      return /^data:image\/png/.test(h || "") ? h : null;
+    };
+    const href = url(c);
+    if (!href) return null;
+    const out: { href: string; x: number; y: number; w: number; h: number; layers?: { href: string; blend: string }[] } =
+      { href: href, x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+    if (extra.length) {
+      out.layers = [];
+      for (let k = 0; k < extra.length; k++) {
+        const h = url(extra[k].c);
+        if (!h) return null;
+        out.layers.push({ href: h, blend: extra[k].blend });
+      }
+    }
+    return out;
   }
 
   // A condition colour carries the alpha of the paint it replaces, as the
@@ -662,5 +775,5 @@ export function rasterFeature(
     setHoverKeys(ws.fx.linkedKeys(k));
   }
 
-  return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover, showMarksLayer, exportMarksImage };
+  return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover, showMarksLayer, exportMarksImage, hideCanvas };
 }

@@ -90,15 +90,21 @@ export function toolbarFeature(
     if (listed) {
       const old = svg.querySelectorAll(".vellumwidget-marks, .vellumwidget-marks-defs, .vellumwidget-detail");
       for (let i = 0; i < old.length; i++) old[i].remove();
-      const img = document.createElementNS(SVGNS, "image");
-      img.setAttribute("class", "vellumwidget-marks-export");
-      img.setAttribute("x", String(listed.x));
-      img.setAttribute("y", String(listed.y));
-      img.setAttribute("width", String(listed.w));
-      img.setAttribute("height", String(listed.h));
-      img.setAttribute("preserveAspectRatio", "none");
-      img.setAttribute("href", listed.href);
-      svg.appendChild(img);
+      // The marks, then (blend runs, VW-32) each stacked layer over them with
+      // its blend mode, as the canvases are stacked on screen.
+      const parts = [{ href: listed.href, blend: "normal" }].concat(listed.layers || []);
+      for (let k = 0; k < parts.length; k++) {
+        const img = document.createElementNS(SVGNS, "image");
+        img.setAttribute("class", "vellumwidget-marks-export");
+        img.setAttribute("x", String(listed.x));
+        img.setAttribute("y", String(listed.y));
+        img.setAttribute("width", String(listed.w));
+        img.setAttribute("height", String(listed.h));
+        img.setAttribute("preserveAspectRatio", "none");
+        if (parts[k].blend !== "normal") img.setAttribute("style", "mix-blend-mode:" + parts[k].blend);
+        img.setAttribute("href", parts[k].href);
+        svg.appendChild(img);
+      }
     } else {
       const drawn = svg.querySelectorAll(".vellumwidget-marks");
       for (let i = 0; i < drawn.length; i++) (drawn[i] as SVGElement).style.visibility = "";

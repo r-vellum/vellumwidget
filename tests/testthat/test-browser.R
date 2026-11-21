@@ -548,3 +548,39 @@ test_that("VW-33: a filter hides a flagged mark in the mid and detail tiers and 
     b$close()
   }
 })
+
+test_that("VW-32: a blend-mode run blends with the furniture and marks beneath it", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
+  # unkeyed grey ground (furniture), an exact blue disc, a multiplied yellow disc
+  s <- vellum::vl_scene(4, 3, dpi = 96, bg = "white") |>
+    vellum::draw(vellum::rect_grob(gp = vellum::vl_gpar(fill = "#808080", col = NA))) |>
+    vellum::draw(vellum::circle_grob(0.35, 0.5, r = 0.2, gp = vellum::vl_gpar(fill = "blue", col = NA), key = "a")) |>
+    vellum::push(vellum::vl_viewport(blend = "multiply")) |>
+    vellum::draw(vellum::circle_grob(0.6, 0.5, r = 0.2, gp = vellum::vl_gpar(fill = "yellow", col = NA), key = "m")) |>
+    vellum::pop()
+  w0 <- as_widget(s, render = render_options(mode = "raster"))
+  skip_if(is.null(w0$x$displayList$run_blend), "vellum without run_blend")
+  for (dm in c(0L, 1L, 100L)) {
+    w <- as_widget(s, elementId = "w1", render = render_options(mode = "raster", detail_marks = dm))
+    b <- open_widget(w)
+    ev <- function(js) b$Runtime$evaluate(js)$result$value
+    expect_true(ev("HTMLWidgets.find('#w1')._test.runsAttached()"))
+    if (dm > 0L) {
+      ev("HTMLWidgets.find('#w1')._test.setView({x:96,y:72,w:192,h:144})")
+      Sys.sleep(0.6)
+      expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), if (dm == 1L) "mid" else "detail")
+    }
+    r <- as.numeric(strsplit(ev("(function(){var r=document.querySelector('.vellumwidget-stage').getBoundingClientRect();return [r.left,r.top,r.width,r.height].join(',')})()"), ",")[[1]])
+    shot <- b$Page$captureScreenshot(format = "png", clip = list(x = r[1], y = r[2], width = r[3], height = r[4], scale = 1))
+    img <- png::readPNG(jsonlite::base64_dec(shot$data))
+    # scene -> stage fraction (the view is x 0.25..0.75 when zoomed)
+    fx <- function(x) if (dm > 0L) (x - 0.25) / 0.5 else x
+    px <- function(x, y) img[round(y * dim(img)[1]), round(fx(x) * dim(img)[2]), 1:3]
+    # yellow over the grey ground multiplies to dark yellow, not plain yellow
+    expect_true(all(abs(px(0.7, 0.5) - c(0.5, 0.5, 0)) < 0.08), info = paste("detail_marks", dm))
+    # yellow over the blue disc multiplies to black
+    expect_true(all(abs(px(0.5, 0.5) - c(0, 0, 0)) < 0.08), info = paste("detail_marks", dm))
+    b$close()
+  }
+})
