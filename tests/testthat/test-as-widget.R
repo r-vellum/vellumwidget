@@ -1183,6 +1183,20 @@ test_that("render_options(detail_marks) reaches the runtime (VW-16)", {
   expect_equal(w$x$options$detailMarks, 500)
 })
 
+test_that("render_options(max_zoom) reaches the runtime in SVG and raster mode (VW-44)", {
+  scene <- vellum::vl_scene(2, 2, dpi = 100) |>
+    vellum::draw(vellum::points_grob(0.5, 0.5, key = "a"))
+  expect_identical(as_widget(scene)$x$options$maxZoom, 100)
+  for (mode in c("svg", "raster")) {
+    w <- as_widget(scene, render = render_options(mode = mode, max_zoom = 400))
+    expect_identical(w$x$options$maxZoom, 400)
+  }
+  # an options object from before max_zoom still gets the default
+  old <- render_options()
+  old$max_zoom <- NULL
+  expect_identical(as_widget(scene, render = old)$x$options$maxZoom, 100)
+})
+
 test_that("render_options() validates max_marks", {
   expect_equal(render_options()$max_marks, 5e5)
   expect_error(render_options(max_marks = -1), "at least 0")

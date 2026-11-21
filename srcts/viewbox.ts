@@ -11,6 +11,65 @@ export function zoomViewBox(vb: ViewBox, factor: number, cx: number, cy: number)
   return { x: cx - (cx - vb.x) / factor, y: cy - (cy - vb.y) / factor, w, h };
 }
 
+// --- maximum zoom (VW-44) ---
+// The zoom is capped per axis at `maxZoom` times the original view: past ~100x
+// the scene's own 0.01 px coordinate grid (SVG mode) and the display list's
+// compact columns (raster mode) are off by more than half a screen pixel, and
+// past ~16,000x a 32-bit float can't place a mark at all. A zoom is the ratio
+// vb0.w / vb.w (and vb0.h / vb.h); a `maxZoom` that isn't a finite number >= 1
+// means no cap.
+function zoomCap(maxZoom: number | undefined): number {
+  return typeof maxZoom === "number" && isFinite(maxZoom) && maxZoom >= 1 ? maxZoom : 0;
+}
+
+// Relative tolerance at the cap, so a view the clamp itself produced (whose
+// extent is vb0 / maxZoom up to rounding) counts as AT the cap, not past it,
+// and a further zoom-in leaves it exactly as it is: no creep, no jitter.
+const CAP_EPS = 1e-9;
+
+// The factor to zoom `vb` in by, given a requested `factor`: the request cut
+// down so that neither axis passes `maxZoom`. A zoom out (factor <= 1) is never
+// cut; at the cap a zoom in returns exactly 1 (so the caller can skip the
+// redraw and the anchor point stays where it is).
+export function clampZoomFactor(vb: ViewBox, vb0: ViewBox, factor: number, maxZoom: number | undefined): number {
+  const cap = zoomCap(maxZoom);
+  if (!cap || !(factor > 1) || !(vb0.w > 0) || !(vb0.h > 0)) return factor;
+  const room = Math.min((vb.w * cap) / vb0.w, (vb.h * cap) / vb0.h);
+  if (!(room > 1 + CAP_EPS)) return 1;
+  return Math.min(factor, room);
+}
+
+// `zoomViewBox` with the cap: the point under (cx, cy) stays put, and the last
+// step before the cap lands exactly on it.
+export function zoomViewBoxCapped(
+  vb: ViewBox, vb0: ViewBox | null, factor: number, cx: number, cy: number, maxZoom: number | undefined
+): ViewBox {
+  const f = vb0 ? clampZoomFactor(vb, vb0, factor, maxZoom) : factor;
+  return f === 1 ? vb : zoomViewBox(vb, f, cx, cy);
+}
+
+// A view set whole (box zoom, zoom-to, a linked peer's view, setView, a cell's
+// stored view) held to the cap: an axis narrower than vb0 / maxZoom is widened
+// to it about its centre. Returns `vb` itself when it is within the cap.
+export function clampViewBox(vb: ViewBox, vb0: ViewBox | null, maxZoom: number | undefined): ViewBox {
+  const cap = zoomCap(maxZoom);
+  if (!cap || !vb0 || !(vb0.w > 0) || !(vb0.h > 0)) return vb;
+  const wMin = vb0.w / cap, hMin = vb0.h / cap;
+  const narrowW = vb.w < wMin * (1 - CAP_EPS), narrowH = vb.h < hMin * (1 - CAP_EPS);
+  if (!narrowW && !narrowH) return vb;
+  const out = { x: vb.x, y: vb.y, w: vb.w, h: vb.h };
+  if (narrowW) { out.x = vb.x + vb.w / 2 - wMin / 2; out.w = wMin; }
+  if (narrowH) { out.y = vb.y + vb.h / 2 - hMin / 2; out.h = hMin; }
+  return out;
+}
+
+// Is `vb` at the cap on either axis?
+export function atMaxZoom(vb: ViewBox, vb0: ViewBox | null, maxZoom: number | undefined): boolean {
+  const cap = zoomCap(maxZoom);
+  if (!cap || !vb0) return false;
+  return vb.w <= (vb0.w / cap) * (1 + CAP_EPS) || vb.h <= (vb0.h / cap) * (1 + CAP_EPS);
+}
+
 export function parseViewBox(s: string | null): ViewBox | null {
   if (!s) return null;
   const p = s.trim().split(/[ ,]+/).map(Number);

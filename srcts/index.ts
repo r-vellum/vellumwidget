@@ -49,7 +49,7 @@ import { createState } from "./state";
 import { axisRetickable, axisTicks, dataToNative, detectTimeFormat, fmtRNum, fmtTick, logTicks, niceTicks, parseSecLabels, secAxisMap, secTicks, strftimeUTC, timeTicks } from "./ticks";
 import { sanitizeTip } from "./tooltip";
 import type { Bbox, ViewBox } from "./types";
-import { conjugatePan, fmtViewBox, isZoomedIn, panToView, parseViewBox, userToCanvas, viewToPan, zoomViewBox } from "./viewbox";
+import { atMaxZoom, clampViewBox, clampZoomFactor, conjugatePan, fmtViewBox, isZoomedIn, panToView, parseViewBox, userToCanvas, viewToPan, zoomViewBox, zoomViewBoxCapped } from "./viewbox";
 
 HTMLWidgets.widget({
   name: "vellumwidget",
@@ -257,6 +257,10 @@ registerProxyHandler();
   isSeriesElem,
   nearestKey,
   zoomViewBox,
+  zoomViewBoxCapped,
+  clampZoomFactor,
+  clampViewBox,
+  atMaxZoom,
   parseViewBox,
   fmtViewBox,
   unionBbox,

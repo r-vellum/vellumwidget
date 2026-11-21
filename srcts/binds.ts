@@ -50,12 +50,22 @@ export function channelToNative(ch: IntervalChannel, src: AxisScale | undefined,
 // bound view draws it at px0 + (n - d0) * k' instead, with k' spanning the panel
 // over the bound domain. Orientation is kept: a reversed axis (decreasing native
 // domain) stays reversed. The vertical axis is the same with py, top-down.
-export function boundPan(p: PanelInfo, t: PanTransform, b: BoundDomain): PanTransform {
+// `maxZoom` (VW-44): a bound domain narrower than the panel's native span over
+// `maxZoom` is widened to it about its centre, so a sliver of a brush zooms
+// the bound panel no further than the wheel could.
+export function boundPan(p: PanelInfo, t: PanTransform, b: BoundDomain, maxZoom?: number): PanTransform {
   const out: PanTransform = { sx: t.sx, sy: t.sy, tx: t.tx, ty: t.ty };
+  const cap = typeof maxZoom === "number" && isFinite(maxZoom) && maxZoom >= 1 ? maxZoom : 0;
+  // [d0, d1] widened so that |native span / (d1 - d0)| <= cap, orientation kept.
+  const capped = (d0: number, d1: number, span: number): number[] => {
+    if (!cap || Math.abs(d1 - d0) * cap >= Math.abs(span)) return [d0, d1];
+    const mid = (d0 + d1) / 2, half = (Math.abs(span) / cap / 2) * (d1 >= d0 ? 1 : -1);
+    return [mid - half, mid + half];
+  };
   if (b.h && p.x && p.px1 !== p.px0 && p.x.native_hi !== p.x.native_lo) {
     const ax = p.x;
     const rising = ax.native_hi > ax.native_lo;
-    const d0 = rising ? b.h[0] : b.h[1], d1 = rising ? b.h[1] : b.h[0];
+    const [d0, d1] = capped(rising ? b.h[0] : b.h[1], rising ? b.h[1] : b.h[0], ax.native_hi - ax.native_lo);
     const k = (p.px1 - p.px0) / (ax.native_hi - ax.native_lo);
     const k2 = (p.px1 - p.px0) / (d1 - d0);
     out.sx = k2 / k;
@@ -64,7 +74,7 @@ export function boundPan(p: PanelInfo, t: PanTransform, b: BoundDomain): PanTran
   if (b.v && p.y && p.py1 !== p.py0 && p.y.native_hi !== p.y.native_lo) {
     const ay = p.y;
     const rising = ay.native_hi > ay.native_lo;
-    const d0 = rising ? b.v[0] : b.v[1], d1 = rising ? b.v[1] : b.v[0];
+    const [d0, d1] = capped(rising ? b.v[0] : b.v[1], rising ? b.v[1] : b.v[0], ay.native_hi - ay.native_lo);
     const k = (p.py1 - p.py0) / (ay.native_hi - ay.native_lo);
     const k2 = (p.py1 - p.py0) / (d1 - d0);
     out.sy = k2 / k;
