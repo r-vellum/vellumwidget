@@ -177,6 +177,10 @@ export interface ColumnElements {
   y0?: (number | null)[] | number;
   x1?: (number | null)[] | number;
   y1?: (number | null)[] | number;
+  // VW-43: the four bbox columns as integers on the 1/100 px grid (see
+  // `decodeBbox()`), in place of x0..y1.
+  bbox?: { n: number; lo: number[]; x0: unknown; y0: unknown; w: unknown; h: unknown; na?: number[] | number;
+    ex?: { at: number[] | number; x0: number[] | number; y0: number[] | number; x1: number[] | number; y1: number[] | number } };
   tooltip?: (string | null)[] | string;
   hover_group?: (string | null)[] | string;
   hover_color?: (string | null)[] | string;

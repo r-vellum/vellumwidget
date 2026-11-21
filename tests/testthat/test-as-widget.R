@@ -993,6 +993,57 @@ test_that("raster mode ships the marks-only display list when vellum has it (VW-
   expect_length(.decode_keys_r(w2$x$elements$key), 62L)
 })
 
+test_that("a big bbox index ships as integers on the 1/100 px grid (VW-43)", {
+  encode <- getFromNamespace(".encode_elements", "vellumwidget")
+  set.seed(43)
+  n <- 5000L
+  cx <- runif(n, -20, 900)
+  cy <- runif(n, 5, 600)
+  r <- sample(c(2.5, 3.75, 7), n, TRUE)
+  cols <- list(key = as.character(seq_len(n)), x0 = cx - r, y0 = cy - r, x1 = cx + r, y1 = cy + r)
+  cols$x0[c(7, 4000)] <- NA # rows with no box
+  cols$x1[c(10, 20)] <- cols$x1[c(10, 20)] + c(150, 900) # odd extents (legend swatches)
+  plain <- list(
+    x0 = floor(cols$x0 * 100) / 100, y0 = floor(cols$y0 * 100) / 100,
+    x1 = ceiling(cols$x1 * 100) / 100, y1 = ceiling(cols$y1 * 100) / 100
+  )
+  e <- encode(cols)
+  expect_null(e$x0)
+  b <- e$bbox
+  expect_identical(b$n, n)
+  expect_equal(as.vector(b$na), c(6L, 3999L))
+  # R's twin of the runtime's decodeBbox(): the same doubles as the plain form
+  gx <- b$lo[1] + .uint_column_r(b$x0)
+  gy <- b$lo[2] + .uint_column_r(b$y0)
+  got <- list(
+    x0 = gx / 100, y0 = gy / 100,
+    x1 = (gx + b$lo[3] + .uint_column_r(b$w)) / 100,
+    y1 = (gy + b$lo[4] + .uint_column_r(b$h)) / 100
+  )
+  # the odd extents ship plain, so they don't widen every row's `w`
+  expect_equal(as.vector(b$ex$at), c(9L, 19L))
+  for (f in names(got)) got[[f]][b$ex$at + 1L] <- b$ex[[f]]
+  expect_lte(b$w$bits, 10L)
+  set <- !is.na(cols$x0)
+  for (f in names(got)) expect_identical(got[[f]][set], plain[[f]][set], label = f)
+  # under a third of the plain JSON, with three mark sizes
+  json <- function(x) nchar(htmlwidgets:::toJSON(x), "bytes")
+  expect_lt(json(b), json(plain) / 3)
+  # constant-size marks: the extents take a bit or two, or one run
+  same <- encode(list(key = cols$key, x0 = cx, y0 = cy, x1 = cx + 5, y1 = cy + 5))$bbox
+  expect_true(!is.null(same$w$rle) || same$w$bits <= 2L)
+  expect_lt(json(same), json(plain) / 4)
+  # small tables, and tables a display list mostly covers, keep the plain form
+  small <- encode(lapply(cols, `[`, 1:100))
+  expect_null(small$bbox)
+  expect_equal(small$x0[[1]], plain$x0[[1]])
+  covered <- cols
+  for (f in c("x0", "y0", "x1", "y1")) covered[[f]][-(1:10)] <- NA
+  ce <- encode(covered)
+  expect_null(ce$bbox)
+  expect_identical(ce$x0$at, setdiff(0:9, 6L))
+})
+
 test_that("covered bboxes are dropped only for exactly listed marks (VW-15)", {
   cols <- list(key = c("1", "2", "3"), x0 = 1:3 + 0, y0 = 1:3 + 0, x1 = 2:4 + 0, y1 = 2:4 + 0)
   dl <- list(
@@ -1198,7 +1249,7 @@ test_that("render_options(max_zoom) reaches the runtime in SVG and raster mode (
 })
 
 test_that("render_options() validates max_marks", {
-  expect_equal(render_options()$max_marks, 5e5)
+  expect_equal(render_options()$max_marks, 2e6)
   expect_error(render_options(max_marks = -1), "at least 0")
   expect_error(render_options(max_marks = "a"), "max_marks")
 })

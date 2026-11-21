@@ -13,7 +13,7 @@
 
 import { ensureStyle } from "./css";
 import { sourceTable } from "./dom";
-import { decodeKeys, dlColumn, normalizeElements, normalizePanels } from "./elements";
+import { decodeBbox, decodeKeys, dlColumn, normalizeElements, normalizePanels } from "./elements";
 import { decodeDisplayList, fillBboxes, tracePoint, traceShape } from "./dlist";
 import { a11yFeature } from "./features/a11y";
 import { axisZoomFeature } from "./features/axisZoom";
@@ -271,6 +271,7 @@ registerProxyHandler();
   idSelector,
   findWidgetById,
   normalizeElements,
+  decodeBbox,
   isZoomedIn,
   userToCanvas,
   nearestSortedIdx,

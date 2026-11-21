@@ -134,11 +134,14 @@ navigator_options <- function(height = 56) {
 #'   switches to the raster image (default `20000`).
 #' @param max_marks In raster mode with a vellum that has the marks-only display
 #'   list, the most marks whose exact geometry and paint ship with the widget
-#'   (default `500000`, about 8 MB). Zoomed-in marks are then redrawn exactly,
-#'   with their own shape, colour, stroke and alpha. Above it, the widget ships
-#'   only a bounding-box index, draws zoomed-in marks as plain dots, and says
-#'   so with a message: a plot that big is better drawn as density, with
-#'   `vellumplot::mark_datashade()` or `vellumplot::mark_hex()`.
+#'   (default `2000000`). Zoomed-in marks are then redrawn exactly, with their
+#'   own shape, colour, stroke and alpha. With `precision = "compact"` a
+#'   scatter's widget takes about 6 MB per million points (1 million: 6.2 MB,
+#'   2 million: 12.2 MB, keys included) and about 5 s per million to build.
+#'   Above it, the widget ships only a bounding-box index,
+#'   about as big (6.3 MB per million), draws zoomed-in marks as plain dots,
+#'   and says so with a message: a plot that big is better drawn as density,
+#'   with `vellumplot::mark_datashade()` or `vellumplot::mark_hex()`.
 #' @param detail_marks In raster mode with the display list, once a zoom
 #'   settles with fewer than this many marks in view (default `3000`), the
 #'   visible marks become real SVG nodes (the detail tier): hover, selection,
@@ -176,7 +179,7 @@ render_options <- function(
   mode = c("auto", "svg", "raster"),
   raster_threshold = 20000L,
   text = c("native", "outline"),
-  max_marks = 500000L,
+  max_marks = 2000000L,
   detail_marks = 3000L,
   precision = c("compact", "f32"),
   max_zoom = 100

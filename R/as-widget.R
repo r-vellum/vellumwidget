@@ -787,6 +787,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #   "pt 2", ...), when that is clearly smaller; see `.encode_template()`.
 # - the bbox columns are rounded outward to 1/100 px (a 0.01 px larger box is
 #   invisible to brush / nearest hit-testing, and it halves their JSON).
+#   When most of a big table has a box (no display list: above `max_marks`,
+#   or an older vellum), the four ship as one integer `bbox` (VW-43, see
+#   `.encode_bbox()`), the same 1/100 px values in about a fifth of the bytes.
 #
 # A ragged list-column (`legend`, `cond`, `filt`) whose entries all hold at most
 # one value is first flattened to a character column (`NA` for empty), which the
@@ -810,10 +813,15 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
       ceiling(v * 100) / 100
     }
   }
+  bbox <- .encode_bbox(cols)
+  if (!is.null(bbox)) {
+    cols[c("x0", "y0", "x1", "y1")] <- NULL
+    cols$bbox <- bbox
+  }
   keys <- cols$key
   kpos <- .key_int_pos(keys)
   cols$key <- .encode_keys(keys, kpos)
-  for (f in setdiff(names(cols), "key")) {
+  for (f in setdiff(names(cols), c("key", "bbox"))) {
     v <- cols[[f]]
     # A single-valued ragged column built flat (VW-39): its list form ships
     # when neither compact form applies, as for a list-column below.
@@ -883,6 +891,84 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     }
   }
   cols
+}
+
+# The bbox columns of a big element table as integers on the 1/100 px grid
+# (VW-43), or NULL when the plain columns are as good: fewer than
+# `.BBOX_INT_MIN` boxes, or boxes on under half the elements (a display list
+# covers the rest, and the few left ship sparse). `x0`/`y0` are the boxes'
+# floored corners in 1/100 px less their minimum (`lo[1:2]`), `w`/`h` the
+# ceiled far corner less the floored near one, less their minimum (`lo[3:4]`),
+# each a typed column (`.uint_column(pack = TRUE)`: a scatter's near-constant
+# sizes take a bit or two, its corners 16-17 bits). The runtime rebuilds
+# `x0 = (lo[1] + x0[i]) / 100`, `x1 = (lo[1] + x0[i] + lo[3] + w[i]) / 100`,
+# the very doubles the plain columns carry. `na`: 0-based rows with no box;
+# `ex`: rows whose extent would widen `w`/`h` for all (`at`, 0-based) with
+# their plain boxes.
+.BBOX_INT_MIN <- 1000L
+
+.encode_bbox <- function(cols) {
+  n <- length(cols$key)
+  bb <- cols[c("x0", "y0", "x1", "y1")]
+  if (n < .BBOX_INT_MIN || any(vapply(bb, is.null, logical(1)))) {
+    return(NULL)
+  }
+  set <- !(is.na(bb$x0) | is.na(bb$y0) | is.na(bb$x1) | is.na(bb$y1))
+  if (sum(set) < max(.BBOX_INT_MIN, n / 2)) {
+    return(NULL)
+  }
+  # (Already rounded to the grid by .encode_elements(); round() undoes the
+  # multiplication's last-bit error.)
+  x0 <- round(bb$x0[set] * 100)
+  y0 <- round(bb$y0[set] * 100)
+  w <- round(bb$x1[set] * 100) - x0
+  h <- round(bb$y1[set] * 100) - y0
+  lo <- c(min(x0), min(y0), min(w), min(h))
+  span <- c(max(x0), max(y0), max(w), max(h)) - lo
+  # Integers past 2^31 (a box ~21 million px out) would not survive the
+  # typed column; keep the plain form there.
+  if (any(!is.finite(span)) || any(span >= 2^31) || any(abs(lo) >= 2^52)) {
+    return(NULL)
+  }
+  # A few odd extents (a legend swatch among a million dots) would widen every
+  # row's `w`/`h`: rows past the cheapest width ship plain in `ex` instead.
+  dw <- w - lo[3]
+  dh <- h - lo[4]
+  k_max <- ceiling(log2(max(dw, dh) + 1))
+  cost <- vapply(0:k_max, function(k) {
+    2 * length(dw) * k + 320 * sum(dw >= 2^k | dh >= 2^k)
+  }, numeric(1))
+  k <- (0:k_max)[which.min(cost)]
+  odd <- dw >= 2^k | dh >= 2^k
+  dw[odd] <- 0
+  dh[odd] <- 0
+  int_col <- function(v) {
+    out <- integer(n)
+    out[set] <- as.integer(v)
+    .uint_column(out, pack = TRUE)
+  }
+  out <- list(
+    n = n,
+    lo = lo,
+    x0 = int_col(x0 - lo[1]),
+    y0 = int_col(y0 - lo[2]),
+    w = int_col(dw),
+    h = int_col(dh)
+  )
+  if (!all(set)) {
+    out$na <- I(which(!set) - 1L)
+  }
+  if (any(odd)) {
+    rows <- which(set)[odd]
+    out$ex <- list(
+      at = I(rows - 1L),
+      x0 = I(bb$x0[rows]),
+      y0 = I(bb$y0[rows]),
+      x1 = I(bb$x1[rows]),
+      y1 = I(bb$y1[rows])
+    )
+  }
+  out
 }
 
 # A column of non-negative integers as the runtime's typed column

@@ -6146,6 +6146,39 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(eA.querySelector("svg").getAttribute("viewBox") === "0 0 400 100", "max zoom: axis-aware zoom keeps the frame fixed at the cap");
 }
 
+
+// ============ the integer bbox (VW-43) and sparse bbox columns ============
+{
+  const T = window.__vellumwidgetTest;
+  const b64 = (a) => Buffer.from(a).toString("base64");
+  const els = T.normalizeElements({
+    key: ["a", "b", "c"],
+    bbox: { n: 3, lo: [-250, 1000, 300, 299],
+      x0: { type: "u8", n: 3, data: b64([0, 5, 200]) }, y0: { type: "u8", n: 3, data: b64([1, 0, 2]) },
+      w: { type: "u8", n: 3, rle: { values: 1, lengths: 3 } }, h: { type: "u8", n: 3, const: 2 }, na: 1 }
+  });
+  ok(els[0].x0 === -250 / 100 && els[0].y0 === 1001 / 100 && els[0].x1 === (-250 + 301) / 100 && els[0].y1 === (1001 + 301) / 100,
+    "integer bbox: a box is the plain 1/100 px doubles");
+  ok(els[1].x0 === undefined && els[1].x1 === undefined, "integer bbox: a row in `na` has no box");
+  ok(els[2].x0 === -50 / 100 && els[2].y1 === (1002 + 301) / 100, "integer bbox: offsets and extents add up per row");
+  const ex = T.decodeBbox({ n: 2, lo: [0, 0, 1, 1], x0: { type: "u8", n: 2, const: 3 }, y0: { type: "u8", n: 2, const: 4 },
+    w: { type: "u8", n: 2, const: 0 }, h: { type: "u8", n: 2, const: 0 }, ex: { at: [1], x0: [500.25], y0: [10], x1: [530.5], y1: [40] } });
+  ok(ex.x0[0] === 0.03 && ex.x1[0] === 0.04 && ex.x0[1] === 500.25 && ex.y1[1] === 40, "integer bbox: rows in `ex` take their plain boxes");
+  // bit-packed 17-bit corners, as R's .uint_column(pack = TRUE) writes them
+  const vals = [0, 70000, 131071, 12345];
+  const bits = [];
+  vals.forEach((v) => { for (let j = 0; j < 17; j++) bits.push((v >> j) & 1); });
+  while (bits.length % 8) bits.push(0);
+  const bytes = [];
+  for (let i = 0; i < bits.length; i += 8) { let x = 0; for (let j = 0; j < 8; j++) x |= bits[i + j] << j; bytes.push(x); }
+  const pk = T.decodeBbox({ n: 4, lo: [0, 0, 0, 0], x0: { type: "u32", n: 4, bits: 17, data: b64(bytes) },
+    y0: { type: "u8", n: 4, const: 0 }, w: { type: "u8", n: 4, const: 0 }, h: { type: "u8", n: 4, const: 0 } });
+  ok(pk.x0.join() === vals.map((v) => v / 100).join(), "integer bbox: 17-bit packed corners decode");
+  // sparse bbox columns (a display list covers the rest): the uncovered boxes survive
+  const sp = T.normalizeElements({ key: ["1", "2", "legend:a"], x0: { at: 2, v: 520.5 }, y0: { at: 2, v: 10 }, x1: { at: 2, v: 535 }, y1: { at: 2, v: 25 } });
+  ok(sp[2].x0 === 520.5 && sp[2].y1 === 25 && sp[0].x0 === undefined, "sparse bbox columns: the listed rows keep their boxes");
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();
