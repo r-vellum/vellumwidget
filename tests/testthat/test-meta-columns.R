@@ -185,3 +185,47 @@ test_that("records and columnar meta give the same widget elements", {
   expect_identical(els$legend_for[i], c(NA, NA, "color:a"))
   expect_identical(els$hover_color[i], c("#ff0000", "#ff0000", NA))
 })
+
+test_that("raster mode builds single-valued ragged columns flat (VW-39)", {
+  # The wire encoding must be identical whether the ragged columns (legend,
+  # cond, filt) arrive as list-columns or are built flat.
+  model_of <- function(meta) {
+    n <- length(meta)
+    g <- vellum::points_grob(
+      seq(0.1, 0.9, length.out = n),
+      0.5,
+      key = paste0("k", seq_len(n)),
+      meta = meta
+    )
+    vellum::scene_model(vellum::vl_scene(2, 2) |> vellum::draw(g), meta = "columns")
+  }
+  enc <- function(m, flat) .encode_elements(.vellumwidget_elements(m, flat_ragged = flat))
+  set.seed(5)
+  cases <- list(
+    # one value each, few levels: dictionary (runs)
+    lapply(1:200, function(i) list(legend = paste0("color:", i %/% 50))),
+    # one value each, many levels on few elements: the list form stays
+    lapply(1:6, function(i) if (i <= 3) list(legend = paste0("color:", i)) else list()),
+    # rare: sparse
+    lapply(1:100, function(i) if (i %% 25 == 0) list(cond = "s:color") else list()),
+    # several values somewhere: the list path
+    lapply(1:40, function(i) list(legend = if (i == 3) c("color:a", "shape:b") else "color:a")),
+    # factors and NA inside a list-column, and an all-empty field
+    lapply(1:30, function(i) {
+      list(filt = if (i %% 3 == 0) factor("f") else if (i %% 3 == 1) NA else NULL, cond = character(0))
+    }),
+    # unique values on every element
+    lapply(1:50, function(i) list(legend = paste0("color:", i), filt = "sel"))
+  )
+  for (meta in cases) {
+    m <- model_of(meta)
+    expect_identical(enc(m, TRUE), enc(m, FALSE))
+    flat <- .vellumwidget_elements(m, flat_ragged = TRUE)
+    for (f in intersect(c("legend", "cond", "filt"), names(flat))) {
+      if (!is.list(flat[[f]])) expect_true(isTRUE(attr(flat[[f]], "ragged")))
+    }
+  }
+  # SVG mode keeps the list-columns.
+  m <- model_of(cases[[1]])
+  expect_type(.vellumwidget_elements(m)$legend, "list")
+})
