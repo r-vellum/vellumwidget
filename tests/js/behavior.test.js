@@ -5526,55 +5526,89 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ];
   const svgOf = (src) => /^data:image\/svg\+xml/.test(src || "") ? decodeURIComponent(src.slice(src.indexOf(",") + 1)) : null;
   const runImgs = (ctx) => ctx.log.filter((r) => r.op === "img");
-  const st = mount({ runSvg: RUN_SVG });
+  // VW-37: only the touched marks' boxes are re-rendered: the run's PNG is
+  // drawn (from a scratch layer) with those boxes cleared, and the restyled
+  // run inside them. (perCanvas: the scratch layer records on its own.)
+  const st = mount({ runSvg: RUN_SVG, perCanvas: true });
   st.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); st.inst._test.evalTier();
   ok(st.inst._test.runStyled().join(",") === "false,false" && seq(st.ctx) === "fill:25,img:RUN1,fill:125,img:RUN2",
     "VW-33: no active state -> the runs draw their PNGs");
   st.inst._call("select", ["p1"]); // the condition dims every non-member: p2 (run 1) and p4 (run 2) too
   {
-    const ims = runImgs(st.ctx), s1 = svgOf(ims[0] && ims[0].src), s2 = svgOf(ims[1] && ims[1].src);
-    ok(st.inst._test.runStyled().join(",") === "true,true" && s1 && s2,
-      "VW-33: a condition touching the flagged marks re-renders both runs from their SVGs");
-    ok(s1 && /data-key="p2"[^>]*style="opacity:0.28"/.test(s1) && s2 && /data-key="p4"[^>]*style="opacity:0.28"/.test(s2),
+    const ims = runImgs(st.ctx);
+    const fills = ims.filter((i) => svgOf(i.src));
+    ok(st.inst._test.runStyled().join(",") === "true,true" && fills.length === 2,
+      "VW-33: a condition touching the flagged marks re-renders them from the runs' SVGs");
+    ok(fills.length === 2 && /data-key="p2"[^>]*style="opacity:0.28"/.test(svgOf(fills[0].src)) && /data-key="p4"[^>]*style="opacity:0.28"/.test(svgOf(fills[1].src)),
       "VW-33: ... with the dimmed marks at the dim opacity, as SVG mode's class would");
-    ok(s1 && /width="400" height="200" viewBox="0 0 200 100"/.test(s1) && ims[0].w === 200,
+    ok(fills.length === 2 && /width="400" height="200" viewBox="0 0 200 100"/.test(svgOf(fills[0].src)) && fills[0].w === 200,
       "VW-33: ... rasterised at the PNG's resolution, drawn in the scene frame");
+    // p2's box 77..83 x 47..53, padded by 2, through the view (x' = 1.25 (x - 20), y' = 1.25 y)
+    ok(fills.length === 2 && fills[0].clip.length === 1 && fills[0].clip[0].join(",") === "69,56,13,13",
+      "VW-37: the re-rendered run is drawn only inside the touched mark's box");
+    ok(ims.length === 4 && !ims[0].src && !ims[2].src,
+      "VW-37: each run's PNG is drawn first, from a layer");
   }
   st.inst._call("clearSelection", []);
   ok(st.inst._test.runStyled().join(",") === "false,false" && seq(st.ctx) === "fill:25,img:RUN1,fill:125,img:RUN2",
     "VW-33: clearing the state puts the PNGs back");
   st.inst._call("filter", ["p1", "p3", "p4"]); // a cross-filter hides p2 only
   {
-    const ims = runImgs(st.ctx), s1 = svgOf(ims[0] && ims[0].src);
-    ok(st.inst._test.runStyled().join(",") === "true,false" && s1 && !/data-key="p2"/.test(s1) && /RUN2$/.test(ims[1].src),
-      "VW-33: a filter hiding a flagged mark removes it from its run; the untouched run keeps its PNG");
+    const ims = runImgs(st.ctx);
+    ok(st.inst._test.runStyled().join(",") === "true,false" && ims.length === 2 && !ims[0].src && /RUN2$/.test(ims[1].src),
+      "VW-37: a filter hiding a lone flagged mark only clears its box (nothing to re-render); the untouched run keeps its PNG");
   }
   st.inst._call("clearFilter", []);
-  // an export redraws with the restyled runs
+  // an export redraws with the patched runs
   st.inst._call("select", ["p1"]);
   {
     const exp = recCtx();
     const saved = { gc: proto.getContext, tdu: proto.toDataURL };
-    proto.getContext = function () { return exp; };
+    proto.getContext = function () { return this._rc || (this._rc = exp); };
     proto.toDataURL = function () { return "data:image/png;base64,REDRAWN"; };
     const r = st.inst._test.exportMarksImage ? st.inst._test.exportMarksImage(2) : null;
     proto.getContext = saved.gc; proto.toDataURL = saved.tdu;
-    const ims = runImgs(exp);
+    const ims = runImgs(exp).filter((i) => svgOf(i.src));
     ok(r && ims.length === 2 && ims.every((i) => /opacity:0.28/.test(svgOf(i.src) || "")),
-      "VW-33: the export redraw draws the restyled runs");
+      "VW-33: the export redraw draws the patched runs");
   }
   st.restore();
-  // the detail tier's run images follow the state
+  // VW-37: an untouched mark whose box meets a touched one's is re-rendered
+  // with it (so no mark is half PNG, half browser); one apart keeps the PNG
+  {
+    const two = ['<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><circle data-key="p2" cx="80" cy="50" r="3"/><circle data-key="p3" cx="84" cy="50" r="3"/></svg>', RUN_SVG[1]];
+    const ov = mount({ runSvg: two, perCanvas: true, cx: [40, 80, 84, 160], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2] });
+    ov.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); ov.inst._test.evalTier();
+    ov.inst._call("select", ["p1", "p3"]); // dims p2 (and p4), not p3
+    const fills = runImgs(ov.ctx).filter((i) => svgOf(i.src));
+    ok(fills.length === 2 && fills[0].clip.length === 2, "VW-37: the overlapping untouched mark's box joins the re-rendered region");
+    ov.restore();
+    const ap = mount({ runSvg: two, perCanvas: true, cx: [40, 80, 120, 160], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2] });
+    ap.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); ap.inst._test.evalTier();
+    ap.inst._call("select", ["p1", "p3"]);
+    const f2 = runImgs(ap.ctx).filter((i) => svgOf(i.src));
+    ok(f2.length === 2 && f2[0].clip.length === 1, "VW-37: a mark apart from the touched ones keeps its PNG pixels");
+    ap.restore();
+  }
+  // the detail tier's runs follow the state
   const sd = mount({ runSvg: RUN_SVG, detailMarks: 100 });
   sd.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); sd.inst._test.evalTier();
   ok(sd.inst._test.markTier() === "detail", "VW-33 setup: detail tier");
   const runImgEl = (r) => sd.el.querySelector('defs.vellumwidget-detail image[data-run="' + r + '"]');
   ok(/RUN1$/.test(runImgEl(1).getAttribute("href")), "VW-33: detail: no state -> the run image is the PNG");
   sd.inst._call("select", ["p1"]);
-  ok(/opacity:0.28/.test(svgOf(runImgEl(1).getAttribute("href")) || "") && /opacity:0.28/.test(svgOf(runImgEl(2).getAttribute("href")) || ""),
-    "VW-33: detail: a condition swaps the run images for restyled ones");
+  {
+    const pg = Array.from(sd.el.querySelectorAll("g.vellumwidget-detail-patch"));
+    const fillOf = (g) => { const u = g.querySelector("use[clip-path]"); const id = u ? u.getAttribute("href").slice(1) : ""; const im = id ? sd.el.querySelector("image#" + id) : null; return im ? svgOf(im.getAttribute("href")) : null; };
+    ok(pg.length === 2 && pg.every((g) => /opacity:0.28/.test(fillOf(g) || "")),
+      "VW-33: detail: a condition patches both runs with their restyled marks");
+    const png = pg.length ? pg[0].querySelector("use[mask]") : null;
+    const mk = png ? sd.el.querySelector("mask#" + png.getAttribute("mask").replace(/^url\(#|\)$/g, "")) : null;
+    ok(png && /RUN1$/.test(sd.el.querySelector("image#" + png.getAttribute("href").slice(1)).getAttribute("href")) && mk && mk.querySelectorAll("rect").length === 2 && mk.querySelectorAll("rect")[1].getAttribute("x") === "75",
+      "VW-37: detail: the PNG shows with the touched box masked out");
+  }
   sd.inst._call("clearSelection", []);
-  ok(/RUN1$/.test(runImgEl(1).getAttribute("href")), "VW-33: detail: clearing it swaps the PNGs back");
+  ok(!sd.el.querySelector("g.vellumwidget-detail-patch") && /RUN1$/.test(runImgEl(1).getAttribute("href")), "VW-33: detail: clearing it puts the PNGs back");
   sd.restore();
   // a payload without the SVGs (an older vellumwidget R side): the PNGs stay
   const ns = mount({});
