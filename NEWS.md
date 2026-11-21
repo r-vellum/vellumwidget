@@ -1,4 +1,6 @@
-# vellumwidget 0.14.1.9000
+# vellumwidget 0.15.0
+
+* Requires vellum (>= 0.12.0).
 
 * **Smaller tooltips in raster payloads (VW-38).** Raster mode ships the
   element table's string columns more compactly. Tooltips that follow a
