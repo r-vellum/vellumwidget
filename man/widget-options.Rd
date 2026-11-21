@@ -19,7 +19,8 @@ render_options(
   raster_threshold = 20000L,
   text = c("native", "outline"),
   max_marks = 500000L,
-  detail_marks = 3000L
+  detail_marks = 3000L,
+  precision = c("compact", "f32")
 )
 }
 \arguments{
@@ -106,6 +107,16 @@ visible marks become real SVG nodes (the detail tier): hover, selection,
 \code{condition()} and \code{filter_by()} styling and keyboard focus then work on
 them as in SVG mode. Zooming back out past 1.5 times this many returns to
 the canvas. \code{0} turns the detail tier off.}
+
+\item{precision}{How the display list ships its marks' coordinates (see
+\code{max_marks}). \code{"compact"} (default), with a vellum that supports it,
+quantises each coordinate column within its range so that no coordinate
+is off by more than 0.005 px, the precision of the SVG vellum writes
+(SVG mode, and raster mode's axes and gridlines): 16 bits per value for a
+plot up to 655 px across, 24 above, instead of a 32-bit float. That
+halves the coordinates in the payload (a 200k-point scatter: 2.7 to
+1.7 MB) and keeps the error under half a pixel up to 100x zoom. \code{"f32"}
+ships 32-bit floats, as an older vellum always does.}
 }
 \value{
 An object of class \code{vellumwidget_tooltip_options},
