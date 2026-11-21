@@ -1,5 +1,14 @@
 # vellumwidget 0.15.0.9000
 
+* **Facets panned past their data stay empty in raster mode (VW-36).**
+  Panning isn't clamped, so under axis zoom a facet or composition cell can
+  be panned beyond its own data. In raster mode each panel drew the whole
+  mark image (and any run of flagged marks spanning several panels) through
+  its own transform, clipped only to its fixed rect on screen, so a
+  neighbouring panel's marks showed through. Each copy is now also clipped
+  to the panel's own area, in every tier (overview image, mid-tier canvas,
+  detail tier) and in exports, as SVG mode always did.
+
 # vellumwidget 0.15.0
 
 * Requires vellum (>= 0.12.0).

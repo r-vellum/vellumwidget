@@ -323,6 +323,7 @@ export interface WidgetFns {
   proxyCall: (method: string, args: unknown) => void;
   reevaluateInteractions: () => void;
   renderValue: (x: Payload) => void;
+  panelClip: (name: string) => string | null;
   reportView: () => void;
   resetZoom: () => void;
   resize: () => void;

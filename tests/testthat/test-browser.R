@@ -511,7 +511,8 @@ test_that("VW-34: a run spanning a pan-group panel and a root panel is drawn onc
   Sys.sleep(0.6)
   expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), "detail")
   hosts <- ev("Array.from(document.querySelectorAll('use.vellumwidget-detail-run')).map(function(u){return (u.closest('[data-vellum-pan]') ? 'pan' : 'root') + (u.hasAttribute('clip-path') ? '+clip' : '')}).sort().join(',')")
-  expect_identical(hosts, "pan,root+clip")
+  # (the pan group's <use> is clipped to its panel's own area, VW-36)
+  expect_identical(hosts, "pan+clip,root+clip")
 })
 
 test_that("VW-33: a filter hides a flagged mark in the mid and detail tiers and the export", {
@@ -608,4 +609,41 @@ test_that("VW-38: a raster widget's hover tooltip is the plot's tooltip, byte fo
   Sys.sleep(0.5)
   html <- b$Runtime$evaluate("document.querySelector('.vellumwidget-tip').innerHTML")$result$value
   expect_identical(html, df$tip[as.integer(el$key[i])])
+})
+
+test_that("VW-36: a facet panned past its own data shows none of its neighbour's marks", {
+  skip_browser()
+  skip_if_not(.split_render_supported(), "vellum without the split render")
+  # red points in panel B only; panel A is panned onto B's scene region, so
+  # an unclipped copy of the mark image (or of a run spanning both panels)
+  # there would show B's red marks in A
+  set.seed(2)
+  df <- data.frame(x = runif(300), y = runif(300), f = rep(c("A", "B"), each = 150), id = paste0("p", 1:300))
+  lab <- data.frame(x = c(0.5, 0.5), y = c(0.5, 0.5), f = c("A", "B"), l = c("aaaa", "bbbb"), id = c("LA", "LB"))
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id, color = f, size = 3) |>
+    vellumplot::mark_text(data = lab, x = x, y = y, label = l, data_id = id, size = 20, color = f) |>
+    vellumplot::scale_color_manual(values = c(A = "#00000000", B = "red")) |>
+    vellumplot::facet_wrap(~f)
+  red_in_a <- function(b) {
+    r <- panel_rect(b, 1)
+    shot <- b$Page$captureScreenshot(format = "png", clip = list(x = r[1] + 2, y = r[2] + 2, width = r[3] - 4, height = r[4] - 4, scale = 1))
+    img <- png::readPNG(jsonlite::base64_dec(shot$data))
+    mean(img[, , 1] > 0.8 & img[, , 2] < 0.3 & img[, , 3] < 0.3)
+  }
+  for (tier in c("overview", "mid", "detail")) {
+    w <- as_widget(p, elementId = "w1", render = render_options(mode = "raster", detail_marks = if (tier == "detail") 5000 else 0))
+    p1 <- w$x$panels[[1]]
+    p2 <- w$x$panels[[2]]
+    b <- open_widget(w)
+    ev <- function(js) b$Runtime$evaluate(js)$result$value
+    v <- as.numeric(strsplit(ev("document.querySelector('#w1 svg').getAttribute('viewBox')"), "[ ,]+")[[1]])
+    z <- if (tier == "overview") 1 else 1.25
+    # the reference panel's visible scene region starts at B's left edge
+    vx <- p2$px0 - (p1$px0 - v[1]) / z
+    ev(sprintf("HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f})", vx, v[2], v[3] / z, v[4] / z))
+    Sys.sleep(0.6)
+    expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), tier)
+    expect_lt(red_in_a(b), 0.001)
+  }
 })

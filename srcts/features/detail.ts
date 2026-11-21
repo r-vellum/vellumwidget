@@ -381,6 +381,10 @@ export function detailFeature(
       if (!panHost[p]) {
         const cid = rootClip(r);
         if (cid) u.setAttribute("clip-path", "url(#" + cid + ")");
+      } else {
+        // the run's part in this panel only, wherever a pan takes it (VW-36)
+        const cp = ws.fx.panelClip(dl.panels[p - 1]);
+        if (cp) u.setAttribute("clip-path", cp);
       }
       groupFor(p).appendChild(u);
       if (chains[p]) chains[p].length = 0;
