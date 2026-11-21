@@ -874,11 +874,6 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
       out[set] <- as.list(v[set])
       cols[[f]] <- out
     }
-    if (ragged) {
-      out <- rep(list(character(0)), n)
-      out[set] <- as.list(v[set])
-      cols[[f]] <- out
-    }
   }
   cols
 }
