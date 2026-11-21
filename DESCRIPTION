@@ -22,7 +22,7 @@ Imports:
     cli (>= 3.4.0),
     grDevices,
     htmlwidgets,
-    vellum (>= 0.10.1)
+    vellum (>= 0.11.1.9000)
 Suggests:
     chromote,
     crosstalk,

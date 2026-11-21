@@ -25,12 +25,16 @@ test_that("scene_model() exposes the element columns vellumwidget reads", {
   el <- m$elements
   expect_true(all(c("key", "x0", "y0", "x1", "y1") %in% names(el)))
   expect_type(el$meta, "list")
+  # the columnar meta vellumwidget asks for (VR-19)
+  cm <- vellum::scene_model(keyed_scene(), meta = "columns")$elements$meta
+  expect_s3_class(cm, "data.frame")
+  expect_identical(cm$tooltip, c("Alpha", "Beta"))
   expect_type(el$key, "character")
   expect_true(is.numeric(el$x0) && is.numeric(el$y1))
 })
 
 test_that("vellumwidget_elements() turns the contract into a columnar interaction table", {
-  m <- vellum::scene_model(keyed_scene())
+  m <- vellum::scene_model(keyed_scene(), meta = "columns")
   els <- vellumwidget_elements(m)
 
   # columnar: a named list of equal-length vectors, one entry per keyed element
@@ -49,5 +53,5 @@ test_that("an unkeyed scene yields no interaction records (contract additivity)"
   plain <- vellum::vl_scene(3, 2, dpi = 100) |>
     vellum::draw(vellum::points_grob(c(0.25, 0.75), 0.5,
                                      gp = vellum::vl_gpar(fill = "steelblue", col = NA)))
-  expect_length(vellumwidget_elements(vellum::scene_model(plain)), 0L)
+  expect_length(vellumwidget_elements(vellum::scene_model(plain, meta = "columns")), 0L)
 })
