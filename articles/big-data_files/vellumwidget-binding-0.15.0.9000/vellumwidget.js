@@ -1090,6 +1090,162 @@
     return { a11yLabel, announce, focusRoving, markFocused, setupA11y };
   }
 
+  // srcts/geometry.ts
+  function rectsIntersect(a, b) {
+    return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
+  }
+  function distToBbox(x, y, b) {
+    const dx = Math.max(b.x0 - x, 0, x - b.x1);
+    const dy = Math.max(b.y0 - y, 0, y - b.y1);
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  function hasBbox(e) {
+    return typeof e.x0 === "number" && typeof e.y0 === "number";
+  }
+  function isRoundMark(mark) {
+    return mark === "point" || mark === "points" || mark === "circle" || mark === "circles";
+  }
+  function distToSegment2(x, y, ax, ay, bx, by) {
+    const vx = bx - ax, vy = by - ay;
+    const len2 = vx * vx + vy * vy;
+    let t = len2 > 0 ? ((x - ax) * vx + (y - ay) * vy) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const dx = x - (ax + t * vx), dy = y - (ay + t * vy);
+    return dx * dx + dy * dy;
+  }
+  function distToGeom(x, y, g, gx, gy, box) {
+    const at = g.at, n = g.n;
+    if (n <= 0) return Infinity;
+    if (g.kind === "point") {
+      const dx = x - gx[at], dy = y - gy[at];
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const r = box ? Math.min(box.x1 - box.x0, box.y1 - box.y0) / 2 : 0;
+      return d > r ? d - r : 0;
+    }
+    if (n === 1) {
+      const dx = x - gx[at], dy = y - gy[at];
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    if (g.kind === "rect" || g.kind === "text" || g.kind === "roundrect") {
+      return distToBbox(x, y, {
+        x0: Math.min(gx[at], gx[at + 1]),
+        x1: Math.max(gx[at], gx[at + 1]),
+        y0: Math.min(gy[at], gy[at + 1]),
+        y1: Math.max(gy[at], gy[at + 1])
+      });
+    }
+    const closed = g.kind === "polygon" || g.kind === "path" || g.kind === "hexagon" || g.kind === "sector";
+    const rings = g.rings || [n];
+    let best = Infinity;
+    let cross = 0;
+    let wind = 0;
+    let ra = at;
+    for (let r = 0; r < rings.length; r++) {
+      const rn = rings[r] | 0;
+      if (rn <= 0) continue;
+      if (closed && rn >= 3) {
+        for (let i = 0, j = rn - 1; i < rn; j = i++) {
+          const xi = gx[ra + i], yi = gy[ra + i];
+          const xj = gx[ra + j], yj = gy[ra + j];
+          if (yi > y !== yj > y) {
+            if (x < (xj - xi) * (y - yi) / (yj - yi) + xi) cross++;
+            const side = (xi - xj) * (y - yj) - (x - xj) * (yi - yj);
+            if (yi > yj) {
+              if (side > 0) wind++;
+            } else if (side < 0) wind--;
+          }
+        }
+      }
+      for (let i = 1; i < rn; i++) {
+        const d2 = distToSegment2(x, y, gx[ra + i - 1], gy[ra + i - 1], gx[ra + i], gy[ra + i]);
+        if (d2 < best) best = d2;
+      }
+      if (closed && rn >= 3) {
+        const d2 = distToSegment2(x, y, gx[ra + rn - 1], gy[ra + rn - 1], gx[ra], gy[ra]);
+        if (d2 < best) best = d2;
+      }
+      ra += rn;
+    }
+    if (closed && (g.evenodd ? (cross & 1) === 1 : wind !== 0)) return 0;
+    return Math.sqrt(best);
+  }
+  function unionBbox(elems, keys) {
+    let out = null;
+    for (let i = 0; i < elems.length; i++) {
+      const e = elems[i];
+      if (!hasBbox(e) || !keys[e.key]) continue;
+      if (!out) out = { x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1 };
+      else {
+        out.x0 = Math.min(out.x0, e.x0);
+        out.y0 = Math.min(out.y0, e.y0);
+        out.x1 = Math.max(out.x1, e.x1);
+        out.y1 = Math.max(out.y1, e.y1);
+      }
+    }
+    return out;
+  }
+  function mul6(m, n) {
+    return [
+      m[0] * n[0] + m[2] * n[1],
+      m[1] * n[0] + m[3] * n[1],
+      m[0] * n[2] + m[2] * n[3],
+      m[1] * n[2] + m[3] * n[3],
+      m[0] * n[4] + m[2] * n[5] + m[4],
+      m[1] * n[4] + m[3] * n[5] + m[5]
+    ];
+  }
+  function parseTransformList(t) {
+    const s = (t || "").trim();
+    if (!s) return null;
+    const re = /([a-zA-Z]+)\s*\(([^)]*)\)/g;
+    let m = [1, 0, 0, 1, 0, 0];
+    let any = false, rest = s, f;
+    while ((f = re.exec(s)) !== null) {
+      rest = rest.replace(f[0], "");
+      const v = f[2].trim() === "" ? [] : f[2].trim().split(/[\s,]+/).map(Number);
+      if (v.some((x) => !isFinite(x))) return null;
+      let n;
+      switch (f[1]) {
+        case "matrix":
+          if (v.length !== 6) return null;
+          n = [v[0], v[1], v[2], v[3], v[4], v[5]];
+          break;
+        case "translate":
+          if (v.length < 1 || v.length > 2) return null;
+          n = [1, 0, 0, 1, v[0], v.length > 1 ? v[1] : 0];
+          break;
+        case "scale":
+          if (v.length < 1 || v.length > 2) return null;
+          n = [v[0], 0, 0, v.length > 1 ? v[1] : v[0], 0, 0];
+          break;
+        case "rotate": {
+          if (v.length !== 1 && v.length !== 3) return null;
+          const r = v[0] * Math.PI / 180, co = Math.cos(r), si = Math.sin(r);
+          const cx = v.length === 3 ? v[1] : 0, cy = v.length === 3 ? v[2] : 0;
+          n = [co, si, -si, co, cx - co * cx + si * cy, cy - si * cx - co * cy];
+          break;
+        }
+        case "skewX":
+          if (v.length !== 1) return null;
+          n = [1, 0, Math.tan(v[0] * Math.PI / 180), 1, 0, 0];
+          break;
+        case "skewY":
+          if (v.length !== 1) return null;
+          n = [1, Math.tan(v[0] * Math.PI / 180), 0, 1, 0, 0];
+          break;
+        default:
+          return null;
+      }
+      m = mul6(m, n);
+      any = true;
+    }
+    if (!any || rest.replace(/[\s,]/g, "") !== "") return null;
+    return m;
+  }
+  function applyAffine6(m, x, y) {
+    return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
+  }
+
   // srcts/features/constants.ts
   var DIM_OVERLAY_MIN = 2e3;
   var OVERLAY_MARK_CAP = 2e3;
@@ -1977,23 +2133,11 @@
     function constantText(n) {
       if (n.style.getPropertyValue("transform")) return;
       const own = (n.getAttribute("transform") || "").trim();
-      const place = transAsCss(n);
-      if (own && !place) return;
-      const x = parseFloat(n.getAttribute("x") || "") || 0, y = parseFloat(n.getAttribute("y") || "") || 0;
-      let X = x, Y = y;
-      const m = /matrix\(([^)]*)\)/.exec(place);
-      if (m) {
-        const v = m[1].split(",").map(Number);
-        X = v[0] * x + v[2] * y + v[4];
-        Y = v[1] * x + v[3] * y + v[5];
-      } else {
-        const t = /translate\(([-+\d.eE]+)px,([-+\d.eE]+)px\)/.exec(place);
-        if (t) {
-          X = x + Number(t[1]);
-          Y = y + Number(t[2]);
-        }
-      }
+      if (own && !parseTransformList(own)) return;
+      const A = anchorThrough(n);
+      const X = A.x, Y = A.y;
       if (!isFinite(X) || !isFinite(Y)) return;
+      const place = transAsCss(n);
       n.style.setProperty("transform-box", "view-box");
       n.style.setProperty("transform-origin", "0px 0px");
       n.style.setProperty(
@@ -2003,32 +2147,21 @@
     }
     function transAsCss(node) {
       const t = (node.getAttribute("transform") || "").trim();
-      if (!t) return "";
-      const N = "([-+\\d.eE]+)";
-      const m = new RegExp(
-        "matrix\\(\\s*" + [N, N, N, N, N, N].join("[\\s,]+") + "\\s*\\)"
-      ).exec(t);
-      if (m) {
-        const v = m.slice(1, 7).map(Number);
-        if (v.some(function(x) {
-          return !isFinite(x);
-        })) return "";
-        return "matrix(" + v.join(",") + ")";
-      }
-      const tr = new RegExp(
-        "translate\\(\\s*" + N + "(?:[\\s,]+" + N + ")?\\s*\\)"
-      ).exec(t);
-      if (tr) {
-        const tx = Number(tr[1]), ty = tr[2] === void 0 ? 0 : Number(tr[2]);
-        if (!isFinite(tx) || !isFinite(ty)) return "";
-        return "translate(" + tx + "px," + ty + "px)";
-      }
-      return "";
+      const m = parseTransformList(t);
+      if (!m) return "";
+      if (/^(\s*translate\([^)]*\)\s*)+$/.test(t)) return "translate(" + m[4] + "px," + m[5] + "px)";
+      return "matrix(" + m.join(",") + ")";
     }
-    function transTranslate(node) {
-      const t = node.getAttribute("transform") || "";
-      const m = /matrix\(\s*[-\d.eE]+\s+[-\d.eE]+\s+[-\d.eE]+\s+[-\d.eE]+\s+([-\d.eE]+)\s+([-\d.eE]+)\s*\)/.exec(t) || /translate\(\s*([-\d.eE]+)[ ,]+([-\d.eE]+)\s*\)/.exec(t);
-      return m ? { tx: parseFloat(m[1]), ty: parseFloat(m[2]) } : { tx: 0, ty: 0 };
+    function anchorThrough(node) {
+      const x = parseFloat(node.getAttribute("x") || "") || 0, y = parseFloat(node.getAttribute("y") || "") || 0;
+      const m = parseTransformList(node.getAttribute("transform"));
+      return m ? applyAffine6(m, x, y) : { x, y };
+    }
+    function rotationOf(node) {
+      const m = parseTransformList(node.getAttribute("transform"));
+      if (!m) return 0;
+      const r = Math.atan2(m[1], m[0]) * 180 / Math.PI;
+      return Math.abs(r) < 1e-6 ? 0 : Math.round(r * 1e6) / 1e6;
     }
     function scrapeAxisStyle() {
       if (!ws.svgEl) return;
@@ -2059,9 +2192,8 @@
         let first = null;
         const along = [], labs = [];
         for (let i = 0; i < texts.length; i++) {
-          const tr = transTranslate(texts[i]);
-          const x = tr.tx + (parseFloat(texts[i].getAttribute("x") || "") || 0);
-          const y = tr.ty + (parseFloat(texts[i].getAttribute("y") || "") || 0);
+          const at = anchorThrough(texts[i]);
+          const x = at.x, y = at.y;
           along.push(isX ? x : y);
           labs.push(texts[i].textContent || "");
           if (!first) first = { x, y };
@@ -2092,13 +2224,15 @@
         }
         if (!best) continue;
         const t0 = texts[0];
+        const rot = rotationOf(t0);
         const anchor = {
           pos: isX ? first.y : first.x,
           // x labels centre on their tick (vellum centres wrapped lines itself, with
           // a start anchor and per-line offsets, so its anchor isn't reusable there).
-          anchor: isX ? "middle" : t0.getAttribute("text-anchor") || "end",
+          anchor: isX && !rot ? "middle" : t0.getAttribute("text-anchor") || (isX ? "middle" : "end"),
           baseline: t0.getAttribute("dominant-baseline") || (isX ? "text-before-edge" : "central"),
-          gap
+          gap: rot ? 0 : gap,
+          rot
         };
         if (isSec) {
           const p = best.p;
@@ -2257,7 +2391,7 @@
       l.setAttribute("stroke-width", String(ws.axisStyle.gridWidth));
       return l;
     }
-    function axisLabel(text, x, y, anchor, baseline) {
+    function axisLabel(text, x, y, anchor, baseline, rot) {
       const t = document.createElementNS(SVGNS, "text");
       t.setAttribute("x", String(x));
       t.setAttribute("y", String(y));
@@ -2266,6 +2400,7 @@
       t.setAttribute("font-size", String(ws.axisStyle.fontSize));
       t.setAttribute("text-anchor", anchor);
       t.setAttribute("dominant-baseline", baseline);
+      if (rot) t.setAttribute("transform", "rotate(" + rot + " " + x + " " + y + ")");
       t.textContent = text;
       return t;
     }
@@ -2306,7 +2441,7 @@
           grid.appendChild(gridLine(sx, p.py0, sx, p.py1));
           if (a.xTick) ticks_.push(tickLine(a.xTick, sx, p));
           if (a.xLab) {
-            const lab = axisLabel(ticks[i].label, sx, a.xLab.pos, a.xLab.anchor, a.xLab.baseline);
+            const lab = axisLabel(ticks[i].label, sx, a.xLab.pos, a.xLab.anchor, a.xLab.baseline, a.xLab.rot);
             if (a.xLab.gap > 0) wrapLabel(lab, ticks[i].label, sx, a.xLab.gap);
             layer.appendChild(lab);
           }
@@ -2316,7 +2451,7 @@
           for (let i = 0; i < st.length; i++) {
             const sx = t.sx * (p.px0 + (st[i].n - ax.native_lo) / k) + t.tx;
             if (!isFinite(sx) || sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
-            layer.appendChild(axisLabel(st[i].label, sx, a.x2Lab.pos, a.x2Lab.anchor, a.x2Lab.baseline));
+            layer.appendChild(axisLabel(st[i].label, sx, a.x2Lab.pos, a.x2Lab.anchor, a.x2Lab.baseline, a.x2Lab.rot));
           }
         }
       }
@@ -2333,7 +2468,7 @@
           grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
           if (a.yTick) ticks_.push(tickLine(a.yTick, sy, p));
           if (a.yLab) {
-            layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline));
+            layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline, a.yLab.rot));
           }
         }
         if (a.y2Lab && a.y2Map) {
@@ -2341,7 +2476,7 @@
           for (let i = 0; i < st.length; i++) {
             const sy = t.sy * (p.py0 + (ay.native_hi - st[i].n) / k) + t.ty;
             if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
-            layer.appendChild(axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline));
+            layer.appendChild(axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline, a.y2Lab.rot));
           }
         }
       }
@@ -2703,17 +2838,12 @@
       const t = n.tagName.toLowerCase() === "text" ? n : n.querySelector("text");
       if (!t) return null;
       const x = parseFloat(t.getAttribute("x") || "") || 0, y = parseFloat(t.getAttribute("y") || "") || 0;
-      const tr = t.getAttribute("transform") || "";
-      const N = "([-+\\d.eE]+)";
-      const m = new RegExp("matrix\\(\\s*" + [N, N, N, N, N, N].join("[\\s,]+") + "\\s*\\)").exec(tr);
-      if (m) {
-        const v = m.slice(1, 7).map(Number);
-        const X = v[0] * x + v[2] * y + v[4], Y = v[1] * x + v[3] * y + v[5];
-        return isFinite(X) && isFinite(Y) ? { x: X, y: Y } : null;
-      }
-      const tt = new RegExp("translate\\(\\s*" + N + "(?:[\\s,]+" + N + ")?\\s*\\)").exec(tr);
-      if (tt) return { x: x + Number(tt[1]), y: y + (tt[2] === void 0 ? 0 : Number(tt[2])) };
-      return { x, y };
+      const tr = (t.getAttribute("transform") || "").trim();
+      if (!tr) return { x, y };
+      const m = parseTransformList(tr);
+      if (!m) return null;
+      const A = applyAffine6(m, x, y);
+      return isFinite(A.x) && isFinite(A.y) ? A : null;
     }
     function geoOf(r) {
       if (geos[r]) return geos[r];
@@ -3920,101 +4050,6 @@
       });
     }
     return { setColorRange, buildColorbar };
-  }
-
-  // srcts/geometry.ts
-  function rectsIntersect(a, b) {
-    return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
-  }
-  function distToBbox(x, y, b) {
-    const dx = Math.max(b.x0 - x, 0, x - b.x1);
-    const dy = Math.max(b.y0 - y, 0, y - b.y1);
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-  function hasBbox(e) {
-    return typeof e.x0 === "number" && typeof e.y0 === "number";
-  }
-  function isRoundMark(mark) {
-    return mark === "point" || mark === "points" || mark === "circle" || mark === "circles";
-  }
-  function distToSegment2(x, y, ax, ay, bx, by) {
-    const vx = bx - ax, vy = by - ay;
-    const len2 = vx * vx + vy * vy;
-    let t = len2 > 0 ? ((x - ax) * vx + (y - ay) * vy) / len2 : 0;
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    const dx = x - (ax + t * vx), dy = y - (ay + t * vy);
-    return dx * dx + dy * dy;
-  }
-  function distToGeom(x, y, g, gx, gy, box) {
-    const at = g.at, n = g.n;
-    if (n <= 0) return Infinity;
-    if (g.kind === "point") {
-      const dx = x - gx[at], dy = y - gy[at];
-      const d = Math.sqrt(dx * dx + dy * dy);
-      const r = box ? Math.min(box.x1 - box.x0, box.y1 - box.y0) / 2 : 0;
-      return d > r ? d - r : 0;
-    }
-    if (n === 1) {
-      const dx = x - gx[at], dy = y - gy[at];
-      return Math.sqrt(dx * dx + dy * dy);
-    }
-    if (g.kind === "rect" || g.kind === "text" || g.kind === "roundrect") {
-      return distToBbox(x, y, {
-        x0: Math.min(gx[at], gx[at + 1]),
-        x1: Math.max(gx[at], gx[at + 1]),
-        y0: Math.min(gy[at], gy[at + 1]),
-        y1: Math.max(gy[at], gy[at + 1])
-      });
-    }
-    const closed = g.kind === "polygon" || g.kind === "path" || g.kind === "hexagon" || g.kind === "sector";
-    const rings = g.rings || [n];
-    let best = Infinity;
-    let cross = 0;
-    let wind = 0;
-    let ra = at;
-    for (let r = 0; r < rings.length; r++) {
-      const rn = rings[r] | 0;
-      if (rn <= 0) continue;
-      if (closed && rn >= 3) {
-        for (let i = 0, j = rn - 1; i < rn; j = i++) {
-          const xi = gx[ra + i], yi = gy[ra + i];
-          const xj = gx[ra + j], yj = gy[ra + j];
-          if (yi > y !== yj > y) {
-            if (x < (xj - xi) * (y - yi) / (yj - yi) + xi) cross++;
-            const side = (xi - xj) * (y - yj) - (x - xj) * (yi - yj);
-            if (yi > yj) {
-              if (side > 0) wind++;
-            } else if (side < 0) wind--;
-          }
-        }
-      }
-      for (let i = 1; i < rn; i++) {
-        const d2 = distToSegment2(x, y, gx[ra + i - 1], gy[ra + i - 1], gx[ra + i], gy[ra + i]);
-        if (d2 < best) best = d2;
-      }
-      if (closed && rn >= 3) {
-        const d2 = distToSegment2(x, y, gx[ra + rn - 1], gy[ra + rn - 1], gx[ra], gy[ra]);
-        if (d2 < best) best = d2;
-      }
-      ra += rn;
-    }
-    if (closed && (g.evenodd ? (cross & 1) === 1 : wind !== 0)) return 0;
-    return Math.sqrt(best);
-  }
-  function unionBbox(elems, keys) {
-    let out = null;
-    for (let i = 0; i < elems.length; i++) {
-      const e = elems[i];
-      if (!hasBbox(e) || !keys[e.key]) continue;
-      if (!out) out = { x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1 };
-      else {
-        out.x0 = Math.min(out.x0, e.x0);
-        out.y0 = Math.min(out.y0, e.y0);
-        out.x1 = Math.max(out.x1, e.x1);
-        out.y1 = Math.max(out.y1, e.y1);
-      }
-    }
-    return out;
   }
 
   // srcts/features/coords.ts
