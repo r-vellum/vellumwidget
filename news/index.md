@@ -2,6 +2,21 @@
 
 ## vellumwidget 0.14.0.9000
 
+- **Raster mode: conditions, filters, dimming and legend hide/mute reach
+  the marks drawn from images (VW-33).** Since 0.14.0, masked, patterned
+  and similar marks and keyed text are drawn from one small PNG per run,
+  with their look baked in. So a cross-filter could not hide a keyed
+  label, and a
+  [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
+  could not recolour or dim it, in the overview, mid and detail tiers or
+  in exports. Each run now also ships as SVG. When some state touches a
+  run’s marks, the widget applies it to that SVG, as SVG mode styles its
+  nodes, and draws the result in place of the PNG; untouched runs keep
+  their PNG. The re-rendered run is drawn by the browser, so its text
+  can differ slightly from vellum’s. If the runs’ SVGs would exceed 4
+  MB, they are left out with a message, and those marks keep their own
+  look.
+
 - **Raster mode: a flagged run’s image is placed once per panel
   (VW-34).** In the detail tier, a run of flagged marks (e.g. text
   labels) spanning a panel with a pan group and one without (a polar or
