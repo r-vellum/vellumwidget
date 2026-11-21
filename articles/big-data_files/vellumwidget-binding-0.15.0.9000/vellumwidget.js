@@ -498,6 +498,38 @@
     }
     return asColumn(v).map(String);
   }
+  function decodeBbox(b) {
+    const n = Number(b.n) || 0;
+    const lo = asColumn(b.lo).map(Number);
+    const ux = dlColumn(b.x0), uy = dlColumn(b.y0);
+    const uw = dlColumn(b.w), uh = dlColumn(b.h);
+    const x0 = new Array(n), y0 = new Array(n);
+    const x1 = new Array(n), y1 = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const gx = lo[0] + ux[i], gy = lo[1] + uy[i];
+      x0[i] = gx / 100;
+      y0[i] = gy / 100;
+      x1[i] = (gx + lo[2] + uw[i]) / 100;
+      y1[i] = (gy + lo[3] + uh[i]) / 100;
+    }
+    const na = asColumn(b.na);
+    for (let k = 0; k < na.length; k++) {
+      const i = na[k];
+      x0[i] = y0[i] = x1[i] = y1[i] = null;
+    }
+    if (b.ex) {
+      const at = asColumn(b.ex.at), ex0 = asColumn(b.ex.x0), ey0 = asColumn(b.ex.y0);
+      const ex1 = asColumn(b.ex.x1), ey1 = asColumn(b.ex.y1);
+      for (let k = 0; k < at.length; k++) {
+        const i = at[k];
+        x0[i] = ex0[k];
+        y0[i] = ey0[k];
+        x1[i] = ex1[k];
+        y1[i] = ey1[k];
+      }
+    }
+    return { x0, y0, x1, y1 };
+  }
   function normalizeElements(raw) {
     if (raw == null) return [];
     if (Array.isArray(raw)) return raw;
@@ -505,11 +537,12 @@
     const key = decodeKeys(c.key);
     const n = key.length;
     if (!n) return [];
-    const x0 = asColumn(c.x0);
-    const y0 = asColumn(c.y0);
-    const x1 = asColumn(c.x1);
-    const y1 = asColumn(c.y1);
     const col = (f) => decodeColumn(c[f], n, key);
+    const bb = c.bbox ? decodeBbox(c.bbox) : null;
+    const x0 = bb ? bb.x0 : col("x0") || [];
+    const y0 = bb ? bb.y0 : col("y0") || [];
+    const x1 = bb ? bb.x1 : col("x1") || [];
+    const y1 = bb ? bb.y1 : col("y1") || [];
     const mark = col("mark");
     const tooltip = col("tooltip");
     const hoverGroup = col("hover_group");
@@ -8637,6 +8670,7 @@
     idSelector,
     findWidgetById,
     normalizeElements,
+    decodeBbox,
     isZoomedIn,
     userToCanvas,
     nearestSortedIdx,

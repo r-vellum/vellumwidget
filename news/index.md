@@ -2,6 +2,24 @@
 
 ## vellumwidget 0.15.0.9000
 
+- **Big raster widgets ship a quarter of the bytes (VW-43).** Above
+  `max_marks`, the bounding-box index went out as plain JSON numbers:
+  28.4 MB for a million-point scatter, 56.6 MB for two million. It now
+  ships as integers on the same 1/100 px grid, bit-packed, with
+  near-constant mark sizes taking a bit or two: 6.3 MB and 12.6 MB, with
+  the very same boxes, and `toJSON()` drops from 1.1 s to 0.05 s at a
+  million. `max_marks` now defaults to `2000000` (was `500000`): the
+  compact display list is as small as the box index (6.2 MB at a
+  million, 12.2 MB at two million), decodes faster (0.27 s against 0.43
+  s at a million, in jsdom), and draws the marks exactly. The
+  `max_marks` documentation gives these sizes instead of the stale
+  “about 8 MB”.
+
+- **Legend swatches keep their boxes in raster mode.** With a display
+  list, the few elements it doesn’t cover (the legend’s keyed swatches)
+  shipped their boxes as sparse columns, which the runtime read as no
+  box at all, so box-based hit-testing skipped them. They now decode.
+
 - **Zoom stops at a maximum (VW-44).** The view zoomed in without end,
   in SVG and raster mode: past about 100x the marks drifted off their
   gridlines (SVG coordinates sit on a 0.01 px grid and the compact
