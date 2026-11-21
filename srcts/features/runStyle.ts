@@ -87,7 +87,7 @@ const ATLAS_MAX = 4000;
 // a few states).
 const CACHE_PER_RUN = 4;
 
-export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" | "runPatch" | "runStyled" | "runSplit" | "markSplitInDetail"> {
+export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" | "runPatch" | "runStyled" | "runSplit" | "markSplitInDetail" | "constAnchor"> {
   let forDl: unknown = null;
   let keyIdx: Map<string, number> = new Map();
   let runKeys: Uint32Array[] = []; // per run (0-based): the distinct key ids of its records
@@ -575,7 +575,35 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
 
   function markSplitInDetail(on: boolean): void { splitInDetail = on; }
 
-  return { restyleRuns, runPatch, runStyled, runSplit, markSplitInDetail };
+  // The anchor (scene px) a flagged constant-size mark keeps its size about,
+  // as the split draws it (VW-35): a text label's anchor from its run's SVG,
+  // a glyph's box centre. null when `key` is no constant mark of a run. The
+  // hit box and the hover/selection ring use it (VW-42).
+  let keyRun: Map<number, number> | null = null;
+  let keyRunDl: unknown = null;
+  function constAnchor(key: string): { x: number; y: number } | null {
+    if (!sync()) return null;
+    const dl = ws.dl!;
+    const id = keyIdx.get(key);
+    if (id == null) return null;
+    if (!keyRun || keyRunDl !== dl) {
+      keyRun = new Map();
+      keyRunDl = dl;
+      for (let r = 0; r < runKeys.length; r++) {
+        const ids = runKeys[r];
+        for (let q = 0; q < ids.length; q++) if (!keyRun.has(ids[q])) keyRun.set(ids[q], r);
+      }
+    }
+    const r = keyRun.get(id);
+    if (r == null) return null;
+    const g = geoOf(r);
+    for (let j = 0; j < g.k.length; j++) {
+      if (g.k[j] === id) return g.cst[j] ? { x: g.ax[j], y: g.ay[j] } : null;
+    }
+    return null;
+  }
+
+  return { restyleRuns, runPatch, runStyled, runSplit, markSplitInDetail, constAnchor };
 }
 
 // The run SVGs of a flagged payload (VW-33), or null when absent or the

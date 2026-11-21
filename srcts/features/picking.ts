@@ -4,7 +4,8 @@
 import Flatbush from "flatbush";
 import { asColumn } from "../elements";
 import { PICK_CANDIDATES } from "./constants";
-import { distToBbox, distToGeom, hasBbox, isRoundMark } from "../geometry";
+import { applyAffine6, distToBbox, distToGeom, hasBbox, isRoundMark, parseTransformList } from "../geometry";
+import { GLYPH_MARKS } from "../scales";
 import type { Geom, GeometryPayload } from "../geometry";
 import { bboxInPolygon, bboxInRect, brushKeys, columnTolerance, dropPartialSeries, lassoKeys, nearestSortedIdx, pointInPolygon, polyBounds } from "../spatial";
 import type { Pt } from "../spatial";
@@ -16,7 +17,7 @@ export function pickingFeature(
 ): Pick<
   WidgetFns,
   "buildSpatialIndex" | "buildGeometry" | "distToElem" | "buildHoverAxis" | "nearestAxisKey"
-  | "columnKeys" | "nearestKeyAt" | "brushKeysIn" | "lassoKeysIn" | "brushSelectable"
+  | "columnKeys" | "nearestKeyAt" | "brushKeysIn" | "lassoKeysIn" | "brushSelectable" | "constBox"
 > {
   // --- spatial index (nearest / brush) ---
   // Rebuild the Flatbush index from the current elements' bboxes. Only bboxed
@@ -85,6 +86,69 @@ export function pickingFeature(
     ws.haveGeometry = at > 0;
   }
 
+  // --- constant-size marks under axis zoom (VW-42) ---
+  // A text or point-glyph mark in an axis-zoomed panel keeps its pixel size
+  // (SVG mode's counter-scale, VW-26; raster mode's records and split runs,
+  // VW-29/VW-35): T maps its anchor, and its extent around the anchor stays
+  // as at 1x. In the scene frame the pointer is mapped into (T⁻¹ of the
+  // screen), that is the record box shrunk about the anchor by T's scale.
+  // Returns that box with the scale, or null when the mark scales with T
+  // (another mark kind, zoom_marks = "scale", no zoom, or outside a panel).
+  function constBox(e: ElemMeta): (Bbox & { sx: number; sy: number }) | null {
+    if (!ws.axisZoomActive || ws.opts.zoomMarks === "scale" || !hasBbox(e)) return null;
+    const text = e.mark === "text";
+    if (!text && !(e.mark && GLYPH_MARKS[e.mark] === true)) return null;
+    let ax = (e.x0 + e.x1) / 2, ay = (e.y0 + e.y1) / 2;
+    const a = ws.fx.azNearest(ax, ay);
+    if (!a) return null;
+    const p = a.p;
+    if (ax < p.px0 || ax > p.px1 || ay < p.py0 || ay > p.py1) return null; // not in a panel
+    const t = ws.fx.azT(a);
+    if (!(t.sx > 0) || !(t.sy > 0) || (Math.abs(t.sx - 1) < 1e-9 && Math.abs(t.sy - 1) < 1e-9)) return null;
+    // Raster mode draws marks at constant size only while some panel is
+    // zoomed in (the canvas tiers); otherwise the mark PNG scales with T.
+    if (ws.rasterMode && !ws.azPanels.some(function (q) { const u = ws.fx.azT(q); return u.sx > 1.0001 || u.sy > 1.0001; })) return null;
+    if (text) {
+      const an = textAnchor(e.key);
+      if (an) { ax = an.x; ay = an.y; }
+    }
+    return {
+      x0: ax + (e.x0 - ax) / t.sx, x1: ax + (e.x1 - ax) / t.sx,
+      y0: ay + (e.y0 - ay) / t.sy, y1: ay + (e.y1 - ay) / t.sy,
+      sx: t.sx, sy: t.sy
+    };
+  }
+
+  // A text mark's anchor: from its flagged run (raster mode), else its own
+  // node's (x, y) through its transform list (SVG mode, as constantText).
+  function textAnchor(key: string): { x: number; y: number } | null {
+    if (ws.rasterMode) {
+      const r = ws.fx.constAnchor(key);
+      if (r) return r;
+    }
+    const nodes = ws.nodesByKey[key];
+    const n = nodes && nodes.length ? nodes[0] : null;
+    const t = n ? (n.tagName.toLowerCase() === "text" ? n : n.querySelector("text")) : null;
+    if (!t) return null;
+    const x = parseFloat(t.getAttribute("x") || "") || 0, y = parseFloat(t.getAttribute("y") || "") || 0;
+    const tr = (t.getAttribute("transform") || "").trim();
+    if (!tr) return { x: x, y: y };
+    const m = parseTransformList(tr);
+    return m ? applyAffine6(m, x, y) : null;
+  }
+
+  // Whether some axis-zoomed panel is zoomed out on an axis (scale < 1): a
+  // constant box is then larger than its record box, so the R-tree (built on
+  // the record boxes) can't shortlist it.
+  function constGrows(): boolean {
+    if (!ws.axisZoomActive || ws.opts.zoomMarks === "scale") return false;
+    for (let i = 0; i < ws.azPanels.length; i++) {
+      const t = ws.fx.azT(ws.azPanels[i]);
+      if (t.sx < 1 - 1e-9 || t.sy < 1 - 1e-9) return true;
+    }
+    return false;
+  }
+
   // Distance from (x, y) to an element's true shape.
   //
   // The payload ships vertices only for the kinds whose shape is not their box
@@ -92,8 +156,11 @@ export function pickingFeature(
   // exactly so for a rect or a label, and for a round mark the inscribed disc,
   // which is reconstructed here rather than shipped as a centre per point.
   function distToElem(x: number, y: number, e: ElemMeta): number {
-    const box = hasBbox(e) ? e : null;
-    const gs = ws.geomByKey[e.key];
+    // A constant-size mark is where it is drawn: its record box shrunk about
+    // its anchor (VW-42).
+    const cb = constBox(e);
+    const box = cb || (hasBbox(e) ? e : null);
+    const gs = cb ? null : ws.geomByKey[e.key];
     if (!gs) {
       if (!box) return Infinity;
       if (isRoundMark(e.mark)) {
@@ -186,7 +253,7 @@ export function pickingFeature(
         best = e.key;
       }
     };
-    if (ws.spatialIndex) {
+    if (ws.spatialIndex && !constGrows()) {
       const ids = ws.spatialIndex.neighbors(x, y, PICK_CANDIDATES, maxDist);
       for (let i = 0; i < ids.length; i++) rank(ws.elements[ws.indexToElem[ids[i]]]);
     } else {
@@ -247,5 +314,5 @@ export function pickingFeature(
     return dropPartialSeries(ws.elements, keys, inside);
   }
 
-  return { buildSpatialIndex, buildGeometry, distToElem, buildHoverAxis, nearestAxisKey, columnKeys, nearestKeyAt, brushKeysIn, lassoKeysIn, brushSelectable };
+  return { buildSpatialIndex, buildGeometry, distToElem, buildHoverAxis, nearestAxisKey, columnKeys, nearestKeyAt, brushKeysIn, lassoKeysIn, brushSelectable, constBox };
 }

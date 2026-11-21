@@ -3122,7 +3122,30 @@
     function markSplitInDetail(on) {
       splitInDetail = on;
     }
-    return { restyleRuns, runPatch, runStyled, runSplit, markSplitInDetail };
+    let keyRun = null;
+    let keyRunDl = null;
+    function constAnchor(key) {
+      if (!sync()) return null;
+      const dl = ws.dl;
+      const id = keyIdx.get(key);
+      if (id == null) return null;
+      if (!keyRun || keyRunDl !== dl) {
+        keyRun = /* @__PURE__ */ new Map();
+        keyRunDl = dl;
+        for (let r2 = 0; r2 < runKeys.length; r2++) {
+          const ids = runKeys[r2];
+          for (let q = 0; q < ids.length; q++) if (!keyRun.has(ids[q])) keyRun.set(ids[q], r2);
+        }
+      }
+      const r = keyRun.get(id);
+      if (r == null) return null;
+      const g = geoOf(r);
+      for (let j = 0; j < g.k.length; j++) {
+        if (g.k[j] === id) return g.cst[j] ? { x: g.ax[j], y: g.ay[j] } : null;
+      }
+      return null;
+    }
+    return { restyleRuns, runPatch, runStyled, runSplit, markSplitInDetail, constAnchor };
   }
   function runSvgsOf(svg, n) {
     if (svg == null) return null;
@@ -5670,9 +5693,64 @@
       }
       ws.haveGeometry = at > 0;
     }
+    function constBox(e) {
+      if (!ws.axisZoomActive || ws.opts.zoomMarks === "scale" || !hasBbox(e)) return null;
+      const text = e.mark === "text";
+      if (!text && !(e.mark && GLYPH_MARKS[e.mark] === true)) return null;
+      let ax = (e.x0 + e.x1) / 2, ay = (e.y0 + e.y1) / 2;
+      const a = ws.fx.azNearest(ax, ay);
+      if (!a) return null;
+      const p = a.p;
+      if (ax < p.px0 || ax > p.px1 || ay < p.py0 || ay > p.py1) return null;
+      const t = ws.fx.azT(a);
+      if (!(t.sx > 0) || !(t.sy > 0) || Math.abs(t.sx - 1) < 1e-9 && Math.abs(t.sy - 1) < 1e-9) return null;
+      if (ws.rasterMode && !ws.azPanels.some(function(q) {
+        const u = ws.fx.azT(q);
+        return u.sx > 1.0001 || u.sy > 1.0001;
+      })) return null;
+      if (text) {
+        const an = textAnchor(e.key);
+        if (an) {
+          ax = an.x;
+          ay = an.y;
+        }
+      }
+      return {
+        x0: ax + (e.x0 - ax) / t.sx,
+        x1: ax + (e.x1 - ax) / t.sx,
+        y0: ay + (e.y0 - ay) / t.sy,
+        y1: ay + (e.y1 - ay) / t.sy,
+        sx: t.sx,
+        sy: t.sy
+      };
+    }
+    function textAnchor(key) {
+      if (ws.rasterMode) {
+        const r = ws.fx.constAnchor(key);
+        if (r) return r;
+      }
+      const nodes = ws.nodesByKey[key];
+      const n = nodes && nodes.length ? nodes[0] : null;
+      const t = n ? n.tagName.toLowerCase() === "text" ? n : n.querySelector("text") : null;
+      if (!t) return null;
+      const x = parseFloat(t.getAttribute("x") || "") || 0, y = parseFloat(t.getAttribute("y") || "") || 0;
+      const tr = (t.getAttribute("transform") || "").trim();
+      if (!tr) return { x, y };
+      const m = parseTransformList(tr);
+      return m ? applyAffine6(m, x, y) : null;
+    }
+    function constGrows() {
+      if (!ws.axisZoomActive || ws.opts.zoomMarks === "scale") return false;
+      for (let i = 0; i < ws.azPanels.length; i++) {
+        const t = ws.fx.azT(ws.azPanels[i]);
+        if (t.sx < 1 - 1e-9 || t.sy < 1 - 1e-9) return true;
+      }
+      return false;
+    }
     function distToElem(x, y, e) {
-      const box = hasBbox(e) ? e : null;
-      const gs = ws.geomByKey[e.key];
+      const cb = constBox(e);
+      const box = cb || (hasBbox(e) ? e : null);
+      const gs = cb ? null : ws.geomByKey[e.key];
       if (!gs) {
         if (!box) return Infinity;
         if (isRoundMark(e.mark)) {
@@ -5736,7 +5814,7 @@
           best = e.key;
         }
       };
-      if (ws.spatialIndex) {
+      if (ws.spatialIndex && !constGrows()) {
         const ids = ws.spatialIndex.neighbors(x, y, PICK_CANDIDATES, maxDist);
         for (let i = 0; i < ids.length; i++) rank(ws.elements[ws.indexToElem[ids[i]]]);
       } else {
@@ -5783,7 +5861,7 @@
       };
       return dropPartialSeries(ws.elements, keys, inside);
     }
-    return { buildSpatialIndex, buildGeometry, distToElem, buildHoverAxis, nearestAxisKey, columnKeys, nearestKeyAt, brushKeysIn, lassoKeysIn, brushSelectable };
+    return { buildSpatialIndex, buildGeometry, distToElem, buildHoverAxis, nearestAxisKey, columnKeys, nearestKeyAt, brushKeysIn, lassoKeysIn, brushSelectable, constBox };
   }
 
   // srcts/features/pointer.ts
@@ -6873,13 +6951,22 @@
     function ringFor(k, cls) {
       const m = ws.meta[k];
       if (!m || !hasBbox(m)) return null;
-      const cx = (m.x0 + m.x1) / 2;
-      const cy = (m.y0 + m.y1) / 2;
+      const cb = ws.fx.constBox(m);
+      const b = cb || m;
+      const cx = (b.x0 + b.x1) / 2;
+      const cy = (b.y0 + b.y1) / 2;
       const r = Math.max(m.x1 - m.x0, m.y1 - m.y0) / 2 + 2;
-      const c = document.createElementNS(SVGNS, "circle");
+      let c;
+      if (cb) {
+        c = document.createElementNS(SVGNS, "ellipse");
+        c.setAttribute("rx", String(r / cb.sx));
+        c.setAttribute("ry", String(r / cb.sy));
+      } else {
+        c = document.createElementNS(SVGNS, "circle");
+        c.setAttribute("r", String(r));
+      }
       c.setAttribute("cx", String(cx));
       c.setAttribute("cy", String(cy));
-      c.setAttribute("r", String(r));
       c.setAttribute("class", cls);
       c.setAttribute("vector-effect", "non-scaling-stroke");
       return c;
