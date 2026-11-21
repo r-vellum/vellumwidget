@@ -773,11 +773,15 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # - **sparse** `{at, v}`: a column set on under 10% of elements (e.g. `tooltip` /
 #   `legend_for`, carried only by the legend swatches of a big scatter) ships just
 #   the 0-based indices that carry a value and those values. Absent elsewhere.
-# - **dictionary** `{levels, codes}`: a string column with few distinct values
-#   (`mark`, a one-series `legend`, `hover_group`, ...) ships each level once and
-#   a 0-based integer code per element (`null` for `NA`), or, when the codes
-#   come in few long runs, `{levels, rv, rl}`: run codes (-1 for `NA`) and
-#   lengths.
+# - **dictionary** `{levels, cb}`: a string column with few distinct values
+#   (`mark`, a one-series `legend`, `hover_group`, repeated tooltips, ...) ships
+#   each level once and per element its code + 1 (0 for `NA`) as a typed
+#   column (`cb`, see `.uint_column()`; VW-38, before that `codes`, a JSON
+#   array), or, when the codes come in few long runs, `{levels, rv, rl}`: run
+#   codes (-1 for `NA`) and lengths.
+# - **template** `{tpl, tc, tn}` (VW-38): a string column of mostly distinct
+#   values that share a few shapes once their integers are taken out ("pt 1",
+#   "pt 2", ...), when that is clearly smaller; see `.encode_template()`.
 # - the bbox columns are rounded outward to 1/100 px (a 0.01 px larger box is
 #   invisible to brush / nearest hit-testing, and it halves their JSON).
 #
@@ -803,7 +807,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
       ceiling(v * 100) / 100
     }
   }
-  cols$key <- .encode_keys(cols$key)
+  keys <- cols$key
+  kpos <- .key_int_pos(keys)
+  cols$key <- .encode_keys(keys, kpos)
   for (f in setdiff(names(cols), "key")) {
     v <- cols[[f]]
     # A single-valued ragged column built flat (VW-39): its list form ships
@@ -843,17 +849,28 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     if (is.character(v)) {
       lv <- unique(v[set])
       if (length(lv) <= n / 4) {
-        codes <- match(v, lv) - 1L
+        codes <- match(v, lv)
+        codes[is.na(codes)] <- 0L
         # Long runs of one value (every mark a "point", a series drawn in
         # one go) ship as runs: `rv` codes (-1 for none) and `rl` lengths.
-        r <- rle(ifelse(is.na(codes), -1L, codes))
+        r <- rle(codes - 1L)
         cols[[f]] <- if (length(r$lengths) < n / 10) {
           list(levels = lv, rv = r$values, rl = r$lengths)
         } else {
-          list(levels = lv, codes = codes)
+          list(levels = lv, cb = .uint_column(codes, pack = TRUE))
         }
         next
       }
+      tpl <- .encode_template(v, set, keys, kpos)
+      if (!is.null(tpl)) {
+        cols[[f]] <- tpl
+        next
+      }
+    }
+    if (ragged) {
+      out <- rep(list(character(0)), n)
+      out[set] <- as.list(v[set])
+      cols[[f]] <- out
     }
     if (ragged) {
       out <- rep(list(character(0)), n)
@@ -864,6 +881,159 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   cols
 }
 
+# A column of non-negative integers as the runtime's typed column
+# (`dlColumn()`, the display list's encoding): `list(type, n, data)` with
+# base64 little-endian u8 / u16 / u32 values, or `rle = list(values, lengths)`
+# when the values come in few runs. With `pack = TRUE`, values that need a
+# bit width other than 8, 16 or 32 are bit-packed instead (`bits`, VW-38):
+# each value in `bits` bits, least significant first, from the low bit of the
+# first byte on.
+.uint_column <- function(x, pack = FALSE) {
+  x <- as.integer(x)
+  n <- length(x)
+  top <- max(x, 0L)
+  type <- if (top <= 255L) "u8" else if (top <= 65535L) "u16" else "u32"
+  r <- rle(x)
+  if (length(r$lengths) * 8L <= n) {
+    return(list(type = type, n = n, rle = list(values = r$values, lengths = r$lengths)))
+  }
+  bits <- max(1L, as.integer(ceiling(log2(top + 1))))
+  if (pack && !bits %in% c(8L, 16L, 32L)) {
+    b <- as.vector(matrix(intToBits(x), nrow = 32L)[seq_len(bits), , drop = FALSE])
+    bytes <- packBits(c(b, raw((-length(b)) %% 8L)), "raw")
+    return(list(type = type, n = n, bits = bits, data = base64enc::base64encode(bytes)))
+  }
+  size <- switch(type, u8 = 1L, u16 = 2L, u32 = 4L)
+  bytes <- if (size == 1L) as.raw(x) else writeBin(x, raw(), size = size, endian = "little")
+  list(type = type, n = n, data = base64enc::base64encode(bytes))
+}
+
+# The integers a string template takes out: maximal runs of digits written as
+# a canonical integer of at most 9 digits (no leading zero), so they round-trip
+# exactly through a JSON number. Other digit runs stay in the template.
+.TEMPLATE_INT <- "(?<![0-9])(0|[1-9][0-9]{0,8})(?![0-9])"
+
+# The template form of a string column (VW-38), or NULL when it would not be
+# clearly smaller than the plain strings. Each set value (`set`) becomes a
+# template -- the string with its integers (`.TEMPLATE_INT`) taken out -- and
+# those integers. The column ships the distinct templates once, as their
+# literal parts (`tpl`), each element's template (`tc`, index + 1, 0 = none,
+# a typed column) and one number stream per slot position (`tn`): in element
+# order, the integers of the elements whose template has that slot, as
+# differences (`d`) or values (`v`), whichever is shorter, or `"key"` when
+# each is the element key's trailing integer (the "pt N" tooltip of a plot
+# keyed by N). The runtime pastes the parts and numbers back together, so the
+# strings come back byte for byte.
+.encode_template <- function(v, set, keys, kpos = .key_int_pos(keys)) {
+  s <- v[set]
+  if (!length(s) || any(grepl("\001", s, fixed = TRUE))) {
+    return(NULL)
+  }
+  # (A string the regex engine refuses, e.g. invalid UTF-8, ships plain.)
+  untemplate <- function(x) {
+    tryCatch(gsub(.TEMPLATE_INT, "\001", x, perl = TRUE), error = function(e) NULL)
+  }
+  # Free text (names, sentences) has nearly as many shapes as values: tell
+  # from a sample before templating every string.
+  if (length(s) > 4000L) {
+    smp <- untemplate(s[unique(round(seq(1, length(s), length.out = 2000L)))])
+    if (is.null(smp) || length(unique(smp)) > length(smp) / 4) {
+      return(NULL)
+    }
+    # One shape around the key itself (`tooltip = paste("pt", id)` keyed by
+    # `id`): confirm it by pasting it back together, without templating each
+    # string. The few that don't fit (a legend swatch's tooltip) ship as
+    # templates without a slot, i.e. as themselves.
+    shapes <- unique(smp)
+    shape <- shapes[which.max(tabulate(match(smp, shapes)))]
+    if (!is.null(keys)) {
+      pq <- strsplit(paste0(shape, "\002"), "\001", fixed = TRUE)[[1L]]
+      if (length(pq) == 2L) {
+        pq[2L] <- sub("\002$", "", pq[2L])
+        idx <- which(set)
+        fit <- kpos[idx] == 1L
+        fit[fit] <- paste0(pq[1L], keys[idx[fit]], pq[2L]) == s[fit]
+        rest <- s[!fit]
+        if (length(rest) <= length(s) / 100) {
+          lit <- unique(rest)
+          tc <- integer(length(v))
+          tc[idx[fit]] <- 1L
+          tc[idx[!fit]] <- 1L + match(rest, lit)
+          return(list(
+            tpl = c(list(pq), as.list(lit)),
+            tc = .uint_column(tc),
+            tn = list("key")
+          ))
+        }
+      }
+    }
+  }
+  tpl <- untemplate(s)
+  if (is.null(tpl)) {
+    return(NULL)
+  }
+  ut <- unique(tpl)
+  if (length(ut) > length(s) / 4) {
+    return(NULL)
+  }
+  nslot <- nchar(ut, type = "bytes") -
+    nchar(gsub("\001", "", ut, fixed = TRUE), type = "bytes")
+  if (!any(nslot > 0L)) {
+    return(NULL)
+  }
+  code <- match(tpl, ut)
+  ns <- nslot[code]
+  parts <- lapply(seq_along(ut), function(i) {
+    p <- strsplit(ut[[i]], "\001", fixed = TRUE)[[1L]]
+    c(p, rep("", nslot[[i]] + 1L - length(p)))
+  })
+  # The integers, slot by slot (`digits[[j]]`: the j-th integer of each
+  # element with at least j). With one slot at most, each is what lies
+  # between its template's two parts.
+  digits <- if (max(nslot) == 1L) {
+    one <- ns == 1L
+    pre <- vapply(parts, function(p) nchar(p[[1L]]), 0L)
+    post <- vapply(parts, function(p) if (length(p) > 1L) nchar(p[[2L]]) else 0L, 0L)
+    s1 <- s[one]
+    c1 <- code[one]
+    list(substr(s1, pre[c1] + 1L, nchar(s1) - post[c1]))
+  } else {
+    all <- regmatches(s, gregexpr(.TEMPLATE_INT, s, perl = TRUE))
+    unname(split(unlist(all, use.names = FALSE), sequence(lengths(all))))
+  }
+  tn <- lapply(seq_along(digits), function(j) {
+    d <- digits[[j]]
+    if (j == 1L && !is.null(keys)) {
+      k <- keys[set][ns >= 1L]
+      kp <- kpos[set][ns >= 1L]
+      # Keys that are these integers (`data_id = N`), or end in them.
+      if (identical(k, d) || (all(kp > 0L) && identical(substring(k, kp), d))) {
+        return("key")
+      }
+    }
+    x <- as.integer(d)
+    delta <- c(x[1L], diff(x))
+    if (sum(nchar(delta)) < sum(nchar(d))) list(d = delta) else list(v = x)
+  })
+  tc <- integer(length(v))
+  tc[set] <- code
+  out <- list(tpl = parts, tc = .uint_column(tc), tn = tn)
+  # Worth it only when clearly smaller than the plain strings (JSON bytes,
+  # roughly: each string quoted and comma-separated).
+  plain <- sum(nchar(s, type = "bytes")) + 3 * length(s) + 5 * sum(!set)
+  size <- sum(nchar(unlist(parts), type = "bytes")) +
+    3 * length(unlist(parts)) +
+    nchar(if (is.null(out$tc$data)) "" else out$tc$data) +
+    sum(vapply(tn, function(t) if (is.list(t)) sum(nchar(t[[1L]])) + length(t[[1L]]) else 5, 0))
+  if (size >= 0.8 * plain) NULL else out
+}
+
+# Where each key's trailing integer starts (`regexpr()`, -1 for none): the
+# runtime reads the same integer (`KEY_INT` in srcts/elements.ts).
+.key_int_pos <- function(key) {
+  regexpr("(0|[1-9][0-9]{0,14})$", key)
+}
+
 # The key column, compactly when most keys end in an integer (row-numbered
 # keys, the usual big-scatter case): `{delta, at, v}` -- the integer suffixes as
 # a first value plus successive differences (mostly one or two digits), and the
@@ -872,9 +1042,8 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # -- the prefixes ride along as runs in `pre` (`{levels, rv, rl}`, one entry per
 # integer key), so a layer's keys cost one level plus its deltas. Otherwise the
 # plain character vector.
-.encode_keys <- function(key) {
+.encode_keys <- function(key, pos = .key_int_pos(key)) {
   n <- length(key)
-  pos <- regexpr("(0|[1-9][0-9]{0,14})$", key)
   int <- !is.na(key) & pos > 0L
   if (n < 2L || sum(int) < 0.9 * n) {
     return(key)

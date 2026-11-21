@@ -1,5 +1,15 @@
 # vellumwidget 0.14.1.9000
 
+* **Smaller tooltips in raster payloads (VW-38).** Raster mode ships the
+  element table's string columns more compactly. Tooltips that follow a
+  pattern around an integer ("pt 1", "pt 2", ..., `"<b>id 17</b><br>..."`)
+  ship as a few templates plus their numbers, and the numbers not at all when
+  they are the mark's key. Repeated values (a dictionary) ship their codes
+  bit-packed. Hover shows exactly the same tooltip text and HTML. For a
+  200,000-point scatter in raster mode: "pt N" tooltips 5.01 MB -> 2.72 MB
+  (the tooltips themselves from 2.3 MB to under 1 kB), a repeated four-value
+  tooltip 3.12 MB -> 2.82 MB, HTML tooltips 3.63 MB -> 3.17 MB.
+
 * **Faster raster widget builds (VW-39).** The legend membership (and the
   condition and filter tags) of a raster widget is built in its final,
   flat form instead of as one list entry per mark that was then flattened

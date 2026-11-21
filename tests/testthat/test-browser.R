@@ -584,3 +584,28 @@ test_that("VW-32: a blend-mode run blends with the furniture and marks beneath i
     b$close()
   }
 })
+
+test_that("VW-38: a raster widget's hover tooltip is the plot's tooltip, byte for byte", {
+  skip_browser()
+  set.seed(1)
+  n <- 25000L
+  df <- data.frame(x = rnorm(n), y = rnorm(n), g = sample(letters[1:4], n, TRUE), id = seq_len(n))
+  df$tip <- paste0("<b>pt ", df$id, "</b><br>café ", df$g, " 日本")
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id, tooltip = tip)
+  w <- as_widget(p, render = render_options(mode = "raster"))
+  expect_false(is.null(w$x$elements$tooltip$tpl)) # the template form
+  el <- vellum::scene_model(vellum::as_vellum_scene(p))$elements
+  el <- el[!is.na(el$key), ]
+  i <- which.max(ifelse(startsWith(el$key, "legend:"), -Inf, el$x1))
+  b <- open_widget(w)
+  xy <- b$Runtime$evaluate(sprintf("(function(){
+    var s = document.querySelector('.vellumwidget svg'), p = s.createSVGPoint();
+    p.x = %f; p.y = %f; var q = p.matrixTransform(s.getScreenCTM());
+    return q.x + ',' + q.y; })()", (el$x0[i] + el$x1[i]) / 2, (el$y0[i] + el$y1[i]) / 2))$result$value
+  xy <- as.numeric(strsplit(xy, ",")[[1]])
+  b$Input$dispatchMouseEvent(type = "mouseMoved", x = xy[1], y = xy[2])
+  Sys.sleep(0.5)
+  html <- b$Runtime$evaluate("document.querySelector('.vellumwidget-tip').innerHTML")$result$value
+  expect_identical(html, df$tip[as.integer(el$key[i])])
+})
