@@ -2630,6 +2630,42 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(!p2.style.fill && !p3.style.fill, "condition: hover off reverts non-members to their true colour");
 }
 
+// VP-72: two layers conditioning colour on one selection, each with its own
+// if_false, carry their own tags ("hi:color@1", "hi:color@2"): a non-member
+// takes its own layer's if_false, not the last condition's.
+{
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const w = widgetDef.factory(e, 200, 100);
+  w.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><g data-vellum-panel="panel-1-1">' +
+      '<path data-key="p1" fill="#ff0000" d="M5 5h4v4h-4z"/>' +
+      '<path data-key="p2" fill="#00ff00" d="M20 5h4v4h-4z"/>' +
+      '<text data-key="t1" x="5" y="30" fill="#ff0000">a</text>' +
+      '<text data-key="t2" x="20" y="30" fill="#00ff00">b</text>' +
+      "</g></svg>",
+    elements: [
+      { key: "p1", cond: ["hi:color@1"] }, { key: "p2", cond: ["hi:color@1"] },
+      { key: "t1", cond: ["hi:color@2"] }, { key: "t2", cond: ["hi:color@2"] }
+    ],
+    interactions: {
+      selections: [{ name: "hi", kind: "point", on: "click", empty: true }],
+      conditions: [
+        { selection: "hi", aes: "color", if_false: "#cccccc", empty: true, tag: "hi:color@1" },
+        { selection: "hi", aes: "color", if_false: "#ff6347", empty: true, tag: "hi:color@2" }
+      ]
+    },
+    options: { hover: true, select: true }
+  });
+  w._call("select", ["p1", "t1"]);
+  const fill = (k) => e.querySelector('[data-key="' + k + '"]').style.fill;
+  const grey = (v) => v === "rgb(204, 204, 204)" || v === "#cccccc";
+  const tomato = (v) => v === "rgb(255, 99, 71)" || v === "#ff6347";
+  ok(!fill("p1") && !fill("t1"), "VP-72: members keep their colour");
+  ok(grey(fill("p2")), "VP-72: a non-selected point takes its own layer's if_false [" + fill("p2") + "]");
+  ok(tomato(fill("t2")), "VP-72: a non-selected label takes the text layer's if_false [" + fill("t2") + "]");
+}
+
 // ===================== VW-12: one element per point, or a fill + stroke twin =====================
 // vellum draws a keyed point with a solid fill and an undashed solid stroke as
 // ONE element carrying both paints; older vellum drew a fill element followed

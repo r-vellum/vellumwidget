@@ -4352,7 +4352,7 @@
       (ws.interactions.selections || []).forEach((s) => selByName[s.name] = s);
       for (let ci = 0; ci < ws.interactions.conditions.length; ci++) {
         const c = ws.interactions.conditions[ci];
-        const tag = c.selection + ":" + c.aes;
+        const tag = c.tag || c.selection + ":" + c.aes;
         const tagged = ws.condTagElems[tag] || [];
         const sel = selByName[c.selection];
         const members = sel ? selectionMembers(sel) : {};

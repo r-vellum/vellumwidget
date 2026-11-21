@@ -1,5 +1,13 @@
 # vellumwidget 0.15.0.9000
 
+* **Two layers' conditions on one selection keep apart (VP-72).** A point
+  layer and a text layer each colouring by `condition(sel, ..., if_false)`
+  shared one condition tag, so a non-selected point took the text layer's
+  `if_false` (whichever condition came last), in SVG and raster mode. The
+  runtime now styles a condition's elements by the `tag` vellumplot sends
+  (`"<sel>:<aes>@<layer>"` for such layers), and falls back to
+  `"<sel>:<aes>"` for an older vellumplot.
+
 * **Rotated text keeps its rotation under axis zoom (VW-41).** In SVG mode,
   with axis zoom active (even at 1x), rotated `mark_text(angle =)` labels
   and rotated annotation text were drawn unrotated: the constant-size text
