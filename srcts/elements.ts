@@ -288,6 +288,39 @@ export function decodeKeys(v: unknown): string[] {
   return asColumn(v as string[] | string).map(String);
 }
 
+// The integer bbox (VW-43, `.encode_bbox()` in R): `x0`/`y0` the near corners
+// and `w`/`h` the extents on the 1/100 px grid, each less its minimum in `lo`;
+// rows in `na` (0-based) have no box (`null`); rows in `ex.at` take the plain
+// boxes in `ex`. The arithmetic is R's, so each
+// value is the same double as the plain 1/100 px column.
+export function decodeBbox(b: NonNullable<ColumnElements["bbox"]>): {
+  x0: (number | null)[]; y0: (number | null)[]; x1: (number | null)[]; y1: (number | null)[];
+} {
+  const n = Number(b.n) || 0;
+  const lo = asColumn(b.lo).map(Number);
+  const ux = dlColumn(b.x0 as DLColumn), uy = dlColumn(b.y0 as DLColumn);
+  const uw = dlColumn(b.w as DLColumn), uh = dlColumn(b.h as DLColumn);
+  const x0: (number | null)[] = new Array(n), y0: (number | null)[] = new Array(n);
+  const x1: (number | null)[] = new Array(n), y1: (number | null)[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const gx = lo[0] + ux[i], gy = lo[1] + uy[i];
+    x0[i] = gx / 100; y0[i] = gy / 100;
+    x1[i] = (gx + lo[2] + uw[i]) / 100; y1[i] = (gy + lo[3] + uh[i]) / 100;
+  }
+  const na = asColumn(b.na);
+  for (let k = 0; k < na.length; k++) { const i = na[k]; x0[i] = y0[i] = x1[i] = y1[i] = null; }
+  // Rows whose extent would have widened every row's `w`/`h`, as plain boxes.
+  if (b.ex) {
+    const at = asColumn(b.ex.at), ex0 = asColumn(b.ex.x0), ey0 = asColumn(b.ex.y0);
+    const ex1 = asColumn(b.ex.x1), ey1 = asColumn(b.ex.y1);
+    for (let k = 0; k < at.length; k++) {
+      const i = at[k];
+      x0[i] = ex0[k]; y0[i] = ey0[k]; x1[i] = ex1[k]; y1[i] = ey1[k];
+    }
+  }
+  return { x0, y0, x1, y1 };
+}
+
 // Reconstruct the per-element `ElemMeta[]` view the runtime uses from whichever
 // shape R sent: a columnar `ColumnElements` (the current wire format) or a legacy
 // `ElemMeta[]` (also what the empty case `[]` and the test harness use). Purely a
@@ -300,13 +333,16 @@ export function normalizeElements(raw: ElemMeta[] | ColumnElements | null | unde
   const key = decodeKeys(c.key as unknown);
   const n = key.length;
   if (!n) return [];
-  const x0 = asColumn<number | null>(c.x0);
-  const y0 = asColumn<number | null>(c.y0);
-  const x1 = asColumn<number | null>(c.x1);
-  const y1 = asColumn<number | null>(c.y1);
   // Every non-key column may arrive in the compact encoding (see decodeColumn).
   const col = <T>(f: keyof ColumnElements): (T | null)[] | null =>
     decodeColumn<T>((c as unknown as Record<string, EncodedColumn<T>>)[f as string], n, key);
+  // The boxes: one integer `bbox` (VW-43), or four columns, plain or (when a
+  // display list covers most marks) sparse.
+  const bb = c.bbox ? decodeBbox(c.bbox) : null;
+  const x0 = bb ? bb.x0 : col<number>("x0") || [];
+  const y0 = bb ? bb.y0 : col<number>("y0") || [];
+  const x1 = bb ? bb.x1 : col<number>("x1") || [];
+  const y1 = bb ? bb.y1 : col<number>("y1") || [];
   const mark = col<string>("mark");
   const tooltip = col<string>("tooltip");
   const hoverGroup = col<string>("hover_group");
