@@ -334,6 +334,14 @@
     if (c.bits) {
       const k = Number(c.bits), a = make(n);
       let pos = 0;
+      if (k <= 24) {
+        const mask = (1 << k) - 1;
+        for (let i = 0; i < n; i++, pos += k) {
+          const o = pos >> 3;
+          a[i] = (bytes[o] | bytes[o + 1] << 8 | bytes[o + 2] << 16 | bytes[o + 3] << 24) >>> (pos & 7) & mask;
+        }
+        return a;
+      }
       for (let i = 0; i < n; i++) {
         let v = 0;
         for (let b = 0; b < k; b++, pos++) if (bytes[pos >> 3] & 1 << (pos & 7)) v += 2 ** b;
@@ -347,23 +355,48 @@
     if (c.type === "u32") return new Uint32Array(buf, 0, n);
     return new Uint8Array(buf, 0, n);
   }
+  function decodeDeltas(db, dx, dv, json) {
+    if (db == null) return asColumn(json);
+    const d = Float64Array.from(dlColumn(db)), at = asColumn(dx), val = asColumn(dv);
+    for (let k = 0; k < at.length; k++) d[at[k]] = val[k];
+    return d;
+  }
   var KEY_INT = /(0|[1-9][0-9]{0,14})$/;
   function decodeTemplate(o, n, keys) {
     const tpl = asColumn(o.tpl).map((p) => asColumn(p).map(String));
     const tc = dlColumn(o.tc);
-    const streams = asColumn(o.tn).map((st) => {
+    const keyW = [];
+    const streams = asColumn(o.tn).map((st, j) => {
       if (st === "key") return null;
       const s = st;
-      if (s.d != null) {
-        const d = asColumn(s.d), out2 = new Array(d.length);
+      if (s.key != null) {
+        const wc = typeof s.w === "object" ? dlColumn(s.w) : null, w0 = Number(s.w) || 0;
+        let k = 0;
+        keyW[j] = wc ? () => wc[k++] : () => w0;
+        return null;
+      }
+      let out2;
+      if (s.d != null || s.db != null) {
+        const d = decodeDeltas(s.db, s.dx, s.dv, s.d);
+        out2 = new Array(d.length);
         let run = 0;
         for (let i = 0; i < d.length; i++) {
           run += d[i];
           out2[i] = String(run);
         }
-        return out2;
+      } else if (s.vb != null) {
+        out2 = Array.from(dlColumn(s.vb), String);
+      } else {
+        out2 = asColumn(s.v).map(String);
       }
-      return asColumn(s.v).map(String);
+      if (s.w != null) {
+        const wc = typeof s.w === "object" ? dlColumn(s.w) : null, w0 = Number(s.w);
+        for (let i = 0; i < out2.length; i++) {
+          const w = wc ? wc[i] : w0;
+          if (out2[i].length < w) out2[i] = "0".repeat(w - out2[i].length) + out2[i];
+        }
+      }
+      return out2;
     });
     const at = new Array(streams.length).fill(0);
     const out = new Array(n);
@@ -381,6 +414,11 @@
         if (st === null) {
           const m = keys && keys[i] != null ? KEY_INT.exec(keys[i]) : null;
           num = m ? m[1] : "";
+          const pw = keyW[j - 1];
+          if (pw) {
+            const w = pw(i);
+            if (num.length < w) num = "0".repeat(w - num.length) + num;
+          }
         } else if (st) {
           num = st[at[j - 1]++];
         }
@@ -439,9 +477,10 @@
     return asColumn(v);
   }
   function decodeKeys(v) {
-    if (v != null && typeof v === "object" && !Array.isArray(v) && "delta" in v) {
+    if (v != null && typeof v === "object" && !Array.isArray(v) && ("delta" in v || "db" in v)) {
       const o = v;
-      const delta = asColumn(o.delta), at = asColumn(o.at), other = asColumn(o.v);
+      const delta = decodeDeltas(o.db, o.dx, o.dv, o.delta);
+      const at = asColumn(o.at), other = asColumn(o.v);
       const pre = o.pre != null ? decodeColumn(o.pre, delta.length) : null;
       const n = delta.length + at.length;
       const out = new Array(n);

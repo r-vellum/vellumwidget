@@ -66,6 +66,15 @@ export function dlColumn(c: DLColumn | null | undefined): Float32Array | Uint8Ar
   if (c.bits) {
     const k = Number(c.bits), a = make(n);
     let pos = 0;
+    if (k <= 24) {
+      // A 32-bit window holds any value of up to 24 bits at any bit offset.
+      const mask = (1 << k) - 1;
+      for (let i = 0; i < n; i++, pos += k) {
+        const o = pos >> 3;
+        a[i] = ((bytes[o] | (bytes[o + 1] << 8) | (bytes[o + 2] << 16) | (bytes[o + 3] << 24)) >>> (pos & 7)) & mask;
+      }
+      return a;
+    }
     for (let i = 0; i < n; i++) {
       let v = 0;
       for (let b = 0; b < k; b++, pos++) if (bytes[pos >> 3] & (1 << (pos & 7))) v += 2 ** b;
@@ -108,7 +117,26 @@ interface DictColumn<T> {
 interface TemplateColumn {
   tpl: (string[] | string)[] | string;
   tc: DLColumn;
-  tn: (string | { d?: number[] | number; v?: number[] | number })[] | string | { d?: number[] | number; v?: number[] | number };
+  tn: (string | TemplateStream)[] | string | TemplateStream;
+}
+// One number stream of a template: differences (`d`) or values (`v`); with
+// `w` (VW-40), the digit runs had leading zeros: pad each to `w` digits (one
+// width for all, or a typed column of one per value).
+// The differences or values may also come binary (VW-40): `db`/`dx`/`dv` as
+// for the keys (see `decodeDeltas`), or `vb`, a typed column of the values.
+interface TemplateStream {
+  d?: number[] | number; v?: number[] | number; w?: number | DLColumn;
+  key?: number; // the element key's integer, zero-padded to `w` (VW-40)
+  db?: DLColumn; dx?: number[] | number; dv?: number[] | number; vb?: DLColumn;
+}
+
+// Integer differences as JSON (`delta` / `d`) or (VW-40) as a typed column
+// `db` whose entries at the 0-based positions `dx` are replaced by `dv`.
+function decodeDeltas(db: DLColumn | undefined, dx: unknown, dv: unknown, json: unknown): ArrayLike<number> {
+  if (db == null) return asColumn(json as number[] | number);
+  const d = Float64Array.from(dlColumn(db)), at = asColumn(dx as number[] | number), val = asColumn(dv as number[] | number);
+  for (let k = 0; k < at.length; k++) d[at[k]] = val[k];
+  return d;
 }
 export type EncodedColumn<T> = T[] | T | SparseColumn<T> | DictColumn<T> | TemplateColumn | null | undefined;
 
@@ -118,16 +146,37 @@ const KEY_INT = /(0|[1-9][0-9]{0,14})$/;
 function decodeTemplate(o: TemplateColumn, n: number, keys: string[] | undefined): (string | null)[] {
   const tpl = asColumn(o.tpl as (string[] | string)[]).map((p) => asColumn(p).map(String));
   const tc = dlColumn(o.tc);
-  const streams = asColumn(o.tn as unknown[]).map((st) => {
+  // Per stream: the decoded numbers, or null to read the key's integer
+  // (padded to `keyW[j]` when set).
+  const keyW: ((i: number) => number)[] = [];
+  const streams = asColumn(o.tn as unknown[]).map((st, j) => {
     if (st === "key") return null; // read from the key
-    const s = st as { d?: number[] | number; v?: number[] | number };
-    if (s.d != null) {
-      const d = asColumn(s.d), out = new Array<string>(d.length);
+    const s = st as TemplateStream;
+    if (s.key != null) {
+      const wc = typeof s.w === "object" ? dlColumn(s.w as DLColumn) : null, w0 = Number(s.w) || 0;
+      let k = 0;
+      keyW[j] = wc ? () => wc[k++] : () => w0;
+      return null;
+    }
+    let out: string[];
+    if (s.d != null || s.db != null) {
+      const d = decodeDeltas(s.db, s.dx, s.dv, s.d);
+      out = new Array<string>(d.length);
       let run = 0;
       for (let i = 0; i < d.length; i++) { run += d[i]; out[i] = String(run); }
-      return out;
+    } else if (s.vb != null) {
+      out = Array.from(dlColumn(s.vb), String);
+    } else {
+      out = asColumn(s.v).map(String);
     }
-    return asColumn(s.v).map(String);
+    if (s.w != null) {
+      const wc = typeof s.w === "object" ? dlColumn(s.w) : null, w0 = Number(s.w);
+      for (let i = 0; i < out.length; i++) {
+        const w = wc ? wc[i] : w0;
+        if (out[i].length < w) out[i] = "0".repeat(w - out[i].length) + out[i];
+      }
+    }
+    return out;
   });
   const at = new Array<number>(streams.length).fill(0);
   const out: (string | null)[] = new Array(n);
@@ -142,6 +191,8 @@ function decodeTemplate(o: TemplateColumn, n: number, keys: string[] | undefined
       if (st === null) {
         const m = keys && keys[i] != null ? KEY_INT.exec(keys[i]) : null;
         num = m ? m[1] : "";
+        const pw = keyW[j - 1];
+        if (pw) { const w = pw(i); if (num.length < w) num = "0".repeat(w - num.length) + num; }
       } else if (st) {
         num = st[at[j - 1]++];
       }
@@ -209,14 +260,19 @@ export function decodeColumn<T>(v: EncodedColumn<T>, n: number, keys?: string[])
 // integer-suffixed keys as `{delta, at, v, pre?}` -- a running sum of `delta`
 // for the integer suffixes, each after its text prefix from `pre` (runs, one
 // per integer key; "" when absent), with the other keys `v` at their 0-based
-// positions `at`.
+// positions `at`. The differences come as the JSON array `delta` or (VW-40)
+// as a typed column `db` whose entries at the 0-based `dx` are replaced by
+// `dv` (negative jumps and wide gaps).
 export function decodeKeys(v: unknown): string[] {
-  if (v != null && typeof v === "object" && !Array.isArray(v) && "delta" in (v as object)) {
+  if (v != null && typeof v === "object" && !Array.isArray(v) && ("delta" in (v as object) || "db" in (v as object))) {
     const o = v as {
-      delta: number[] | number; at?: number[] | number; v?: string[] | string;
+      delta?: number[] | number; at?: number[] | number; v?: string[] | string;
       pre?: EncodedColumn<string>;
+      // VW-40: the differences as a typed column, with exceptions at `dx`.
+      db?: DLColumn; dx?: number[] | number; dv?: number[] | number;
     };
-    const delta = asColumn(o.delta), at = asColumn(o.at), other = asColumn(o.v);
+    const delta = decodeDeltas(o.db, o.dx, o.dv, o.delta);
+    const at = asColumn(o.at), other = asColumn(o.v);
     const pre = o.pre != null ? decodeColumn<string>(o.pre, delta.length) : null;
     const n = delta.length + at.length;
     const out: string[] = new Array(n);

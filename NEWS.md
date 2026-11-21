@@ -12,6 +12,18 @@
   `render_options(precision = "f32")` keeps 32-bit floats, and the runtime
   reads float lists from an older vellum as before.
 
+* **Smaller raster payloads for keys and numbered tooltips (VW-40).** The
+  element key column ships its integer differences as a bit-packed binary
+  column (big jumps and restarts as exceptions) instead of a JSON array: a
+  200k keyed scatter's keys go from 0.41 to 0.14 MB (1M: 2.0 to 0.7 MB).
+  Tooltip templates now also take zero-padded and decimal numbers
+  (`"id 00042"`, `"t = 0.05 s"`, `"1.5e-07"`): a digit run with leading
+  zeros ships its width, so the text comes back byte for byte, and the
+  number streams can ship as binary too. 200k tooltips `sprintf("id %06d",
+  id)`: 2.40 to 0.14 MB; `"<b>g</b><br>x = 0.1234<br>y = -1.0567"`: 8.2 to
+  1.9 MB. Hover text is unchanged. Keys that are not mostly integers, or
+  integers of more than 15 digits, ship as text as before.
+
 * With a vellum whose raster backend no longer isolates plain groups (VR-21),
   a blend-mode layer wrapped in a group without opacity, mask, blend or effect
   gets the mixed tier and composites with its mode, instead of falling back to

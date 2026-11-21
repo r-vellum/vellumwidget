@@ -862,7 +862,8 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
         }
         next
       }
-      tpl <- .encode_template(v, set, keys, kpos)
+      tpl <- .encode_template(v, set, keys, kpos) %||%
+        .encode_template(v, set, keys, kpos, re = .TEMPLATE_RUN)
       if (!is.null(tpl)) {
         cols[[f]] <- tpl
         next
@@ -894,13 +895,18 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   n <- length(x)
   top <- max(x, 0L)
   type <- if (top <= 255L) "u8" else if (top <= 65535L) "u16" else "u32"
-  r <- rle(x)
-  if (length(r$lengths) * 8L <= n) {
+  # (Count the runs before building them: most columns have many.)
+  if (!n || (n > 1L && (sum(x[-1L] != x[-n], na.rm = TRUE) + 1L) * 8L <= n)) {
+    r <- rle(x)
     return(list(type = type, n = n, rle = list(values = r$values, lengths = r$lengths)))
   }
   bits <- max(1L, as.integer(ceiling(log2(top + 1))))
   if (pack && !bits %in% c(8L, 16L, 32L)) {
-    b <- as.vector(matrix(intToBits(x), nrow = 32L)[seq_len(bits), , drop = FALSE])
+    # One row per bit plane, so each value's bits are consecutive, LSB first.
+    b <- do.call(rbind, lapply(seq_len(bits), function(j) {
+      as.raw(bitwAnd(bitwShiftR(x, j - 1L), 1L))
+    }))
+    b <- as.vector(b)
     bytes <- packBits(c(b, raw((-length(b)) %% 8L)), "raw")
     return(list(type = type, n = n, bits = bits, data = base64enc::base64encode(bytes)))
   }
@@ -914,25 +920,44 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # exactly through a JSON number. Other digit runs stay in the template.
 .TEMPLATE_INT <- "(?<![0-9])(0|[1-9][0-9]{0,8})(?![0-9])"
 
+# The second try (VW-40), when templating by `.TEMPLATE_INT` fails: every
+# maximal run of at most 9 digits, so "00042" and the "05" of "0.05" become
+# numbers too. A run with leading zeros ships its width, and the runtime pads
+# it back; longer runs stay in the template. A decimal or scientific number
+# is then several runs around its literal "." / "e-" / "-". (Tried second
+# because where canonical integers already template a column, the widths
+# would only add bytes.)
+.TEMPLATE_RUN <- "(?<![0-9])[0-9]{1,9}(?![0-9])"
+
 # The template form of a string column (VW-38), or NULL when it would not be
 # clearly smaller than the plain strings. Each set value (`set`) becomes a
-# template -- the string with its integers (`.TEMPLATE_INT`) taken out -- and
+# template -- the string with its integers (`re`) taken out -- and
 # those integers. The column ships the distinct templates once, as their
 # literal parts (`tpl`), each element's template (`tc`, index + 1, 0 = none,
 # a typed column) and one number stream per slot position (`tn`): in element
 # order, the integers of the elements whose template has that slot, as
-# differences (`d`) or values (`v`), whichever is shorter, or `"key"` when
+# differences (`d`, or VW-40 binary `db`/`dx`/`dv` as for the keys, see
+# `.encode_deltas()`) or values (`v`, or a typed column `vb`), whichever is
+# shortest, or `"key"` when
 # each is the element key's trailing integer (the "pt N" tooltip of a plot
-# keyed by N). The runtime pastes the parts and numbers back together, so the
-# strings come back byte for byte.
-.encode_template <- function(v, set, keys, kpos = .key_int_pos(keys)) {
+# keyed by N; `list(key = 1, w)` when it is zero-padded, VW-40). A stream whose digit runs are not all canonical (a leading
+# zero) carries their widths (VW-40): `w`, one width for all, or a typed
+# column of one width per value. The runtime pastes the parts and the
+# zero-padded numbers back together, so the strings come back byte for byte.
+.encode_template <- function(
+  v,
+  set,
+  keys,
+  kpos = .key_int_pos(keys),
+  re = .TEMPLATE_INT
+) {
   s <- v[set]
   if (!length(s) || any(grepl("\001", s, fixed = TRUE))) {
     return(NULL)
   }
   # (A string the regex engine refuses, e.g. invalid UTF-8, ships plain.)
   untemplate <- function(x) {
-    tryCatch(gsub(.TEMPLATE_INT, "\001", x, perl = TRUE), error = function(e) NULL)
+    tryCatch(gsub(re, "\001", x, perl = TRUE), error = function(e) NULL)
   }
   # Free text (names, sentences) has nearly as many shapes as values: tell
   # from a sample before templating every string.
@@ -999,8 +1024,14 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     c1 <- code[one]
     list(substr(s1, pre[c1] + 1L, nchar(s1) - post[c1]))
   } else {
-    all <- regmatches(s, gregexpr(.TEMPLATE_INT, s, perl = TRUE))
-    unname(split(unlist(all, use.names = FALSE), sequence(lengths(all))))
+    # Fence each number with the placeholder and split on it: the numbers
+    # are every second piece (a string that starts with one starts with "").
+    fenced <- gsub(paste0("(", re, ")"), "\001\\1\001", s, perl = TRUE)
+    pieces <- strsplit(fenced, "\001", fixed = TRUE)
+    pos <- sequence(lengths(pieces))
+    all <- unlist(pieces, use.names = FALSE)
+    even <- pos %% 2L == 0L
+    unname(split(all[even], pos[even] %/% 2L))
   }
   tn <- lapply(seq_along(digits), function(j) {
     d <- digits[[j]]
@@ -1011,10 +1042,25 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
       if (identical(k, d) || (all(kp > 0L) && identical(substring(k, kp), d))) {
         return("key")
       }
+      # The keys' integers zero-padded ("id 000042" keyed by 42, VW-40).
+      if (all(kp > 0L) && identical(substring(k, kp), sub("^0+(?=[0-9])", "", d, perl = TRUE))) {
+        w <- nchar(d)
+        return(list(key = 1L, w = if (all(w == w[1L])) w[1L] else .uint_column(w, pack = TRUE)))
+      }
     }
     x <- as.integer(d)
-    delta <- c(x[1L], diff(x))
-    if (sum(nchar(delta)) < sum(nchar(d))) list(d = delta) else list(v = x)
+    # Differences or values, as JSON or (VW-40) binary: whichever is smallest.
+    dd <- .encode_deltas(c(x[1L], diff(x)))
+    if (!is.null(dd$delta)) {
+      dd <- list(d = dd$delta)
+    }
+    forms <- list(dd, list(v = x), list(vb = .uint_column(x, pack = TRUE)))
+    st <- forms[[which.min(vapply(forms, .json_bytes, 0))]]
+    w <- nchar(d)
+    if (any(w != nchar(x))) {
+      st$w <- if (all(w == w[1L])) w[1L] else .uint_column(w, pack = TRUE)
+    }
+    st
   })
   tc <- integer(length(v))
   tc[set] <- code
@@ -1022,11 +1068,23 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   # Worth it only when clearly smaller than the plain strings (JSON bytes,
   # roughly: each string quoted and comma-separated).
   plain <- sum(nchar(s, type = "bytes")) + 3 * length(s) + 5 * sum(!set)
-  size <- sum(nchar(unlist(parts), type = "bytes")) +
-    3 * length(unlist(parts)) +
-    nchar(if (is.null(out$tc$data)) "" else out$tc$data) +
-    sum(vapply(tn, function(t) if (is.list(t)) sum(nchar(t[[1L]])) + length(t[[1L]]) else 5, 0))
+  size <- .json_bytes(out)
   if (size >= 0.8 * plain) NULL else out
+}
+
+# Roughly the JSON bytes of `x` as htmlwidgets writes it (numbers as whole
+# numbers, strings quoted, lists as arrays or objects).
+.json_bytes <- function(x) {
+  if (is.null(x)) {
+    return(4)
+  }
+  if (is.list(x)) {
+    return(sum(vapply(x, .json_bytes, 0)) + 4 * length(x) + sum(nchar(names(x))) + 2)
+  }
+  if (is.character(x)) {
+    return(sum(nchar(x, type = "bytes")) + 3 * length(x) + 2)
+  }
+  sum(floor(log10(pmax(abs(x), 1))) + 1 + (x < 0)) + length(x) + 2
 }
 
 # Where each key's trailing integer starts (`regexpr()`, -1 for none): the
@@ -1036,13 +1094,15 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 }
 
 # The key column, compactly when most keys end in an integer (row-numbered
-# keys, the usual big-scatter case): `{delta, at, v}` -- the integer suffixes as
-# a first value plus successive differences (mostly one or two digits), and the
-# other keys (legend swatches, say) sparse at their 0-based positions. When the
-# integers carry a text prefix -- vellumplot's default keys, "p1-1:l2:7" (VP-55)
-# -- the prefixes ride along as runs in `pre` (`{levels, rv, rl}`, one entry per
-# integer key), so a layer's keys cost one level plus its deltas. Otherwise the
-# plain character vector.
+# keys, the usual big-scatter case): the integer suffixes as a first value
+# plus successive differences (see `.encode_deltas()`: binary `db`/`dx`/`dv`,
+# or the JSON `delta`), and the other keys (legend swatches, say) sparse at
+# their 0-based positions (`at`, `v`). When the integers carry a text prefix
+# -- vellumplot's default keys, "p1-1:l2:7" (VP-55) -- the prefixes ride
+# along as runs in `pre` (`{levels, rv, rl}`, one entry per integer key), so
+# a layer's keys cost one level plus its deltas. Otherwise (keys that are not
+# mostly integers, or integers of more than 15 digits) the plain character
+# vector.
 .encode_keys <- function(key, pos = .key_int_pos(key)) {
   n <- length(key)
   int <- !is.na(key) & pos > 0L
@@ -1052,10 +1112,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   ki <- key[int]
   at_num <- pos[int]
   v <- as.numeric(substring(ki, at_num))
-  out <- list(
-    delta = c(v[[1]], diff(v)),
-    at = which(!int) - 1L,
-    v = key[!int]
+  out <- c(
+    .encode_deltas(c(v[[1]], diff(v))),
+    list(at = which(!int) - 1L, v = key[!int])
   )
   pre <- substr(ki, 1L, at_num - 1L)
   if (any(nzchar(pre))) {
@@ -1067,6 +1126,48 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     out$pre <- list(levels = lv, rv = r$values, rl = r$lengths)
   }
   out
+}
+
+# The key column's integer differences (`d`, whole numbers of up to 15
+# digits), as the smaller of two forms. Binary (VW-40): `db`, a bit-packed
+# typed column (`.uint_column()`) of every difference that fits in `b` bits,
+# 0 for the rest, which follow as `dx` (their 0-based positions) and `dv`
+# (their values: negative jumps, where the keys restart, and big gaps). `b`
+# is the width that makes the whole smallest; a plot drawn grouped by colour
+# has mostly small positive steps, so a few bits each. Or the plain JSON
+# array `delta`, when that is smaller (a short column).
+.encode_deltas <- function(d) {
+  m <- length(d)
+  plain <- list(delta = d)
+  if (m < 16L) {
+    return(plain)
+  }
+  # Characters of each whole number as JSON (digits, sign).
+  digits <- function(x) floor(log10(pmax(abs(x), 1))) + 1 + (x < 0)
+  nd <- digits(d)
+  json <- sum(nd) + m
+  # The bits each difference needs (25: does not fit, negative or wide).
+  need <- findInterval(d, 2^(1:24)) + 1L
+  need[d < 0] <- 25L
+  # JSON bytes of each difference as an exception: position (at most), value,
+  # commas.
+  cost <- nd + digits(m) + 2
+  by_need <- numeric(25)
+  agg <- rowsum(cost, need)
+  by_need[as.integer(rownames(agg))] <- agg[, 1]
+  size <- vapply(
+    1:24,
+    function(b) ceiling(m * b / 8) * 4 / 3 + sum(by_need[(b + 1L):25]),
+    0
+  )
+  b <- which.min(size)
+  if (size[[b]] >= json) {
+    return(plain)
+  }
+  exc <- need > b
+  dz <- d
+  dz[exc] <- 0
+  list(db = .uint_column(dz, pack = TRUE), dx = which(exc) - 1L, dv = d[exc])
 }
 
 # Per-element meta fields, read from `scene_model(meta = "columns")` (VR-19).

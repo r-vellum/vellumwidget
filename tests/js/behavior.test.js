@@ -4443,6 +4443,26 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(tpl.join("|") === "<b>pt 7</b> of 40|x=12.2 é|-|<b>pt 0</b> of 5|plain", "VW-38: a template column pastes parts, key integers and number streams back");
   const tv = T3.normalizeElements({ key: ["1", "2"], tooltip: { tpl: [["n", ""]], tc: { type: "u8", n: 2, const: 1 }, tn: { v: [9, 1000000000] } } });
   ok(tv[0].tooltip === "n9" && tv[1].tooltip === "n1000000000", "VW-38: a value stream (auto-unboxed list) decodes");
+  // VW-40: zero-padded runs carry their width, one for all or one per value
+  const tw = T3.normalizeElements({ key: ["1", "2", "3"], tooltip: { tpl: [["id ", " / ", ".", ""]], tc: { type: "u8", n: 3, const: 1 },
+    tn: [{ d: [42, 1, 958], w: 5 }, { v: [0, 0, 12] }, { v: [5, 50, 0], w: { type: "u8", n: 3, data: Buffer.from([2, 2, 3]).toString("base64") } }] } });
+  ok(tw.map((e) => e.tooltip).join("|") === "id 00042 / 0.05|id 00043 / 0.50|id 01001 / 12.000",
+    "VW-40: template numbers are zero-padded to their width (fixed or per value)");
+  const tb = T3.normalizeElements({ key: ["1", "2", "3", "4"], tooltip: { tpl: [["t = ", ".", " s"]], tc: { type: "u8", n: 4, const: 1 },
+    tn: [{ db: { type: "u8", n: 4, rle: { values: [0], lengths: [4] } }, dx: [3], dv: [12] },
+         { vb: { type: "u8", n: 4, bits: 7, data: pack([5, 10, 95, 0], 7) }, w: 2 }] } });
+  ok(tb.map((e) => e.tooltip).join("|") === "t = 0.05 s|t = 0.10 s|t = 0.95 s|t = 12.00 s",
+    "VW-40: binary difference and value streams decode");
+  const tk = T3.normalizeElements({ key: ["p:7", "p:12", "legend:a", "p:1234567"], tooltip: { tpl: [["id ", ""], "x"], tc: { type: "u8", n: 4, data: Buffer.from([1, 1, 2, 1]).toString("base64") },
+    tn: { key: 1, w: { type: "u8", n: 3, data: Buffer.from([5, 3, 7]).toString("base64") } } } });
+  ok(tk.map((e) => e.tooltip).join("|") === "id 00007|id 012|x|id 1234567", "VW-40: a zero-padded key stream pads each key integer");
+  // VW-40: binary key differences: a bit-packed column with exceptions at dx
+  const kd = T3.decodeKeys({ db: { type: "u8", n: 6, bits: 3, data: pack([5, 2, 0, 1, 7, 0], 3) }, dx: [2, 5], dv: [-6, 1000000000000],
+    at: [3], v: ["legend:a"] });
+  ok(kd.join(",") === "5,7,1,legend:a,2,9,1000000000009", "VW-40: binary key differences decode, exceptions (negative, huge) included");
+  const kr = T3.decodeKeys({ db: { type: "u8", n: 4, rle: { values: [1], lengths: [4] } }, dx: [], dv: [], at: [], v: [],
+    pre: { levels: "p1-1:l2:", rv: 0, rl: 4 } });
+  ok(kr.join(",") === "p1-1:l2:1,p1-1:l2:2,p1-1:l2:3,p1-1:l2:4", "VW-40: a run-length key column with a prefix decodes");
   // hover in raster mode shows the template tooltip byte for byte
   const N = 12, key = [], x0 = [], y0 = [], x1 = [], y1 = [];
   for (let i = 0; i < N; i++) { key.push("k" + i); x0.push(i * 10); y0.push(0); x1.push(i * 10 + 4); y1.push(4); }

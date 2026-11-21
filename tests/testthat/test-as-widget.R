@@ -594,7 +594,7 @@ test_that("raster mode ships the element index in the compact encoding (VW-13)",
   expect_identical(.decode_column_r(alt$g, n), rep(c("a", "b"), n / 2))
   # mostly-integer keys: a first value and differences, the rest sparse
   k <- encode(list(key = c("5", "7", "legend:a", "6", as.character(10:50))))$key
-  expect_identical(k$delta, c(5, 2, -1, 4, rep(1, 40)))
+  expect_identical(.key_deltas_r(k), c(5, 2, -1, 4, rep(1, 40)))
   expect_identical(k$at, 2L)
   expect_identical(k$v, "legend:a")
   expect_identical(encode(list(key = c("a", "b", "c")))$key, c("a", "b", "c"))
@@ -605,7 +605,7 @@ test_that("raster mode ships the element index in the compact encoding (VW-13)",
     paste0("p1-1:l2:", 1:30)
   )
   k <- encode(list(key = pk))$key
-  expect_identical(k$delta, c(1, rep(1, 29), -29, rep(1, 29)))
+  expect_identical(.key_deltas_r(k), c(1, rep(1, 29), -29, rep(1, 29)))
   expect_identical(k$at, 30L)
   expect_identical(k$pre$levels, c("p1-1:l1:", "p1-1:l2:"))
   expect_identical(k$pre$rv, 0:1)
@@ -1465,12 +1465,14 @@ test_that("tooltip columns encode compactly and decode byte for byte (VW-38)", {
       c(paste0("<b>pt ", 1:6000, "</b> é"), "a", "b 7"),
       "key"
     ),
-    prefixed_key = list(paste0("p1-1:l2:", 1:n), paste0("<b>pt ", 1:n, "</b><br>of ", n), "key+d"),
-    values = list(as.character(1:n), paste0("pt ", ids), "v"),
+    prefixed_key = list(paste0("p1-1:l2:", 1:n), paste0("<b>pt ", 1:n, "</b><br>of ", n), "key+vb"),
+    # (VW-40: binary values)
+    values = list(as.character(1:n), paste0("pt ", ids), "vb"),
     html = list(as.character(1:n), paste0("<i>", sample(letters, n, TRUE), "</i> x = ", round(rnorm(n), 2)), NULL),
     unicode_na = list(as.character(1:n), ifelse(1:n %% 5 == 0, NA, paste0("café ", 1:n, " 日本 😀")), "key"),
     leading_zero = list(as.character(1:n), sprintf("id %06d", ids), NULL),
-    all_leading_zero = list(as.character(1:n), sprintf("id 0%06d", ids), "plain"),
+    # every number zero-padded: a template with a fixed width (VW-40)
+    all_leading_zero = list(as.character(1:n), sprintf("id 0%06d", ids), NULL),
     free_text = list(as.character(1:n), vapply(1:n, function(i) paste(sample(letters, 6), collapse = ""), ""), "plain"),
     sentinel = list(as.character(1:n), paste0("a\001", 1:n), "plain"),
     repeated = list(as.character(1:n), sample(c("north", "south", NA, "east"), n, TRUE), "dict")
@@ -1486,7 +1488,7 @@ test_that("tooltip columns encode compactly and decode byte for byte (VW-38)", {
       "dict"
     } else if (!is.null(tp$tpl)) {
       tn <- if (is.list(tp$tn)) tp$tn else list(tp$tn)
-      paste(vapply(tn, function(t) if (is.list(t)) names(t) else t, ""), collapse = "+")
+      paste(vapply(tn, function(t) if (is.list(t)) paste(names(t), collapse = "") else t, ""), collapse = "+")
     } else {
       "other"
     }
@@ -1497,6 +1499,96 @@ test_that("tooltip columns encode compactly and decode byte for byte (VW-38)", {
       nchar(htmlwidgets:::toJSON(cs[[2]]), "bytes")
     )
   }
+})
+
+test_that("zero-padded and decimal numbers template byte for byte (VW-40)", {
+  set.seed(40)
+  n <- 3000
+  ids <- sample(1e6, n)
+  form <- function(tp) {
+    if (!is.list(tp)) {
+      return("plain")
+    }
+    if (is.null(tp$tpl)) {
+      return("dict")
+    }
+    tn <- if (is.list(tp$tn)) tp$tn else list(tp$tn)
+    paste(vapply(tn, function(t) if (is.list(t)) paste(names(t), collapse = "") else t, ""), collapse = "+")
+  }
+  cases <- list(
+    # one width for the whole stream
+    # the key's own integer, padded
+    zero_pad = list(sprintf("id %05d", 1:n), "keyw"),
+    zero_pad_not_key = list(sprintf("id %05d", ids %% 100000), NULL),
+    # widths vary: a typed width column
+    mixed_width = list(sprintf("%0*d", 1:n %% 4 + 1, ids %% 1000), NULL),
+    # decimals with leading zeros in the fraction ("0.05")
+    decimals = list(sprintf("t = %.2f s", (1:n) * 0.05), NULL),
+    scientific = list(format(rnorm(n) * 10^sample(-12:12, n, TRUE), scientific = TRUE, digits = 4), NULL),
+    negative = list(paste0("v = ", sample(-50000:50000, n), ".", sprintf("%02d", sample(0:99, n, TRUE))), NULL),
+    dates = list(format(as.POSIXct("2024-03-05", tz = "UTC") + sample(1e7, n), "%Y-%m-%d %H:%M:%S"), NULL),
+    mixed = list(paste0("<b>id ", sprintf("%04d", 1:n), "</b> x = ", round(rnorm(n), 3), " (", format(runif(n) * 1e-6, scientific = TRUE, digits = 2), ")"), NULL),
+    zeros = list(strrep("0", 1:n %% 9 + 1), NULL)
+  )
+  for (nm in names(cases)) {
+    tip <- cases[[nm]][[1]]
+    key <- as.character(1:n)
+    tp <- .encode_elements(list(key = key, tooltip = tip))$tooltip
+    expect_identical(.decode_column_r(tp, n, key), tip, label = nm)
+    if (!is.null(cases[[nm]][[2]])) expect_identical(form(tp), cases[[nm]][[2]], label = nm)
+    expect_false(identical(form(tp), "plain"), label = nm)
+    expect_lt(nchar(htmlwidgets:::toJSON(tp), "bytes"), nchar(htmlwidgets:::toJSON(tip), "bytes"), label = nm)
+  }
+  # A stream with varying widths ships them as a typed column.
+  tp <- .encode_elements(list(key = as.character(1:n), tooltip = cases$mixed_width[[1]]))$tooltip
+  expect_true(is.list(tp$tn$w %||% tp$tn[[1]]$w))
+  # Where canonical integers already template a column, nothing changes: no
+  # widths are added (the "05" of 1.05 stays in the template text).
+  html <- paste0("<i>", sample(letters, n, TRUE), "</i> x = ", round(rnorm(n), 2))
+  tp <- .encode_elements(list(key = as.character(1:n), tooltip = html))$tooltip
+  expect_false(any(vapply(tp$tn, function(t) is.list(t) && !is.null(t$w), TRUE)))
+  expect_identical(.decode_column_r(tp, n, as.character(1:n)), html)
+  # Runs of more than 9 digits stay text.
+  long <- sprintf("acct %012.0f", 1e11 + sample(1e6, n))
+  expect_identical(.encode_elements(list(key = as.character(1:n), tooltip = long))$tooltip, long)
+})
+
+test_that("integer keys ship their differences as a binary column (VW-40)", {
+  set.seed(41)
+  n <- 3000
+  enc <- function(k) .encode_elements(list(key = k))$key
+  # Drawn grouped by colour: ascending runs with a jump back at each group.
+  ids <- sample(n)
+  grouped <- as.character(c(sort(ids[1:1000]), sort(ids[1001:2200]), sort(ids[2201:n])))
+  k <- enc(c(grouped, "legend:color:a", "legend:color:b"))
+  expect_false(is.null(k$db))
+  expect_null(k$delta)
+  expect_identical(sum(k$dv < 0), 2L) # the two jumps back, among the wide gaps
+  expect_identical(k$at, c(3000L, 3001L))
+  expect_identical(.decode_keys_r(k), c(grouped, "legend:color:a", "legend:color:b"))
+  expect_lt(
+    nchar(htmlwidgets:::toJSON(k), "bytes"),
+    nchar(htmlwidgets:::toJSON(c(list(delta = c(1, diff(as.numeric(grouped)))))), "bytes") / 2
+  )
+  # A plain sequence collapses to runs.
+  s <- enc(as.character(1:n))
+  expect_false(is.null(s$db$rle))
+  expect_identical(.decode_keys_r(s), as.character(1:n))
+  # Prefixed keys keep their runs of prefixes.
+  pk <- paste0("p1-1:l", rep(1:2, each = n / 2), ":", c(1:(n / 2), 1:(n / 2)))
+  kp <- enc(pk)
+  expect_false(is.null(kp$db))
+  expect_identical(.decode_keys_r(kp), pk)
+  # Shuffled keys, 15-digit keys, a short column: whichever form is smaller,
+  # always exact.
+  for (kk in list(as.character(sample(1e6, n)), as.character(1e14 + sample(1e6, n)),
+                  as.character(c(999999999999990, sample(n))), c("5", "7", "6"))) {
+    e <- enc(kk)
+    expect_identical(.decode_keys_r(e), kk)
+  }
+  # 16-digit integers are not integers to the encoder: plain, or a prefix.
+  big <- paste0("12", sprintf("%014.0f", as.numeric(1:n)))
+  expect_identical(.decode_keys_r(enc(big)), big)
 })
 
 test_that("raster payload tooltips match the scene's (VW-38)", {
