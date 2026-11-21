@@ -44,7 +44,9 @@ export function markStateFeature(
     if (forDl === dl) return true;
     forDl = dl;
     keyIdx = new Map();
-    for (let i = 0; i < dl.keys.length; i++) keyIdx.set(dl.keys[i], i);
+    // First index of each key: the one the records use when the table is
+    // the element table's keys (VR-22), which may repeat a key.
+    for (let i = 0; i < dl.keys.length; i++) if (!keyIdx.has(dl.keys[i])) keyIdx.set(dl.keys[i], i);
     tagIds = {};
     paletteIdx = {};
     ws.msPalette = [];

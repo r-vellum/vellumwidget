@@ -494,8 +494,10 @@
   function opaqueHex(s) {
     return s == null || !/^#[0-9a-fA-F]{8}$/.test(s) || /ff$/i.test(s);
   }
-  function decodeDisplayList(raw) {
+  function decodeDisplayList(raw, elemKeys) {
     if (!raw || raw.format !== "vellum-display-list" || raw.version !== 1 && raw.version !== 2 || !raw.record) return null;
+    const given = raw.keys_given != null ? Number(raw.keys_given) : -1;
+    if (given >= 0 && (!elemKeys || elemKeys.length !== given)) return null;
     const n = raw.n || 0;
     const kind = u8(dlColumn(raw.record.kind));
     const pt = raw.point, rc = raw.rect, pa = raw.path;
@@ -564,13 +566,15 @@
       }
     }
     const k = raw.keys;
+    let own;
     if (k && typeof k === "object" && !Array.isArray(k) && "type" in k) {
       const kc = dlColumn(k);
-      dl.keys = new Array(kc.length);
-      for (let i = 0; i < kc.length; i++) dl.keys[i] = String(kc[i]);
+      own = new Array(kc.length);
+      for (let i = 0; i < kc.length; i++) own[i] = String(kc[i]);
     } else {
-      dl.keys = asColumn(raw.keys).map(String);
+      own = asColumn(raw.keys).map(String);
     }
+    dl.keys = given >= 0 && elemKeys ? own.length ? elemKeys.concat(own) : elemKeys.slice() : own;
     const P = raw.paints;
     const fill = asColumn(P.fill), stroke = asColumn(P.stroke), sw = asColumn(P.stroke_width);
     const dash = asColumn(P.dash), cap = asColumn(P.linecap), join = asColumn(P.linejoin);
@@ -2255,7 +2259,7 @@
       if (forDl === dl) return true;
       forDl = dl;
       keyIdx = /* @__PURE__ */ new Map();
-      for (let i = 0; i < dl.keys.length; i++) keyIdx.set(dl.keys[i], i);
+      for (let i = 0; i < dl.keys.length; i++) if (!keyIdx.has(dl.keys[i])) keyIdx.set(dl.keys[i], i);
       tagIds = {};
       paletteIdx = {};
       ws.msPalette = [];
@@ -2374,7 +2378,7 @@
       forDl = dl;
       svgs = ws.runSvg;
       keyIdx = /* @__PURE__ */ new Map();
-      for (let i = 0; i < dl.keys.length; i++) keyIdx.set(dl.keys[i], i);
+      for (let i = 0; i < dl.keys.length; i++) if (!keyIdx.has(dl.keys[i])) keyIdx.set(dl.keys[i], i);
       const sets = [];
       for (let r = 0; r < dl.nRuns; r++) sets.push({});
       for (let i = 0; i < dl.n; i++) {
@@ -6488,7 +6492,7 @@
         x.options || {}
       );
       ws.elements = normalizeElements(x.elements);
-      ws.dl = x.options && x.options.raster && x.displayList ? decodeDisplayList(x.displayList) : null;
+      ws.dl = x.options && x.options.raster && x.displayList ? decodeDisplayList(x.displayList, ws.elements.map((e) => e.key)) : null;
       ws.runSvg = null;
       if (ws.dl) fillBboxes(ws.elements, ws.dl);
       ws.panels = normalizePanels(x.panels);
@@ -7522,6 +7526,12 @@
           },
           displayListSize: function() {
             return ws.dl ? ws.dl.n : 0;
+          },
+          displayListKeys: function() {
+            return ws.dl ? ws.dl.keys.slice() : null;
+          },
+          keyIds: function(keys) {
+            return Array.from(ws.fx.keyIds(keys));
           },
           markTier: function() {
             return ws.markTier;

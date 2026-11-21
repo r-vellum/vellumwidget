@@ -220,7 +220,10 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     ws.elements = normalizeElements(x.elements);
     // The marks-only display list (raster mode, VW-15): the covered marks ship
     // without bboxes, which are derived here from their exact geometry.
-    ws.dl = x.options && x.options.raster && x.displayList ? decodeDisplayList(x.displayList) : null;
+    // Its records may index the element table's keys (VR-22).
+    ws.dl = x.options && x.options.raster && x.displayList
+      ? decodeDisplayList(x.displayList, ws.elements.map((e) => e.key))
+      : null;
     ws.runSvg = null;
     if (ws.dl) fillBboxes(ws.elements, ws.dl);
     ws.panels = normalizePanels(x.panels);

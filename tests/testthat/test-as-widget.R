@@ -972,7 +972,8 @@ test_that("raster mode ships the marks-only display list when vellum has it (VW-
   el <- w$x$elements
   expect_identical(el$x0$at, which(grepl("^legend:", .decode_keys_r(el$key))) - 1L)
   # the list's keys are the plot's data_id
-  expect_setequal(as.character(.dl_col(dl$keys)), as.character(1:60))
+  rk <- .dl_key_table(dl, .decode_keys_r(el$key))[.dl_col(dl$record$key) + 1]
+  expect_setequal(rk, as.character(1:60))
   # SVG mode ships none
   expect_null(as_widget(p, render = render_options(mode = "svg"))$x$displayList)
   # above max_marks: no list, the bbox index instead, and a message saying why
@@ -1297,4 +1298,48 @@ test_that("as_widget() argument count is a tripwire (prefer the spec; see CLAUDE
   # render_options() (the old names ride along in `...`), so the baseline is
   # now 18 (17 named arguments plus `...`).
   expect_lte(length(formals(as_widget)), 18L)
+})
+
+test_that("the display list indexes the element table's keys (VR-22)", {
+  skip_if_not(.split_render_supported(), "vellum without the split render")
+  skip_if_not(.display_list_keys_supported(), "vellum without scene_display_list(keys =)")
+  set.seed(1)
+  df <- data.frame(x = rnorm(60), y = rnorm(60), g = rep(c("a", "b"), 30), id = 1:60)
+  df$lbl <- paste0("pt ", df$id)
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id, tooltip = lbl)
+  ro <- render_options(mode = "raster")
+  w <- as_widget(p, render = ro)
+  dl <- w$x$displayList
+  ek <- .decode_keys_r(w$x$elements$key)
+  # The list ships no keys of its own: its records index the element table.
+  expect_identical(dl$keys_given, length(ek))
+  expect_length(dl$keys, 0L)
+  new_keys <- .dl_key_table(dl, ek)[.dl_col(dl$record$key) + 1]
+  # The same per-record keys as a list with its own key table (older vellum).
+  local_mocked_bindings(.display_list_keys_supported = function() FALSE)
+  w_old <- as_widget(p, render = ro)
+  dl_old <- w_old$x$displayList
+  expect_null(dl_old$keys_given)
+  expect_identical(new_keys, .dl_key_table(dl_old)[.dl_col(dl_old$record$key) + 1])
+  # Everything else in the payload is unchanged: the same elements (and so
+  # the same hover tooltips), panels and list geometry.
+  expect_identical(w$x$elements, w_old$x$elements)
+  expect_identical(w$x$panels, w_old$x$panels)
+  strip <- function(d) {
+    d[c("keys", "keys_given")] <- NULL
+    d$record$key <- NULL
+    d
+  }
+  expect_identical(strip(dl), strip(dl_old))
+})
+
+test_that("integer display-list keys read back without scientific notation", {
+  dl <- list(keys = list(type = "u32", n = 3L, data = base64enc::base64encode(
+    writeBin(c(5L, 100000L, 2000000L), raw(), size = 4, endian = "little")
+  )))
+  expect_identical(.dl_key_table(dl), c("5", "100000", "2000000"))
+  dl2 <- list(keys = character(0), keys_given = 2L)
+  expect_identical(.dl_key_table(dl2, c("a", "b")), c("a", "b"))
+  expect_error(.dl_key_table(dl2, "a"), "different key table")
 })
