@@ -586,9 +586,12 @@ test_that("raster mode ships the element index in the compact encoding (VW-13)",
   expect_identical(e$legend$levels, "color:a")
   expect_identical(e$legend$rv, c(0L, -1L))
   expect_identical(e$legend$rl, c(n - 1L, 1L))
-  # without long runs the codes ship one per element
+  # without long runs the codes ship one per element, as a typed column of
+  # code + 1, bit-packed (VW-38)
   alt <- encode(list(key = cols$key, g = rep(c("a", "b"), n / 2)))
-  expect_identical(alt$g$codes, rep(c(0L, 1L), n / 2))
+  expect_identical(alt$g$cb$bits, 2L)
+  expect_identical(.uint_column_r(alt$g$cb), rep(1:2, n / 2))
+  expect_identical(.decode_column_r(alt$g, n), rep(c("a", "b"), n / 2))
   # mostly-integer keys: a first value and differences, the rest sparse
   k <- encode(list(key = c("5", "7", "legend:a", "6", as.character(10:50))))$key
   expect_identical(k$delta, c(5, 2, -1, 4, rep(1, 40)))
@@ -619,8 +622,12 @@ test_that("raster mode ships the element index in the compact encoding (VW-13)",
   expect_null(e$hover_group)
   # a ragged multi-value list-column that is mostly empty goes sparse
   expect_identical(e$cond$at, 0L)
-  # high-cardinality strings stay plain
-  expect_identical(e$join, cols$join)
+  # high-cardinality strings that are the keys' integers: a template whose
+  # one number stream is the key (VW-38); free text stays plain
+  expect_identical(e$join$tn, list("key"))
+  expect_identical(.decode_column_r(e$join, n, cols$key), cols$join)
+  words <- vapply(seq_len(n), function(i) paste(letters[(i + 0:4) %% 26 + 1], collapse = ""), "")
+  expect_identical(encode(list(key = cols$key, w = words))$w, words)
   # bboxes rounded outward to 1/100 px
   expect_equal(e$x0[[1]], 1.23)
   expect_equal(e$y0[[1]], 2.34)
@@ -1342,4 +1349,85 @@ test_that("integer display-list keys read back without scientific notation", {
   dl2 <- list(keys = character(0), keys_given = 2L)
   expect_identical(.dl_key_table(dl2, c("a", "b")), c("a", "b"))
   expect_error(.dl_key_table(dl2, "a"), "different key table")
+})
+
+test_that(".uint_column() round-trips in every form (VW-38)", {
+  set.seed(2)
+  for (top in c(1L, 2L, 7L, 200L, 255L, 256L, 1800L, 65535L, 70000L, 2^30)) {
+    top <- as.integer(top)
+    x <- sample(0:top, 300, TRUE)
+    x[1] <- top
+    for (pack in c(FALSE, TRUE)) {
+      col <- .uint_column(x, pack = pack)
+      expect_identical(.uint_column_r(col), x)
+      expect_identical(!is.null(col$bits), pack && !ceiling(log2(top + 1)) %in% c(8, 16, 32))
+    }
+  }
+  r <- .uint_column(rep(c(3L, 0L), each = 100))
+  expect_identical(r$rle$values, c(3L, 0L))
+})
+
+test_that("tooltip columns encode compactly and decode byte for byte (VW-38)", {
+  set.seed(4)
+  n <- 2000
+  ids <- sample(1e6, n)
+  cases <- list(
+    key = list(as.character(ids), paste0("pt ", ids), "key"),
+    # a large column around the key, with legend-style exceptions (fast path)
+    key_legend = list(
+      c(as.character(1:6000), paste0("legend:color:", c("a", "b7"))),
+      c(paste0("<b>pt ", 1:6000, "</b> é"), "a", "b 7"),
+      "key"
+    ),
+    prefixed_key = list(paste0("p1-1:l2:", 1:n), paste0("<b>pt ", 1:n, "</b><br>of ", n), "key+d"),
+    values = list(as.character(1:n), paste0("pt ", ids), "v"),
+    html = list(as.character(1:n), paste0("<i>", sample(letters, n, TRUE), "</i> x = ", round(rnorm(n), 2)), NULL),
+    unicode_na = list(as.character(1:n), ifelse(1:n %% 5 == 0, NA, paste0("café ", 1:n, " 日本 😀")), "key"),
+    leading_zero = list(as.character(1:n), sprintf("id %06d", ids), NULL),
+    all_leading_zero = list(as.character(1:n), sprintf("id 0%06d", ids), "plain"),
+    free_text = list(as.character(1:n), vapply(1:n, function(i) paste(sample(letters, 6), collapse = ""), ""), "plain"),
+    sentinel = list(as.character(1:n), paste0("a\001", 1:n), "plain"),
+    repeated = list(as.character(1:n), sample(c("north", "south", NA, "east"), n, TRUE), "dict")
+  )
+  for (nm in names(cases)) {
+    cs <- cases[[nm]]
+    e <- .encode_elements(list(key = cs[[1]], tooltip = cs[[2]]))
+    tp <- e$tooltip
+    n <- length(cs[[1]])
+    form <- if (!is.list(tp)) {
+      "plain"
+    } else if (!is.null(tp$cb)) {
+      "dict"
+    } else if (!is.null(tp$tpl)) {
+      tn <- if (is.list(tp$tn)) tp$tn else list(tp$tn)
+      paste(vapply(tn, function(t) if (is.list(t)) names(t) else t, ""), collapse = "+")
+    } else {
+      "other"
+    }
+    if (!is.null(cs[[3]])) expect_identical(form, cs[[3]], label = nm)
+    expect_identical(.decode_column_r(tp, n, cs[[1]]), cs[[2]], label = nm)
+    expect_lte(
+      nchar(htmlwidgets:::toJSON(tp), "bytes"),
+      nchar(htmlwidgets:::toJSON(cs[[2]]), "bytes")
+    )
+  }
+})
+
+test_that("raster payload tooltips match the scene's (VW-38)", {
+  skip_if_not_installed("vellumplot")
+  set.seed(6)
+  n <- 3000
+  df <- data.frame(x = rnorm(n), y = rnorm(n), id = seq_len(n), g = sample(c("a", "b"), n, TRUE))
+  df$tip <- paste0("<b>pt ", df$id, "</b><br>", ifelse(df$g == "a", "café", "日本"))
+  df$tip[c(3, 10)] <- NA
+  for (tip in c("tip", "g")) {
+    df$t <- df[[tip]]
+    p <- vellumplot::vplot(df) |>
+      vellumplot::mark_point(x = x, y = y, color = g, data_id = id, tooltip = t)
+    w <- as_widget(p, render = render_options(mode = "raster"))
+    svg <- as_widget(p, render = render_options(mode = "svg"))$x$elements
+    keys <- .decode_keys_r(w$x$elements$key)
+    got <- .decode_column_r(w$x$elements$tooltip, length(keys), keys)
+    expect_identical(got, svg$tooltip[match(keys, svg$key)])
+  }
 })

@@ -22,18 +22,14 @@
 // the one blended group the run holds. Marks under a blend mode (flag 32) are
 // covered only with that table; an unknown or empty mode is not.
 
-import { asColumn } from "./elements";
+import { asColumn, dlColumn } from "./elements";
+import type { DLColumn } from "./elements";
+
+// The column decoder lives in elements.ts (element columns use it too).
+export { dlColumn };
+export type { DLColumn };
 import type { ElemMeta } from "./types";
 
-// One encoded numeric column: `list(type, n, data | const | seq | rle)`.
-export interface DLColumn {
-  type: "f32" | "u8" | "u16" | "u32";
-  n: number;
-  data?: string;
-  const?: number;
-  seq?: number[];
-  rle?: { values: number[] | number; lengths: number[] | number };
-}
 
 export interface DLPayload {
   format: string;
@@ -154,42 +150,6 @@ export const BLEND_MODES: Record<string, boolean> = {
   "color-dodge": true, "color-burn": true, "hard-light": true, "soft-light": true,
   difference: true, exclusion: true, hue: true, saturation: true, color: true, luminosity: true
 };
-
-function b64bytes(s: string): Uint8Array {
-  const bin = atob(s);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-// One encoded column -> a typed array of its type.
-export function dlColumn(c: DLColumn | null | undefined): Float32Array | Uint8Array | Uint16Array | Uint32Array {
-  const n = c ? c.n || 0 : 0;
-  const make = (len: number) => {
-    const t = c ? c.type : "u32";
-    return t === "f32" ? new Float32Array(len) : t === "u8" ? new Uint8Array(len) : t === "u16" ? new Uint16Array(len) : new Uint32Array(len);
-  };
-  if (!c || !n) return make(0);
-  if (c.const != null) { const a = make(n); a.fill(c.const as number); return a; }
-  if (c.seq != null) {
-    const s = asColumn(c.seq), a = make(n);
-    for (let i = 0; i < n; i++) a[i] = s[0] + s[1] * i;
-    return a;
-  }
-  if (c.rle != null) {
-    const v = asColumn(c.rle.values), l = asColumn(c.rle.lengths), a = make(n);
-    let o = 0;
-    for (let i = 0; i < v.length; i++) { a.fill(v[i], o, o + l[i]); o += l[i]; }
-    return a;
-  }
-  const bytes = b64bytes(c.data || "");
-  // Copy into a fresh, aligned buffer (little-endian, as every browser is).
-  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-  if (c.type === "f32") return new Float32Array(buf, 0, n);
-  if (c.type === "u16") return new Uint16Array(buf, 0, n);
-  if (c.type === "u32") return new Uint32Array(buf, 0, n);
-  return new Uint8Array(buf, 0, n);
-}
 
 const u32 = (a: ArrayLike<number>): Uint32Array => (a instanceof Uint32Array ? a : Uint32Array.from(a));
 const f32 = (a: ArrayLike<number>): Float32Array => (a instanceof Float32Array ? a : Float32Array.from(a));

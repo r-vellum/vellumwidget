@@ -4411,6 +4411,52 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(off.inst._test.markTier() === "mid" && !off.el.querySelector(".vellumwidget-detail"), "tier: detailMarks = 0 never materialises nodes");
 }
 
+// ============ VW-38: compact tooltip columns (typed dictionary codes, templates) ============
+{
+  const T3 = window.__vellumwidgetTest;
+  // bit-pack values LSB first, as R's `.uint_column(pack = TRUE)` does
+  const pack = (xs, k) => {
+    const bytes = new Uint8Array(Math.ceil((xs.length * k) / 8));
+    let pos = 0;
+    for (const x of xs) for (let b = 0; b < k; b++, pos++) if (Math.floor(x / 2 ** b) % 2) bytes[pos >> 3] |= 1 << (pos & 7);
+    return Buffer.from(bytes).toString("base64");
+  };
+  const xs = [0, 3, 5, 7, 1, 2, 6, 4, 0, 7];
+  ok(Array.from(T3.dlColumn({ type: "u8", n: 10, bits: 3, data: pack(xs, 3) })).join() === xs.join(), "VW-38: a bit-packed column decodes");
+  const big = [0, 1800, 77, 1024, 2047];
+  ok(Array.from(T3.dlColumn({ type: "u16", n: 5, bits: 11, data: pack(big, 11) })).join() === big.join(), "VW-38: 11-bit codes decode");
+  // dictionary with typed codes (code + 1, 0 = none)
+  const lv = ["north", "<b>south</b>", "日本 é"];
+  const dict = T3.normalizeElements({ key: ["a", "b", "c", "d", "e"], tooltip: { levels: lv, cb: { type: "u8", n: 5, bits: 2, data: pack([1, 0, 3, 2, 3], 2) } } });
+  ok(dict.map((e) => (e.tooltip === undefined ? "-" : e.tooltip)).join("|") === "north|-|日本 é|<b>south</b>|日本 é", "VW-38: typed dictionary codes decode (0 = none)");
+  // template: "key" stream (the key's trailing integer, as text), deltas and values
+  const keys = ["p1-1:l2:7", "p1-1:l2:12", "legend:a", "p1-1:l2:0", "p1-1:l2:1005"];
+  const tc = { type: "u8", n: 5, data: Buffer.from([1, 2, 0, 1, 3]).toString("base64") };
+  const tpl = T3.normalizeElements({
+    key: keys,
+    tooltip: { tpl: [["<b>pt ", "</b> of ", ""], ["x=", ".", " é"], "plain"], tc: tc, tn: ["key", { d: [40, -38, 3] }] }
+  }).map((e) => (e.tooltip === undefined ? "-" : e.tooltip));
+  ok(tpl.join("|") === "<b>pt 7</b> of 40|x=12.2 é|-|<b>pt 0</b> of 5|plain", "VW-38: a template column pastes parts, key integers and number streams back");
+  const tv = T3.normalizeElements({ key: ["1", "2"], tooltip: { tpl: [["n", ""]], tc: { type: "u8", n: 2, const: 1 }, tn: { v: [9, 1000000000] } } });
+  ok(tv[0].tooltip === "n9" && tv[1].tooltip === "n1000000000", "VW-38: a value stream (auto-unboxed list) decodes");
+  // hover in raster mode shows the template tooltip byte for byte
+  const N = 12, key = [], x0 = [], y0 = [], x1 = [], y1 = [];
+  for (let i = 0; i < N; i++) { key.push("k" + i); x0.push(i * 10); y0.push(0); x1.push(i * 10 + 4); y1.push(4); }
+  const eT = document.createElement("div");
+  document.body.appendChild(eT);
+  const iT = widgetDef.factory(eT, 120, 20);
+  iT.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="20" viewBox="0 0 120 20" role="img"><image width="120" height="20" href="data:,"/></svg>',
+    elements: { key: key, x0: x0, y0: y0, x1: x1, y1: y1,
+      tooltip: { tpl: [["<b>pt ", "</b><br>café 😀"]], tc: { type: "u8", n: N, const: 1 }, tn: "key" } },
+    options: { tooltip: true, hover: true, select: true, nearest: true, raster: true }
+  });
+  fireOn(eT.querySelector("svg"), "pointermove", eT.querySelector("image"));
+  const tipT = eT.querySelector(".vellumwidget-tip");
+  ok(tipT.classList.contains("vellumwidget-show") && tipT.innerHTML === "<b>pt 0</b><br>café 😀",
+    "VW-38: hovering a raster mark shows its template tooltip unchanged");
+}
+
 // ============ VR-22: display-list records index the element table's keys ============
 {
   const T3 = window.__vellumwidgetTest;

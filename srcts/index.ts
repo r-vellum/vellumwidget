@@ -13,7 +13,7 @@
 
 import { ensureStyle } from "./css";
 import { sourceTable } from "./dom";
-import { decodeKeys, normalizeElements, normalizePanels } from "./elements";
+import { decodeKeys, dlColumn, normalizeElements, normalizePanels } from "./elements";
 import { decodeDisplayList, fillBboxes, tracePoint, traceShape } from "./dlist";
 import { a11yFeature } from "./features/a11y";
 import { axisZoomFeature } from "./features/axisZoom";
@@ -307,5 +307,6 @@ registerProxyHandler();
   tracePoint,
   traceShape,
   decodeKeys,
+  dlColumn,
   bus: vellumwidgetBus
 };

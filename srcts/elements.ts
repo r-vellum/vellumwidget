@@ -10,10 +10,70 @@ export function asColumn<T>(v: T[] | T | null | undefined): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
+// One encoded numeric column: `list(type, n, data | const | seq | rle)`.
+export interface DLColumn {
+  type: "f32" | "u8" | "u16" | "u32";
+  n: number;
+  data?: string;
+  bits?: number; // bit-packed `data`: each value in `bits` bits, LSB first (VW-38)
+  const?: number;
+  seq?: number[];
+  rle?: { values: number[] | number; lengths: number[] | number };
+}
+
+function b64bytes(s: string): Uint8Array {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// One encoded column -> a typed array of its type.
+export function dlColumn(c: DLColumn | null | undefined): Float32Array | Uint8Array | Uint16Array | Uint32Array {
+  const n = c ? c.n || 0 : 0;
+  const make = (len: number) => {
+    const t = c ? c.type : "u32";
+    return t === "f32" ? new Float32Array(len) : t === "u8" ? new Uint8Array(len) : t === "u16" ? new Uint16Array(len) : new Uint32Array(len);
+  };
+  if (!c || !n) return make(0);
+  if (c.const != null) { const a = make(n); a.fill(c.const as number); return a; }
+  if (c.seq != null) {
+    const s = asColumn(c.seq), a = make(n);
+    for (let i = 0; i < n; i++) a[i] = s[0] + s[1] * i;
+    return a;
+  }
+  if (c.rle != null) {
+    const v = asColumn(c.rle.values), l = asColumn(c.rle.lengths), a = make(n);
+    let o = 0;
+    for (let i = 0; i < v.length; i++) { a.fill(v[i], o, o + l[i]); o += l[i]; }
+    return a;
+  }
+  const bytes = b64bytes(c.data || "");
+  if (c.bits) {
+    const k = Number(c.bits), a = make(n);
+    let pos = 0;
+    for (let i = 0; i < n; i++) {
+      let v = 0;
+      for (let b = 0; b < k; b++, pos++) if (bytes[pos >> 3] & (1 << (pos & 7))) v += 2 ** b;
+      a[i] = v;
+    }
+    return a;
+  }
+  // Copy into a fresh, aligned buffer (little-endian, as every browser is).
+  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  if (c.type === "f32") return new Float32Array(buf, 0, n);
+  if (c.type === "u16") return new Uint16Array(buf, 0, n);
+  if (c.type === "u32") return new Uint32Array(buf, 0, n);
+  return new Uint8Array(buf, 0, n);
+}
+
 // A column in the compact wire encoding (raster mode, `.encode_elements()` in R):
 // a sparse `{at, v}` (0-based indices that carry a value, and the values) or a
 // dictionary `{levels, codes}` (each level once, a 0-based code per element,
-// `null` for none).
+// `null` for none). The dictionary's codes may come as runs (`rv`, `rl`) or,
+// VW-38, as a typed column `cb` of code + 1 (0 = none). A string column of
+// mostly distinct values that share a few shapes may come as a template
+// column (`TemplateColumn`).
 interface SparseColumn<T> {
   at: number[] | number;
   v: T[] | T;
@@ -23,16 +83,82 @@ interface DictColumn<T> {
   codes?: (number | null)[] | number | null;
   rv?: number[] | number; // run-length form: run codes (-1 = none) ...
   rl?: number[] | number; // ... and run lengths
+  cb?: DLColumn; // typed form: code + 1 per element, 0 = none (VW-38)
 }
-export type EncodedColumn<T> = T[] | T | SparseColumn<T> | DictColumn<T> | null | undefined;
+// VW-38: each string is a template with integer slots. `tpl` holds each
+// template's literal parts (one more than its slots), `tc` the template per
+// element (a typed column, template index + 1, 0 = none), and `tn` one number
+// stream per slot position: `"key"` (the element key's trailing integer, as
+// text), `{d}` (a first value and differences) or `{v}` (the values), each
+// listing, in element order, the elements whose template has that slot.
+interface TemplateColumn {
+  tpl: (string[] | string)[] | string;
+  tc: DLColumn;
+  tn: (string | { d?: number[] | number; v?: number[] | number })[] | string | { d?: number[] | number; v?: number[] | number };
+}
+export type EncodedColumn<T> = T[] | T | SparseColumn<T> | DictColumn<T> | TemplateColumn | null | undefined;
+
+// The trailing integer of a key, as `.encode_keys()` reads it in R.
+const KEY_INT = /(0|[1-9][0-9]{0,14})$/;
+
+function decodeTemplate(o: TemplateColumn, n: number, keys: string[] | undefined): (string | null)[] {
+  const tpl = asColumn(o.tpl as (string[] | string)[]).map((p) => asColumn(p).map(String));
+  const tc = dlColumn(o.tc);
+  const streams = asColumn(o.tn as unknown[]).map((st) => {
+    if (st === "key") return null; // read from the key
+    const s = st as { d?: number[] | number; v?: number[] | number };
+    if (s.d != null) {
+      const d = asColumn(s.d), out = new Array<string>(d.length);
+      let run = 0;
+      for (let i = 0; i < d.length; i++) { run += d[i]; out[i] = String(run); }
+      return out;
+    }
+    return asColumn(s.v).map(String);
+  });
+  const at = new Array<number>(streams.length).fill(0);
+  const out: (string | null)[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const c = tc[i];
+    if (!c || c > tpl.length) { out[i] = null; continue; }
+    const parts = tpl[c - 1];
+    let s = parts[0];
+    for (let j = 1; j < parts.length; j++) {
+      const st = streams[j - 1];
+      let num = "";
+      if (st === null) {
+        const m = keys && keys[i] != null ? KEY_INT.exec(keys[i]) : null;
+        num = m ? m[1] : "";
+      } else if (st) {
+        num = st[at[j - 1]++];
+      }
+      s += num + parts[j];
+    }
+    out[i] = s;
+  }
+  return out;
+}
 
 // Decode one payload column to a plain length-`n` array (`null` where unset):
-// expands the sparse / dictionary encodings, and otherwise behaves as `asColumn`.
-// Returns `null` when the column is absent.
-export function decodeColumn<T>(v: EncodedColumn<T>, n: number): (T | null)[] | null {
+// expands the sparse / dictionary / template encodings, and otherwise behaves
+// as `asColumn`. Returns `null` when the column is absent. `keys` (the decoded
+// element keys) serves a template's `"key"` stream.
+export function decodeColumn<T>(v: EncodedColumn<T>, n: number, keys?: string[]): (T | null)[] | null {
   if (v == null) return null;
   if (typeof v === "object" && !Array.isArray(v)) {
+    if ((v as TemplateColumn).tpl !== undefined && (v as TemplateColumn).tc !== undefined) {
+      return decodeTemplate(v as TemplateColumn, n, keys) as unknown as (T | null)[];
+    }
     const o = v as Partial<SparseColumn<T> & DictColumn<T>>;
+    if (o.levels !== undefined && o.cb !== undefined) {
+      const levels = asColumn<T>(o.levels as T[] | T);
+      const cb = dlColumn(o.cb);
+      const out: (T | null)[] = new Array(n);
+      for (let i = 0; i < n; i++) {
+        const c = cb[i];
+        out[i] = c ? levels[c - 1] : null;
+      }
+      return out;
+    }
     if (o.at !== undefined && o.v !== undefined) {
       const at = asColumn<number>(o.at);
       const vals = asColumn<T>(o.v as T[] | T);
@@ -110,7 +236,7 @@ export function normalizeElements(raw: ElemMeta[] | ColumnElements | null | unde
   const y1 = asColumn<number | null>(c.y1);
   // Every non-key column may arrive in the compact encoding (see decodeColumn).
   const col = <T>(f: keyof ColumnElements): (T | null)[] | null =>
-    decodeColumn<T>((c as unknown as Record<string, EncodedColumn<T>>)[f as string], n);
+    decodeColumn<T>((c as unknown as Record<string, EncodedColumn<T>>)[f as string], n, key);
   const mark = col<string>("mark");
   const tooltip = col<string>("tooltip");
   const hoverGroup = col<string>("hover_group");
