@@ -217,9 +217,10 @@ element position, and a repeated key maps to its first position.
 - R-CMD-check installs vellum and vellumplot from their `main`. A PR
   that needs an unmerged vellum branch names it with a
   `vellum-ref: <branch>` line in the PR description (`vellumplot-ref:`
-  likewise); the workflow rewrites `Remotes:` in its checkout only (X-9,
-  `.github/CONTRIBUTING.md`). Edit the description, then re-run the job;
-  drop the line once vellum’s PR is merged.
+  likewise); the workflow installs that ref over the main-built
+  dependencies, in the job only (X-9, `.github/CONTRIBUTING.md`). Edit
+  the description, then re-run the job; drop the line once vellum’s PR
+  is merged.
 - Run R tests with `devtools::test()`. Never run
   [`testthat::test_dir()`](https://testthat.r-lib.org/reference/test_dir.html)
   against an installed build: it deletes snapshot files.

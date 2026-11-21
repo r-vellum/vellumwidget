@@ -25,11 +25,12 @@ the PR description (on its own line, anywhere in the text):
     vellum-ref: my-feature-branch
 
 `vellumplot-ref:` works the same way for vellumplot. The value is a
-branch, tag or commit SHA on `r-vellum/vellum` (`r-vellum/vellumplot`).
-The R-CMD-check workflow reads the description when it runs and rewrites
-the `Remotes:` entry in its own checkout only, so nothing is committed
-and there is nothing to undo when the PR merges. The job log shows a
-notice naming the ref it built against.
+branch, tag or full commit SHA on `r-vellum/vellum`
+(`r-vellum/vellumplot`). The R-CMD-check workflow reads the description
+when it runs, installs the dependencies from `main` as usual, then
+builds and installs that ref over them, in the CI job only: nothing is
+committed, so there is nothing to undo when the PR merges. The job log
+shows a notice naming the ref and commit it built against.
 
 - Editing the description does not start a new run: re-run the
   R-CMD-check job (it reads the description afresh).
