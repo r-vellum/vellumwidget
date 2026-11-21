@@ -461,6 +461,21 @@ export function rasterFeature(
         else (runLoose[r] = runLoose[r] || []).push(dl.bx0[i], dl.by0[i], dl.bx1[i], dl.by1[i]);
       }
     }
+    // The image holds every panel's part of the run: in panel p it is
+    // clipped to the panel's fixed rect and to the panel's own area mapped
+    // through its transform, so a pan past the panel's data does not bring
+    // a neighbouring panel's part into view (VW-36). Null when they don't meet.
+    const ownClip = function (p: number): number[] | null {
+      const pc = pclip[p], A = aff[p];
+      const nm = dl.panels[p - 1];
+      const pn = ws.panels.filter((q) => q.name === nm)[0];
+      if (!pc || !pn) return pc;
+      const x0 = Math.max(pc[0], Math.min(A.ax * pn.px0 + A.bx, A.ax * pn.px1 + A.bx));
+      const x1 = Math.min(pc[2], Math.max(A.ax * pn.px0 + A.bx, A.ax * pn.px1 + A.bx));
+      const y0 = Math.max(pc[1], Math.min(A.ay * pn.py0 + A.by, A.ay * pn.py1 + A.by));
+      const y1 = Math.min(pc[3], Math.max(A.ay * pn.py0 + A.by, A.ay * pn.py1 + A.by));
+      return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
+    };
     let op = ""; // a blend mode drawn straight onto ctx (no sink)
     const drawRun = function (r: number): void {
       // its PNG, or re-rendered with the state of its marks (VW-33)
@@ -485,7 +500,7 @@ export function rasterFeature(
       };
       if (!anyPclip) { one(aff[0], null); return; }
       const hosted = runPanels[r];
-      if (hosted) for (let p = 1; p <= np; p++) if (hosted[p]) one(aff[p], pclip[p]);
+      if (hosted) for (let p = 1; p <= np; p++) if (hosted[p]) { const c = ownClip(p); if (c) one(aff[p], c); }
       if (runLoose[r]) one(aff[0], null, runLoose[r]);
     };
     let curGroup = 0;

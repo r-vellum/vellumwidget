@@ -4204,6 +4204,10 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
   ok(two.el.querySelector("image.vellumwidget-marks").getAttribute("id") !== def1.getAttribute("id"),
     "split: the image id is unique per widget");
   ok(two.inst._test.axisZoomActive() === true, "split: facets zoom by axis in raster mode");
+  // VW-36: each panel's <use> is clipped by the panel's own clip (read in the
+  // pan group's scene space), so a pan never shows a neighbour's marks there
+  ok(Array.from(two.el.querySelectorAll("use.vellumwidget-marks")).every((u) => u.getAttribute("clip-path") === "url(#c0)"),
+    "split: each panel's mark <use> carries the panel's own clip (VW-36)");
 
   // a listed panel without a pan group: one image over the whole scene, viewBox zoom.
   const root = mountSplit(["panel-1-1"], [panel("panel-1-1", 20, 180)], ["panel-1-1", "panel-9"]);
@@ -5474,6 +5478,44 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(Array.from(dr.el.querySelectorAll("use.vellumwidget-detail-run")).every((u) => !u.hasAttribute("clip-path")),
     "VW-34: without pan groups the run <use>s stay unclipped");
   dr.restore();
+
+  // VW-36: panning is not clamped, so a panel can be panned past its own
+  // data. Each copy of a whole-scene image in a panel (the mark PNG's <use>,
+  // a run on the canvas or in the detail tier) is confined to that panel's
+  // own area wherever its T takes it, or a neighbour's part would show.
+  {
+    // canvas: panned right at 2x (T: x' = 2x - 300), the panel's own area
+    // maps to -260..60, so the runs are clipped to 20..60 of its 20..180 rect
+    const zp = mount({ panels: true, options: { axisZoom: true } });
+    zp.inst._test.setView({ x: 150, y: 25, w: 100, h: 50 }); zp.inst._test.evalTier();
+    ok(zp.inst._test.markTier() === "mid", "VW-36 setup: mid tier, panned past the panel's right edge");
+    const zpi = zp.ctx.log.filter((r) => r.op === "img");
+    ok(zpi.length === 2 && zpi.every((r) => r.clip.length === 1 && r.clip[0].join(",") === "20,10,40,80"),
+      "VW-36: a run is clipped to the panel's own area under its T, not only to the fixed panel rect");
+    // panned wholly past it: the runs are not drawn there at all
+    zp.inst._test.setView({ x: 200, y: 25, w: 100, h: 50 }); zp.inst._test.evalTier();
+    ok(zp.ctx.log.filter((r) => r.op === "img").length === 0, "VW-36: a panel panned wholly past its own area draws no run");
+    // the mark PNG's <use>: a panel without a clip of its own gets its described rect
+    const mu = zp.el.querySelector("[data-vellum-pan] use.vellumwidget-marks");
+    const mid = mu ? (mu.getAttribute("clip-path") || "").replace(/^url\(#|\)$/g, "") : "";
+    const mr = mid ? zp.el.querySelector("clipPath#" + mid + " rect") : null;
+    ok(mr && mr.getAttribute("x") === "20" && mr.getAttribute("y") === "10" && mr.getAttribute("width") === "160" && mr.getAttribute("height") === "80",
+      "VW-36: the mark image's <use> is clipped to the panel's own rect (in the pan group's scene space)");
+    zp.restore();
+    // detail tier: the run <use> in the pan group gets the same clip, and one
+    // clipPath per panel serves every rebuild
+    const zd = mount({ panels: true, detailMarks: 100, options: { axisZoom: true } });
+    zd.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); zd.inst._test.evalTier();
+    ok(zd.inst._test.markTier() === "detail", "VW-36 setup: detail tier");
+    const du = Array.from(zd.el.querySelectorAll("[data-vellum-pan] use.vellumwidget-detail-run"));
+    const mu2 = zd.el.querySelector("[data-vellum-pan] use.vellumwidget-marks");
+    ok(du.length === 2 && !!mu2.getAttribute("clip-path") && du.every((u) => u.getAttribute("clip-path") === mu2.getAttribute("clip-path")),
+      "VW-36: the detail tier's run <use>s are clipped to the panel's own area too");
+    zd.inst._test.setView({ x: 0, y: 0, w: 200, h: 100 }); zd.inst._test.evalTier();
+    zd.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); zd.inst._test.evalTier();
+    ok(zd.el.querySelectorAll("defs.vellumwidget-clip-defs clipPath").length === 1, "VW-36: the panel's clip is made once per render");
+    zd.restore();
+  }
 
   // VW-33: state on a flagged mark re-renders its run from the run's SVG
   const RUN_SVG = [

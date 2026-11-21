@@ -16,8 +16,53 @@ import { fmtViewBox, parseViewBox } from "../viewbox";
 // Page-unique ids for the split render's mark image (several widgets per page).
 let marksSeq = 0;
 let aboveSeq = 0;
+let clipSeq = 0;
 
-export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | "resize"> {
+export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | "resize" | "panelClip"> {
+  // The clip-path value that confines a copy of a whole-scene image in panel
+  // `name`'s pan group to that panel's own area (VW-36). The pan group is
+  // transformed by the panel's T, and a userSpaceOnUse clip on an element
+  // inside it is read in the pan group's (scene) space, so the panel's own
+  // clip -- on its outer group, in the same scene space -- trims the image
+  // to the panel's marks wherever T takes them. Without it, a pan past the
+  // panel's data would bring a neighbouring panel's part of the image into
+  // view: the outer clip only bounds the panel's fixed rect on screen. A
+  // panel with no clip of its own (vellumplot leaves a boundary-only panel
+  // unclipped) gets its described rect.
+  let clipSvg: SVGSVGElement | null = null;
+  let clipMade: Record<string, string> = {};
+  function panelClip(name: string): string | null {
+    if (!ws.svgEl) return null;
+    if (clipSvg !== ws.svgEl) { clipSvg = ws.svgEl; clipMade = {}; }
+    if (clipMade[name]) return clipMade[name];
+    const pan = ws.svgEl.querySelector('[data-vellum-pan="' + cssEscape(name) + '"]');
+    if (!pan) return null;
+    for (let up = pan.parentNode as Element | null; up && up !== ws.svgEl; up = up.parentNode as Element | null) {
+      if (!up.hasAttribute || !up.hasAttribute("data-vellum-panel")) continue;
+      const c = up.getAttribute("clip-path");
+      if (c) return c;
+      break;
+    }
+    const p = ws.panels.filter(function (q) { return q.name === name; })[0];
+    if (!p || !(p.px1 > p.px0) || !(p.py1 > p.py0)) return null;
+    let defs = ws.svgEl.querySelector("defs.vellumwidget-clip-defs");
+    if (!defs) {
+      defs = document.createElementNS(SVGNS, "defs");
+      defs.setAttribute("class", "vellumwidget-clip-defs");
+      ws.svgEl.insertBefore(defs, ws.svgEl.firstChild);
+    }
+    const id = "vw-own-" + (++clipSeq);
+    const cp = document.createElementNS(SVGNS, "clipPath");
+    cp.setAttribute("id", id);
+    cp.setAttribute("clipPathUnits", "userSpaceOnUse");
+    const rc = document.createElementNS(SVGNS, "rect");
+    rc.setAttribute("x", String(p.px0)); rc.setAttribute("y", String(p.py0));
+    rc.setAttribute("width", String(p.px1 - p.px0)); rc.setAttribute("height", String(p.py1 - p.py0));
+    cp.appendChild(rc);
+    defs.appendChild(cp);
+    return (clipMade[name] = "url(#" + id + ")");
+  }
+
   // Split render (VW-14): place the keyed-mark PNG under the SVG furniture. The
   // image is defined once and drawn by a <use> in each listed panel's pan group,
   // so axis zoom moves it with that panel's T and the panel's clip trims it to
@@ -94,6 +139,8 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       const u = document.createElementNS(SVGNS, "use");
       u.setAttribute("class", "vellumwidget-marks");
       u.setAttribute("href", "#" + id);
+      const cp = panelClip(names[i]);
+      if (cp) u.setAttribute("clip-path", cp);
       pans[i].appendChild(u);
     }
     return "pans";
@@ -415,5 +462,5 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     ws.fx.drawPoints();
   }
 
-  return { renderValue, resize };
+  return { renderValue, resize, panelClip };
 }
