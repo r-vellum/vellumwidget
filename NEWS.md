@@ -1,5 +1,18 @@
 # vellumwidget 0.14.0.9000
 
+* **Raster mode: a blend mode no longer keeps the whole plot on the mark
+  image (VW-32).** One mark under a blend mode (a layer `blend = "multiply"`,
+  `"screen"`, ...) used to send every mark back to the PNG. The PNG also
+  blended only against the other marks, not the panel beneath, so it didn't
+  match the static render. With a vellum that reports each run's blend mode
+  (`run_blend`, feature-detected), a blended run is drawn on a canvas layer
+  of its own with that CSS `mix-blend-mode`, stacked between the marks
+  before and after it. It blends with the furniture and marks beneath it, as
+  SVG mode and `scene_png()` do, in every raster tier (the overview included,
+  where the canvas now stands in for the PNG) and in PNG/SVG exports. In the
+  detail tier the run's `<use>` carries the blend mode. An older vellum, or a
+  run vellum can't composite, keeps the old behaviour.
+
 * **Raster mode: conditions, filters, dimming and legend hide/mute reach the
   marks drawn from images (VW-33).** Since 0.14.0, masked, patterned and
   similar marks and keyed text are drawn from one small PNG per run, with

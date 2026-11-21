@@ -16,6 +16,11 @@
 // (`payload$flagged`, attached by the runtime once loaded: `runImgs`), the
 // list is drawn in full anyway: the exact records by the runtime, each run as
 // its image at the run's place in paint order (the mixed tier).
+//
+// Blend modes (VW-32): a vellum that splits runs at blend roots says per run
+// how its image composites (`run_blend`): "normal", or the CSS blend mode of
+// the one blended group the run holds. Marks under a blend mode (flag 32) are
+// covered only with that table; an unknown or empty mode is not.
 
 import { asColumn } from "./elements";
 import type { ElemMeta } from "./types";
@@ -38,6 +43,7 @@ export interface DLPayload {
   n: number;
   record: { kind: DLColumn; paint: DLColumn; key: DLColumn; flags: DLColumn; clip: DLColumn; panel: DLColumn; group?: DLColumn; run?: DLColumn };
   runs?: number;
+  run_blend?: string[] | string | null;
   point: { cx: DLColumn; cy: DLColumn; r: DLColumn; shape: DLColumn };
   rect: { x: DLColumn; y: DLColumn; w: DLColumn; h: DLColumn };
   path: { xy: DLColumn; run_offset: DLColumn; path_offset: DLColumn; closed: DLColumn; evenodd: DLColumn };
@@ -93,7 +99,8 @@ export const DL_RECT = 1;
 export const DL_PATH = 2;
 export const DL_FLAG_PICK = 16;
 // Inside a group with a blend mode (vellum VW-30): the mark mixes with what is
-// beneath it, so its run raster, rendered on its own, can't stand in for it.
+// beneath it, so its run raster, rendered on its own, stands in for it only
+// when composited with the run's blend mode (`run_blend`, VW-32).
 export const DL_FLAG_BLEND = 32;
 
 // A decoded display list: per record (paint order) its kind, paint, key,
@@ -131,7 +138,19 @@ export interface DisplayList {
   runHref: string[] | null;
   runW: number;
   runH: number;
+  // Per run, how its image composites ("normal" or a CSS blend mode, VW-32),
+  // null from a vellum without the table; and whether any run blends.
+  runBlend: string[] | null;
+  blendRuns: boolean;
 }
+
+// The blend modes a run image can composite with: CSS `mix-blend-mode`
+// keywords, which are also canvas `globalCompositeOperation` values.
+export const BLEND_MODES: Record<string, boolean> = {
+  multiply: true, screen: true, overlay: true, darken: true, lighten: true,
+  "color-dodge": true, "color-burn": true, "hard-light": true, "soft-light": true,
+  difference: true, exclusion: true, hue: true, saturation: true, color: true, luminosity: true
+};
 
 function b64bytes(s: string): Uint8Array {
   const bin = atob(s);
@@ -201,11 +220,23 @@ export function decodeDisplayList(raw: DLPayload | null | undefined): DisplayLis
     group: raw.record.group ? u32(dlColumn(raw.record.group)) : new Uint32Array(n),
     run: raw.record.run ? u32(dlColumn(raw.record.run)) : new Uint32Array(n),
     nRuns: Number(raw.runs) || 0, covered: true, runImgs: null, runHref: null, runW: 0, runH: 0,
+    runBlend: null, blendRuns: false,
     gradients: [], groups: [],
     cpXy: new Float32Array(0), cpRunOff: new Uint32Array(0), cpPathOff: new Uint32Array(0), cpEvenodd: new Uint8Array(0)
   };
   if (dl.group.length !== n) dl.group = new Uint32Array(n);
   if (dl.run.length !== n) { dl.run = new Uint32Array(n); dl.nRuns = 0; }
+  if (raw.run_blend != null && dl.nRuns > 0) {
+    const rb = asColumn(raw.run_blend).map((m) => (m == null ? "" : String(m)));
+    if (rb.length === dl.nRuns) {
+      dl.runBlend = rb;
+      for (let r = 0; r < rb.length; r++) {
+        if (rb[r] === "normal") continue;
+        if (BLEND_MODES[rb[r]]) dl.blendRuns = true;
+        else dl.covered = false; // a run that can't be composited from its image
+      }
+    }
+  }
   // keys: a character vector, or an integer column.
   const k = raw.keys as unknown;
   if (k && typeof k === "object" && !Array.isArray(k) && "type" in (k as object)) {
@@ -270,7 +301,9 @@ export function decodeDisplayList(raw: DLPayload | null | undefined): DisplayLis
     const pg = dl.paints[dl.paint[i]];
     if ((pg && pg.grad < 0) || dl.group[i] > dl.groups.length) { dl.flags[i] |= 1; dl.exact = false; }
     if ((dl.flags[i] & ~DL_FLAG_PICK) && !(dl.run[i] > 0 && dl.run[i] <= dl.nRuns)) dl.covered = false;
-    if (dl.flags[i] & DL_FLAG_BLEND) dl.covered = false;
+    // Under a blend mode: only with a vellum that composites runs by blend
+    // root (VW-32); the record's run then carries its mode.
+    if ((dl.flags[i] & DL_FLAG_BLEND) && !dl.runBlend) dl.covered = false;
     const kd = kind[i];
     if (kd === DL_POINT) {
       const j = ip++, r = dl.r[j];

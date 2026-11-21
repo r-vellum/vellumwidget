@@ -1088,15 +1088,34 @@ test_that("the flagged layer falls back to the PNG path when it can't be used (V
   dl$runs <- .MAX_FLAGGED_RUNS + 1L
   expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
   # a blend-mode mark (flag 32) can't be composited from its own raster
+  # without the run's blend mode (an older vellum), or with one the runtime
+  # doesn't know (VW-32)
   dl$runs <- 1L
   dl$record$flags <- list(type = "u8", n = 1L, const = 36)
   expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
+  dl$run_blend <- ""
+  expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
+  dl$run_blend <- "plus-lighter"
+  expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
+  expect_true(.run_blend_ok(modifyList(dl, list(run_blend = "multiply")), 1L))
+  expect_true(.run_blend_ok(modifyList(dl, list(run_blend = NULL, record = list(flags = list(type = "u8", n = 1L, const = 4)))), 1L))
+})
+
+test_that("a blend-mode mark ships its run with the run's blend mode (VW-32)", {
+  skip_if_not(.split_render_supported() && .flagged_layer_supported(), "vellum without layer = 'keyed_flagged'")
   blend <- vellum::vl_scene(2, 2, dpi = 72) |>
     vellum::draw(vellum::points_grob(0.3, 0.5, key = "a")) |>
     vellum::push(vellum::vl_viewport(blend = "multiply")) |>
     vellum::draw(vellum::circle_grob(0.5, 0.5, r = 0.2, key = "m")) |>
     vellum::pop()
-  expect_null(as_widget(blend, render = render_options(mode = "raster"))$x$flagged)
+  w <- as_widget(blend, render = render_options(mode = "raster"))
+  if (is.null(w$x$displayList$run_blend)) {
+    # an older vellum: the PNG path, as before
+    expect_null(w$x$flagged)
+  } else {
+    expect_identical(w$x$displayList$run_blend, "multiply")
+    expect_length(w$x$flagged$runs, 1L)
+  }
 })
 
 test_that("the flagged runs' SVGs are dropped past the size cap, with a message (VW-33)", {

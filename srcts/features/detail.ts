@@ -373,6 +373,11 @@ export function detailFeature(
       const u = document.createElementNS(SVGNS, "use");
       u.setAttribute("class", "vellumwidget-detail-run");
       u.setAttribute("href", "#" + runIds[r]);
+      // A run with a blend mode (VW-32) blends with what the panel group
+      // (isolated by its clip) already holds: furniture and earlier nodes,
+      // as the blended group does in SVG mode.
+      const mode = dl.runBlend ? dl.runBlend[r - 1] : "normal";
+      if (mode && mode !== "normal") (u as unknown as SVGElement).style.setProperty("mix-blend-mode", mode);
       if (!panHost[p]) {
         const cid = rootClip(r);
         if (cid) u.setAttribute("clip-path", "url(#" + cid + ")");
@@ -427,7 +432,7 @@ export function detailFeature(
     ws.calib = null;
     ws.hoverSig = "";
     // The nodes replace the image and the canvas.
-    if (ws.canvasEl) ws.canvasEl.style.display = "none";
+    ws.fx.hideCanvas(); // and its blend layers (VW-32)
     ws.fx.showMarksLayer(false);
     ws.fx.clearGroup(ws.selGroup);
     ws.fx.clearGroup(ws.hovGroup);
