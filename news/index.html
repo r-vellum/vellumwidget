@@ -13,7 +13,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.14.1</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.14.1.9000</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -48,6 +48,9 @@
       <small>Source: <a href="https://github.com/r-vellum/vellumwidget/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="0.14.1.9000" id="vellumwidget-01419000">vellumwidget 0.14.1.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-01419000"></a></h2>
+</div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.14.1" id="vellumwidget-0141">vellumwidget 0.14.1<a class="anchor" aria-label="anchor" href="#vellumwidget-0141"></a></h2>
 <ul><li><p><strong>Raster mode: a blend mode no longer keeps the whole plot on the mark image (VW-32).</strong> One mark under a blend mode (a layer <code>blend = "multiply"</code>, <code>"screen"</code>, …) used to send every mark back to the PNG. The PNG also blended only against the other marks, not the panel beneath, so it didn’t match the static render. With a vellum that reports each run’s blend mode (<code>run_blend</code>, feature-detected), a blended run is drawn on a canvas layer of its own with that CSS <code>mix-blend-mode</code>, stacked between the marks before and after it. It blends with the furniture and marks beneath it, as SVG mode and <code>scene_png()</code> do, in every raster tier (the overview included, where the canvas now stands in for the PNG) and in PNG/SVG exports. In the detail tier the run’s <code>&lt;use&gt;</code> carries the blend mode. An older vellum, or a run vellum can’t composite, keeps the old behaviour.</p></li>
