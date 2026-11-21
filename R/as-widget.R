@@ -350,6 +350,8 @@ as_widget <- function(
       raster = use_raster,
       # Raster detail tier threshold (VW-16): SVG nodes below this many visible marks.
       detailMarks = render$detail_marks,
+      # The most a view zooms in, per axis (VW-44).
+      maxZoom = render$max_zoom %||% 100,
       # Hover tooltip, highlight, click-select, brush, lasso, pan/zoom, and
       # axis-aware zoom are on by default (interactive-by-default): the runtime
       # supplies the defaults, so they no longer need per-widget flags. Per-mark

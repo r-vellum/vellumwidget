@@ -6,7 +6,7 @@ import { SVGNS } from "./constants";
 import { polyBounds } from "../spatial";
 import type { WidgetFns, WidgetState } from "../state";
 import type { Bbox } from "../types";
-import { zoomViewBox } from "../viewbox";
+import { zoomViewBoxCapped } from "../viewbox";
 
 export function pointerFeature(
   ws: WidgetState
@@ -141,9 +141,11 @@ export function pointerFeature(
       const d = Math.hypot(pts[0].cx - pts[1].cx, pts[0].cy - pts[1].cy);
       if (d > 0) {
         const u = ws.fx.toAnchor((pts[0].cx + pts[1].cx) / 2, (pts[0].cy + pts[1].cy) / 2);
-        ws.vb = zoomViewBox(ws.vb, d / ws.pinchDist, u.x, u.y);
-        ws.fx.applyViewBox();
+        // Capped (VW-44): spreading the fingers further at the limit holds the
+        // view still; the distance still updates, so pinching in works at once.
+        const next = zoomViewBoxCapped(ws.vb, ws.vb0, d / ws.pinchDist, u.x, u.y, ws.opts.maxZoom);
         ws.pinchDist = d;
+        if (next !== ws.vb) { ws.vb = next; ws.fx.applyViewBox(); }
       }
       return;
     }
@@ -327,7 +329,11 @@ export function pointerFeature(
     ws.fx.focusCellAt(ev.clientX, ev.clientY); // per-cell zoom: the wheel's cell (VW-18)
     const u = ws.fx.toAnchor(ev.clientX, ev.clientY);
     const factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
-    ws.vb = zoomViewBox(ws.vb, factor, u.x, u.y);
+    // Capped (VW-44): the last step lands on the limit with the point under the
+    // cursor fixed; past it the wheel is a no-op, so the view doesn't creep.
+    const next = zoomViewBoxCapped(ws.vb, ws.vb0, factor, u.x, u.y, ws.opts.maxZoom);
+    if (next === ws.vb) return;
+    ws.vb = next;
     ws.fx.applyViewBox();
   }
 
@@ -388,8 +394,13 @@ export function pointerFeature(
       case "ArrowRight": ws.vb.x += dx; break;
       case "ArrowUp": ws.vb.y -= dy; break;
       case "ArrowDown": ws.vb.y += dy; break;
-      case "+": case "=": ws.vb = zoomViewBox(ws.vb, 1.2, cx, cy); break;
-      case "-": case "_": ws.vb = zoomViewBox(ws.vb, 1 / 1.2, cx, cy); break;
+      case "+": case "=": {
+        const next = zoomViewBoxCapped(ws.vb, ws.vb0, 1.2, cx, cy, ws.opts.maxZoom);
+        if (next === ws.vb) { ev.preventDefault(); return; } // at the limit (VW-44)
+        ws.vb = next;
+        break;
+      }
+      case "-": case "_": ws.vb = zoomViewBoxCapped(ws.vb, ws.vb0, 1 / 1.2, cx, cy, ws.opts.maxZoom); break;
       default: handled = false;
     }
     if (handled) {

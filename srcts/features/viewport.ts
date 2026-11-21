@@ -4,7 +4,7 @@ import { busPublishView } from "../linking";
 import type { ViewFraction } from "../linking";
 import type { WidgetFns, WidgetState } from "../state";
 import type { Bbox } from "../types";
-import { fmtViewBox, isZoomedIn, panToView } from "../viewbox";
+import { atMaxZoom, clampViewBox, fmtViewBox, isZoomedIn, panToView } from "../viewbox";
 
 export function viewportFeature(
   ws: WidgetState
@@ -87,11 +87,14 @@ export function viewportFeature(
   // Guarded so re-emitting (Shiny) is fine but we do not re-broadcast to the bus.
   function applyLinkedView(v: ViewFraction): void {
     if (!ws.vb0) return;
-    const next = {
+    let next = {
       x: ws.vb0.x + v.x * ws.vb0.w, y: ws.vb0.y + v.y * ws.vb0.h,
       w: v.w * ws.vb0.w, h: v.h * ws.vb0.h
     };
     if (!(next.w > 0) || !(next.h > 0)) return;
+    // A peer may allow more zoom than we do: hold its view to our cap (VW-44),
+    // before the no-op test so a repeat of the same view stays a no-op.
+    next = clampViewBox(next, ws.vb0, ws.opts.maxZoom);
     // No-op if unchanged (avoids redundant work and ping-pong on equal views).
     if (ws.vb && Math.abs(next.x - ws.vb.x) < 1e-6 && Math.abs(next.y - ws.vb.y) < 1e-6 &&
         Math.abs(next.w - ws.vb.w) < 1e-6 && Math.abs(next.h - ws.vb.h) < 1e-6) return;
@@ -124,6 +127,12 @@ export function viewportFeature(
     // x-only range zoom: keep the full y-extent on screen (never crop the y-axis),
     // so every zoom/pan path (nav, wheel, pinch, keyboard, linked) is 1-D in x.
     if (ws.xZoom && ws.vb && ws.vb0) { ws.vb.y = ws.vb0.y; ws.vb.h = ws.vb0.h; }
+    // The maximum zoom (VW-44), whichever path set the view: the wheel, pinch
+    // and keys already stop at it about their anchor, so this only widens a
+    // view set whole (box zoom, zoom-to, setView, a stored cell view) about its
+    // centre. Axis-aware zoom (T) and viewBox zoom both derive from `vb`.
+    if (ws.vb) ws.vb = clampViewBox(ws.vb, ws.vb0, ws.opts.maxZoom);
+    if (ws.vb) ws.el.classList.toggle("vellumwidget-zoom-max", atMaxZoom(ws.vb, ws.vb0, ws.opts.maxZoom));
     if (ws.axisZoomActive && ws.panGroup && ws.vb && ws.vb0) {
       // Axis-aware zoom: hold the base frame at vb0 and scale only the data region
       // by T (so axes/titles/legend stay put), then re-tick for the visible range.
@@ -187,7 +196,9 @@ export function viewportFeature(
     const h = Math.max(rect.y1 - rect.y0, 1e-6);
     const px = w * pad;
     const py = h * pad;
-    ws.vb = { x: rect.x0 - px, y: rect.y0 - py, w: w + 2 * px, h: h + 2 * py };
+    // A tiny region (one point, a sliver of a brush) frames at most the maximum
+    // zoom, centred on it (VW-44).
+    ws.vb = clampViewBox({ x: rect.x0 - px, y: rect.y0 - py, w: w + 2 * px, h: h + 2 * py }, ws.vb0, ws.opts.maxZoom);
     applyViewBox();
   }
 

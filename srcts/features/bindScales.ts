@@ -111,7 +111,7 @@ export function bindScalesFeature(
   // bound axes replaced by the selection's range. `t` itself when unbound.
   function boundT(a: AzPanel, t: PanTransform): PanTransform {
     const b = ws.scaleBinds[a.p.name];
-    return b ? boundPan(a.p, t, b) : t;
+    return b ? boundPan(a.p, t, b, ws.opts.maxZoom) : t;
   }
 
   // Recompute every bound panel's domain from the current interval selections

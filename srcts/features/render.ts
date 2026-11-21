@@ -5,7 +5,7 @@ import { asColumn, normalizeElements, normalizePanels } from "../elements";
 import { attachRuns, decodeDisplayList, fillBboxes } from "../dlist";
 import { isScalesBound } from "./bindScales";
 import { runSvgsOf } from "./runStyle";
-import { DIM_OVERLAY_MIN, SVGNS } from "./constants";
+import { DEFAULT_MAX_ZOOM, DIM_OVERLAY_MIN, SVGNS } from "./constants";
 import { cssEscape } from "../css";
 import { isDarkBg, sceneBackgrounds } from "../ink";
 import { registerProxyHandler } from "../shiny";
@@ -261,7 +261,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       // Interactive-by-default: hover/select/brush/lasso/zoom and axis-aware
       // zoom are on unless the payload overrides them. (as_widget() no longer
       // exposes these as flags; the defaults live here.)
-      { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false, navigator: false, axisZoom: true, zoomMarks: "fixed" },
+      { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false, navigator: false, axisZoom: true, zoomMarks: "fixed", maxZoom: DEFAULT_MAX_ZOOM },
       x.options || {}
     );
     ws.elements = normalizeElements(x.elements);

@@ -20,7 +20,8 @@ render_options(
   text = c("native", "outline"),
   max_marks = 500000L,
   detail_marks = 3000L,
-  precision = c("compact", "f32")
+  precision = c("compact", "f32"),
+  max_zoom = 100
 )
 }
 \arguments{
@@ -117,6 +118,15 @@ plot up to 655 px across, 24 above, instead of a 32-bit float. That
 halves the coordinates in the payload (a 200k-point scatter: 2.7 to
 1.7 MB) and keeps the error under half a pixel up to 100x zoom. \code{"f32"}
 ships 32-bit floats, as an older vellum always does.}
+
+\item{max_zoom}{The most the view zooms in, per axis, over the full view
+(default \code{100}), in SVG and raster mode alike: the wheel, pinch, keys,
+box zoom and zoom-to-selection, \code{\link[=vw_zoom]{vw_zoom()}}, linked views (\verb{group =}) and
+\code{vellumplot::bind_scale()} all stop there. At 100x the 0.01 px grid vellum
+writes SVG coordinates on (and the 0.005 px error of \code{precision = "compact"}) is still within half a screen pixel, so the marks stay on
+their gridlines; past it they drift (a few pixels at 1000x) and show only
+the rounding. A number from 1 (no zoom in) to \code{10000}: past about 16,000x
+a 32-bit float can no longer place a mark at all.}
 }
 \value{
 An object of class \code{vellumwidget_tooltip_options},

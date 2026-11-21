@@ -717,3 +717,32 @@ test_that("VW-37: a state on one flagged label leaves the other labels' pixels a
   # and the hidden label is gone: its dark pixels changed
   expect_gt(sum(apply(abs(a - f), c(1, 2), max) > 0.3), 100)
 })
+
+test_that("VW-44: wheeling past max_zoom stops at it, with the cursor's point held still", {
+  skip_browser()
+  set.seed(4)
+  df <- data.frame(x = runif(200), y = runif(200), id = paste0("p", 1:200))
+  p <- vellumplot::vplot(df) |> vellumplot::mark_point(x = x, y = y, data_id = id)
+  for (mode in c("svg", "raster")) {
+    w <- as_widget(p, elementId = "w1", render = render_options(mode = mode, max_zoom = 20))
+    b <- open_widget(w)
+    ev <- function(js) b$Runtime$evaluate(js)$result$value
+    # whole client px: Chrome delivers a mouse event's clientX/Y as integers
+    r <- round(panel_rect(b))
+    r[3:4] <- r[3:4] - r[3:4] %% 10
+    view <- function() ev("JSON.stringify(HTMLWidgets.find('#w1')._test.getView())")
+    # the scene point under the cursor, before and after
+    at <- sprintf("JSON.stringify(HTMLWidgets.find('#w1')._test.toView(%d, %d))", as.integer(r[1] + r[3] * 0.4), as.integer(r[2] + r[4] * 0.5))
+    v0 <- jsonlite::fromJSON(view())
+    p0 <- jsonlite::fromJSON(ev(at))
+    wheel_in(b, r, n = 25) # 1.2^25 = 95x requested
+    v1 <- jsonlite::fromJSON(view())
+    expect_equal(v0$w / v1$w, 20, tolerance = 1e-9, label = paste(mode, "zoom"))
+    expect_true(ev("document.getElementById('w1').classList.contains('vellumwidget-zoom-max')"))
+    p1 <- jsonlite::fromJSON(ev(at))
+    expect_equal(c(p1$x, p1$y), c(p0$x, p0$y), tolerance = 1e-6, label = paste(mode, "anchor"))
+    wheel_in(b, r, n = 5)
+    v2 <- jsonlite::fromJSON(view())
+    expect_identical(v2, v1, label = paste(mode, "no jitter"))
+  }
+})

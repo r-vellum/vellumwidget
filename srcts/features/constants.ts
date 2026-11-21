@@ -20,6 +20,12 @@ export const PICK_CANDIDATES = 256;
 // for the zoom to settle (SETTLE_MS without another view change).
 export const LIVE_DRAW_MAX = 50000;
 export const SETTLE_MS = 120;
+// The default maximum zoom (VW-44, `render_options(max_zoom =)`): at 100x one
+// step of vellum's 0.01 px SVG coordinate grid, and the display list's compact
+// coordinates' 0.005 px error bound doubled, is one screen pixel, so a mark is
+// still drawn within half a pixel of where it belongs. Past that, zooming only
+// magnifies rounding.
+export const DEFAULT_MAX_ZOOM = 100;
 // --- raster-mode feedback (rings drawn on the overlay, index-driven) ---
 export const SVGNS = "http://www.w3.org/2000/svg";
 // Unified tooltip: one box listing every mark in the hovered column, one row

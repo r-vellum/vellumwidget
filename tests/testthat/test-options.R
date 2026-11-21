@@ -25,6 +25,13 @@ test_that("option helpers return classed objects with the defaults", {
   expect_identical(r$precision, "compact")
   expect_identical(render_options(precision = "f32")$precision, "f32")
   expect_error(render_options(precision = "u16"), "precision")
+  expect_identical(r$max_zoom, 100)
+  expect_identical(render_options(max_zoom = 1000)$max_zoom, 1000)
+  expect_identical(render_options(max_zoom = 1)$max_zoom, 1)
+  expect_error(render_options(max_zoom = 0.5), "at least 1")
+  expect_error(render_options(max_zoom = 20000), "at most 10000")
+  expect_error(render_options(max_zoom = Inf), "finite")
+  expect_error(render_options(max_zoom = NA), "max_zoom")
 })
 
 test_that("option helpers print", {

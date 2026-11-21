@@ -154,6 +154,15 @@ navigator_options <- function(height = 56) {
 #'   halves the coordinates in the payload (a 200k-point scatter: 2.7 to
 #'   1.7 MB) and keeps the error under half a pixel up to 100x zoom. `"f32"`
 #'   ships 32-bit floats, as an older vellum always does.
+#' @param max_zoom The most the view zooms in, per axis, over the full view
+#'   (default `100`), in SVG and raster mode alike: the wheel, pinch, keys,
+#'   box zoom and zoom-to-selection, [vw_zoom()], linked views (`group =`) and
+#'   `vellumplot::bind_scale()` all stop there. At 100x the 0.01 px grid vellum
+#'   writes SVG coordinates on (and the 0.005 px error of `precision =
+#'   "compact"`) is still within half a screen pixel, so the marks stay on
+#'   their gridlines; past it they drift (a few pixels at 1000x) and show only
+#'   the rounding. A number from 1 (no zoom in) to `10000`: past about 16,000x
+#'   a 32-bit float can no longer place a mark at all.
 #' @param text How text is written into the SVG, passed to [vellum::scene_svg()]:
 #'   `"native"` (default) emits selectable `<text>` referencing system fonts ---
 #'   smaller when the page has the font, post-processable, and better for
@@ -169,7 +178,8 @@ render_options <- function(
   text = c("native", "outline"),
   max_marks = 500000L,
   detail_marks = 3000L,
-  precision = c("compact", "f32")
+  precision = c("compact", "f32"),
+  max_zoom = 100
 ) {
   text_set <- !missing(text)
   structure(
@@ -184,6 +194,7 @@ render_options <- function(
       max_marks = .check_number(max_marks, "max_marks", min = 0),
       detail_marks = .check_number(detail_marks, "detail_marks", min = 0),
       precision = .check_choice(precision, c("compact", "f32"), "precision"),
+      max_zoom = .check_max_zoom(max_zoom),
       text_set = text_set
     ),
     class = "vellumwidget_render_options"
@@ -230,6 +241,25 @@ print.vellumwidget_render_options <- function(x, ...) {
     cat("  ", nm, ": ", shown, "\n", sep = "")
   }
   invisible(x)
+}
+
+# `render_options(max_zoom =)` (VW-44): a finite number in [1, 10000]. The
+# upper bound keeps the view inside what a 32-bit float (the canvas, the
+# display list) can resolve: past ~16,000x a scene px is below its precision.
+.MAX_ZOOM_LIMIT <- 10000
+
+.check_max_zoom <- function(x, call = parent.frame()) {
+  x <- .check_number(x, "max_zoom", min = 1, call = call)
+  if (x > .MAX_ZOOM_LIMIT) {
+    cli::cli_abort(
+      c(
+        "{.arg max_zoom} must be at most {(.MAX_ZOOM_LIMIT)}, not {x}.",
+        i = "Past about 16,000x a 32-bit float can no longer place a mark."
+      ),
+      call = call
+    )
+  }
+  x
 }
 
 # Check that `x` is an options object of `class` (from helper `helper`), or
