@@ -13,7 +13,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.17.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.18.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -49,8 +49,9 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="0.17.0.9000" id="vellumwidget-01709000">vellumwidget 0.17.0.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-01709000"></a></h2>
-<ul><li><p><strong>Selecting a mark from the keyboard keeps its focus (VW-57).</strong> Raising the selection above its layer (VW-53) moves the selected nodes in the DOM, and the browser drops keyboard focus from a moved node: pressing Enter on a focused mark sent focus to the page body, so the arrow keys stopped walking the marks. The raise now puts focus back on the mark, keeping the focus ring, the roving tabindex and the “selected” announcement. Tab order was not affected: only the roving mark is tabbable and the arrow keys walk the marks in data order, not DOM order.</p></li>
+<h2 class="pkg-version" data-toc-text="0.18.0" id="vellumwidget-0180">vellumwidget 0.18.0<a class="anchor" aria-label="anchor" href="#vellumwidget-0180"></a></h2>
+<ul><li><p>Requires vellum (&gt;= 0.14.0) and vellumplot (&gt;= 0.19.0).</p></li>
+<li><p><strong>Selecting a mark from the keyboard keeps its focus (VW-57).</strong> Raising the selection above its layer (VW-53) moves the selected nodes in the DOM, and the browser drops keyboard focus from a moved node: pressing Enter on a focused mark sent focus to the page body, so the arrow keys stopped walking the marks. The raise now puts focus back on the mark, keeping the focus ring, the roving tabindex and the “selected” announcement. Tab order was not affected: only the roving mark is tabbable and the arrow keys walk the marks in data order, not DOM order.</p></li>
 <li><p><strong>Long re-ticked y labels trim their precision when the title can’t move further (VW-59).</strong> Under axis zoom the y title moves out as the re-ticked labels grow (VW-51), but stops at the canvas edge, so long labels could still crowd it. When that shift is capped, a linear y axis is now re-ticked with one decimal fewer at a time (a coarser step, so the labels stay exact and distinct) until they fit or fewer than two ticks would be in view. At the deepest zooms, where no coarser step leaves two ticks, the labels keep their precision.</p></li>
 <li><p><strong>The fallback dots above <code>max_marks</code> have the marks’ shapes (VW-58).</strong> In raster mode above <code>max_marks</code> (no display list), zooming in drew every mark as a round dot, even squares and triangles. R now ships each element’s point marker next to its colour (<code>markColors$shape</code>, bit-packed, only when some point is not a circle) and the dots are drawn as their own marker, at the same radius: squares, triangles, diamonds, stars filled, plus and cross stroked.</p></li>
 <li><p><strong>A per-row alpha <code>if_false</code> is applied (VW-56).</strong> With <code>alpha = condition(sel, 1, af)</code>, where <code>af</code> is a column, the per-row opacities were dropped on the R side (only colours were kept), so non-members fell back to the theme dim. They now ship as one opacity per element and each non-member takes its own, in SVG mode (per node) and in every raster tier; a value outside [0, 1] falls back to the constant <code>if_false</code> or the theme dim. Per-row values for other aesthetics (size, shape) are still not shipped.</p></li>
