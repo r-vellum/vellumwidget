@@ -1,7 +1,7 @@
 // Shared type declarations for the vellumwidget runtime: the payload shapes the R
 // side ships and the small structural types the helpers and the factory share.
 
-import type { DLPayload } from "./dlist";
+import type { DLColumn, DLPayload } from "./dlist";
 import type { GeometryPayload } from "./geometry";
 
 // The subset of the object a widget's factory returns that the proxy needs: the
@@ -288,11 +288,20 @@ export interface Payload {
   colorbar?: ColorbarInfo; // interactive continuous-colour colorbar (optional)
   marks?: MarksLayer; // split-render mark layer (raster mode, VW-14)
   displayList?: DLPayload; // marks-only display list (raster mode, VW-15)
+  markColors?: MarkColors | null; // per-element dot colours above max_marks (raster mode, VW-50)
   above?: string | null; // furniture painted after the marks, as SVG (raster mode, VW-21)
   flagged?: FlaggedLayer | null; // per-run rasters of the flagged keyed marks (raster mode, VW-30)
   interactions?: InteractionSpec; // declarative interactivity (from the plot spec)
   provenance?: Provenance; // click-to-source rows per element (from inspect_source())
   options: Options;
+}
+
+// Above `max_marks` (no display list), each element's mark colour for the
+// fallback dots (VW-50): `#rrggbbaa` palette strings and, per element row, a
+// 1-based palette index (0: unknown, sample the mark image's pixel instead).
+export interface MarkColors {
+  pal: string[] | string;
+  idx: DLColumn;
 }
 
 // The split render's mark layer (raster mode with vellum's `layer =` split): a

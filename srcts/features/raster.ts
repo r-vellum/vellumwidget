@@ -2,11 +2,13 @@
 // stand in for per-node selection / hover classes.
 
 import { LIVE_DRAW_MAX, OVERLAY_MARK_CAP, RUN_BOX_PAD, SETTLE_MS, SVGNS } from "./constants";
+import { asColumn, dlColumn } from "../elements";
 import { hasBbox, isRoundMark } from "../geometry";
 import { DL_POINT, DL_RECT, fillGradient, traceClipPath, tracePoint, traceShape } from "../dlist";
 import { MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
 import type { Affine, DisplayList } from "../dlist";
 import type { WidgetFns, WidgetState } from "../state";
+import type { MarkColors } from "../types";
 import type { RunPatch, RunSplit } from "./runStyle";
 import { isZoomedIn, userToCanvas } from "../viewbox";
 
@@ -46,9 +48,11 @@ export function rasterFeature(
 
   // Sample each keyed element's colour from the rendered base raster (its centre
   // pixel) and record centre + radius (from the index bbox). Done once per render,
-  // asynchronously after the image decodes. No colour data crosses the wire — it is
-  // read back from the pixels vellum already drew, so the crisp layer matches them.
-  function sampleBaseRaster(): void {
+  // asynchronously after the image decodes. Under heavy overplotting the centre
+  // pixel belongs to whichever mark was painted last there, so above `max_marks`
+  // R ships each element's own colour (`colors`, VW-50) and the pixel is read
+  // only for an element without one.
+  function sampleBaseRaster(colors?: MarkColors | null): void {
     clearPointData();
     // The display list (VW-15) carries every covered mark's exact geometry and
     // paint, so there is nothing to read back from the pixels.
@@ -81,6 +85,7 @@ export function rasterFeature(
       }
       const cx: number[] = [], cy: number[] = [], rad: number[] = [], rgb: number[] = [];
       let allRound = true;
+      const known = markColorTable(colors, els.length);
       for (let i = 0; i < els.length; i++) {
         const e = els[i];
         if (!hasBbox(e)) continue;
@@ -93,7 +98,9 @@ export function rasterFeature(
         cx.push(mx);
         cy.push(my);
         rad.push(Math.max(e.x1 - e.x0, e.y1 - e.y0) / 2 + 0.5);
-        rgb.push(data[o], data[o + 1], data[o + 2]);
+        const c = known ? known.pal[known.idx[i]] : null;
+        if (c) rgb.push(c[0], c[1], c[2], c[3]);
+        else rgb.push(data[o], data[o + 1], data[o + 2], 255);
       }
       ws.ptN = cx.length;
       ws.ptCx = Float64Array.from(cx);
@@ -105,6 +112,31 @@ export function rasterFeature(
     };
     img.onerror = function () {};
     img.src = href;
+  }
+
+  // The fallback dot colours (VW-50) as RGBA quads per palette entry (index 0,
+  // and any entry that isn't a hex colour, is null: sample the pixel) and the
+  // per-element index; null when R sent none or it doesn't fit the elements.
+  function markColorTable(colors: MarkColors | null | undefined, n: number): { pal: (number[] | null)[]; idx: ArrayLike<number> } | null {
+    if (!colors || !colors.idx) return null;
+    const idx = dlColumn(colors.idx);
+    if (idx.length !== n) return null;
+    const pal: (number[] | null)[] = [null];
+    const src = asColumn(colors.pal);
+    for (let k = 0; k < src.length; k++) pal.push(hexRGBA(String(src[k])));
+    return { pal: pal, idx: idx };
+  }
+
+  // "#rgb", "#rrggbb" or "#rrggbbaa" -> [r, g, b, a] (0-255), else null.
+  function hexRGBA(s: string): number[] | null {
+    const h = /^#([0-9a-f]+)$/i.exec(s.trim());
+    if (!h) return null;
+    let v = h[1];
+    if (v.length === 3) v = v[0] + v[0] + v[1] + v[1] + v[2] + v[2];
+    if (v.length === 6) v += "ff";
+    if (v.length !== 8) return null;
+    const out = [0, 2, 4, 6].map(function (k) { return parseInt(v.slice(k, k + 2), 16); });
+    return out.every(isFinite) ? out : null;
   }
 
   // Redraw the crisp point layer for the current view. Engages only when zoomed in
@@ -150,7 +182,10 @@ export function rasterFeature(
     const dot = function (px: number, py: number, r: number, i: number): void {
       ctx.beginPath();
       ctx.arc(px, py, Math.max(0.75, r), 0, 6.283185307179586);
-      ctx.fillStyle = "rgb(" + rgb[i * 3] + "," + rgb[i * 3 + 1] + "," + rgb[i * 3 + 2] + ")";
+      const a = rgb[i * 4 + 3];
+      ctx.fillStyle = a === 255
+        ? "rgb(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + ")"
+        : "rgba(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + "," + (a / 255) + ")";
       ctx.fill();
     };
     if (az) {
