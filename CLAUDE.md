@@ -180,19 +180,26 @@ extra images (`exportMarksImage().layers`) stacked with
 `mix-blend-mode`. The canvas also replaces the mark PNG at the overview
 while blend runs exist. Blend modes (flag 32), a flagged record outside
 every run, more than `.MAX_FLAGGED_RUNS` runs or an older vellum keep
-the old behaviour. Exports (`exportSvgString()`) redraw an exact display
-list at export resolution with that state (`exportMarksImage()`,
-raster.ts `paintList`, the painter shared with the canvas) instead of
-embedding the mark PNG (VW-25). With a vellum that has display list
-version 2 (`.display_list_v2_supported()`, VW-23) the list also carries
-gradient fills, clip paths and opacity groups: `paintList` draws a
-group’s records into a pooled offscreen layer and composites it at the
-group’s alpha; the detail tier builds `<defs>` gradients, chained
-`<clipPath>`s and `<g opacity>` wrappers. The decoder (`srcts/dlist.ts`)
-accepts versions 1 and 2 and feature-detects the tables. With a vellum
-whose `scene_display_list()` takes `keys =` (VR-22,
-`.display_list_keys_supported()`), R passes the element table’s key
-column and the list’s records index it (`keys_given`; the list’s own
+the old behaviour. Selected marks draw above their layer’s non-members
+(VW-53, `features/raise.ts`): in SVG mode and the detail tier member
+nodes move to the end of their run of keyed siblings (or of the layer’s
+last plain series group, `layer-<n>-g*`), with placeholder comments to
+restore them; the canvas paints `raiseOrder()` (`srcts/raise.ts`:
+members last within a stretch of same panel/group/kind unflagged
+records), cached by `ws.selRev`, and stands in for the mark PNG at the
+overview while it reorders anything. Exports (`exportSvgString()`)
+redraw an exact display list at export resolution with that state
+(`exportMarksImage()`, raster.ts `paintList`, the painter shared with
+the canvas) instead of embedding the mark PNG (VW-25). With a vellum
+that has display list version 2 (`.display_list_v2_supported()`, VW-23)
+the list also carries gradient fills, clip paths and opacity groups:
+`paintList` draws a group’s records into a pooled offscreen layer and
+composites it at the group’s alpha; the detail tier builds `<defs>`
+gradients, chained `<clipPath>`s and `<g opacity>` wrappers. The decoder
+(`srcts/dlist.ts`) accepts versions 1 and 2 and feature-detects the
+tables. With a vellum whose `scene_display_list()` takes `keys =`
+(VR-22, `.display_list_keys_supported()`), R passes the element table’s
+key column and the list’s records index it (`keys_given`; the list’s own
 `keys` holds only keys the table lacks): `dl.keys` is then the element
 keys followed by those extras, so a key id (`ws.msFlags` etc.) is an
 element position, and a repeated key maps to its first position. With a
