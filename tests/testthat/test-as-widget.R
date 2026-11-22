@@ -1034,6 +1034,82 @@ test_that("above max_marks each element ships its mark colour for the dots (VW-5
   expect_null(as_widget(p, render = render_options(mode = "svg"))$x$markColors)
 })
 
+test_that("raster geometry leaves the listed keys to the display list (VW-49)", {
+  skip_if_not(.split_render_supported(), "vellum without the split render")
+  skip_if_not(.display_list_keys_supported(), "vellum without display-list keys")
+  set.seed(49)
+  d <- data.frame(
+    t = rep(1:40, 3),
+    v = cumsum(rnorm(120)),
+    k = rep(c("p", "q", "r"), each = 40)
+  )
+  p <- vellumplot::vplot(d) |>
+    vellumplot::mark_line(x = t, y = v, color = k, data_id = k)
+  svg_geom <- as_widget(p, render = render_options(mode = "svg"))$x$geometry
+  w <- as_widget(p, render = render_options(mode = "raster"))
+  g <- w$x$geometry
+  dl <- w$x$displayList
+  expect_identical(g$dl, 1L)
+  # the three series are drawn exactly by the list: their vertices are gone,
+  # the legend's keyed swatch segments (not in the list) stay
+  expect_false(any(c("p", "q", "r") %in% g$key))
+  expect_true(all(grepl("^legend:", g$key)))
+  expect_length(g$x, sum(g$n))
+  # SVG mode ships every element, as before
+  expect_null(svg_geom$dl)
+  expect_true(all(c("p", "q", "r") %in% svg_geom$key))
+  # R twin of the runtime's `listGeometry()`: each dropped element's vertices
+  # are its list path's, to within the list's coordinate precision
+  keys <- .decode_keys_r(w$x$elements$key)
+  rk <- .dl_key_table(dl, keys)[.dl_col(dl$record$key) + 1L]
+  kind <- .dl_col(dl$record$kind)
+  xy <- .dl_col(dl$path$xy)
+  ro <- .dl_col(dl$path$run_offset)
+  po <- .dl_col(dl$path$path_offset)
+  j <- cumsum(kind == 2L)
+  st <- cumsum(c(0L, svg_geom$n))
+  for (key in c("p", "q", "r")) {
+    i <- which(kind == 2L & rk == key)
+    expect_length(i, 1L)
+    v <- (ro[po[j[i]] + 1L] + 1L):ro[po[j[i] + 1L] + 1L]
+    e <- match(key, svg_geom$key)
+    gx <- svg_geom$x[(st[e] + 1L):st[e + 1L]]
+    gy <- svg_geom$y[(st[e] + 1L):st[e + 1L]]
+    expect_length(v, length(gx))
+    expect_lt(max(abs(xy[2L * v - 1L] - gx), abs(xy[2L * v] - gy)), 0.02)
+  }
+  # rings and fill rules of the kept elements are subset with them
+  geom <- list(
+    key = c("a", "b", "c"),
+    kind = rep("path", 3),
+    n = c(3L, 6L, 3L),
+    x = as.numeric(1:12),
+    y = as.numeric(1:12),
+    nr = c(1L, 2L, 1L),
+    rl = c(3L, 3L, 3L, 3L),
+    eo = c(0L, 1L, 0L)
+  )
+  fake <- list(
+    n = 1L,
+    keys_given = 3L,
+    keys = character(0),
+    record = list(
+      key = list(type = "u8", n = 1L, const = 1),
+      kind = list(type = "u8", n = 1L, const = 2),
+      flags = list(type = "u8", n = 1L, const = 0)
+    )
+  )
+  out <- .drop_listed_geometry(geom, fake, c("a", "b", "c"))
+  expect_identical(out$key, c("a", "c"))
+  expect_identical(out$x, as.numeric(c(1:3, 10:12)))
+  expect_null(out$nr)
+  expect_null(out$rl)
+  expect_null(out$eo)
+  expect_identical(out$dl, 1L)
+  # nothing listed: the block is returned unchanged
+  expect_identical(.drop_listed_geometry(geom, NULL, geom$key), geom)
+})
+
 test_that("a big bbox index ships as integers on the 1/100 px grid (VW-43)", {
   encode <- getFromNamespace(".encode_elements", "vellumwidget")
   set.seed(43)

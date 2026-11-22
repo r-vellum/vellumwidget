@@ -4573,6 +4573,42 @@ ok(T.distToSegment2(-4, 0, 0, 0, 10, 0) === 16, "distToSegment2: beyond the end 
     "dlist: elements shipped without bboxes get them from the list");
   ok(inst._test.indexSize() === 5, "dlist: the derived bboxes feed the spatial index");
   ok(inst._test.nearestKeyAt(101, 50, 20) === "7", "dlist: hit-testing works on the derived geometry");
+
+  // VW-49: a geometry block flagged `dl: 1` leaves out the keys the list draws
+  // exactly; their shapes come from the list's path records. Record 3 (key
+  // "10") is a closed even-odd path: a triangle with a triangular hole.
+  const mountG = (geometry, dlRaw) => {
+    const eg = document.createElement("div");
+    document.body.appendChild(eg);
+    const ig = widgetDef.factory(eg, 400, 100);
+    ig.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100"><g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"></g></g></svg>',
+      elements: { key: { delta: [7, 1, 1, 1, 1], at: [], v: [] }, mark: { levels: ["point", "rect", "path"], rv: [0, 1, 2, 0], rl: [2, 1, 1, 1] } },
+      marks: { href: "data:image/png;base64,", width: 400, height: 100, panels: "panel-1-1" },
+      displayList: dlRaw || DL,
+      geometry: geometry,
+      options: { raster: true, hover: true, select: true }
+    });
+    return ig._test;
+  };
+  const blk = { key: ["8"], kind: ["segment"], n: [2], x: [0, 10], y: [0, 10] };
+  const gl = mountG(Object.assign({ dl: 1 }, blk));
+  ok(gl.geomVertexCount() === 8, "VW-49: the listed path's 6 vertices are appended to the block's 2");
+  ok(gl.distToKey(68, 62, "10") === 0, "VW-49: inside the listed path's outer ring is a hit");
+  ok(gl.distToKey(61.7, 61.3, "10") > 0, "VW-49: its hole (even-odd, from the list's runs) is not");
+  ok(Math.abs(gl.distToKey(80, 65, "10") - 10) < 1e-6, "VW-49: outside, the distance is to the path's edge");
+  ok(gl.distToKey(5, 5, "8") === 0, "VW-49: the block's own elements still parse");
+  // every key listed: an empty block with `dl: 1` still yields the list's shapes
+  ok(mountG({ key: [], kind: [], n: [], x: [], y: [], dl: 1 }).geomVertexCount() === 6,
+    "VW-49: an empty block flagged dl takes every listed shape");
+  // without the flag the list is not read (an older payload): bbox picking
+  const gn = mountG(blk);
+  ok(gn.geomVertexCount() === 2 && gn.distToKey(61.7, 61.3, "10") === 0,
+    "VW-49: without `dl` the key falls back to its box");
+  // a key with a flagged record is not drawn exactly: R keeps its vertices, the list is not read
+  const DLf = Object.assign({}, DL, { record: Object.assign({}, DL.record, { flags: col("u8", [0, 0, 0, 1, 1]) }) });
+  ok(mountG(Object.assign({ dl: 1 }, blk), DLf).geomVertexCount() === 2,
+    "VW-49: a flagged key takes no shape from the list");
 }
 
 // ============ VW-16: the raster detail tier ============

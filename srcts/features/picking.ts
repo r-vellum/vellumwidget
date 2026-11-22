@@ -3,6 +3,7 @@
 
 import Flatbush from "flatbush";
 import { asColumn } from "../elements";
+import { DL_PATH } from "../dlist";
 import { PICK_CANDIDATES } from "./constants";
 import { applyAffine6, distToBbox, distToGeom, hasBbox, isRoundMark, parseTransformList, rectsIntersect } from "../geometry";
 import { GLYPH_MARKS } from "../scales";
@@ -56,9 +57,16 @@ export function pickingFeature(
     const ns = asColumn<number>(g.n);
     const xs = asColumn<number>(g.x);
     const ys = asColumn<number>(g.y);
-    if (!keys.length || xs.length !== ys.length) return;
-    ws.gx = Float64Array.from(xs);
-    ws.gy = Float64Array.from(ys);
+    if (xs.length !== ys.length) return;
+    // The keys the display list draws exactly ship no vertices (VW-49): their
+    // shapes are appended from its path records after the block's own.
+    const fromList = g.dl === 1 && ws.dl ? listGeometry(keys) : null;
+    if (!keys.length && !fromList) return;
+    const nv = xs.length + (fromList ? fromList.nv : 0);
+    ws.gx = new Float64Array(nv);
+    ws.gy = new Float64Array(nv);
+    ws.gx.set(xs);
+    ws.gy.set(ys);
     // Ring boundaries of a multi-ring path. Absent (an older payload, or a
     // scene whose every element is one ring) means one ring per element,
     // which is what the whole vertex run already describes.
@@ -68,7 +76,7 @@ export function pickingFeature(
     let at = 0, ra = 0;
     for (let i = 0; i < keys.length; i++) {
       const n = ns[i] | 0;
-      if (n <= 0 || at + n > ws.gx.length) break; // malformed: keep what parsed
+      if (n <= 0 || at + n > xs.length) break; // malformed: keep what parsed
       const rec: Geom = { kind: kinds[i], at: at, n: n };
       if (eos && eos[i] === 1) rec.evenodd = true;
       if (nrs && rls) {
@@ -83,7 +91,57 @@ export function pickingFeature(
       (ws.geomByKey[keys[i]] || (ws.geomByKey[keys[i]] = [])).push(rec);
       at += n;
     }
+    if (fromList) at = appendListGeometry(fromList.recs, at);
     ws.haveGeometry = at > 0;
+  }
+
+  // The display list's path records whose key it draws exactly (no flagged
+  // record, as R's `.drop_listed_geometry()` reads it) and that the block
+  // itself has no shape for, with their total vertex count.
+  function listGeometry(blockKeys: string[]): { recs: number[]; nv: number } {
+    const dl = ws.dl!;
+    const inBlock: Record<string, boolean> = {};
+    for (let i = 0; i < blockKeys.length; i++) inBlock[blockKeys[i]] = true;
+    const flagged: Record<number, boolean> = {};
+    for (let i = 0; i < dl.n; i++) if (dl.flags[i] & 15) flagged[dl.key[i]] = true;
+    const recs: number[] = [];
+    let nv = 0;
+    for (let i = 0; i < dl.n; i++) {
+      if (dl.kind[i] !== DL_PATH || flagged[dl.key[i]]) continue;
+      const k = dl.keys[dl.key[i]];
+      if (k == null || inBlock[k]) continue;
+      const j = dl.row[i];
+      const n = dl.runOff[dl.pathOff[j + 1]] - dl.runOff[dl.pathOff[j]];
+      if (n <= 0) continue;
+      recs.push(i);
+      nv += n;
+    }
+    return { recs: recs, nv: nv };
+  }
+
+  // Append each listed path record as a geometry element at vertex `at`: its
+  // runs are its rings, closed paths measure like a polygon (inside is a hit)
+  // and open ones like a line, under the record's fill rule. Returns the new
+  // vertex end.
+  function appendListGeometry(recs: number[], at: number): number {
+    const dl = ws.dl!;
+    for (let r = 0; r < recs.length; r++) {
+      const i = recs[r], j = dl.row[i];
+      const r0 = dl.pathOff[j], r1 = dl.pathOff[j + 1];
+      const v0 = dl.runOff[r0], v1 = dl.runOff[r1];
+      for (let v = v0; v < v1; v++) { ws.gx[at + v - v0] = dl.xy[2 * v]; ws.gy[at + v - v0] = dl.xy[2 * v + 1]; }
+      const rec: Geom = { kind: dl.closed[j] === 1 ? "polygon" : "line", at: at, n: v1 - v0 };
+      if (r1 - r0 > 1) {
+        const lens: number[] = [];
+        for (let run = r0; run < r1; run++) lens.push(dl.runOff[run + 1] - dl.runOff[run]);
+        rec.rings = lens;
+      }
+      if (dl.evenodd[j] === 1) rec.evenodd = true;
+      const k = dl.keys[dl.key[i]];
+      (ws.geomByKey[k] || (ws.geomByKey[k] = [])).push(rec);
+      at += v1 - v0;
+    }
+    return at;
   }
 
   // --- constant-size marks under axis zoom (VW-42) ---
