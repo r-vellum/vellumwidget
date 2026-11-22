@@ -30,7 +30,13 @@
 #' @param x A `vellumplot` plot (a `PlotSpec` / `PlotComposition`) or a `vellum`
 #'   scene --- anything [vellum::as_vellum_scene()] accepts. Also a keyframe
 #'   animation from `vellumplot::animate()`, embedded as a self-contained animated
-#'   SVG that plays on its own (no per-element interaction).
+#'   SVG (no per-element interaction). It autoplays and loops, with playback
+#'   controls in the bottom-left corner: a play/pause button, always shown, and
+#'   a frame scrubber that appears on hover or keyboard focus. Dragging the
+#'   scrubber pauses on the chosen frame. When the reader's system asks for
+#'   reduced motion (`prefers-reduced-motion`), the animation starts paused on
+#'   its still frame; the button still plays it. Without JavaScript (the SVG on
+#'   its own) it loops as before.
 #' @param width,height Widget size (any valid CSS size, or `NULL` to size from the
 #'   scene). Passed to [htmlwidgets::createWidget()].
 #' @param toolbar Show the on-hover toolbar (default `TRUE`). Hover tooltip,
@@ -450,6 +456,8 @@ as_widget <- function(
 # animation and prefers-reduced-motion fallback, so it plays natively once the
 # runtime injects it (`holder.innerHTML = x.svg`) -- no interaction index, no
 # raster canvas. Vector-only: an animated SVG is the resolution-independent path.
+# `options$animated` tells the runtime to add its play/pause button and frame
+# scrubber (srcts/features/anim.ts, VW-55).
 .animation_widget <- function(x, width, height, elementId, alt, a11y) {
   if (!requireNamespace("vellumplot", quietly = TRUE)) {
     stop(

@@ -433,6 +433,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       ws.fx.buildHoverAxis();
       wire(ws.svgEl);
       ws.fx.buildToolbar();
+      ws.fx.buildAnimControls(); // play/pause + scrubber for an animated SVG (VW-55); no-op otherwise
       ws.fx.buildNavigator();
       ws.fx.buildColorbar();
       ws.fx.setupInteractions(); // index the declarative interaction block (conditions/…)

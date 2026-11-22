@@ -190,11 +190,35 @@ export const VELLUMWIDGET_CSS = `
 }
 .vellumwidget-toolbar button:hover { background: rgba(0,0,0,0.08); }
 .vellumwidget-toolbar button.vellumwidget-active { background: rgba(37,99,235,0.18); }
+/* Animation playback controls (VW-55): a small bar in the stage's bottom-left
+   corner. The button stays visible (a pause control must be findable); the
+   scrubber shows on hover or keyboard focus. */
+.vellumwidget-anim {
+  position: absolute; left: 4px; bottom: 4px; z-index: 25; display: flex; align-items: center; gap: 4px;
+  padding: 2px; border-radius: 6px; background: rgba(255,255,255,0.78);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.18); opacity: 0.7; transition: opacity 0.12s;
+}
+.vellumwidget-root:hover .vellumwidget-anim, .vellumwidget-anim:focus-within { opacity: 1; }
+.vellumwidget-anim-btn {
+  border: 0; background: transparent; cursor: pointer; border-radius: 4px; color: #111827;
+  width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+}
+.vellumwidget-anim-btn:hover { background: rgba(0,0,0,0.08); }
+.vellumwidget-anim-btn:focus-visible, .vellumwidget-anim-range:focus-visible {
+  outline: 2px solid var(--vellumwidget-focus-stroke, #2563eb); outline-offset: 1px;
+}
+.vellumwidget-anim-range { width: 0; margin: 0; opacity: 0; transition: width 0.12s, opacity 0.12s; accent-color: #2563eb; }
+.vellumwidget-root:hover .vellumwidget-anim-range, .vellumwidget-anim:focus-within .vellumwidget-anim-range { width: 110px; margin: 0 4px 0 0; opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .vellumwidget-anim, .vellumwidget-anim-range { transition: none; }
+}
 @media (prefers-color-scheme: dark) {
   .vellumwidget-tip { background: var(--vellumwidget-tip-bg, rgba(243,244,246,0.96)); color: var(--vellumwidget-tip-fg, #111827); }
   .vellumwidget-toolbar { background: rgba(31,41,55,0.9); }
   .vellumwidget-toolbar button { color: #f3f4f6; }
   .vellumwidget-toolbar button:hover { background: rgba(255,255,255,0.12); }
+  .vellumwidget-anim { background: rgba(31,41,55,0.9); }
+  .vellumwidget-anim-btn { color: #f3f4f6; }
 }
 `;
 

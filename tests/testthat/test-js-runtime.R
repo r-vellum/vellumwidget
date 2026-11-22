@@ -14,3 +14,16 @@ test_that("the vellumwidget JS runtime passes its headless behaviour suite", {
   if (!ok) cat(status, sep = "\n")
   expect_true(ok)
 })
+
+test_that("the animation playback controls pass their headless suite (VW-55)", {
+  node <- Sys.which("node")
+  skip_if(node == "", "Node.js not available")
+  script <- testthat::test_path("..", "js", "anim.test.js")
+  skip_if_not(file.exists(script), "JS animation test not found")
+  pkg_root <- normalizePath(file.path(dirname(script), "..", ".."))
+  skip_if_not(dir.exists(file.path(pkg_root, "node_modules", "jsdom")), "jsdom not installed")
+  status <- system2(node, shQuote(normalizePath(script)), stdout = TRUE, stderr = TRUE)
+  ok <- any(grepl("ALL PASS", status))
+  if (!ok) cat(status, sep = "\n")
+  expect_true(ok)
+})
