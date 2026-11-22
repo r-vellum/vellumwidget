@@ -742,6 +742,11 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     # ragged like `legend`. The JS runtime styles non-members of an active
     # selection by these tags.
     cond = .meta_ragged(field("cond"), flat_ragged),
+    # A per-row `if_false` colour per condition tag (VW-46): a named list,
+    # tag -> one CSS colour per element (`NA` where the element has none),
+    # which the runtime paints a non-member with in place of the condition's
+    # constant `if_false` / theme dim.
+    cond_value = .meta_cond_value(field("cond_value")),
     # Filter selection tags (a view filtered by `filter_by()`) -- ragged like
     # `cond`. The runtime hides a tagged element when its `join` is not in the
     # filtering selection's members, scoped to this view.
@@ -823,6 +828,17 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   cols$key <- .encode_keys(keys, kpos)
   for (f in setdiff(names(cols), c("key", "bbox"))) {
     v <- cols[[f]]
+    # `cond_value` (VW-46): one CSS colour column per condition tag, each
+    # encoded as a column of its own (a tag on few elements goes sparse).
+    if (f == "cond_value") {
+      cv <- lapply(v, function(x) {
+        enc <- .encode_column(x, n, keys, kpos)
+        if (is.null(enc)) x else if (identical(enc, "drop")) NULL else enc
+      })
+      cv <- cv[!vapply(cv, is.null, logical(1))]
+      cols[[f]] <- if (length(cv)) cv
+      next
+    }
     # A single-valued ragged column built flat (VW-39): its list form ships
     # when neither compact form applies, as for a list-column below.
     ragged <- isTRUE(attr(v, "ragged"))
@@ -848,37 +864,16 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
         next
       }
     }
-    set <- !is.na(v)
-    if (!any(set)) {
+    enc <- .encode_column(v, n, keys, kpos)
+    if (identical(enc, "drop")) {
       cols[[f]] <- NULL
       next
     }
-    if (sum(set) < 0.1 * n) {
-      cols[[f]] <- list(at = which(set) - 1L, v = v[set])
+    if (!is.null(enc)) {
+      cols[[f]] <- enc
       next
     }
-    if (is.character(v)) {
-      lv <- unique(v[set])
-      if (length(lv) <= n / 4) {
-        codes <- match(v, lv)
-        codes[is.na(codes)] <- 0L
-        # Long runs of one value (every mark a "point", a series drawn in
-        # one go) ship as runs: `rv` codes (-1 for none) and `rl` lengths.
-        r <- rle(codes - 1L)
-        cols[[f]] <- if (length(r$lengths) < n / 10) {
-          list(levels = lv, rv = r$values, rl = r$lengths)
-        } else {
-          list(levels = lv, cb = .uint_column(codes, pack = TRUE))
-        }
-        next
-      }
-      tpl <- .encode_template(v, set, keys, kpos) %||%
-        .encode_template(v, set, keys, kpos, re = .TEMPLATE_RUN)
-      if (!is.null(tpl)) {
-        cols[[f]] <- tpl
-        next
-      }
-    }
+    set <- !is.na(v)
     if (ragged) {
       out <- rep(list(character(0)), n)
       out[set] <- as.list(v[set])
@@ -886,6 +881,39 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     }
   }
   cols
+}
+
+# One atomic element column in its compact form (`.encode_elements()`): the
+# sparse `{at, v}`, a dictionary or a template, `"drop"` when no element has
+# a value, or NULL when the plain column is as good.
+.encode_column <- function(v, n, keys, kpos) {
+  set <- !is.na(v)
+  if (!any(set)) {
+    return("drop")
+  }
+  if (sum(set) < 0.1 * n) {
+    return(list(at = which(set) - 1L, v = v[set]))
+  }
+  if (is.character(v)) {
+    lv <- unique(v[set])
+    if (length(lv) <= n / 4) {
+      codes <- match(v, lv)
+      codes[is.na(codes)] <- 0L
+      # Long runs of one value (every mark a "point", a series drawn in
+      # one go) ship as runs: `rv` codes (-1 for none) and `rl` lengths.
+      r <- rle(codes - 1L)
+      return(if (length(r$lengths) < n / 10) {
+        list(levels = lv, rv = r$values, rl = r$lengths)
+      } else {
+        list(levels = lv, cb = .uint_column(codes, pack = TRUE))
+      })
+    }
+    return(
+      .encode_template(v, set, keys, kpos) %||%
+        .encode_template(v, set, keys, kpos, re = .TEMPLATE_RUN)
+    )
+  }
+  NULL
 }
 
 # The bbox columns of a big element table as integers on the 1/100 px grid
@@ -1330,6 +1358,48 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   }
   v <- as.numeric(v)
   if (all(is.na(v))) NULL else v
+}
+
+# The `cond_value` meta field (a list-column, each entry a named list
+# tag -> that element's per-row `if_false`, VW-46) as one column per tag of CSS
+# colours (`NA` where an element has none or its value is not a colour), or
+# NULL when no element has a colour. Built from one `unlist()`, never a pass
+# per element. A number (an `if_false` for `size`, say) is no colour here,
+# though `col2rgb()` would read it as a palette index.
+.meta_cond_value <- function(v) {
+  if (!is.list(v)) {
+    return(NULL)
+  }
+  len <- lengths(v)
+  if (!any(len > 0L)) {
+    return(NULL)
+  }
+  vals <- unlist(v, use.names = TRUE)
+  if (!is.character(vals) && !is.factor(vals)) {
+    return(NULL)
+  }
+  tags <- names(vals)
+  vals <- as.character(vals)
+  if (is.null(tags) || length(vals) != sum(len)) {
+    return(NULL)
+  }
+  at <- rep.int(seq_along(v), len)
+  lv <- unique(vals[!is.na(vals)])
+  hex <- vapply(lv, function(x) {
+    if (grepl("^[-+0-9.eE]+$", x)) {
+      return(NA_character_)
+    }
+    tryCatch(.css_color(x) %||% NA_character_, error = function(e) NA_character_)
+  }, character(1), USE.NAMES = FALSE)
+  css <- hex[match(vals, lv)]
+  out <- list()
+  for (t in unique(tags[!is.na(css)])) {
+    hit <- tags == t & !is.na(css)
+    col <- rep(NA_character_, length(v))
+    col[at[hit]] <- css[hit]
+    out[[t]] <- col
+  }
+  if (length(out)) out else NULL
 }
 
 # A ragged meta field as a list-column of character vectors (`character(0)`

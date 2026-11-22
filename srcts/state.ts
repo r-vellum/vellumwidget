@@ -41,6 +41,9 @@ export interface WidgetState {
   // Click-to-source (from inspect_source()): rows per grob id, read on click.
   provenance: Provenance | null;
   condTagElems: Record<string, string[]>;
+  // VW-46: per tag, each tagged key's own `if_false` colour (aligned with
+  // `condTagElems[tag]`, null where it has none), or null when no key has one.
+  condTagVals: Record<string, (string | null)[] | null>;
   filtSelElems: Record<string, string[]>; // filter selection -> keys of its target view
   joinOf: Record<string, string>; // key -> cross-view join id (compositions)
   lastHoverKeys: string[];
@@ -128,8 +131,8 @@ export interface WidgetState {
   // Per-mark style state for the node-less raster tiers (VW-22,
   // features/markState.ts), indexed by display-list key id.
   msFlags: Uint8Array | null;
-  msColor: Uint16Array | null;
-  msCond: Uint16Array | null;
+  msColor: Uint32Array | null;
+  msCond: Uint32Array | null;
   msPalette: string[];
   msActive: boolean; // any mark dimmed, recoloured, muted or hidden
   msDimAlpha: number;
@@ -277,7 +280,7 @@ export interface WidgetFns {
   drawCrosshair: (k: string, hm: "closest" | "x" | "y") => void;
   drawPoints: (stateOnly?: boolean) => void;
   condStatesBegin: () => boolean;
-  condStateSet: (tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, color: string | null | undefined) => void;
+  condStateSet: (tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, color: string | null | undefined, colors?: (string | null)[] | null) => void;
   updateMarkStates: () => void;
   keyIds: (keys: string[]) => Int32Array;
   restyleRuns: () => boolean;
@@ -374,6 +377,7 @@ export function createState(el: HTMLElement): WidgetState {
     interactions: null,
     provenance: null,
     condTagElems: {},
+    condTagVals: {},
     filtSelElems: {},
     joinOf: {},
     lastHoverKeys: [],

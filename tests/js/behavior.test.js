@@ -2666,6 +2666,46 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(tomato(fill("t2")), "VP-72: a non-selected label takes the text layer's if_false [" + fill("t2") + "]");
 }
 
+// VW-46: a per-row if_false (`cond_value`) recolours each non-member with its
+// own colour in SVG mode, from the legacy per-record payload and from columns;
+// a key without one takes the constant if_false.
+{
+  const svgCV = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><g data-vellum-panel="panel-1-1">' +
+    '<path data-key="p1" fill="#ff0000" d="M5 5h4v4h-4z"/>' +
+    '<path data-key="p2" fill="#00ff00" d="M20 5h4v4h-4z"/>' +
+    '<path data-key="p3" fill="#0000ff" d="M35 5h4v4h-4z"/>' +
+    "</g></svg>";
+  const records = [
+    { key: "p1", cond: ["hi:color"], cond_value: { "hi:color": "#111111" } },
+    { key: "p2", cond: ["hi:color"], cond_value: { "hi:color": "#222222" } },
+    { key: "p3", cond: ["hi:color"] }
+  ];
+  const columns = { key: ["p1", "p2", "p3"], cond: ["hi:color", "hi:color", "hi:color"],
+    cond_value: { "hi:color": ["#111111", "#222222", null] } };
+  [["records", records], ["columns", columns]].forEach(function (cs) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const w = widgetDef.factory(e, 200, 100);
+    w.renderValue({
+      svg: svgCV, elements: cs[1],
+      interactions: {
+        selections: [{ name: "hi", kind: "point", on: "click", empty: true }],
+        conditions: [{ selection: "hi", aes: "color", if_false: "#cccccc", empty: true }]
+      },
+      options: { hover: true, select: true, selectMode: "multiple" }
+    });
+    const fill = (k) => e.querySelector('[data-key="' + k + '"]').style.fill;
+    w._call("select", ["p1"]);
+    ok(!fill("p1"), "VW-46 " + cs[0] + ": a member keeps its own (if_true) colour");
+    ok(/#222222|rgb\(34, 34, 34\)/.test(fill("p2")), "VW-46 " + cs[0] + ": a non-member takes its per-row if_false [" + fill("p2") + "]");
+    ok(/#cccccc|rgb\(204, 204, 204\)/.test(fill("p3")), "VW-46 " + cs[0] + ": a key without one takes the constant if_false [" + fill("p3") + "]");
+    w._call("select", ["p2"]);
+    ok(/#111111|rgb\(17, 17, 17\)/.test(fill("p1")) && !fill("p2"), "VW-46 " + cs[0] + ": the colours follow the selection");
+    w._call("clearSelection");
+    ok(!fill("p1") && !fill("p2") && !fill("p3"), "VW-46 " + cs[0] + ": an empty selection restores every colour");
+  });
+}
+
 // ===================== VW-12: one element per point, or a fill + stroke twin =====================
 // vellum draws a keyed point with a solid fill and an undashed solid stroke as
 // ONE element carrying both paints; older vellum drew a fill element followed
@@ -4714,7 +4754,8 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     inst.renderValue({
       svg: svg,
       elements: { key: keys, mark: keys.map(() => "point"),
-        cond: o.cond ? keys.map(() => ["pick:color"]) : undefined, filt: o.filt ? keys.map(() => ["pick"]) : undefined },
+        cond: o.cond ? keys.map(() => ["pick:color"]) : undefined, filt: o.filt ? keys.map(() => ["pick"]) : undefined,
+        cond_value: o.condValue ? { "pick:color": o.condValue } : undefined },
       panels: [panel],
       marks: { href: "data:image/png;base64,", width: 200, height: 100, panels: "panel-1-1" },
       displayList: dlOf(o.n, o.flagged),
@@ -4762,6 +4803,28 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(fills(c.ctx).join(",") === "120:#cccccc@1,160:#cccccc@1,40:#ff0000ff@1,80:#cccccc@1",
     "markstate: non-members draw in the condition's if_false colour");
   ok(c.ctx.log.filter((r) => r.op === "fill" && r.style === "#cccccc").length === 1, "markstate: same-colour opaque marks are batched");
+
+  // VW-46: a per-row if_false (a colour column per tag, here run-encoded)
+  // paints each non-member its own colour; a key without one falls back to
+  // the constant (the dim), and members keep their paint -- in every tier.
+  const pr = mountMS({ cond: "dim", options: { detailMarks: 2 },
+    condValue: { levels: ["#00ff00", "#0000ff"], rv: [0, -1, 1, 0], rl: [1, 1, 1, 1] } });
+  pr.inst._call("select", ["p1"]);
+  ok(fills(pr.ctx).join(",") === "120:#0000ff@1,160:#00ff00@1,40:#ff0000ff@1,80:#ff0000ff@0.28",
+    "VW-46: non-members draw in their own per-row if_false, the rest dim [" + fills(pr.ctx).join(",") + "]");
+  pr.inst._call("select", ["p1", "p3"]);
+  ok(fills(pr.ctx).join(",") === "120:#ff0000ff@1,160:#00ff00@1,40:#ff0000ff@1,80:#ff0000ff@0.28",
+    "VW-46: a key that joins the selection keeps its own (if_true) paint");
+  pr.inst._call("select", ["p1"]);
+  pr.inst._test.setView({ x: 30, y: 25, w: 100, h: 50 }); pr.inst._test.evalTier();
+  ok(pr.inst._test.markTier() === "mid" && fills(pr.ctx).some((f) => /:#0000ff@1$/.test(f)),
+    "VW-46: the mid canvas keeps the per-row colours");
+  pr.inst._test.setView({ x: 150, y: 40, w: 20, h: 20 }); pr.inst._test.evalTier();
+  const n4 = pr.el.querySelector('.vellumwidget-detail [data-key="p4"]');
+  ok(pr.inst._test.markTier() === "detail" && n4 && /(#00ff00|rgb\(0, 255, 0\))/.test(n4.style.fill),
+    "VW-46: a detail node takes its per-row if_false [" + (n4 && n4.style.fill) + "]");
+  pr.inst._call("clearSelection");
+  ok(pr.inst._test.markTier() !== "detail" || !n4.style.fill, "VW-46: clearing the selection reverts the per-row colour");
 
   // filter_by(): non-members of the filtered view are not drawn and not pickable.
   const f = mountMS({ filt: true });

@@ -352,6 +352,14 @@ export function normalizeElements(raw: ElemMeta[] | ColumnElements | null | unde
   const legend = col<string[] | string>("legend");
   const filterValue = col<number>("filter_value");
   const cond = col<string[] | string>("cond");
+  // VW-46: per-row `if_false` colours, one column per condition tag.
+  const condValue: [string, (string | null)[]][] = [];
+  if (c.cond_value && typeof c.cond_value === "object") {
+    for (const t in c.cond_value) {
+      const v = decodeColumn<string>(c.cond_value[t] as EncodedColumn<string>, n, key);
+      if (v) condValue.push([t, v]);
+    }
+  }
   const filt = col<string[] | string>("filt");
   const join = col<string>("join");
   const source = col<string>("source");
@@ -386,6 +394,10 @@ export function normalizeElements(raw: ElemMeta[] | ColumnElements | null | unde
       if (v != null && !(Array.isArray(v) && v.length === 0)) {
         e.cond = Array.isArray(v) ? (v as string[]) : [String(v)];
       }
+    }
+    for (let t = 0; t < condValue.length; t++) {
+      const v = condValue[t][1][i];
+      if (v != null) (e.cond_value = e.cond_value || {})[condValue[t][0]] = String(v);
     }
     if (filt) {
       const v = filt[i];
