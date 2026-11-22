@@ -5793,6 +5793,21 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       const r0 = c0.el.querySelector(".vellumwidget-fb-sel");
       ok(c0.inst._test.distToKey(82.5, 50, "p2") === 0 && (!r0 || (r0.tagName.toLowerCase() === "circle" && r0.getAttribute("r") === "5")),
         "VW-42: at 1x the record box and ring are used as before");
+      // VW-48: a ring drawn at 1x is redrawn when the view zooms by axis:
+      // at its constant-size mark's 1x size (an ellipse of 2.5 scene px at
+      // 2x), clipped to its panel at the new T (20..180 x 10..90 -> 60..140 x 30..70)
+      c0.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 });
+      const r1 = c0.el.querySelector(".vellumwidget-fb-sel");
+      ok(r1 && r1.tagName.toLowerCase() === "ellipse" && r1.getAttribute("rx") === "2.5",
+        "VW-48: a selection ring follows an axis zoom to its constant-size mark [" + (r1 && r1.outerHTML) + "]");
+      const cid = r1 ? (r1.getAttribute("clip-path") || "").replace(/^url\(#|\)$/g, "") : "";
+      const crc = cid ? c0.el.querySelector("clipPath#" + cid + " rect") : null;
+      ok(crc && [crc.getAttribute("x"), crc.getAttribute("y"), crc.getAttribute("width"), crc.getAttribute("height")].join(",") === "60,30,80,40",
+        "VW-48: ... clipped to its panel's rect at the current T [" + (crc && crc.outerHTML) + "]");
+      c0.inst._test.setView({ x: 0, y: 0, w: 200, h: 100 });
+      const r2 = c0.el.querySelector(".vellumwidget-fb-sel");
+      ok(r2 && r2.tagName.toLowerCase() === "circle" && r2.getAttribute("r") === "5",
+        "VW-48: back at 1x the ring is the record's circle again");
       c0.restore();
     }
     // zoom_marks = "scale" keeps the run scaling with the zoom

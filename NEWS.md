@@ -1,5 +1,16 @@
 # vellumwidget 0.16.0.9000
 
+* **Raster selection rings follow an axis zoom (VW-48).** A ring drawn
+  before zooming kept its 1x box and grew with the zoom, about twice the
+  size of a constant-size point at 2x, and a selected point panned out of
+  its panel left its ring over the axes. Rings are now redrawn as the view
+  changes under any axis zoom (before, only with several zoomed panels), so
+  they keep their constant-size mark's size, and each is clipped to its
+  panel. The pale crescent reported on selected points in raster mode is
+  not an offset: no tier is displaced at device pixel ratio 1 or 2. It is a
+  later-drawn neighbour overlapping the selected point, as in SVG mode, seen
+  inside a ring that the raster overlay draws over every mark.
+
 # vellumwidget 0.16.0
 
 * Requires vellum (>= 0.13.0).
