@@ -2,6 +2,21 @@
 
 ## vellumwidget 0.17.0.9000
 
+- **Animated widgets have playback controls (VW-55).** An animation from
+  [`vellumplot::animate()`](https://r-vellum.github.io/vellumplot/reference/animate.html)
+  looped forever with no way to stop it, and the runtime never read
+  `options$animated`. The widget now adds a play/pause button (a real
+  `<button>` whose label switches between “Pause animation” and “Play
+  animation”, with a visible focus ring) and a frame scrubber
+  (`<input type="range">`, shown on hover or keyboard focus) in the
+  plot’s bottom-left corner. Dragging the scrubber pauses on that frame;
+  play resumes from it. The pause control meets WCAG 2.2.2 (Pause, Stop,
+  Hide). It still autoplays and loops by default; under
+  `prefers-reduced-motion` it starts paused on the SVG’s still frame,
+  and the button still plays it. Static widgets are unchanged. No new
+  [`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+  argument: the controls are always on for an animation.
+
 ## vellumwidget 0.17.0
 
 - **Selected marks are drawn above the rest of their layer (VW-53).** A

@@ -189,11 +189,35 @@
 }
 .vellumwidget-toolbar button:hover { background: rgba(0,0,0,0.08); }
 .vellumwidget-toolbar button.vellumwidget-active { background: rgba(37,99,235,0.18); }
+/* Animation playback controls (VW-55): a small bar in the stage's bottom-left
+   corner. The button stays visible (a pause control must be findable); the
+   scrubber shows on hover or keyboard focus. */
+.vellumwidget-anim {
+  position: absolute; left: 4px; bottom: 4px; z-index: 25; display: flex; align-items: center; gap: 4px;
+  padding: 2px; border-radius: 6px; background: rgba(255,255,255,0.78);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.18); opacity: 0.7; transition: opacity 0.12s;
+}
+.vellumwidget-root:hover .vellumwidget-anim, .vellumwidget-anim:focus-within { opacity: 1; }
+.vellumwidget-anim-btn {
+  border: 0; background: transparent; cursor: pointer; border-radius: 4px; color: #111827;
+  width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+}
+.vellumwidget-anim-btn:hover { background: rgba(0,0,0,0.08); }
+.vellumwidget-anim-btn:focus-visible, .vellumwidget-anim-range:focus-visible {
+  outline: 2px solid var(--vellumwidget-focus-stroke, #2563eb); outline-offset: 1px;
+}
+.vellumwidget-anim-range { width: 0; margin: 0; opacity: 0; transition: width 0.12s, opacity 0.12s; accent-color: #2563eb; }
+.vellumwidget-root:hover .vellumwidget-anim-range, .vellumwidget-anim:focus-within .vellumwidget-anim-range { width: 110px; margin: 0 4px 0 0; opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .vellumwidget-anim, .vellumwidget-anim-range { transition: none; }
+}
 @media (prefers-color-scheme: dark) {
   .vellumwidget-tip { background: var(--vellumwidget-tip-bg, rgba(243,244,246,0.96)); color: var(--vellumwidget-tip-fg, #111827); }
   .vellumwidget-toolbar { background: rgba(31,41,55,0.9); }
   .vellumwidget-toolbar button { color: #f3f4f6; }
   .vellumwidget-toolbar button:hover { background: rgba(255,255,255,0.12); }
+  .vellumwidget-anim { background: rgba(31,41,55,0.9); }
+  .vellumwidget-anim-btn { color: #f3f4f6; }
 }
 `;
   function ensureStyle() {
@@ -1133,6 +1157,250 @@
       } else buildDataTable();
     }
     return { a11yLabel, announce, focusRoving, markFocused, setupA11y };
+  }
+
+  // srcts/features/anim.ts
+  var FRAME_RE = /^(.+)-vf$/;
+  var SEEK_JITTER_MS = 0.3137;
+  var ICON_OPEN = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false">';
+  var PAUSE_ICON = ICON_OPEN + '<rect x="2" y="1.5" width="2.8" height="9" rx="0.6" fill="currentColor"/><rect x="7.2" y="1.5" width="2.8" height="9" rx="0.6" fill="currentColor"/></svg>';
+  var PLAY_ICON = ICON_OPEN + '<path d="M3 1.5 L10.5 6 L3 10.5 Z" fill="currentColor"/></svg>';
+  function frameToken(el) {
+    const cls = el.getAttribute("class");
+    if (!cls) return null;
+    const toks = cls.split(/\s+/);
+    for (let i = 0; i < toks.length; i++) {
+      const m = FRAME_RE.exec(toks[i]);
+      if (m) return m[1];
+    }
+    return null;
+  }
+  function seconds(v) {
+    const m = /^(-?[\d.]+)(m?s)$/.exec(v.trim());
+    if (!m) return NaN;
+    const n = parseFloat(m[1]);
+    return m[2] === "ms" ? n / 1e3 : n;
+  }
+  function parseAnimation(svg) {
+    let prefix = null;
+    const gs = svg.querySelectorAll("g[class]");
+    for (let i = 0; i < gs.length && prefix == null; i++) prefix = frameToken(gs[i]);
+    if (prefix == null) return null;
+    const frames = Array.prototype.slice.call(svg.querySelectorAll("." + cssEscape(prefix + "-vf")));
+    const n = frames.length;
+    if (n < 2) return null;
+    const delays = frames.map(function(f) {
+      const m = /animation-delay\s*:\s*([-\d.]+m?s)/.exec(f.getAttribute("style") || "");
+      const d = m ? seconds(m[1]) : NaN;
+      return isFinite(d) ? Math.abs(d) : 0;
+    });
+    let css = "";
+    const styles = svg.querySelectorAll("style");
+    for (let i = 0; i < styles.length; i++) css += styles[i].textContent || "";
+    const esc = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const rule = new RegExp("\\." + esc + "-vf\\s*\\{([^}]*)\\}").exec(css);
+    let name = null;
+    let dur = NaN;
+    let timing = "steps(1,end)";
+    const anim = rule ? /animation\s*:\s*([^;]+)/.exec(rule[1]) : null;
+    if (anim) {
+      const toks = anim[1].trim().split(/\s+/);
+      for (let i = 0; i < toks.length; i++) {
+        const t = toks[i];
+        if (/^[\d.]+m?s$/.test(t) && !isFinite(dur)) dur = seconds(t);
+        else if (/^(steps|cubic-bezier)\(/.test(t) || /^(linear|ease|ease-in|ease-out|ease-in-out|step-start|step-end)$/.test(t)) timing = t;
+        else if (t !== "infinite" && !/^\d+$/.test(t) && name == null) name = t;
+      }
+    }
+    if (!(dur > 0)) {
+      let step = Infinity;
+      for (let i = 0; i < n; i++) if (delays[i] > 0 && delays[i] < step) step = delays[i];
+      dur = isFinite(step) ? step * n : n / 25;
+    }
+    let still = 0;
+    for (let i = 0; i < n; i++) if (frames[i].classList.contains(prefix + "-vs")) {
+      still = i;
+      break;
+    }
+    return { prefix, frames, delays, dur, dt: dur / n, still, name, timing };
+  }
+  function frameAt(info, t) {
+    let best = 0;
+    let bestPhase = Infinity;
+    for (let i = 0; i < info.frames.length; i++) {
+      let ph = (t + info.delays[i]) % info.dur;
+      if (ph < 0) ph += info.dur;
+      if (ph < bestPhase - 1e-9) {
+        bestPhase = ph;
+        best = i;
+      }
+    }
+    return best;
+  }
+  function timeOfFrame(info, k) {
+    let t = (info.dur - info.delays[k]) % info.dur;
+    if (t < 0) t += info.dur;
+    return t + info.dt / 2;
+  }
+  function reducedMotion() {
+    const mm = window.matchMedia;
+    try {
+      return typeof mm === "function" && !!mm.call(window, "(prefers-reduced-motion: reduce)").matches;
+    } catch (e) {
+      return false;
+    }
+  }
+  function animFeature(ws) {
+    let info = null;
+    let bar = null;
+    let btn = null;
+    let range = null;
+    let styleEl = null;
+    let playing = false;
+    let frame = 0;
+    let playT0 = 0;
+    let playFrom = 0;
+    let raf = 0;
+    function now() {
+      return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+    }
+    function cssAnims() {
+      const svg = ws.svgEl;
+      if (!svg || typeof svg.getAnimations !== "function" || !info) return null;
+      const all = svg.getAnimations({ subtree: true });
+      const nm = info.name;
+      return nm ? all.filter(function(a) {
+        return a.animationName == null || a.animationName === nm;
+      }) : all;
+    }
+    function currentFrame() {
+      if (!info) return 0;
+      if (!playing) return frame;
+      const as = cssAnims();
+      if (as && as.length && as[0].currentTime != null) return frameAt(info, Number(as[0].currentTime) / 1e3);
+      const n = info.frames.length;
+      return (playFrom + Math.floor((now() - playT0) / 1e3 / info.dt)) % n;
+    }
+    function showFrame(k) {
+      if (!info) return;
+      const cur = "vellumwidget-anim-cur";
+      for (let i = 0; i < info.frames.length; i++) info.frames[i].classList.toggle(cur, i === k);
+    }
+    function syncRange(k) {
+      if (!range || !info) return;
+      range.value = String(k);
+      range.setAttribute("aria-valuetext", "Frame " + (k + 1) + " of " + info.frames.length);
+    }
+    function syncButton() {
+      if (!btn) return;
+      const label = playing ? "Pause animation" : "Play animation";
+      btn.setAttribute("aria-label", label);
+      btn.title = label;
+      btn.innerHTML = playing ? PAUSE_ICON : PLAY_ICON;
+      btn.classList.toggle("vellumwidget-anim-playing-btn", playing);
+    }
+    function tick() {
+      raf = 0;
+      if (!playing || !bar || !bar.isConnected) return;
+      syncRange(currentFrame());
+      raf = window.requestAnimationFrame(tick);
+    }
+    function setPlaying(on) {
+      if (!info) return;
+      if (on === playing) return;
+      if (!on) frame = currentFrame();
+      playing = on;
+      ws.el.classList.toggle("vellumwidget-anim-paused", !on);
+      ws.el.classList.toggle("vellumwidget-anim-playing", on);
+      if (on) {
+        playFrom = frame;
+        playT0 = now() - info.dt / 2 * 1e3;
+        const as = cssAnims();
+        if (as) {
+          const t = timeOfFrame(info, frame) * 1e3 + SEEK_JITTER_MS;
+          for (let i = 0; i < as.length; i++) as[i].currentTime = t;
+        }
+        if (typeof window.requestAnimationFrame === "function" && !raf) raf = window.requestAnimationFrame(tick);
+      } else {
+        if (raf && typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(raf);
+        raf = 0;
+        showFrame(frame);
+        syncRange(frame);
+      }
+      syncButton();
+    }
+    function seek(k) {
+      if (!info) return;
+      const n = info.frames.length;
+      k = Math.max(0, Math.min(n - 1, Math.round(k)));
+      if (playing) setPlaying(false);
+      frame = k;
+      showFrame(k);
+      syncRange(k);
+    }
+    function teardown() {
+      if (raf && typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(raf);
+      raf = 0;
+      if (bar) bar.remove();
+      if (styleEl) styleEl.remove();
+      bar = btn = range = null;
+      styleEl = null;
+      info = null;
+      playing = false;
+      ws.el.classList.remove("vellumwidget-anim-paused", "vellumwidget-anim-playing");
+    }
+    function buildAnimControls() {
+      teardown();
+      if (!ws.opts.animated || !ws.svgEl || !ws.stage) return;
+      info = parseAnimation(ws.svgEl);
+      if (!info) return;
+      const p = "." + cssEscape(info.prefix);
+      let css = ".vellumwidget-anim-paused " + p + "-vf{animation:none!important;visibility:hidden!important}.vellumwidget-anim-paused " + p + "-vf.vellumwidget-anim-cur{visibility:visible!important}";
+      if (info.name) {
+        css += ".vellumwidget-anim-playing " + p + "-vf{animation-name:" + info.name + "!important;animation-duration:" + info.dur + "s!important;animation-timing-function:" + info.timing + "!important;animation-iteration-count:infinite!important}.vellumwidget-anim-playing " + p + "-vs{visibility:hidden}";
+      }
+      styleEl = document.createElement("style");
+      styleEl.textContent = css;
+      ws.el.appendChild(styleEl);
+      bar = document.createElement("div");
+      bar.className = "vellumwidget-anim";
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "vellumwidget-anim-btn";
+      btn.addEventListener("click", function() {
+        setPlaying(!playing);
+      });
+      range = document.createElement("input");
+      range.type = "range";
+      range.className = "vellumwidget-anim-range";
+      range.min = "0";
+      range.max = String(info.frames.length - 1);
+      range.step = "1";
+      range.setAttribute("aria-label", "Animation frame");
+      range.addEventListener("input", function() {
+        if (range) seek(parseInt(range.value, 10) || 0);
+      });
+      bar.appendChild(btn);
+      bar.appendChild(range);
+      ws.stage.appendChild(bar);
+      frame = info.still;
+      playing = false;
+      if (reducedMotion()) {
+        ws.el.classList.add("vellumwidget-anim-paused");
+        showFrame(frame);
+        syncRange(frame);
+        syncButton();
+      } else {
+        frame = 0;
+        syncRange(0);
+        setPlaying(true);
+      }
+    }
+    function animState() {
+      if (!info) return null;
+      return { playing, frame: currentFrame(), frames: info.frames.length };
+    }
+    return { buildAnimControls, animState, animPlay: setPlaying, animSeek: seek };
   }
 
   // srcts/geometry.ts
@@ -8035,6 +8303,7 @@
         ws.fx.buildHoverAxis();
         wire(ws.svgEl);
         ws.fx.buildToolbar();
+        ws.fx.buildAnimControls();
         ws.fx.buildNavigator();
         ws.fx.buildColorbar();
         ws.fx.setupInteractions();
@@ -8885,6 +9154,7 @@
         pointerFeature(ws),
         sourceFeature(ws),
         toolbarFeature(ws),
+        animFeature(ws),
         renderFeature(ws),
         a11yFeature(ws),
         detailFeature(ws),
@@ -8932,6 +9202,10 @@
           rasterMode: function() {
             return ws.rasterMode;
           },
+          // Animation playback (VW-55): state, play/pause, seek to a frame.
+          animState: ws.fx.animState,
+          animPlay: ws.fx.animPlay,
+          animSeek: ws.fx.animSeek,
           hasCanvas: function() {
             return !!ws.canvasEl;
           },
@@ -9188,6 +9462,8 @@
     traceShape,
     decodeKeys,
     dlColumn,
+    animFrameAt: frameAt,
+    animTimeOfFrame: timeOfFrame,
     bus: vellumwidgetBus
   };
 })();

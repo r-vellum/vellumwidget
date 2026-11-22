@@ -112,7 +112,13 @@ focused — see the <code>a11y</code> argument.</p>
 <dd><p>A <code>vellumplot</code> plot (a <code>PlotSpec</code> / <code>PlotComposition</code>) or a <code>vellum</code>
 scene — anything <code><a href="https://r-vellum.github.io/vellum/reference/as_vellum_scene.html" class="external-link">vellum::as_vellum_scene()</a></code> accepts. Also a keyframe
 animation from <code><a href="https://r-vellum.github.io/vellumplot/reference/animate.html" class="external-link">vellumplot::animate()</a></code>, embedded as a self-contained animated
-SVG that plays on its own (no per-element interaction).</p></dd>
+SVG (no per-element interaction). It autoplays and loops, with playback
+controls in the bottom-left corner: a play/pause button, always shown, and
+a frame scrubber that appears on hover or keyboard focus. Dragging the
+scrubber pauses on the chosen frame. When the reader's system asks for
+reduced motion (<code>prefers-reduced-motion</code>), the animation starts paused on
+its still frame; the button still plays it. Without JavaScript (the SVG on
+its own) it loops as before.</p></dd>
 
 
 <dt id="arg-width-height">width, height<a class="anchor" aria-label="anchor" href="#arg-width-height"></a></dt>
