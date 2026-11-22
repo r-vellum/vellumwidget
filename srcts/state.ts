@@ -81,6 +81,7 @@ export interface WidgetState {
   elements: ElemMeta[];
   panels: PanelInfo[]; // cartesian data panels with scale descriptors (data-space mapping)
   selected: Record<string, boolean>;
+  selRev: number; // bumped whenever the selection is re-applied (VW-53 caches by it)
   nodesByKey: Record<string, Element[]>; // key -> SVG nodes (built once per render)
   hoverRAF: number; // rAF handle throttling the nearest-mark scan
   // Spatial index over element bboxes (built once per render), so nearest-mark
@@ -341,6 +342,8 @@ export interface WidgetFns {
   retick: () => void;
   sampleBaseRaster: () => void;
   selectedKeys: () => string[];
+  raiseSelected: () => void;
+  raiseOrder: (dl: DisplayList) => Uint32Array | null;
   setColorRange: (a: number, b: number) => void;
   setHover: (k: string) => void;
   setHoverKeys: (keys: string[]) => void;
@@ -405,6 +408,7 @@ export function createState(el: HTMLElement): WidgetState {
     elements: [],
     panels: [],
     selected: {},
+    selRev: 0,
     nodesByKey: {},
     hoverRAF: 0,
     spatialIndex: null,

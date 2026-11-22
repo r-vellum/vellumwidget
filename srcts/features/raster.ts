@@ -236,7 +236,11 @@ export function rasterFeature(
     // beneath, which the mark PNG (blended against a transparent page) can't
     // show: the canvas stands in for it at the overview zoom too.
     const blending = dl.exact && !!dl.runImgs && dl.blendRuns;
-    if (!(zoomed || (styled && dl.exact) || blending) || !dl.n) {
+    // A selection whose marks a non-member partly covers (VW-53): the
+    // canvas draws them above it, standing in for the image (which can't
+    // reorder its pixels) at the overview zoom too.
+    const raising = dl.exact && !!ws.fx.raiseOrder(dl);
+    if (!(zoomed || (styled && dl.exact) || blending || raising) || !dl.n) {
       hideCanvas();
       showMarksLayer(true);
       return;
@@ -583,7 +587,10 @@ export function rasterFeature(
     };
     let curGroup = 0;
     tgt.save();
-    for (let i = 0; i < dl.n; i++) {
+    // Selected marks after the rest of their segment (VW-53, raise.ts).
+    const ord = ws.fx.raiseOrder(dl);
+    for (let q = 0; q < dl.n; q++) {
+      const i = ord ? ord[q] : q;
       if (runImgs && dl.run[i] > 0) {
         // The run's records are all in its image, drawn where the run starts.
         // The image carries its own groups (a run takes whole opacity groups),

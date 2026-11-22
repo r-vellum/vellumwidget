@@ -1,5 +1,18 @@
 # vellumwidget 0.16.0.9000
 
+* **Selected marks are drawn above the rest of their layer (VW-53).** A
+  selected point kept its paint order, so a later neighbour could cover part
+  of it: in raster mode this showed as a pale crescent inside its ring. While
+  a selection is active, its marks now draw above the non-members of their
+  own layer, in SVG mode and in every raster tier (the canvas stands in for
+  the mark image at the overview to do it) and in exports. Clearing the
+  selection restores the original order. Members never rise above a later
+  layer of another kind (a line, a bar, text): in SVG mode a node moves to
+  the end of its layer's last series group, and on the canvas the display
+  list's records are reordered only within a stretch of same-kind records in
+  one panel. Two adjacent point layers count as one there. Marks drawn from
+  a flagged run image (text, masks, effects) are not raised.
+
 * **The large-scene hover clone follows a zoom (VW-54).** A hover clone takes
   its panel's counter-scale when it is made (VW-47), so zooming with the
   wheel while a hover showed left it at the old size, twice the mark's size

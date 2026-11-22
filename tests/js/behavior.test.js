@@ -2738,6 +2738,45 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   });
 }
 
+// VW-53: while a selection is active its nodes are drawn above the
+// non-members of their own layer (the end of their run of keyed siblings),
+// never above a later layer; clearing it restores the paint order exactly.
+{
+  const svgR = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><g data-vellum-panel="panel-1-1">' +
+    '<g data-vellum-id="layer-1-point-g1">' +
+    '<circle data-key="a" cx="10" cy="10" r="5"/>\n  <circle data-key="b" cx="13" cy="10" r="5"/>' +
+    '<circle data-key="b" cx="13" cy="10" r="5" fill="none" stroke="#000"/>' +
+    '<circle data-key="c" cx="16" cy="10" r="5"/></g>' +
+    // a second series of layer 1 (vellum draws one group per series)
+    '<g data-vellum-id="layer-1-point-g2" role="presentation"><circle data-key="d" cx="11" cy="10" r="5"/></g>\n' +
+    '<g data-vellum-id="layer-2-text-g2"><text data-key="t">lab</text></g>' +
+    // a raw scene's keyed siblings: a tag change ends a run
+    '<g id="raw"><circle data-key="r1" cx="50" cy="10" r="5"/><circle data-key="r2" cx="53" cy="10" r="5"/><rect data-key="r3" x="50" y="5" width="9" height="9"/></g>' +
+    "</g></svg>";
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const w = widgetDef.factory(e, 200, 100);
+  w.renderValue({ svg: svgR, elements: { key: ["a", "b", "c", "d", "t", "r1", "r2", "r3"] }, options: { hover: true, select: true, selectMode: "multiple" } });
+  const order = (sel) => Array.from(e.querySelectorAll(sel + " > [data-key]")).map((n) => n.getAttribute("data-key") + (n.getAttribute("fill") === "none" ? "~" : "")).join(",");
+  const L1 = '[data-vellum-id="layer-1-point-g1"]';
+  ok(order(L1) === "a,b,b~,c", "VW-53 svg: the paint order as drawn");
+  w._call("select", ["a"]);
+  const L2 = '[data-vellum-id="layer-1-point-g2"]';
+  ok(order(L1) === "b,b~,c" && order(L2) === "d,a" && order('[data-vellum-id="layer-2-text-g2"]') === "t",
+    "VW-53 svg: a selected node is drawn last in its layer (its last series group), not above the later text layer [" + order(L1) + " | " + order(L2) + "]");
+  w._call("select", ["b", "a"]);
+  ok(order(L1) === "c" && order(L2) === "d,a,b,b~", "VW-53 svg: several members keep their own paint order (and a fill+stroke twin stays together) [" + order(L1) + " | " + order(L2) + "]");
+  w._call("select", ["d"]);
+  ok(order(L1) === "a,b,b~,c" && order(L2) === "d", "VW-53 svg: a member already last in its layer stays put");
+  w._call("select", ["r1"]);
+  ok(order("#raw") === "r2,r1,r3" && order(L1) === "a,b,b~,c" && order(L2) === "d",
+    "VW-53 svg: in a run of keyed siblings a member rises to the run's end, before a different mark; the old members go back [" + order("#raw") + "]");
+  w._call("clearSelection");
+  ok(order(L1) === "a,b,b~,c" && order(L2) === "d" && order("#raw") === "r1,r2,r3" && !e.querySelector(L1).innerHTML.includes("vw-home"),
+    "VW-53 svg: clearing the selection restores the original paint order");
+  ok(e.querySelector('[data-key="a"]').classList.contains("vellumwidget-selected") === false, "VW-53 svg: (and the selection classes)");
+}
+
 // VW-52: a constant if_false is routed by the condition's aesthetic: alpha is
 // the non-members' opacity (the dim class at that opacity), size and shape
 // are not applied, and none of them is ever painted as a colour; a per-row
@@ -4901,6 +4940,44 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   pr.inst._call("clearSelection");
   ok(pr.inst._test.markTier() !== "detail" || !n4.style.fill, "VW-46: clearing the selection reverts the per-row colour");
 
+  // VW-53: a selection is drawn above the non-members of its segment: the
+  // canvas stands in for the image at the overview and draws the members
+  // last, in the mid tier and the export too; the detail tier's nodes move.
+  const xsOrder = (ctx) => ctx.log.filter((r) => r.op === "fill").flatMap((r) => r.xs).join(",");
+  const rs = mountMS({ options: { detailMarks: 3 } });
+  ok(rs.inst._test.raiseOrder() === null && rs.canvas.style.display !== "block", "VW-53: no selection -> the list's order, the image");
+  rs.inst._call("select", ["p2"]);
+  ok(rs.inst._test.raiseOrder().join(",") === "0,2,3,1" && rs.canvas.style.display === "block" && rs.img() === "hidden",
+    "VW-53 overview: the canvas stands in for the image and draws the member last");
+  ok(xsOrder(rs.ctx) === "40,120,160,80", "VW-53 overview: p2 is painted after p3 and p4 [" + xsOrder(rs.ctx) + "]");
+  rs.inst._call("select", ["p4"]);
+  ok(rs.inst._test.raiseOrder() === null && rs.canvas.style.display !== "block" && rs.img() === "",
+    "VW-53: a member already last needs no reorder: the image stays");
+  rs.inst._call("select", ["p3", "p1"]);
+  ok(rs.inst._test.raiseOrder().join(",") === "1,3,0,2", "VW-53: members keep their own paint order");
+  rs.inst._test.setView({ x: 30, y: 25, w: 100, h: 50 }); rs.inst._test.evalTier();
+  ok(rs.inst._test.markTier() === "mid" && xsOrder(rs.ctx) === "100,20,180",
+    "VW-53 mid: the canvas draws the members last [" + xsOrder(rs.ctx) + "]");
+  {
+    const exp = recCtx();
+    const cp = window.HTMLCanvasElement.prototype;
+    const saved = { gc: cp.getContext, tdu: cp.toDataURL };
+    cp.getContext = function () { return exp; };
+    cp.toDataURL = function () { return "data:image/png;base64,X"; };
+    rs.inst._test.exportMarksImage(1);
+    cp.getContext = saved.gc; cp.toDataURL = saved.tdu;
+    const ex = xsOrder(exp).split(",").map(Number), sorted = ex.slice().sort((u, v) => u - v);
+    ok(ex.length === 3 && ex[0] === sorted[1], "VW-53 export: the redraw paints the members last [" + xsOrder(exp) + "]");
+  }
+  rs.inst._call("select", ["p1"]);
+  rs.inst._test.setView({ x: 30, y: 40, w: 60, h: 20 }); rs.inst._test.evalTier();
+  const dorder = () => Array.from(rs.el.querySelectorAll(".vellumwidget-detail [data-key]")).map((n) => n.getAttribute("data-key")).join(",");
+  ok(rs.inst._test.markTier() === "detail" && dorder() === "p2,p1", "VW-53 detail: the member's node is drawn after its neighbour [" + rs.inst._test.markTier() + ":" + dorder() + "]");
+  rs.inst._call("clearSelection");
+  ok(dorder() === "p1,p2", "VW-53 detail: clearing the selection restores the order");
+  rs.inst._test.setView({ x: 0, y: 0, w: 200, h: 100 }); rs.inst._test.evalTier();
+  ok(rs.inst._test.markTier() === "overview" && rs.canvas.style.display !== "block" && rs.img() === "", "VW-53: back to the image once nothing is raised");
+
   // VW-52: an alpha if_false draws non-members at that opacity in every
   // tier; a size or shape one is not applied (never drawn as a colour).
   const al = mountMS({ cond: 0.2, aes: "alpha", options: { detailMarks: 2 } });
@@ -4921,7 +4998,8 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ["size", "shape"].forEach(function (a) {
     const z = mountMS({ cond: a === "size" ? 3 : "square", aes: a });
     z.inst._call("select", ["p1"]);
-    ok(!fills(z.ctx).some((f) => !/:#ff0000ff@1$/.test(f)) && z.img() === "",
+    // (the canvas may stand in to raise the selection, VW-53: every mark in its own paint)
+    ok(!fills(z.ctx).some((f) => !/:#ff0000ff@1$/.test(f)),
       "VW-52: a " + a + " if_false is not applied on the canvas (no colour, no dim) [" + fills(z.ctx).join(",") + "]");
   });
 
@@ -5688,6 +5766,11 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(im && im.w === 200 && im.h === 100 && Math.abs(im.t[0] - 1.25) < 1e-6 && Math.abs(im.t[2] + 25) < 1e-6 && !im.clipped,
     "VW-30: under viewBox zoom a run raster goes through the view's transform, unclipped");
   ok(!marksShown(a), "VW-30: the mark PNG is hidden: every mark is on the canvas");
+  // VW-53: a flagged run (text, masks) ends a segment: p1 is not raised over it
+  a.inst._call("select", ["p1"]);
+  ok(a.inst._test.raiseOrder() === null && seq(a.ctx) === "fill:25,img:RUN1,fill:125,img:RUN2",
+    "VW-53: a member is not raised past a flagged run (a later layer's text or masked marks)");
+  a.inst._call("clearSelection");
   // styling: the exact marks take a condition, the run raster is drawn as is
   a.inst._call("select", ["p1"]);
   ok(/img:RUN1/.test(seq(a.ctx)), "VW-30: a condition keeps the runs on the canvas (their own styling is baked in)");
