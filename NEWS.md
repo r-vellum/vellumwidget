@@ -30,6 +30,13 @@
   `if_false` colour is used for colour aesthetics only, and R no longer
   reads a non-colour `if_false` such as `"1"` as a palette colour.
 
+* **A zoomed y axis moves its title out of the way of longer labels
+  (VW-51).** At deep zoom the re-ticked y labels need more digits than the
+  static ones ("0.5002" for "0.5") and ran into the y-axis title. The title
+  now moves out by however much wider the widest re-ticked label is than the
+  widest static one, never past the edge of the canvas, and goes back when
+  the labels fit again. The same holds for a secondary y axis on the right.
+
 * **Brush and lasso test constant-size marks where they are drawn (VW-47).**
   Under axis zoom a point or label keeps its pixel size, and hover has
   hit-tested it at that size since VW-42. A brush, though, still tested its

@@ -7,7 +7,7 @@ import { SVGNS } from "./constants";
 import { GLYPH_MARKS } from "../scales";
 import type { WidgetFns, WidgetState } from "../state";
 import { axisRetickable, axisTicks, secAxisMap, secTicks } from "../ticks";
-import type { AxisAnchor, AzPanel, TickStyle } from "../types";
+import type { AxisAnchor, AxisTitle, AzPanel, TickStyle } from "../types";
 import { fmtViewBox } from "../viewbox";
 import type { PanTransform } from "../viewbox";
 
@@ -75,6 +75,7 @@ export function axisZoomFeature(
     ws.axisZoomActive = true;
     scrapeAxisStyle();
     scrapeAxisAnchors();
+    scrapeAxisTitles();
     hideStaticAxes();
     // Re-ticked gridlines: a group inside each clipped panel, before its pan group,
     // so they render under the marks and are clipped to the panel (like vellum's).
@@ -354,6 +355,12 @@ export function axisZoomFeature(
         gap: rot ? 0 : gap,
         rot: rot
       };
+      // A y axis records its widest static label, measured while still shown.
+      if (!isX && !rot) {
+        let w0 = 0;
+        for (let i = 0; i < texts.length; i++) w0 = Math.max(w0, labelWidth(texts[i]));
+        anchor.w0 = w0;
+      }
       if (isSec) {
         // Read the secondary transform back off the static labels: each label sits
         // at its break's primary position, so (primary native, label value) pairs
@@ -374,6 +381,98 @@ export function axisZoomFeature(
       if (isX && !best.xLab) best.xLab = anchor;
       if (!isX && !best.yLab) best.yLab = anchor;
     }
+  }
+
+  // Pair each static y-axis title (axis-title-y / axis-title-y2) with the y
+  // label anchors it was laid out beside: the nearest title on the labels' outer
+  // side (left of "end"-anchored labels, right of "start"-anchored ones). A
+  // re-tick whose labels outgrow the static ones moves the title out by the
+  // difference (VW-51), never past the canvas edge.
+  function scrapeAxisTitles(): void {
+    if (!ws.svgEl || !ws.vb0) return;
+    const vb0 = ws.vb0;
+    const groups = ws.svgEl.querySelectorAll('[data-vellum-panel^="axis-title-y"]');
+    const titles: { t: AxisTitle; x: number; y: number }[] = [];
+    for (let g = 0; g < groups.length; g++) {
+      const node = groups[g].querySelector("text");
+      if (!node) continue;
+      const at = anchorThrough(node);
+      const fs = parseFloat(node.getAttribute("font-size") || "") || ws.axisStyle.fontSize;
+      // A rotated title is about one line tall across; a flat one its width.
+      const half = rotationOf(node) ? fs / 2 : labelWidth(node as SVGTextElement) / 2;
+      const sec = /^axis-title-y2/.test(groups[g].getAttribute("data-vellum-panel") || "");
+      const room = sec ? vb0.x + vb0.w - (at.x + half) : at.x - half - vb0.x;
+      titles.push({
+        t: { node: node, orig: node.getAttribute("transform"), room: Math.max(0, room), dir: sec ? 1 : -1, need: 0, shift: 0 },
+        x: at.x, y: at.y
+      });
+    }
+    if (!titles.length) return;
+    for (let i = 0; i < ws.azPanels.length; i++) {
+      const a = ws.azPanels[i];
+      const labs = [a.yLab, a.y2Lab];
+      for (let j = 0; j < labs.length; j++) {
+        const lab = labs[j];
+        if (!lab || lab.w0 === undefined) continue;
+        const dir = lab.anchor === "end" ? -1 : lab.anchor === "start" ? 1 : 0;
+        if (!dir) continue;
+        let best: AxisTitle | null = null, bestD = Infinity;
+        for (let k = 0; k < titles.length; k++) {
+          const c = titles[k];
+          if (c.t.dir !== dir || (c.x - lab.pos) * dir <= 0) continue;
+          const dy = c.y < a.p.py0 ? a.p.py0 - c.y : c.y > a.p.py1 ? c.y - a.p.py1 : 0;
+          const d = Math.abs(c.x - lab.pos) + dy;
+          if (d < bestD) { bestD = d; best = c.t; }
+        }
+        lab.title = best;
+      }
+    }
+  }
+
+  // A text node's advance width in device px: the browser's own measure, or,
+  // with no layout to ask (jsdom), 0.6 em per character.
+  function labelWidth(t: Element): number {
+    const f = (t as SVGTextElement).getComputedTextLength;
+    if (typeof f === "function") {
+      try {
+        const w = f.call(t);
+        if (w > 0) return w;
+      } catch (e) { /* not laid out */ }
+    }
+    const fs = parseFloat(t.getAttribute("font-size") || "") || ws.axisStyle.fontSize;
+    return (t.textContent || "").length * 0.6 * fs;
+  }
+
+  // Move each y title out by what its widest re-ticked labels need beyond the
+  // static ones (capped at its room), or back home when they fit again.
+  function placeAxisTitles(): void {
+    const seen: AxisTitle[] = [];
+    for (let i = 0; i < ws.azPanels.length; i++) {
+      const labs = [ws.azPanels[i].yLab, ws.azPanels[i].y2Lab];
+      for (let j = 0; j < labs.length; j++) {
+        const t = labs[j] && labs[j]!.title;
+        if (t && seen.indexOf(t) < 0) seen.push(t);
+      }
+    }
+    for (let i = 0; i < seen.length; i++) {
+      const t = seen[i];
+      const shift = Math.min(t.room, Math.max(0, t.need));
+      t.need = 0;
+      if (Math.abs(shift - t.shift) < 0.01) continue;
+      t.shift = shift;
+      if (shift > 0) {
+        t.node.setAttribute("transform", "translate(" + t.dir * shift + " 0)" + (t.orig ? " " + t.orig : ""));
+      } else if (t.orig !== null) {
+        t.node.setAttribute("transform", t.orig);
+      } else {
+        t.node.removeAttribute("transform");
+      }
+    }
+  }
+
+  // Note how far a y axis's re-ticked labels outgrow its static ones.
+  function noteLabelWidth(lab: AxisAnchor, w: number): void {
+    if (lab.title && lab.w0 !== undefined) lab.title.need = Math.max(lab.title.need, w - lab.w0);
   }
 
   // Hide vellum's gridlines (role="grid", inside the pan group -> would stretch
@@ -542,6 +641,7 @@ export function axisZoomFeature(
     if (!ws.axisZoomActive || !ws.vb || !ws.vb0 || !ws.retickLayer) return;
     while (ws.retickLayer.firstChild) ws.retickLayer.removeChild(ws.retickLayer.firstChild);
     for (let i = 0; i < ws.azPanels.length; i++) retickPanel(ws.azPanels[i]);
+    placeAxisTitles();
   }
 
   function retickPanel(a: AzPanel): void {
@@ -593,7 +693,9 @@ export function axisZoomFeature(
         grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
         if (a.yTick) ticks_.push(tickLine(a.yTick, sy, p));
         if (a.yLab) {
-          layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline, a.yLab.rot));
+          const lab = axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline, a.yLab.rot);
+          layer.appendChild(lab);
+          noteLabelWidth(a.yLab, labelWidth(lab));
         }
       }
       if (a.y2Lab && a.y2Map) {
@@ -601,7 +703,9 @@ export function axisZoomFeature(
         for (let i = 0; i < st.length; i++) {
           const sy = t.sy * (p.py0 + (ay.native_hi - st[i].n) / k) + t.ty;
           if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
-          layer.appendChild(axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline, a.y2Lab.rot));
+          const lab = axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline, a.y2Lab.rot);
+          layer.appendChild(lab);
+          noteLabelWidth(a.y2Lab, labelWidth(lab));
         }
       }
     }
