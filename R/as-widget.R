@@ -2189,6 +2189,12 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # a palette of `#rrggbbaa` strings and a bit-packed 1-based index per row, 0
 # where a row has no keyed mark or its fill is a gradient (the runtime samples
 # the pixel for those). The fill, or the stroke when the fill is transparent.
+# When some point mark is not a circle, `shape` (VW-58) is each row's point
+# marker as 1 + vellum's shape code (0 circle, 1 square, 2 triangle, 3 diamond,
+# 4 plus, 5 cross, 6 triangle down, 7 star), bit-packed like `idx`, 0 where a
+# row is no point (the runtime draws a round dot there, as before); absent
+# when every point is a circle, so such a payload is unchanged. (The size
+# needs nothing: a marker's box is 2r wide whatever its shape.)
 # NULL at or under `max_marks` (the list itself ships) or without a vellum
 # whose list indexes the element keys (VR-22).
 .fallback_mark_colors <- function(scene, model, panels, max_marks, keys) {
@@ -2215,11 +2221,22 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   }
   rk <- .dl_col(dl$record$key) + 1L
   rp <- .dl_col(dl$record$paint) + 1L
+  # Each record's point marker (-1 for a record that is no point): the point
+  # table holds the point records' rows in record order.
+  kind <- .dl_col(dl$record$kind)
+  rs <- rep(-1L, length(kind))
+  if (!is.null(dl$point$shape) && any(kind == 0L)) {
+    sh <- .dl_col(dl$point$shape)
+    if (length(sh) == sum(kind == 0L)) {
+      rs[kind == 0L] <- as.integer(sh)
+    }
+  }
   # The first record of each mark: a filled-and-stroked point is one record,
   # and a mark of several records is painted mostly by its first.
   first <- !duplicated(rk)
   rk <- rk[first]
   rp <- rp[first]
+  rs <- rs[first]
   pt <- dl$paints
   clear <- function(v) is.na(v) | grepl("^#[0-9A-Fa-f]{6}00$", v)
   col <- ifelse(clear(pt$fill), pt$stroke, pt$fill)
@@ -2232,7 +2249,13 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   # Keys past `keys_given` are the list's own (marks the table lacks): skip.
   own <- rk <= length(keys)
   idx[rk[own]] <- match(col[rp[own]], pal, nomatch = 0L)
-  list(pal = pal, idx = .uint_column(idx, pack = TRUE))
+  out <- list(pal = pal, idx = .uint_column(idx, pack = TRUE))
+  if (any(rs[own] > 0L)) {
+    shape <- integer(length(keys))
+    shape[rk[own]] <- rs[own] + 1L
+    out$shape <- .uint_column(shape, pack = TRUE)
+  }
+  out
 }
 
 # One display-list column (`list(type, n, data | const | seq | rle)`) as an R
