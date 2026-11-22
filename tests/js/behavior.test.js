@@ -2569,6 +2569,12 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     const any = Array.from(e.querySelectorAll(".vellumwidget-hl")).filter((n) => !n.closest("[data-vellum-pan]"));
     ok(i._test.largeDim() && any.length === 1 && any[0].style.getPropertyValue("--vw-ix") === "0.5" && any[0].style.getPropertyValue("--vw-iy") === "0.5",
       "VW-47: a hover clone in the large-scene overlay carries its panel's counter-scale [" + (any[0] && any[0].getAttribute("style")) + "]");
+    // VW-54: zooming while the hover shows (no pointer move) re-clones it at
+    // the new counter-scale instead of leaving the old one.
+    i._test.setView({ x: 75, y: 37.5, w: 50, h: 25 });
+    const any2 = Array.from(e.querySelectorAll(".vellumwidget-hl")).filter((n) => !n.closest("[data-vellum-pan]"));
+    ok(any2.length === 1 && any2[0].style.getPropertyValue("--vw-ix") === "0.25" && any2[0].style.getPropertyValue("--vw-iy") === "0.25",
+      "VW-54: a zoom during a hover refreshes the overlay clone's counter-scale [" + (any2[0] && any2[0].getAttribute("style")) + "]");
   }
 
   // "fixed" (default): the glyph is counter-scaled from the shared vars; the
