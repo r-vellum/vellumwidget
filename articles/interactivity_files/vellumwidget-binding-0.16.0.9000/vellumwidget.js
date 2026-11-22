@@ -623,6 +623,7 @@
   // srcts/dlist.ts
   var DL_POINT = 0;
   var DL_RECT = 1;
+  var DL_PATH = 2;
   var DL_FLAG_PICK = 16;
   var DL_FLAG_BLEND = 32;
   var BLEND_MODES = {
@@ -6086,16 +6087,21 @@
       const ns = asColumn(g.n);
       const xs = asColumn(g.x);
       const ys = asColumn(g.y);
-      if (!keys.length || xs.length !== ys.length) return;
-      ws.gx = Float64Array.from(xs);
-      ws.gy = Float64Array.from(ys);
+      if (xs.length !== ys.length) return;
+      const fromList = g.dl === 1 && ws.dl ? listGeometry(keys) : null;
+      if (!keys.length && !fromList) return;
+      const nv = xs.length + (fromList ? fromList.nv : 0);
+      ws.gx = new Float64Array(nv);
+      ws.gy = new Float64Array(nv);
+      ws.gx.set(xs);
+      ws.gy.set(ys);
       const nrs = g.nr != null ? asColumn(g.nr) : null;
       const rls = g.rl != null ? asColumn(g.rl) : null;
       const eos = g.eo != null ? asColumn(g.eo) : null;
       let at = 0, ra = 0;
       for (let i = 0; i < keys.length; i++) {
         const n = ns[i] | 0;
-        if (n <= 0 || at + n > ws.gx.length) break;
+        if (n <= 0 || at + n > xs.length) break;
         const rec = { kind: kinds[i], at, n };
         if (eos && eos[i] === 1) rec.evenodd = true;
         if (nrs && rls) {
@@ -6110,7 +6116,51 @@
         (ws.geomByKey[keys[i]] || (ws.geomByKey[keys[i]] = [])).push(rec);
         at += n;
       }
+      if (fromList) at = appendListGeometry(fromList.recs, at);
       ws.haveGeometry = at > 0;
+    }
+    function listGeometry(blockKeys) {
+      const dl = ws.dl;
+      const inBlock = {};
+      for (let i = 0; i < blockKeys.length; i++) inBlock[blockKeys[i]] = true;
+      const flagged = {};
+      for (let i = 0; i < dl.n; i++) if (dl.flags[i] & 15) flagged[dl.key[i]] = true;
+      const recs = [];
+      let nv = 0;
+      for (let i = 0; i < dl.n; i++) {
+        if (dl.kind[i] !== DL_PATH || flagged[dl.key[i]]) continue;
+        const k = dl.keys[dl.key[i]];
+        if (k == null || inBlock[k]) continue;
+        const j = dl.row[i];
+        const n = dl.runOff[dl.pathOff[j + 1]] - dl.runOff[dl.pathOff[j]];
+        if (n <= 0) continue;
+        recs.push(i);
+        nv += n;
+      }
+      return { recs, nv };
+    }
+    function appendListGeometry(recs, at) {
+      const dl = ws.dl;
+      for (let r = 0; r < recs.length; r++) {
+        const i = recs[r], j = dl.row[i];
+        const r0 = dl.pathOff[j], r1 = dl.pathOff[j + 1];
+        const v0 = dl.runOff[r0], v1 = dl.runOff[r1];
+        for (let v = v0; v < v1; v++) {
+          ws.gx[at + v - v0] = dl.xy[2 * v];
+          ws.gy[at + v - v0] = dl.xy[2 * v + 1];
+        }
+        const rec = { kind: dl.closed[j] === 1 ? "polygon" : "line", at, n: v1 - v0 };
+        if (r1 - r0 > 1) {
+          const lens = [];
+          for (let run = r0; run < r1; run++) lens.push(dl.runOff[run + 1] - dl.runOff[run]);
+          rec.rings = lens;
+        }
+        if (dl.evenodd[j] === 1) rec.evenodd = true;
+        const k = dl.keys[dl.key[i]];
+        (ws.geomByKey[k] || (ws.geomByKey[k] = [])).push(rec);
+        at += v1 - v0;
+      }
+      return at;
     }
     function constBox(e) {
       if (!ws.axisZoomActive || ws.opts.zoomMarks === "scale" || !hasBbox(e)) return null;
