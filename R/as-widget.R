@@ -353,9 +353,6 @@ as_widget <- function(
     marks = marks,
     # The marks-only display list (raster mode, VW-15), or NULL.
     displayList = dlist,
-    # Above `max_marks`: each element's colour for the fallback dots (VW-50),
-    # or NULL.
-    markColors = mark_colors,
     # The furniture painted after the marks (raster mode, VW-21), or NULL.
     above = above,
     # The flagged keyed marks, one PNG per run (raster mode, VW-30), or NULL.
@@ -392,6 +389,12 @@ as_widget <- function(
       )
     )
   )
+
+  # Above `max_marks`: each element's colour for the fallback dots (VW-50).
+  # Only when there is one, so every other payload is unchanged.
+  if (!is.null(mark_colors)) {
+    payload$markColors <- mark_colors
+  }
 
   # Click-to-source (from vellumplot::inspect_source()): attach the per-grob
   # source-row payload only when the spec opted in, so an ordinary widget carries
