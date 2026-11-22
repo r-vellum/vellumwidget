@@ -2738,6 +2738,49 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   });
 }
 
+// VW-52: a constant if_false is routed by the condition's aesthetic: alpha is
+// the non-members' opacity (the dim class at that opacity), size and shape
+// are not applied, and none of them is ever painted as a colour; a per-row
+// colour is kept for colour aesthetics only.
+{
+  const svgCV = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><g data-vellum-panel="panel-1-1">' +
+    '<path data-key="p1" fill="#ff0000" stroke="#000000" d="M5 5h4v4h-4z"/>' +
+    '<path data-key="p2" fill="#00ff00" stroke="#000000" d="M20 5h4v4h-4z"/>' +
+    "</g></svg>";
+  function mountAes(aes, ifFalse) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const w = widgetDef.factory(e, 200, 100);
+    w.renderValue({
+      svg: svgCV,
+      elements: { key: ["p1", "p2"], cond: ["hi:x", "hi:x"], cond_value: { "hi:x": ["#111111", "#222222"] } },
+      interactions: {
+        selections: [{ name: "hi", kind: "point", on: "click", empty: true }],
+        conditions: [{ selection: "hi", aes: aes, if_false: ifFalse, empty: true, tag: "hi:x" }]
+      },
+      options: { hover: true, select: true, selectMode: "multiple" }
+    });
+    w._call("select", ["p1"]);
+    return { e: e, w: w, n: e.querySelector('[data-key="p2"]') };
+  }
+  const al = mountAes("alpha", 0.2);
+  ok(al.n.classList.contains("vellumwidget-cond-dim") && al.n.style.getPropertyValue("--vellumwidget-dim-opacity") === "0.2",
+    "VW-52 svg: an alpha if_false dims the non-member to that opacity [" + al.n.getAttribute("style") + "]");
+  ok(!al.n.style.fill && !al.n.style.stroke, "VW-52 svg: an alpha if_false (and the column's per-row values) is not painted as a colour");
+  al.w._call("clearSelection");
+  ok(!al.n.classList.contains("vellumwidget-cond-dim") && !al.n.style.getPropertyValue("--vellumwidget-dim-opacity"),
+    "VW-52 svg: clearing the selection drops the opacity");
+  [["size", 3], ["shape", "square"], ["linewidth", 0.5], ["alpha", 7]].forEach(function (c) {
+    const m = mountAes(c[0], c[1]);
+    ok(!m.n.style.fill && !m.n.style.stroke && !m.n.classList.contains("vellumwidget-cond-dim"),
+      "VW-52 svg: an if_false of " + JSON.stringify(c[1]) + " on " + c[0] + " is not applied [" + (m.n.getAttribute("style") || "") + "]");
+  });
+  const sz = mountAes("size", null);
+  ok(sz.n.classList.contains("vellumwidget-cond-dim"), "VW-52 svg: no if_false is still the theme dim, whatever the aesthetic");
+  const col = mountAes("fill", "#cccccc");
+  ok(/#222222|rgb\(34, 34, 34\)/.test(col.n.style.fill), "VW-52 svg: a colour aesthetic keeps its per-row colour");
+}
+
 // ===================== VW-12: one element per point, or a fill + stroke twin =====================
 // vellum draws a keyed point with a solid fill and an undashed solid stroke as
 // ONE element carrying both paints; older vellum drew a fill element followed
@@ -4793,7 +4836,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       displayList: dlOf(o.n, o.flagged),
       interactions: {
         selections: [{ name: "pick", kind: "point", on: "click", empty: true }],
-        conditions: o.cond ? [{ selection: "pick", aes: "color", if_false: o.cond === "dim" ? null : o.cond, empty: true }] : [],
+        conditions: o.cond ? [{ selection: "pick", aes: o.aes || "color", tag: "pick:color", if_false: o.cond === "dim" ? null : o.cond, empty: true }] : [],
         filters: o.filt ? [{ selection: "pick" }] : []
       },
       options: Object.assign({ raster: true, hover: true, select: true, zoom: true, selectMode: "multiple" }, o.options || {})
@@ -4857,6 +4900,30 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     "VW-46: a detail node takes its per-row if_false [" + (n4 && n4.style.fill) + "]");
   pr.inst._call("clearSelection");
   ok(pr.inst._test.markTier() !== "detail" || !n4.style.fill, "VW-46: clearing the selection reverts the per-row colour");
+
+  // VW-52: an alpha if_false draws non-members at that opacity in every
+  // tier; a size or shape one is not applied (never drawn as a colour).
+  const al = mountMS({ cond: 0.2, aes: "alpha", options: { detailMarks: 2 } });
+  al.inst._call("select", ["p1"]);
+  ok(fills(al.ctx).join(",") === "120:#ff0000ff@0.2,160:#ff0000ff@0.2,40:#ff0000ff@1,80:#ff0000ff@0.2",
+    "VW-52: overview: non-members draw at the alpha if_false, in their own paint [" + fills(al.ctx).join(",") + "]");
+  al.inst._test.setView({ x: 30, y: 25, w: 100, h: 50 }); al.inst._test.evalTier();
+  ok(al.inst._test.markTier() === "mid" && fills(al.ctx).some((f) => /:#ff0000ff@0.2$/.test(f)) && !fills(al.ctx).some((f) => /@0.28$/.test(f)),
+    "VW-52: the mid canvas keeps the alpha");
+  al.inst._test.setView({ x: 70, y: 40, w: 20, h: 20 }); al.inst._test.evalTier();
+  const an = al.el.querySelector('.vellumwidget-detail [data-key="p2"]');
+  ok(al.inst._test.markTier() === "detail" && an && an.classList.contains("vellumwidget-cond-dim") && an.style.getPropertyValue("--vellumwidget-dim-opacity") === "0.2" && !an.style.fill,
+    "VW-52: a detail node takes the alpha as its dim opacity, not a fill");
+  al.inst._call("clearSelection");
+  const al2 = mountMS({ cond: 0.5, aes: "alpha" });
+  al2.inst._call("select", ["p1"]);
+  ok(fills(al2.ctx).filter((f) => /@0.5$/.test(f)).length === 3, "VW-52: two alpha values keep their own opacity per widget");
+  ["size", "shape"].forEach(function (a) {
+    const z = mountMS({ cond: a === "size" ? 3 : "square", aes: a });
+    z.inst._call("select", ["p1"]);
+    ok(!fills(z.ctx).some((f) => !/:#ff0000ff@1$/.test(f)) && z.img() === "",
+      "VW-52: a " + a + " if_false is not applied on the canvas (no colour, no dim) [" + fills(z.ctx).join(",") + "]");
+  });
 
   // filter_by(): non-members of the filtered view are not drawn and not pickable.
   const f = mountMS({ filt: true });
@@ -5601,7 +5668,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       displayList: dlRuns(o),
       flagged: flagged,
       interactions: { selections: [{ name: "pick", kind: "point", on: "click", empty: true }],
-        conditions: [{ selection: "pick", aes: "color", if_false: null, empty: true }], filters: [] },
+        conditions: [o.cond || { selection: "pick", aes: "color", if_false: null, empty: true }], filters: [] },
       options: Object.assign({ raster: true, hover: true, select: true, zoom: true, selectMode: "multiple", detailMarks: o.detailMarks || 1 }, o.options || {})
     });
     return { el: e, inst: inst, ctx: ctx, restore: function () { proto.getContext = orig; } };
@@ -5791,6 +5858,31 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       "VW-33: the export redraw draws the patched runs");
   }
   st.restore();
+  // VW-52: an alpha if_false restyles a run's marks at that opacity, on the
+  // canvas and in the export; a size one leaves the runs as drawn
+  {
+    const ra = mount({ runSvg: RUN_SVG, perCanvas: true, cond: { selection: "pick", aes: "alpha", tag: "pick:color", if_false: 0.4, empty: true } });
+    ra.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); ra.inst._test.evalTier();
+    ra.inst._call("select", ["p1"]);
+    const fs = runImgs(ra.ctx).filter((i) => svgOf(i.src));
+    ok(fs.length === 2 && fs.every((i) => /style="opacity:0.4"/.test(svgOf(i.src)) && !/fill:/.test(svgOf(i.src))),
+      "VW-52: a run's marks restyle at the alpha if_false, not as a colour [" + fs.map((i) => (svgOf(i.src) || "").match(/style="[^"]*"/)).join(" | ") + "]");
+    const exp = recCtx();
+    const saved = { gc: proto.getContext, tdu: proto.toDataURL };
+    proto.getContext = function () { return this._rc || (this._rc = exp); };
+    proto.toDataURL = function () { return "data:image/png;base64,REDRAWN"; };
+    const r = ra.inst._test.exportMarksImage ? ra.inst._test.exportMarksImage(2) : null;
+    proto.getContext = saved.gc; proto.toDataURL = saved.tdu;
+    const eims = runImgs(exp).filter((i) => svgOf(i.src));
+    ok(r && eims.length === 2 && eims.every((i) => /opacity:0.4/.test(svgOf(i.src) || "")), "VW-52: the export redraw keeps the alpha");
+    ra.restore();
+    const rs = mount({ runSvg: RUN_SVG, perCanvas: true, cond: { selection: "pick", aes: "size", tag: "pick:color", if_false: 2, empty: true } });
+    rs.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); rs.inst._test.evalTier();
+    rs.inst._call("select", ["p1"]);
+    ok(rs.inst._test.runStyled().join(",") === "false,false" && seq(rs.ctx) === "fill:25,img:RUN1,fill:125,img:RUN2",
+      "VW-52: a size if_false leaves the runs (and the exact marks) as drawn");
+    rs.restore();
+  }
   // VW-37: an untouched mark whose box meets a touched one's is re-rendered
   // with it (so no mark is half PNG, half browser); one apart keeps the PNG
   {

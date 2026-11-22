@@ -241,7 +241,7 @@
         let op = "";
         if (cl.contains("vellumwidget-legend-off") && cl.contains("vellumwidget-legend")) op = "0.4";
         else if (cl.contains("vellumwidget-colorfiltered")) op = cssVar(cs, "--vellumwidget-colorfilter-opacity", "0.12");
-        else if (cl.contains("vellumwidget-cond-dim")) op = cssVar(cs, "--vellumwidget-dim-opacity", "0.28");
+        else if (cl.contains("vellumwidget-cond-dim")) op = n.style.getPropertyValue("--vellumwidget-dim-opacity").trim() || cssVar(cs, "--vellumwidget-dim-opacity", "0.28");
         else if (cl.contains("vellumwidget-legend-muted")) op = "0.12";
         if (op) c.style.opacity = op;
       }
@@ -2573,16 +2573,24 @@
   var MS_MUTED = 4;
   var DIM_DEFAULT = 0.28;
   var MUTED_ALPHA = 0.12;
+  var ALPHA_CODE = 2147483648;
+  function dimAlphaOf(ws, k) {
+    const a = ws.msAlpha;
+    const i = a ? a[k] : 0;
+    return i ? ws.msAlphaPal[i - 1] : ws.msDimAlpha;
+  }
   function markStateFeature(ws) {
     let forDl = null;
     let keyIdx = /* @__PURE__ */ new Map();
     let tagIds = {};
     let paletteIdx = {};
+    let alphaIdx = {};
     function sync() {
       const dl = ws.dl;
       if (!dl) {
         forDl = null;
         ws.msFlags = ws.msColor = ws.msCond = null;
+        ws.msAlpha = null;
         ws.msActive = false;
         return false;
       }
@@ -2592,7 +2600,10 @@
       for (let i = 0; i < dl.keys.length; i++) if (!keyIdx.has(dl.keys[i])) keyIdx.set(dl.keys[i], i);
       tagIds = {};
       paletteIdx = {};
+      alphaIdx = {};
       ws.msPalette = [];
+      ws.msAlphaPal = [];
+      ws.msAlpha = new Uint16Array(dl.keys.length);
       ws.msFlags = new Uint8Array(dl.keys.length);
       ws.msColor = new Uint32Array(dl.keys.length);
       ws.msCond = new Uint32Array(dl.keys.length);
@@ -2622,12 +2633,22 @@
       }
       return p + 2;
     }
-    function condStateSet(tag, tagged, members, active, color, colors) {
+    function alphaCode(a) {
+      const s = String(a);
+      let p = alphaIdx[s];
+      if (p == null) {
+        if (ws.msAlphaPal.length >= 65535) return ALPHA_CODE + ws.msAlphaPal.length - 1;
+        p = alphaIdx[s] = ws.msAlphaPal.length;
+        ws.msAlphaPal.push(a);
+      }
+      return ALPHA_CODE + p;
+    }
+    function condStateSet(tag, tagged, members, active, look, colors) {
       const cond = ws.msCond;
       if (!cond || !ws.dl) return;
       let ids = tagIds[tag];
       if (!ids) ids = tagIds[tag] = keyIds(tagged);
-      const code = colorCode(color);
+      const code = look.kind === "color" ? colorCode(look.color) : look.kind === "alpha" ? alphaCode(look.alpha) : look.kind === "dim" ? 1 : 0;
       for (let i = 0; i < ids.length; i++) {
         const id = ids[i];
         if (id < 0) continue;
@@ -2641,16 +2662,20 @@
     }
     function updateMarkStates() {
       if (!ws.rasterMode || !sync() || !ws.msFlags || !ws.msColor || !ws.msCond) return;
-      const flags = ws.msFlags, color = ws.msColor, cond = ws.msCond;
+      const flags = ws.msFlags, color = ws.msColor, cond = ws.msCond, alpha = ws.msAlpha;
       flags.fill(0);
       color.fill(0);
+      if (alpha) alpha.fill(0);
       let active = false;
       for (let k = 0; k < cond.length; k++) {
         const c = cond[k];
         if (!c) continue;
         active = true;
         if (c === 1) flags[k] = MS_DIM;
-        else color[k] = c - 1;
+        else if (c >= ALPHA_CODE) {
+          flags[k] = MS_DIM;
+          if (alpha) alpha[k] = c - ALPHA_CODE + 1;
+        } else color[k] = c - 1;
       }
       const hide = function(set) {
         for (const key in set) {
@@ -2742,7 +2767,7 @@
       let s = "";
       for (let q = 0; q < ids.length; q++) {
         const k = ids[q], f = flags[k], c = color[k];
-        if (f || c) s += k + ":" + f + ":" + (c ? ws.msPalette[c - 1] : "") + ";";
+        if (f || c) s += k + ":" + f + ":" + (c ? ws.msPalette[c - 1] : "") + (f & MS_DIM ? ":" + dimAlphaOf(ws, k) : "") + ";";
       }
       return s ? s + "@" + ws.msDimAlpha : "";
     }
@@ -2771,7 +2796,7 @@
         if (fa && fa !== "none") st += ";fill:" + col;
         if (sa && sa !== "none") st += ";stroke:" + col;
       }
-      if (f & MS_DIM) st += ";opacity:" + ws.msDimAlpha;
+      if (f & MS_DIM) st += ";opacity:" + dimAlphaOf(ws, k);
       else if (f & MS_MUTED) st += ";opacity:" + MUTED_ALPHA;
       if (st) n.setAttribute("style", st.replace(/^;/, ""));
       return true;
@@ -4395,6 +4420,26 @@
     return { currentViewBox, toUser, toView, toAnchor, azNearest, azT, azMulti, fmtPan, calibrateXform, sceneToClient, clientToScene, panelAt, dataRangeOf, brushDataFields };
   }
 
+  // srcts/types.ts
+  function condLook(aes, ifFalse) {
+    let v = ifFalse;
+    if (Array.isArray(v)) v = v.length === 1 ? v[0] : null;
+    if (v == null) return { kind: "dim" };
+    if (isColorAes(aes)) return typeof v === "string" && v !== "" ? { kind: "color", color: v } : { kind: "none" };
+    if (isAlphaAes(aes)) {
+      const a = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+      return isFinite(a) && a >= 0 && a <= 1 ? { kind: "alpha", alpha: a } : { kind: "none" };
+    }
+    return { kind: "none" };
+  }
+  function isColorAes(aes) {
+    if (aes == null || aes === "") return true;
+    return /(^|_)(colou?r|fill|stroke)$/.test(aes);
+  }
+  function isAlphaAes(aes) {
+    return aes != null && /(^|_)(alpha|opacity)$/.test(aes);
+  }
+
   // srcts/features/declarative.ts
   function declarativeFeature(ws) {
     function setupInteractions() {
@@ -4451,12 +4496,15 @@
       for (let i = 0; i < keys.length; i++) set[keys[i]] = true;
       return set;
     }
-    function styleCondNode(node, color) {
-      if (color == null) {
+    function styleCondNode(node, look) {
+      if (look.kind === "none") return;
+      const n = node;
+      if (look.kind === "dim" || look.kind === "alpha") {
         node.classList.add("vellumwidget-cond-dim");
+        if (look.kind === "alpha") n.style.setProperty("--vellumwidget-dim-opacity", String(look.alpha));
         return;
       }
-      const n = node;
+      const color = look.color;
       const f = node.getAttribute("fill");
       if (f && f !== "none") n.style.fill = color;
       const s = node.getAttribute("stroke");
@@ -4467,6 +4515,7 @@
       const n = node;
       if (n.style.fill) n.style.fill = "";
       if (n.style.stroke) n.style.stroke = "";
+      if (n.style.getPropertyValue("--vellumwidget-dim-opacity")) n.style.removeProperty("--vellumwidget-dim-opacity");
     }
     function applyConditions() {
       if (!ws.interactions || !ws.interactions.conditions) return;
@@ -4479,19 +4528,21 @@
         const c = ws.interactions.conditions[ci];
         const tag = c.tag || c.selection + ":" + c.aes;
         const tagged = ws.condTagElems[tag] || [];
-        const vals = ws.condTagVals[tag] || null;
+        const look = condLook(c.aes, c.if_false);
+        const vals = isColorAes(c.aes) ? ws.condTagVals[tag] || null : null;
         const sel = selByName[c.selection];
         const members = sel ? selectionMembers(sel) : {};
         const active = Object.keys(members).length > 0 || c.empty === false;
-        if (ms) ws.fx.condStateSet(tag, tagged, members, active, c.if_false, vals);
+        if (ms) ws.fx.condStateSet(tag, tagged, members, active, look, vals);
         if (ring) continue;
         for (let i = 0; i < tagged.length; i++) {
           const nodes = ws.fx.elementsForKey(tagged[i]);
           const member = !!members[tagged[i]];
-          const color = vals && vals[i] != null ? vals[i] : c.if_false;
+          const own = vals ? vals[i] : null;
+          const lk = own != null ? { kind: "color", color: own } : look;
           for (let j = 0; j < nodes.length; j++) {
             clearCondNode(nodes[j]);
-            if (active && !member) styleCondNode(nodes[j], color);
+            if (active && !member) styleCondNode(nodes[j], lk);
           }
         }
       }
@@ -6691,7 +6742,7 @@
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, W, H);
       const flags = styled ? ws.msFlags : null, recol = styled ? ws.msColor : null, pal = ws.msPalette;
-      const dimA = ws.msDimAlpha;
+      const dimA = ws.msDimAlpha, am = styled ? ws.msAlpha : null, apal = ws.msAlphaPal;
       let tgt = ctx;
       const open_ = [];
       let curFill = null, curStroke = null, curGrad = 0;
@@ -6930,7 +6981,7 @@
         if (flags) {
           const k = dl.key[i], f = flags[k];
           if (f & MS_HIDDEN) continue;
-          if (f & MS_DIM) alpha = dimA;
+          if (f & MS_DIM) alpha = am && am[k] ? apal[am[k] - 1] : dimA;
           else if (f & MS_MUTED) alpha = MUTED_ALPHA;
           ov = recol[k];
         }
@@ -8399,6 +8450,8 @@
       msColor: null,
       msCond: null,
       msPalette: [],
+      msAlpha: null,
+      msAlphaPal: [],
       msActive: false,
       msDimAlpha: 0.28,
       runSvg: null,
