@@ -30,9 +30,26 @@ export function hoverFeature(
       for (let j = 0; j < nodes.length; j++) {
         const c = nodes[j].cloneNode(true) as Element;
         c.classList.add("vellumwidget-hl");
+        pinScaleVars(c, keys[i]);
         ws.dimLayer.appendChild(azOverlayWrap(c, keys[i]));
       }
     }
+  }
+
+  // A constant-size glyph or label counter-scales by its pan group's
+  // --vw-ix / --vw-iy (VW-26), which a clone in the overlay, outside every
+  // pan group, does not inherit: it would fall back to 1 and grow with the
+  // zoom. Give the clone its own panel's values (VW-47).
+  function pinScaleVars(node: Element, key: string): void {
+    if (!ws.axisZoomActive || ws.opts.zoomMarks === "scale") return;
+    const m = ws.meta[key];
+    if (!m || !hasBbox(m)) return;
+    const a = ws.fx.azNearest((m.x0 + m.x1) / 2, (m.y0 + m.y1) / 2);
+    if (!a) return;
+    const t = ws.fx.azT(a);
+    const st = (node as unknown as { style: CSSStyleDeclaration }).style;
+    st.setProperty("--vw-ix", String(t.sx ? 1 / t.sx : 1));
+    st.setProperty("--vw-iy", String(t.sy ? 1 / t.sy : 1));
   }
 
   // Multi-panel axis zoom: the overlay sits at the fixed base view, so a clone

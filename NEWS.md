@@ -1,5 +1,16 @@
 # vellumwidget 0.16.0.9000
 
+* **Brush and lasso test constant-size marks where they are drawn (VW-47).**
+  Under axis zoom a point or label keeps its pixel size, and hover has
+  hit-tested it at that size since VW-42. A brush, though, still tested its
+  record box scaled by the zoom, so it took points it didn't touch, and a
+  lasso took a label by its record box's centre, away from where the label
+  is drawn. Both now use the drawn box. Also, in a large SVG scene, hover
+  dims the plot and clones the hovered marks into an overlay outside the
+  pan group. A clone of a constant-size mark did not get the group's
+  counter-scale there, so it grew with the zoom (four times its size at 4x).
+  It now carries its panel's counter-scale.
+
 * **A per-row `if_false` reaches the widget (VW-46).** For
   `color = condition(sel, if_true, col)` with a column `col`, a non-member
   used to get the theme dim, because the payload dropped vellumplot's

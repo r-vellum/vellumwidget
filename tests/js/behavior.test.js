@@ -2545,6 +2545,32 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     };
   }
 
+  // VW-47: in a large SVG scene hover dims the plot and clones the hovered
+  // marks into the overlay, outside the pan group whose --vw-ix/--vw-iy a
+  // constant-size glyph counter-scales by: the clone carries its own.
+  {
+    let fill = "";
+    const keys = ["p"], marks = ["point"], x0 = [98], y0 = [48], x1 = [102], y1 = [52];
+    for (let i = 0; i < 2100; i++) {
+      const x = 20 + (i % 150), y = 60 + Math.floor(i / 150);
+      fill += '<rect data-key="f' + i + '" x="' + x + '" y="' + y + '" width="0.5" height="0.5"/>';
+      keys.push("f" + i); marks.push("rect"); x0.push(x); y0.push(y); x1.push(x + 0.5); y1.push(y + 0.5);
+    }
+    const big = svg.replace('<rect data-key="r" x="40" y="20" width="30" height="10"/>', fill);
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const i = widgetDef.factory(e, 200, 100);
+    i.renderValue({
+      svg: big, elements: { key: keys, mark: marks, x0: x0, y0: y0, x1: x1, y1: y1 }, panels: panel,
+      options: { axisZoom: true, hover: true, select: true, zoom: true }
+    });
+    i._test.setView({ x: 50, y: 25, w: 100, h: 50 });
+    fireOn(e.querySelector("svg"), "pointermove", e.querySelector('[data-key="p"]'));
+    const any = Array.from(e.querySelectorAll(".vellumwidget-hl")).filter((n) => !n.closest("[data-vellum-pan]"));
+    ok(i._test.largeDim() && any.length === 1 && any[0].style.getPropertyValue("--vw-ix") === "0.5" && any[0].style.getPropertyValue("--vw-iy") === "0.5",
+      "VW-47: a hover clone in the large-scene overlay carries its panel's counter-scale [" + (any[0] && any[0].getAttribute("style")) + "]");
+  }
+
   // "fixed" (default): the glyph is counter-scaled from the shared vars; the
   // positional mark keeps a non-scaling stroke; neither the frame nor the data move yet.
   const fx = mountCM("fixed");
@@ -5835,6 +5861,12 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     ok(ring && ring.tagName.toLowerCase() === "ellipse" && ring.getAttribute("cx") === "80" && ring.getAttribute("cy") === "50" &&
        ring.getAttribute("rx") === "2.5" && ring.getAttribute("ry") === "2.5",
       "VW-42: the selection ring of a constant glyph keeps its 1x size under axis zoom");
+    // VW-47: a brush tests the drawn (constant-size) box, 78.5..81.5, not the
+    // T-scaled record box: a brush over 82..90 grazes only the record box
+    ok(c1.inst._test.brushKeysIn({ x0: 82, y0: 40, x1: 90, y1: 60 }).indexOf("p2") < 0,
+      "VW-47: a brush over the record box but off the drawn glyph misses it");
+    ok(c1.inst._test.brushKeysIn({ x0: 81, y0: 40, x1: 90, y1: 60 }).indexOf("p2") >= 0,
+      "VW-47: ... and one over the drawn glyph takes it");
     c1.restore();
     // a start-anchored label (anchor 150, 50 from the run's SVG) keeps its
     // size about the anchor: at 2x its box 150..170 x 45..55 is 150..160 x 47.5..52.5
@@ -5847,6 +5879,11 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       c9.inst._call("select", ["p4"]);
       const r9 = c9.el.querySelector(".vellumwidget-fb-sel");
       ok(r9 && r9.getAttribute("cx") === "155" && r9.getAttribute("rx") === "6", "VW-42: ... and its ring sits on the drawn label");
+      // VW-47: a lasso takes the label by its drawn box's centre (155, 50),
+      // not its record box's (160, 50)
+      const sq = (x0, x1) => [{ x: x0, y: 40 }, { x: x1, y: 40 }, { x: x1, y: 60 }, { x: x0, y: 60 }];
+      ok(c9.inst._test.lassoKeysIn(sq(157, 165)).indexOf("p4") < 0 && c9.inst._test.lassoKeysIn(sq(152, 158)).indexOf("p4") >= 0,
+        "VW-47: a lasso tests a constant label at its drawn centre");
       c9.restore();
     }
     // at 1x nothing changes: the record box, a circle ring
