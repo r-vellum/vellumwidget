@@ -2,7 +2,8 @@
 // styling and filters.
 
 import type { WidgetFns, WidgetState } from "../state";
-import type { SelDef } from "../types";
+import type { CondLook, SelDef } from "../types";
+import { condLook, isColorAes } from "../types";
 
 export function declarativeFeature(
   ws: WidgetState
@@ -91,13 +92,19 @@ export function declarativeFeature(
   // colour recolours the paints the node actually uses: fill and stroke of a
   // point drawn as one element, or the fill of the fill element and the stroke
   // of its fill="none" stroke twin (older vellum) -- never the twin's fill:none.
-  // No colour falls back to the theme-dim class.
-  function styleCondNode(node: Element, color: string | null | undefined): void {
-    if (color == null) {
+  // The theme dim is the theme-dim class; an alpha condition's if_false is
+  // that class at its own opacity (the class reads --vellumwidget-dim-opacity,
+  // set on the node; the export reads it back the same way); an if_false the
+  // widget can't apply (size, shape) leaves the node as drawn (VW-52).
+  function styleCondNode(node: Element, look: CondLook): void {
+    if (look.kind === "none") return;
+    const n = node as unknown as { style: CSSStyleDeclaration };
+    if (look.kind === "dim" || look.kind === "alpha") {
       node.classList.add("vellumwidget-cond-dim");
+      if (look.kind === "alpha") n.style.setProperty("--vellumwidget-dim-opacity", String(look.alpha));
       return;
     }
-    const n = node as unknown as { style: CSSStyleDeclaration };
+    const color = look.color!;
     const f = node.getAttribute("fill");
     if (f && f !== "none") n.style.fill = color;
     const s = node.getAttribute("stroke");
@@ -109,6 +116,7 @@ export function declarativeFeature(
     const n = node as unknown as { style: CSSStyleDeclaration };
     if (n.style.fill) n.style.fill = "";
     if (n.style.stroke) n.style.stroke = "";
+    if (n.style.getPropertyValue("--vellumwidget-dim-opacity")) n.style.removeProperty("--vellumwidget-dim-opacity");
   }
 
   // Re-evaluate every conditional encoding against the current selection state:
@@ -135,20 +143,24 @@ export function declarativeFeature(
       // tags are always "<sel>:<aes>".
       const tag = c.tag || c.selection + ":" + c.aes;
       const tagged = ws.condTagElems[tag] || [];
-      // Each key's own per-row if_false colour (VW-46), or null.
-      const vals = ws.condTagVals[tag] || null;
+      // The constant if_false, routed by the aesthetic (VW-52), and each
+      // key's own per-row if_false colour (VW-46), kept for a colour
+      // aesthetic only, or null.
+      const look = condLook(c.aes, c.if_false);
+      const vals = isColorAes(c.aes) ? ws.condTagVals[tag] || null : null;
       const sel = selByName[c.selection];
       const members = sel ? selectionMembers(sel) : {};
       const active = Object.keys(members).length > 0 || c.empty === false;
-      if (ms) ws.fx.condStateSet(tag, tagged, members, active, c.if_false, vals);
+      if (ms) ws.fx.condStateSet(tag, tagged, members, active, look, vals);
       if (ring) continue;
       for (let i = 0; i < tagged.length; i++) {
         const nodes = ws.fx.elementsForKey(tagged[i]);
         const member = !!members[tagged[i]];
-        const color = vals && vals[i] != null ? vals[i] : c.if_false;
+        const own = vals ? vals[i] : null;
+        const lk: CondLook = own != null ? { kind: "color", color: own } : look;
         for (let j = 0; j < nodes.length; j++) {
           clearCondNode(nodes[j]);
-          if (active && !member) styleCondNode(nodes[j], color);
+          if (active && !member) styleCondNode(nodes[j], lk);
         }
       }
     }

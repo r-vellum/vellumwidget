@@ -253,7 +253,8 @@ export function inlineStateStyles(live: Element, clone: Element): void {
       let op = "";
       if (cl.contains("vellumwidget-legend-off") && cl.contains("vellumwidget-legend")) op = "0.4";
       else if (cl.contains("vellumwidget-colorfiltered")) op = cssVar(cs, "--vellumwidget-colorfilter-opacity", "0.12");
-      else if (cl.contains("vellumwidget-cond-dim")) op = cssVar(cs, "--vellumwidget-dim-opacity", "0.28");
+      // an alpha condition sets its own opacity on the node (VW-52)
+      else if (cl.contains("vellumwidget-cond-dim")) op = n.style.getPropertyValue("--vellumwidget-dim-opacity").trim() || cssVar(cs, "--vellumwidget-dim-opacity", "0.28");
       else if (cl.contains("vellumwidget-legend-muted")) op = "0.12";
       if (op) c.style.opacity = op;
     }

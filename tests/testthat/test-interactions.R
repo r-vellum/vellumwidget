@@ -277,3 +277,25 @@ test_that("a condition's if_false colour ships as CSS (VW-16)", {
     vellumplot::select_point("hi", on = "hover")
   expect_identical(as_widget(p)$x$interactions$conditions[[1]]$if_false, "#cccccc")
 })
+
+test_that("only a colour condition's if_false is read as a colour (VW-52)", {
+  df <- data.frame(x = 1:10, y = 1:10, g = rep(c("a", "b"), 5))
+  ix <- function(...) {
+    p <- vellumplot::vplot(df) |>
+      vellumplot::mark_point(x = x, y = y, ...) |>
+      vellumplot::select_point("hi")
+    as_widget(p)$x$interactions$conditions[[1]]
+  }
+  a <- ix(alpha = vellumplot::condition("hi", 1, 0.2))
+  expect_identical(a$aes, "alpha")
+  expect_identical(a$if_false, 0.2)
+  # a string col2rgb() would read as a palette colour stays a string
+  s <- ix(shape = vellumplot::condition("hi", "circle", "1"))
+  expect_identical(s$if_false, "1")
+  expect_identical(ix(fill = vellumplot::condition("hi", g, "grey80"))$if_false, "#cccccc")
+  expect_true(.is_colour_aes("color"))
+  expect_true(.is_colour_aes("edge_colour"))
+  expect_true(.is_colour_aes(NULL))
+  expect_false(.is_colour_aes("alpha"))
+  expect_false(.is_colour_aes("size"))
+})

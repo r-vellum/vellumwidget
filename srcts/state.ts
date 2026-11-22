@@ -8,7 +8,7 @@ import type { Geom, GeometryPayload } from "./geometry";
 import type { CrosstalkHandle, ViewFraction } from "./linking";
 import type { IntervalRange } from "./scales";
 import type { Pt } from "./spatial";
-import type { AzPanel, Bbox, ColorbarInfo, ElemMeta, InteractionSpec, Options, PanelInfo, Payload, Provenance, ViewBox } from "./types";
+import type { AzPanel, Bbox, ColorbarInfo, CondLook, ElemMeta, InteractionSpec, Options, PanelInfo, Payload, Provenance, ViewBox } from "./types";
 import type { PanTransform } from "./viewbox";
 import type { RunPatch, RunSplit } from "./features/runStyle";
 
@@ -135,6 +135,10 @@ export interface WidgetState {
   msColor: Uint32Array | null;
   msCond: Uint32Array | null;
   msPalette: string[];
+  // VW-52: per key, 0 or 1 + an index into msAlphaPal: the opacity of a key
+  // dimmed by an alpha condition's if_false (MS_DIM; 0 = the theme dim).
+  msAlpha: Uint16Array | null;
+  msAlphaPal: number[];
   msActive: boolean; // any mark dimmed, recoloured, muted or hidden
   msDimAlpha: number;
   // The flagged runs' SVGs (VW-33, payload$flagged$svg), restyled into images
@@ -281,7 +285,7 @@ export interface WidgetFns {
   drawCrosshair: (k: string, hm: "closest" | "x" | "y") => void;
   drawPoints: (stateOnly?: boolean) => void;
   condStatesBegin: () => boolean;
-  condStateSet: (tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, color: string | null | undefined, colors?: (string | null)[] | null) => void;
+  condStateSet: (tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, look: CondLook, colors?: (string | null)[] | null) => void;
   updateMarkStates: () => void;
   keyIds: (keys: string[]) => Int32Array;
   restyleRuns: () => boolean;
@@ -430,6 +434,8 @@ export function createState(el: HTMLElement): WidgetState {
     msColor: null,
     msCond: null,
     msPalette: [],
+    msAlpha: null,
+    msAlphaPal: [],
     msActive: false,
     msDimAlpha: 0.28,
     runSvg: null,
