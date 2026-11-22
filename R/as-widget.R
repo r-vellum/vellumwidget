@@ -558,19 +558,31 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   }
   im <- getExportedValue("vellumplot", "interaction_model")
   ix <- tryCatch(im(x), error = function(e) NULL)
-  # A condition's `if_false` is an R colour ("grey80"), which the runtime sets
-  # as a CSS fill/stroke: normalise it to hex, or the browser drops it. A value
-  # R does not know (a CSS-only name) passes through.
+  # A colour condition's `if_false` is an R colour ("grey80"), which the
+  # runtime sets as a CSS fill/stroke: normalise it to hex, or the browser
+  # drops it. A value R does not know (a CSS-only name) passes through. Other
+  # aesthetics keep their value (an alpha, a size, a shape name), which the
+  # runtime routes by `aes` (VW-52).
   if (!is.null(ix) && length(ix$conditions)) {
     ix$conditions <- lapply(ix$conditions, function(c) {
       v <- c$if_false
-      if (is.character(v) && length(v) == 1L && !is.na(v)) {
+      if (.is_colour_aes(c$aes) && is.character(v) && length(v) == 1L && !is.na(v)) {
         c$if_false <- tryCatch(.css_color(v), error = function(e) v) %||% v
       }
       c
     })
   }
   ix
+}
+
+# A colour aesthetic, as the runtime's `isColorAes()` reads one: color,
+# colour, fill, stroke, or a prefixed one (`edge_color`). No `aes` counts as
+# colour, as before.
+.is_colour_aes <- function(aes) {
+  if (!is.character(aes) || length(aes) != 1L || is.na(aes) || !nzchar(aes)) {
+    return(TRUE)
+  }
+  grepl("(^|_)(colou?r|fill|stroke)$", aes)
 }
 
 # Build the click-to-source payload for the JS runtime: source rows per grob id

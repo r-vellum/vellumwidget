@@ -12,6 +12,7 @@ export function hoverFeature(
   WidgetFns,
   "showHighlightOverlay" | "hideHighlightOverlay" | "clearCrosshair" | "drawCrosshair"
   | "showTip" | "showTipMulti" | "hideTip" | "moveTip" | "clearHover" | "azOverlayWrap"
+  | "refreshHighlightOverlay"
 > {
   // --- large-scene hover dim (overlay, O(hovered)) ---
   function dimOpacityVal(): string {
@@ -19,10 +20,14 @@ export function hoverFeature(
     return d == null || (d as unknown) === "" ? "0.28" : String(d);
   }
 
+  // The keys the overlay currently clones (empty when it is hidden).
+  let overlayKeys: string[] = [];
+
   // Dim the whole plot once (holder opacity) and clone the highlighted marks into
   // the overlay so they stay crisp above the dim — O(hovered), not O(n).
   function showHighlightOverlay(keys: string[]): void {
     if (!ws.holder || !ws.dimLayer) return;
+    overlayKeys = keys;
     ws.holder.style.opacity = dimOpacityVal();
     while (ws.dimLayer.firstChild) ws.dimLayer.removeChild(ws.dimLayer.firstChild);
     for (let i = 0; i < keys.length; i++) {
@@ -67,7 +72,17 @@ export function hoverFeature(
     return g;
   }
 
+  // The view moved while the overlay shows (wheel zoom during a hover): each
+  // clone's counter-scale (pinScaleVars) and multi-panel wrapper
+  // (azOverlayWrap) were taken from the panel's T when it was made, so
+  // re-clone the same keys for the new T (VW-54). O(hovered).
+  function refreshHighlightOverlay(): void {
+    if (!overlayKeys.length || !ws.dimLayer || !ws.dimLayer.firstChild) return;
+    showHighlightOverlay(overlayKeys);
+  }
+
   function hideHighlightOverlay(): void {
+    overlayKeys = [];
     if (ws.holder) ws.holder.style.opacity = "";
     if (ws.dimLayer) while (ws.dimLayer.firstChild) ws.dimLayer.removeChild(ws.dimLayer.firstChild);
   }
@@ -261,5 +276,5 @@ export function hoverFeature(
     }
   }
 
-  return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover, azOverlayWrap };
+  return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover, azOverlayWrap, refreshHighlightOverlay };
 }

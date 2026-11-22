@@ -30,6 +30,11 @@ export function selectionFeature(
 
   // --- selection (+ linking) ---
   function refreshSelected(): void {
+    ws.selRev++;
+    // Selected marks above the rest of their layer (VW-53): nodes move here;
+    // the canvas tiers draw in the raised order (raiseOrder()) when the
+    // mark state below redraws them.
+    ws.fx.raiseSelected();
     if (ws.fx.ringMode()) {
       ws.fx.drawSelFeedback();
       // Conditions and filters go to the canvas's per-key mark state

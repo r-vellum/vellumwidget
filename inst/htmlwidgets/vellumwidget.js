@@ -241,7 +241,7 @@
         let op = "";
         if (cl.contains("vellumwidget-legend-off") && cl.contains("vellumwidget-legend")) op = "0.4";
         else if (cl.contains("vellumwidget-colorfiltered")) op = cssVar(cs, "--vellumwidget-colorfilter-opacity", "0.12");
-        else if (cl.contains("vellumwidget-cond-dim")) op = cssVar(cs, "--vellumwidget-dim-opacity", "0.28");
+        else if (cl.contains("vellumwidget-cond-dim")) op = n.style.getPropertyValue("--vellumwidget-dim-opacity").trim() || cssVar(cs, "--vellumwidget-dim-opacity", "0.28");
         else if (cl.contains("vellumwidget-legend-muted")) op = "0.12";
         if (op) c.style.opacity = op;
       }
@@ -2574,16 +2574,24 @@
   var MS_MUTED = 4;
   var DIM_DEFAULT = 0.28;
   var MUTED_ALPHA = 0.12;
+  var ALPHA_CODE = 2147483648;
+  function dimAlphaOf(ws, k) {
+    const a = ws.msAlpha;
+    const i = a ? a[k] : 0;
+    return i ? ws.msAlphaPal[i - 1] : ws.msDimAlpha;
+  }
   function markStateFeature(ws) {
     let forDl = null;
     let keyIdx = /* @__PURE__ */ new Map();
     let tagIds = {};
     let paletteIdx = {};
+    let alphaIdx = {};
     function sync() {
       const dl = ws.dl;
       if (!dl) {
         forDl = null;
         ws.msFlags = ws.msColor = ws.msCond = null;
+        ws.msAlpha = null;
         ws.msActive = false;
         return false;
       }
@@ -2593,7 +2601,10 @@
       for (let i = 0; i < dl.keys.length; i++) if (!keyIdx.has(dl.keys[i])) keyIdx.set(dl.keys[i], i);
       tagIds = {};
       paletteIdx = {};
+      alphaIdx = {};
       ws.msPalette = [];
+      ws.msAlphaPal = [];
+      ws.msAlpha = new Uint16Array(dl.keys.length);
       ws.msFlags = new Uint8Array(dl.keys.length);
       ws.msColor = new Uint32Array(dl.keys.length);
       ws.msCond = new Uint32Array(dl.keys.length);
@@ -2623,12 +2634,22 @@
       }
       return p + 2;
     }
-    function condStateSet(tag, tagged, members, active, color, colors) {
+    function alphaCode(a) {
+      const s = String(a);
+      let p = alphaIdx[s];
+      if (p == null) {
+        if (ws.msAlphaPal.length >= 65535) return ALPHA_CODE + ws.msAlphaPal.length - 1;
+        p = alphaIdx[s] = ws.msAlphaPal.length;
+        ws.msAlphaPal.push(a);
+      }
+      return ALPHA_CODE + p;
+    }
+    function condStateSet(tag, tagged, members, active, look, colors) {
       const cond = ws.msCond;
       if (!cond || !ws.dl) return;
       let ids = tagIds[tag];
       if (!ids) ids = tagIds[tag] = keyIds(tagged);
-      const code = colorCode(color);
+      const code = look.kind === "color" ? colorCode(look.color) : look.kind === "alpha" ? alphaCode(look.alpha) : look.kind === "dim" ? 1 : 0;
       for (let i = 0; i < ids.length; i++) {
         const id = ids[i];
         if (id < 0) continue;
@@ -2642,16 +2663,20 @@
     }
     function updateMarkStates() {
       if (!ws.rasterMode || !sync() || !ws.msFlags || !ws.msColor || !ws.msCond) return;
-      const flags = ws.msFlags, color = ws.msColor, cond = ws.msCond;
+      const flags = ws.msFlags, color = ws.msColor, cond = ws.msCond, alpha = ws.msAlpha;
       flags.fill(0);
       color.fill(0);
+      if (alpha) alpha.fill(0);
       let active = false;
       for (let k = 0; k < cond.length; k++) {
         const c = cond[k];
         if (!c) continue;
         active = true;
         if (c === 1) flags[k] = MS_DIM;
-        else color[k] = c - 1;
+        else if (c >= ALPHA_CODE) {
+          flags[k] = MS_DIM;
+          if (alpha) alpha[k] = c - ALPHA_CODE + 1;
+        } else color[k] = c - 1;
       }
       const hide = function(set) {
         for (const key in set) {
@@ -2692,6 +2717,158 @@
       }
     }
     return { condStatesBegin, condStateSet, updateMarkStates, keyIds };
+  }
+
+  // srcts/raise.ts
+  function boundary(dl, a, b) {
+    return dl.panel[a] !== dl.panel[b] || dl.group[a] !== dl.group[b] || dl.kind[a] !== dl.kind[b] || dl.flags[a] !== 0 || dl.flags[b] !== 0 || dl.run[a] > 0 || dl.run[b] > 0;
+  }
+  function raisedOrder(dl, member) {
+    const n = dl.n;
+    let out = null;
+    let s = 0;
+    for (let i = 1; i <= n; i++) {
+      if (i < n && !boundary(dl, i - 1, i)) continue;
+      let seenMember = false, moves = false;
+      for (let j = s; j < i; j++) {
+        if (member[dl.key[j]]) seenMember = true;
+        else if (seenMember) {
+          moves = true;
+          break;
+        }
+      }
+      if (moves) {
+        if (!out) {
+          out = new Uint32Array(n);
+          for (let j = 0; j < s; j++) out[j] = j;
+        }
+        let w = s;
+        for (let j = s; j < i; j++) if (!member[dl.key[j]]) out[w++] = j;
+        for (let j = s; j < i; j++) if (member[dl.key[j]]) out[w++] = j;
+      } else if (out) {
+        for (let j = s; j < i; j++) out[j] = j;
+      }
+      s = i;
+    }
+    return out;
+  }
+
+  // srcts/features/raise.ts
+  var SEG_END = "vw-seg-end";
+  function raiseFeature(ws) {
+    let raised = [];
+    let marked = /* @__PURE__ */ new WeakSet();
+    let segEnd = /* @__PURE__ */ new WeakMap();
+    let layerLast = /* @__PURE__ */ new WeakMap();
+    const LAYER_RE = /^layer-(\d+)-/;
+    function plainGroup(e) {
+      if (e.tagName.toLowerCase() !== "g") return false;
+      for (let i = 0; i < e.attributes.length; i++) {
+        const a = e.attributes[i].name;
+        if (a !== "data-vellum-id" && a !== "role" && a !== "class") return false;
+      }
+      return true;
+    }
+    function lastOfLayer(p) {
+      const hit = layerLast.get(p);
+      if (hit) return hit;
+      let last = p;
+      const e = p;
+      const m = e.nodeType === 1 && e.getAttribute("data-vellum-id") ? LAYER_RE.exec(e.getAttribute("data-vellum-id")) : null;
+      if (m && plainGroup(e)) {
+        for (let s = e.nextSibling; s; s = s.nextSibling) {
+          if (s.nodeType !== 1) continue;
+          const se = s, id = se.getAttribute("data-vellum-id") || "";
+          const sm = LAYER_RE.exec(id);
+          if (!sm || sm[1] !== m[1] || !plainGroup(se)) break;
+          last = s;
+        }
+      }
+      layerLast.set(p, last);
+      return last;
+    }
+    function markParent(p) {
+      if (marked.has(p)) return;
+      marked.add(p);
+      const kids = Array.prototype.slice.call(p.childNodes);
+      let run = [], tag = "";
+      const close = function(before) {
+        if (!run.length) return;
+        let end = null;
+        if (before) {
+          end = document.createComment(SEG_END);
+          p.insertBefore(end, before);
+        }
+        for (let i = 0; i < run.length; i++) segEnd.set(run[i], end);
+        run = [];
+      };
+      for (let i = 0; i < kids.length; i++) {
+        const k = kids[i];
+        const keyed = k.nodeType === 1 && k.hasAttribute("data-key");
+        if (k.nodeType !== 1) continue;
+        if (keyed && (!run.length || k.tagName === tag)) {
+          run.push(k);
+          tag = k.tagName;
+          continue;
+        }
+        close(k);
+        if (keyed) {
+          run.push(k);
+          tag = k.tagName;
+        }
+      }
+      close(null);
+    }
+    function restore() {
+      for (let i = raised.length - 1; i >= 0; i--) {
+        const r = raised[i];
+        if (r.home.parentNode) r.home.parentNode.replaceChild(r.node, r.home);
+      }
+      raised = [];
+    }
+    function raiseSelected() {
+      restore();
+      if (ws.fx.ringMode()) return;
+      const keys = ws.fx.selectedKeys();
+      if (!keys.length) return;
+      const nodes = [];
+      for (let i = 0; i < keys.length; i++) {
+        const ns = ws.fx.elementsForKey(keys[i]);
+        for (let j = 0; j < ns.length; j++) if (ns[j].parentNode) nodes.push(ns[j]);
+      }
+      if (!nodes.length) return;
+      nodes.sort((a, b) => a === b ? 0 : a.compareDocumentPosition(b) & 4 ? -1 : 1);
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i], p = n.parentNode;
+        markParent(p);
+        let tp = p, end = segEnd.has(n) ? segEnd.get(n) : null;
+        if (end === null) tp = lastOfLayer(p);
+        if (end && end.parentNode !== p) continue;
+        let nx = n.nextSibling;
+        while (nx && nx.nodeType !== 1 && nx !== end) nx = nx.nextSibling;
+        if (tp === p && nx === end) continue;
+        if (tp !== p) end = null;
+        const home = document.createComment("vw-home");
+        p.replaceChild(home, n);
+        tp.insertBefore(n, end);
+        raised.push({ node: n, home });
+      }
+    }
+    let cacheDl = null, cacheRev = -1, cacheOrd = null;
+    function raiseOrder(dl) {
+      if (cacheDl === dl && cacheRev === ws.selRev) return cacheOrd;
+      cacheDl = dl;
+      cacheRev = ws.selRev;
+      cacheOrd = null;
+      const keys = ws.fx.selectedKeys();
+      if (!keys.length) return null;
+      const ids = ws.fx.keyIds(keys);
+      const member = new Uint8Array(dl.keys.length);
+      for (let i = 0; i < ids.length; i++) if (ids[i] >= 0) member[ids[i]] = 1;
+      cacheOrd = raisedOrder(dl, member);
+      return cacheOrd;
+    }
+    return { raiseSelected, raiseOrder };
   }
 
   // srcts/features/runStyle.ts
@@ -2743,7 +2920,7 @@
       let s = "";
       for (let q = 0; q < ids.length; q++) {
         const k = ids[q], f = flags[k], c = color[k];
-        if (f || c) s += k + ":" + f + ":" + (c ? ws.msPalette[c - 1] : "") + ";";
+        if (f || c) s += k + ":" + f + ":" + (c ? ws.msPalette[c - 1] : "") + (f & MS_DIM ? ":" + dimAlphaOf(ws, k) : "") + ";";
       }
       return s ? s + "@" + ws.msDimAlpha : "";
     }
@@ -2772,7 +2949,7 @@
         if (fa && fa !== "none") st += ";fill:" + col;
         if (sa && sa !== "none") st += ";stroke:" + col;
       }
-      if (f & MS_DIM) st += ";opacity:" + ws.msDimAlpha;
+      if (f & MS_DIM) st += ";opacity:" + dimAlphaOf(ws, k);
       else if (f & MS_MUTED) st += ";opacity:" + MUTED_ALPHA;
       if (st) n.setAttribute("style", st.replace(/^;/, ""));
       return true;
@@ -4396,6 +4573,26 @@
     return { currentViewBox, toUser, toView, toAnchor, azNearest, azT, azMulti, fmtPan, calibrateXform, sceneToClient, clientToScene, panelAt, dataRangeOf, brushDataFields };
   }
 
+  // srcts/types.ts
+  function condLook(aes, ifFalse) {
+    let v = ifFalse;
+    if (Array.isArray(v)) v = v.length === 1 ? v[0] : null;
+    if (v == null) return { kind: "dim" };
+    if (isColorAes(aes)) return typeof v === "string" && v !== "" ? { kind: "color", color: v } : { kind: "none" };
+    if (isAlphaAes(aes)) {
+      const a = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+      return isFinite(a) && a >= 0 && a <= 1 ? { kind: "alpha", alpha: a } : { kind: "none" };
+    }
+    return { kind: "none" };
+  }
+  function isColorAes(aes) {
+    if (aes == null || aes === "") return true;
+    return /(^|_)(colou?r|fill|stroke)$/.test(aes);
+  }
+  function isAlphaAes(aes) {
+    return aes != null && /(^|_)(alpha|opacity)$/.test(aes);
+  }
+
   // srcts/features/declarative.ts
   function declarativeFeature(ws) {
     function setupInteractions() {
@@ -4452,12 +4649,15 @@
       for (let i = 0; i < keys.length; i++) set[keys[i]] = true;
       return set;
     }
-    function styleCondNode(node, color) {
-      if (color == null) {
+    function styleCondNode(node, look) {
+      if (look.kind === "none") return;
+      const n = node;
+      if (look.kind === "dim" || look.kind === "alpha") {
         node.classList.add("vellumwidget-cond-dim");
+        if (look.kind === "alpha") n.style.setProperty("--vellumwidget-dim-opacity", String(look.alpha));
         return;
       }
-      const n = node;
+      const color = look.color;
       const f = node.getAttribute("fill");
       if (f && f !== "none") n.style.fill = color;
       const s = node.getAttribute("stroke");
@@ -4468,6 +4668,7 @@
       const n = node;
       if (n.style.fill) n.style.fill = "";
       if (n.style.stroke) n.style.stroke = "";
+      if (n.style.getPropertyValue("--vellumwidget-dim-opacity")) n.style.removeProperty("--vellumwidget-dim-opacity");
     }
     function applyConditions() {
       if (!ws.interactions || !ws.interactions.conditions) return;
@@ -4480,19 +4681,21 @@
         const c = ws.interactions.conditions[ci];
         const tag = c.tag || c.selection + ":" + c.aes;
         const tagged = ws.condTagElems[tag] || [];
-        const vals = ws.condTagVals[tag] || null;
+        const look = condLook(c.aes, c.if_false);
+        const vals = isColorAes(c.aes) ? ws.condTagVals[tag] || null : null;
         const sel = selByName[c.selection];
         const members = sel ? selectionMembers(sel) : {};
         const active = Object.keys(members).length > 0 || c.empty === false;
-        if (ms) ws.fx.condStateSet(tag, tagged, members, active, c.if_false, vals);
+        if (ms) ws.fx.condStateSet(tag, tagged, members, active, look, vals);
         if (ring) continue;
         for (let i = 0; i < tagged.length; i++) {
           const nodes = ws.fx.elementsForKey(tagged[i]);
           const member = !!members[tagged[i]];
-          const color = vals && vals[i] != null ? vals[i] : c.if_false;
+          const own = vals ? vals[i] : null;
+          const lk = own != null ? { kind: "color", color: own } : look;
           for (let j = 0; j < nodes.length; j++) {
             clearCondNode(nodes[j]);
-            if (active && !member) styleCondNode(nodes[j], color);
+            if (active && !member) styleCondNode(nodes[j], lk);
           }
         }
       }
@@ -4616,8 +4819,10 @@
       const d = ws.opts.style && ws.opts.style.dimOpacity;
       return d == null || d === "" ? "0.28" : String(d);
     }
+    let overlayKeys = [];
     function showHighlightOverlay(keys) {
       if (!ws.holder || !ws.dimLayer) return;
+      overlayKeys = keys;
       ws.holder.style.opacity = dimOpacityVal();
       while (ws.dimLayer.firstChild) ws.dimLayer.removeChild(ws.dimLayer.firstChild);
       for (let i = 0; i < keys.length; i++) {
@@ -4652,7 +4857,12 @@
       g.appendChild(node);
       return g;
     }
+    function refreshHighlightOverlay() {
+      if (!overlayKeys.length || !ws.dimLayer || !ws.dimLayer.firstChild) return;
+      showHighlightOverlay(overlayKeys);
+    }
     function hideHighlightOverlay() {
+      overlayKeys = [];
       if (ws.holder) ws.holder.style.opacity = "";
       if (ws.dimLayer) while (ws.dimLayer.firstChild) ws.dimLayer.removeChild(ws.dimLayer.firstChild);
     }
@@ -4826,7 +5036,7 @@
         ws.fx.reevaluateInteractions();
       }
     }
-    return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover, azOverlayWrap };
+    return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover, azOverlayWrap, refreshHighlightOverlay };
   }
 
   // srcts/features/interval.ts
@@ -6612,7 +6822,8 @@
       }) : isZoomedIn(vb, vb0);
       const styled = ws.msActive && !!ws.msFlags && !!ws.msColor;
       const blending = dl.exact && !!dl.runImgs && dl.blendRuns;
-      if (!(zoomed || styled && dl.exact || blending) || !dl.n) {
+      const raising = dl.exact && !!ws.fx.raiseOrder(dl);
+      if (!(zoomed || styled && dl.exact || blending || raising) || !dl.n) {
         hideCanvas();
         showMarksLayer(true);
         return;
@@ -6734,7 +6945,7 @@
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, W, H);
       const flags = styled ? ws.msFlags : null, recol = styled ? ws.msColor : null, pal = ws.msPalette;
-      const dimA = ws.msDimAlpha;
+      const dimA = ws.msDimAlpha, am = styled ? ws.msAlpha : null, apal = ws.msAlphaPal;
       let tgt = ctx;
       const open_ = [];
       let curFill = null, curStroke = null, curGrad = 0;
@@ -6937,7 +7148,9 @@
       };
       let curGroup = 0;
       tgt.save();
-      for (let i = 0; i < dl.n; i++) {
+      const ord = ws.fx.raiseOrder(dl);
+      for (let q = 0; q < dl.n; q++) {
+        const i = ord ? ord[q] : q;
         if (runImgs && dl.run[i] > 0) {
           const r = dl.run[i];
           if (!drawnRun[r]) {
@@ -6973,7 +7186,7 @@
         if (flags) {
           const k = dl.key[i], f = flags[k];
           if (f & MS_HIDDEN) continue;
-          if (f & MS_DIM) alpha = dimA;
+          if (f & MS_DIM) alpha = am && am[k] ? apal[am[k] - 1] : dimA;
           else if (f & MS_MUTED) alpha = MUTED_ALPHA;
           ov = recol[k];
         }
@@ -7012,10 +7225,10 @@
             tgt.beginPath();
             tgt.rect(cx0, cy0, A.ax * (cr.x1 - cr.x0), A.ay * (cr.y1 - cr.y0));
             tgt.clip();
-            for (let q = 0; q < cr.pn; q++) {
+            for (let q2 = 0; q2 < cr.pn; q2++) {
               tgt.beginPath();
-              traceClipPath(tgt, dl, cr.ps + q, A);
-              tgt.clip(dl.cpEvenodd[cr.ps + q] === 1 ? "evenodd" : "nonzero");
+              traceClipPath(tgt, dl, cr.ps + q2, A);
+              tgt.clip(dl.cpEvenodd[cr.ps + q2] === 1 ? "evenodd" : "nonzero");
             }
           }
           curState = st;
@@ -7814,6 +8027,8 @@
       }
     }
     function refreshSelected() {
+      ws.selRev++;
+      ws.fx.raiseSelected();
       if (ws.fx.ringMode()) {
         ws.fx.drawSelFeedback();
         ws.fx.reevaluateInteractions();
@@ -8334,6 +8549,7 @@
       if (ws.dimLayer && overlayVb) ws.dimLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
       if (ws.crosshairLayer && overlayVb) ws.crosshairLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
       ws.fx.placeIntervalBand();
+      if (ws.largeDim) ws.fx.refreshHighlightOverlay();
       if (ws.rasterMode && ws.axisZoomActive) ws.fx.drawSelFeedback();
       if (ws.colorbarLayer && (ws.vb || ws.vb0)) {
         ws.colorbarLayer.setAttribute("viewBox", fmtViewBox(ws.axisZoomActive && ws.vb0 ? ws.vb0 : ws.vb));
@@ -8415,6 +8631,7 @@
       elements: [],
       panels: [],
       selected: {},
+      selRev: 0,
       nodesByKey: {},
       hoverRAF: 0,
       spatialIndex: null,
@@ -8441,6 +8658,8 @@
       msColor: null,
       msCond: null,
       msPalette: [],
+      msAlpha: null,
+      msAlphaPal: [],
       msActive: false,
       msDimAlpha: 0.28,
       runSvg: null,
@@ -8552,7 +8771,8 @@
         a11yFeature(ws),
         detailFeature(ws),
         markStateFeature(ws),
-        runStyleFeature(ws)
+        runStyleFeature(ws),
+        raiseFeature(ws)
       );
       ensureStyle();
       el.classList.add("vellumwidget-root");
@@ -8617,6 +8837,10 @@
           },
           runStyled: ws.fx.runStyled,
           exportMarksImage: ws.fx.exportMarksImage,
+          raiseOrder: function() {
+            const o = ws.dl ? ws.fx.raiseOrder(ws.dl) : null;
+            return o ? Array.from(o) : null;
+          },
           condTags: function() {
             return Object.keys(ws.condTagElems).map(function(k) {
               return k + "=" + ws.condTagElems[k].length;
