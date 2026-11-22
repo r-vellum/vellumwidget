@@ -289,7 +289,7 @@ export interface WidgetFns {
   drawCrosshair: (k: string, hm: "closest" | "x" | "y") => void;
   drawPoints: (stateOnly?: boolean) => void;
   condStatesBegin: () => boolean;
-  condStateSet: (tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, look: CondLook, colors?: (string | null)[] | null) => void;
+  condStateSet: (tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, look: CondLook, own?: (string | null)[] | null, ownAlpha?: boolean) => void;
   updateMarkStates: () => void;
   keyIds: (keys: string[]) => Int32Array;
   restyleRuns: () => boolean;

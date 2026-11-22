@@ -3,7 +3,7 @@
 
 import type { WidgetFns, WidgetState } from "../state";
 import type { CondLook, SelDef } from "../types";
-import { condLook, isColorAes } from "../types";
+import { condLook, isAlphaAes, isColorAes } from "../types";
 
 export function declarativeFeature(
   ws: WidgetState
@@ -111,6 +111,13 @@ export function declarativeFeature(
     if (s && s !== "none") n.style.stroke = color;
   }
 
+  // A key's own per-row alpha if_false (VW-56) as its look: that opacity, or
+  // the condition's constant look when the value is not one.
+  function ownAlpha(own: string, look: CondLook): CondLook {
+    const lk = condLook("alpha", own);
+    return lk.kind === "alpha" ? lk : look;
+  }
+
   function clearCondNode(node: Element): void {
     node.classList.remove("vellumwidget-cond-dim");
     const n = node as unknown as { style: CSSStyleDeclaration };
@@ -144,20 +151,21 @@ export function declarativeFeature(
       const tag = c.tag || c.selection + ":" + c.aes;
       const tagged = ws.condTagElems[tag] || [];
       // The constant if_false, routed by the aesthetic (VW-52), and each
-      // key's own per-row if_false colour (VW-46), kept for a colour
-      // aesthetic only, or null.
+      // key's own per-row if_false: a colour for a colour aesthetic (VW-46),
+      // an opacity for alpha (VW-56); null for any other aesthetic.
       const look = condLook(c.aes, c.if_false);
-      const vals = isColorAes(c.aes) ? ws.condTagVals[tag] || null : null;
+      const colorAes = isColorAes(c.aes);
+      const vals = colorAes || isAlphaAes(c.aes) ? ws.condTagVals[tag] || null : null;
       const sel = selByName[c.selection];
       const members = sel ? selectionMembers(sel) : {};
       const active = Object.keys(members).length > 0 || c.empty === false;
-      if (ms) ws.fx.condStateSet(tag, tagged, members, active, look, vals);
+      if (ms) ws.fx.condStateSet(tag, tagged, members, active, look, vals, !colorAes);
       if (ring) continue;
       for (let i = 0; i < tagged.length; i++) {
         const nodes = ws.fx.elementsForKey(tagged[i]);
         const member = !!members[tagged[i]];
         const own = vals ? vals[i] : null;
-        const lk: CondLook = own != null ? { kind: "color", color: own } : look;
+        const lk: CondLook = own == null ? look : colorAes ? { kind: "color", color: own } : ownAlpha(own, look);
         for (let j = 0; j < nodes.length; j++) {
           clearCondNode(nodes[j]);
           if (active && !member) styleCondNode(nodes[j], lk);

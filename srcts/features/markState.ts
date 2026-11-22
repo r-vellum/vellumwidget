@@ -118,9 +118,10 @@ export function markStateFeature(
   // One condition's outcome for its tagged keys: members keep their look;
   // non-members take `look` (routed by the condition's aesthetic, VW-52: the
   // theme dim, a colour, an opacity, or nothing), or their own per-row
-  // colour, `colors[i]` (aligned with `tagged`), where they have one (VW-46).
+  // value, `own[i]` (aligned with `tagged`), where they have one: a colour
+  // (VW-46), or with `ownAlpha` an opacity in [0, 1] (VW-56).
   // As in SVG mode, the last condition that tags a key decides its style.
-  function condStateSet(tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, look: CondLook, colors?: (string | null)[] | null): void {
+  function condStateSet(tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, look: CondLook, own?: (string | null)[] | null, ownAlpha?: boolean): void {
     const cond = ws.msCond;
     if (!cond || !ws.dl) return;
     let ids = tagIds[tag];
@@ -132,8 +133,11 @@ export function markStateFeature(
       const id = ids[i];
       if (id < 0) continue;
       if (!active || members[tagged[i]]) { cond[id] = 0; continue; }
-      const own = colors ? colors[i] : null;
-      cond[id] = own != null ? colorCode(own) : code;
+      const v = own ? own[i] : null;
+      if (v == null) { cond[id] = code; continue; }
+      if (!ownAlpha) { cond[id] = colorCode(v); continue; }
+      const a = Number(v);
+      cond[id] = v !== "" && isFinite(a) && a >= 0 && a <= 1 ? alphaCode(a) : code;
     }
   }
 
