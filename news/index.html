@@ -13,7 +13,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.16.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.17.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -49,7 +49,7 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="0.16.0.9000" id="vellumwidget-01609000">vellumwidget 0.16.0.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-01609000"></a></h2>
+<h2 class="pkg-version" data-toc-text="0.17.0" id="vellumwidget-0170">vellumwidget 0.17.0<a class="anchor" aria-label="anchor" href="#vellumwidget-0170"></a></h2>
 <ul><li><p><strong>Selected marks are drawn above the rest of their layer (VW-53).</strong> A selected point kept its paint order, so a later neighbour could cover part of it: in raster mode this showed as a pale crescent inside its ring. While a selection is active, its marks now draw above the non-members of their own layer, in SVG mode and in every raster tier (the canvas stands in for the mark image at the overview to do it) and in exports. Clearing the selection restores the original order. Members never rise above a later layer of another kind (a line, a bar, text): in SVG mode a node moves to the end of its layer’s last series group, and on the canvas the display list’s records are reordered only within a stretch of same-kind records in one panel. Two adjacent point layers count as one there. Marks drawn from a flagged run image (text, masks, effects) are not raised.</p></li>
 <li><p><strong>The large-scene hover clone follows a zoom (VW-54).</strong> A hover clone takes its panel’s counter-scale when it is made (VW-47), so zooming with the wheel while a hover showed left it at the old size, twice the mark’s size after a 2x zoom, until the pointer moved. A view change now re-clones the hovered marks for the new zoom.</p></li>
 <li><p><strong>A condition’s <code>if_false</code> is applied by its aesthetic (VW-52).</strong> A constant <code>if_false</code> on <code>alpha</code>, <code>size</code> or <code>shape</code> was written as a fill/stroke colour, which the browser and the canvas could not read. Now a colour aesthetic’s <code>if_false</code> recolours non-members as before, an <code>alpha</code> one draws them at that opacity (in SVG mode, every raster tier, restyled flagged runs and exports), and one the widget can’t apply (a size, a shape, a line width) leaves them as drawn. Size is left alone because the widget has the drawn marks but not the size scale. A per-row <code>if_false</code> colour is used for colour aesthetics only, and R no longer reads a non-colour <code>if_false</code> such as <code>"1"</code> as a palette colour.</p></li>
