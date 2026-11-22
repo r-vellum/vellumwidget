@@ -421,7 +421,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       // make sure any canvas from a prior render is hidden.
       if (ws.rasterMode) {
         ws.fx.ensureCanvas();
-        ws.fx.sampleBaseRaster();
+        ws.fx.sampleBaseRaster(x.markColors);
         if (ws.marksLayer && x.flagged) loadFlagged(x.flagged);
       } else {
         ws.fx.clearPointData();

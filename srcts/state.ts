@@ -8,7 +8,7 @@ import type { Geom, GeometryPayload } from "./geometry";
 import type { CrosstalkHandle, ViewFraction } from "./linking";
 import type { IntervalRange } from "./scales";
 import type { Pt } from "./spatial";
-import type { AzPanel, Bbox, ColorbarInfo, ElemMeta, InteractionSpec, Options, PanelInfo, Payload, Provenance, ViewBox } from "./types";
+import type { AzPanel, Bbox, ColorbarInfo, ElemMeta, InteractionSpec, MarkColors, Options, PanelInfo, Payload, Provenance, ViewBox } from "./types";
 import type { PanTransform } from "./viewbox";
 import type { RunPatch, RunSplit } from "./features/runStyle";
 
@@ -152,7 +152,7 @@ export interface WidgetState {
   ptCx: Float64Array | null; // sampled point centres (viewBox space)
   ptCy: Float64Array | null;
   ptRad: Float64Array | null; // sampled point radii (viewBox units)
-  ptRGB: Uint8Array | null; // packed [r,g,b, r,g,b, …] per sampled point
+  ptRGB: Uint8Array | null; // packed [r,g,b,a, r,g,b,a, …] per sampled point
   ptN: number; // number of sampled (drawable) points
   ptAllRound: boolean; // every sampled point is a round mark (the canvas draws it exactly)
   opts: Options;
@@ -335,7 +335,7 @@ export interface WidgetFns {
   resetZoom: () => void;
   resize: () => void;
   retick: () => void;
-  sampleBaseRaster: () => void;
+  sampleBaseRaster: (colors?: MarkColors | null) => void;
   selectedKeys: () => string[];
   setColorRange: (a: number, b: number) => void;
   setHover: (k: string) => void;

@@ -101,8 +101,8 @@ own shape, colour, stroke and alpha. With \code{precision = "compact"} a
 scatter's widget takes about 6 MB per million points (1 million: 6.2 MB,
 2 million: 12.2 MB, keys included) and about 5 s per million to build.
 Above it, the widget ships only a bounding-box index,
-about as big (6.3 MB per million), draws zoomed-in marks as plain dots,
-and says so with a message: a plot that big is better drawn as density,
+about as big (6.3 MB per million), draws zoomed-in marks as plain dots
+(each in its own mark's colour), and says so with a message: a plot that big is better drawn as density,
 with \code{vellumplot::mark_datashade()} or \code{vellumplot::mark_hex()}.}
 
 \item{detail_marks}{In raster mode with the display list, once a zoom

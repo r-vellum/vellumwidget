@@ -6294,6 +6294,74 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(sp[2].x0 === 520.5 && sp[2].y1 === 25 && sp[0].x0 === undefined, "sparse bbox columns: the listed rows keep their boxes");
 }
 
+// VW-50: above max_marks the zoomed-in fallback dots take each mark's colour
+// from `markColors`, not the mark image's pixel under its centre (which, in a
+// dense scatter, is whichever group was painted last). An element with index 0
+// (no colour known) still takes the sampled pixel.
+{
+  const proto = window.HTMLCanvasElement.prototype;
+  const origGC = proto.getContext, origImage = global.Image;
+  const log = [];
+  let arcs = [];
+  const ctx = {
+    fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1,
+    save() {}, restore() {}, setTransform() {}, clearRect() { log.length = 0; }, rect() {}, clip() {},
+    beginPath() { arcs = []; }, arc(x) { arcs.push(Math.round(x)); },
+    fill() { log.push({ style: this.fillStyle, xs: arcs.slice() }); },
+    drawImage() {},
+    // every pixel of the mark image: opaque green (the last group painted)
+    getImageData(x, y, w, h) {
+      const d = new Uint8ClampedArray(w * h * 4);
+      for (let i = 0; i < d.length; i += 4) { d[i + 1] = 158; d[i + 2] = 115; d[i + 3] = 255; }
+      return { data: d };
+    }
+  };
+  proto.getContext = function () { return ctx; };
+  // An Image that "decodes" as soon as its src is set.
+  global.Image = function () {
+    const im = {};
+    Object.defineProperty(im, "src", { set(v) { this._src = v; if (this.onload) this.onload(); }, get() { return this._src; } });
+    return im;
+  };
+  function mountFB(markColors) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    inst.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+        '<image width="200" height="100" href="data:image/png;base64,AAAA"/></svg>',
+      elements: { key: ["p1", "p2", "p3"], mark: ["point", "point", "point"],
+        x0: [38, 78, 118], y0: [48, 48, 48], x1: [42, 82, 122], y1: [52, 52, 52] },
+      markColors: markColors,
+      options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple" }
+    });
+    inst._test.setView({ x: 0, y: 0, w: 180, h: 90 });
+    return { el: e, inst: inst };
+  }
+  const fills = () => log.flatMap((r) => r.xs.map(() => r.style));
+  try {
+    mountFB(null);
+    const plain = fills();
+    ok(plain.length === 3 && plain.every((s) => s === "rgb(0,158,115)"),
+      "VW-50: without markColors the dots take the sampled pixel (" + plain.join(" ") + ")");
+    // p1 blue, p2 dark (half alpha), p3 unknown -> sampled pixel; packed as u8 [1, 2, 0]
+    mountFB({ pal: ["#0072b2ff", "#2f485880"], idx: { type: "u8", n: 3, data: Buffer.from([1, 2, 0]).toString("base64") } });
+    const own = fills();
+    ok(own.length === 3, "VW-50: markColors: all three dots drawn when zoomed in");
+    ok(own[0] === "rgb(0,114,178)", "VW-50: a dot takes its own palette colour (" + own[0] + ")");
+    ok(/^rgba\(47,72,88,0\.50/.test(own[1]), "VW-50: a palette alpha is kept (" + own[1] + ")");
+    ok(own[2] === "rgb(0,158,115)", "VW-50: an element with no known colour falls back to the pixel (" + own[2] + ")");
+    // an rle column, and one that doesn't fit the element count, is ignored
+    mountFB({ pal: "#d55e00ff", idx: { type: "u8", n: 3, rle: { values: [1], lengths: [3] } } });
+    ok(fills().every((s) => s === "rgb(213,94,0)"), "VW-50: an rle-coded index with a one-colour palette");
+    mountFB({ pal: ["#d55e00ff"], idx: { type: "u8", n: 2, rle: { values: [1], lengths: [2] } } });
+    ok(fills().every((s) => s === "rgb(0,158,115)"), "VW-50: a colour index of the wrong length is ignored");
+  } finally {
+    proto.getContext = origGC;
+    global.Image = origImage;
+  }
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();

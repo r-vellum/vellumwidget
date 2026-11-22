@@ -993,6 +993,47 @@ test_that("raster mode ships the marks-only display list when vellum has it (VW-
   expect_length(.decode_keys_r(w2$x$elements$key), 62L)
 })
 
+test_that("above max_marks each element ships its mark colour for the dots (VW-50)", {
+  skip_if_not(.split_render_supported(), "vellum without the split render")
+  skip_if_not(.display_list_keys_supported(), "vellum without display-list keys")
+  set.seed(1)
+  df <- data.frame(
+    x = rnorm(60),
+    y = rnorm(60),
+    g = rep(c("a", "b", "c"), each = 20),
+    id = 1:60
+  )
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id)
+  w <- suppressMessages(
+    as_widget(p, render = render_options(mode = "raster", max_marks = 10))
+  )
+  mc <- w$x$markColors
+  expect_false(is.null(mc))
+  keys <- .decode_keys_r(w$x$elements$key)
+  idx <- .dl_col(mc$idx)
+  expect_length(idx, length(keys))
+  # every data mark has a colour; the legend swatches (outside the mark
+  # layer) have none
+  pt <- keys %in% as.character(df$id)
+  expect_true(all(idx[pt] > 0L))
+  expect_true(all(idx[!pt] == 0L))
+  # three groups, three colours, each group in one colour of its own
+  col <- mc$pal[idx[pt]]
+  grp <- df$g[match(keys[pt], df$id)]
+  expect_length(unique(col), 3L)
+  expect_true(all(tapply(col, grp, function(v) length(unique(v))) == 1L))
+  expect_true(all(grepl("^#[0-9a-f]{8}$", mc$pal)))
+  # the colours are the display list's own fills
+  dl <- as_widget(p, render = render_options(mode = "raster"))$x$displayList
+  rk <- .dl_key_table(dl, keys)[.dl_col(dl$record$key) + 1L]
+  fill <- dl$paints$fill[.dl_col(dl$record$paint) + 1L]
+  expect_identical(unname(col), fill[match(keys[pt], rk)])
+  # at or under max_marks the list itself ships, and no colours
+  expect_null(as_widget(p, render = render_options(mode = "raster"))$x$markColors)
+  expect_null(as_widget(p, render = render_options(mode = "svg"))$x$markColors)
+})
+
 test_that("a big bbox index ships as integers on the 1/100 px grid (VW-43)", {
   encode <- getFromNamespace(".encode_elements", "vellumwidget")
   set.seed(43)

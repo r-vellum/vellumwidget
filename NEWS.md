@@ -1,5 +1,16 @@
 # vellumwidget 0.16.0.9000
 
+* **Above `max_marks` the zoomed-in dots keep each mark's colour (VW-50).**
+  Without the display list, the dots took their colour from the mark image's
+  pixel under each mark's centre. In a dense scatter that pixel belongs to
+  whichever mark was painted last, so a plot coloured by group drew every
+  dot in the last group's colour. The widget now ships each element's mark
+  colour (`markColors`: a palette plus a packed index per element, a few
+  hundred bytes for a grouped 600k scatter), read from vellum's display list,
+  which is built for its colours only. An element with no known colour (a
+  gradient fill) still takes the pixel. The dots stay dots: shapes are still
+  only drawn exactly with the display list.
+
 * **Brush and lasso test constant-size marks where they are drawn (VW-47).**
   Under axis zoom a point or label keeps its pixel size, and hover has
   hit-tested it at that size since VW-42. A brush, though, still tested its
