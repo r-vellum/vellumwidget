@@ -2693,6 +2693,158 @@
     return { condStatesBegin, condStateSet, updateMarkStates, keyIds };
   }
 
+  // srcts/raise.ts
+  function boundary(dl, a, b) {
+    return dl.panel[a] !== dl.panel[b] || dl.group[a] !== dl.group[b] || dl.kind[a] !== dl.kind[b] || dl.flags[a] !== 0 || dl.flags[b] !== 0 || dl.run[a] > 0 || dl.run[b] > 0;
+  }
+  function raisedOrder(dl, member) {
+    const n = dl.n;
+    let out = null;
+    let s = 0;
+    for (let i = 1; i <= n; i++) {
+      if (i < n && !boundary(dl, i - 1, i)) continue;
+      let seenMember = false, moves = false;
+      for (let j = s; j < i; j++) {
+        if (member[dl.key[j]]) seenMember = true;
+        else if (seenMember) {
+          moves = true;
+          break;
+        }
+      }
+      if (moves) {
+        if (!out) {
+          out = new Uint32Array(n);
+          for (let j = 0; j < s; j++) out[j] = j;
+        }
+        let w = s;
+        for (let j = s; j < i; j++) if (!member[dl.key[j]]) out[w++] = j;
+        for (let j = s; j < i; j++) if (member[dl.key[j]]) out[w++] = j;
+      } else if (out) {
+        for (let j = s; j < i; j++) out[j] = j;
+      }
+      s = i;
+    }
+    return out;
+  }
+
+  // srcts/features/raise.ts
+  var SEG_END = "vw-seg-end";
+  function raiseFeature(ws) {
+    let raised = [];
+    let marked = /* @__PURE__ */ new WeakSet();
+    let segEnd = /* @__PURE__ */ new WeakMap();
+    let layerLast = /* @__PURE__ */ new WeakMap();
+    const LAYER_RE = /^layer-(\d+)-/;
+    function plainGroup(e) {
+      if (e.tagName.toLowerCase() !== "g") return false;
+      for (let i = 0; i < e.attributes.length; i++) {
+        const a = e.attributes[i].name;
+        if (a !== "data-vellum-id" && a !== "role" && a !== "class") return false;
+      }
+      return true;
+    }
+    function lastOfLayer(p) {
+      const hit = layerLast.get(p);
+      if (hit) return hit;
+      let last = p;
+      const e = p;
+      const m = e.nodeType === 1 && e.getAttribute("data-vellum-id") ? LAYER_RE.exec(e.getAttribute("data-vellum-id")) : null;
+      if (m && plainGroup(e)) {
+        for (let s = e.nextSibling; s; s = s.nextSibling) {
+          if (s.nodeType !== 1) continue;
+          const se = s, id = se.getAttribute("data-vellum-id") || "";
+          const sm = LAYER_RE.exec(id);
+          if (!sm || sm[1] !== m[1] || !plainGroup(se)) break;
+          last = s;
+        }
+      }
+      layerLast.set(p, last);
+      return last;
+    }
+    function markParent(p) {
+      if (marked.has(p)) return;
+      marked.add(p);
+      const kids = Array.prototype.slice.call(p.childNodes);
+      let run = [], tag = "";
+      const close = function(before) {
+        if (!run.length) return;
+        let end = null;
+        if (before) {
+          end = document.createComment(SEG_END);
+          p.insertBefore(end, before);
+        }
+        for (let i = 0; i < run.length; i++) segEnd.set(run[i], end);
+        run = [];
+      };
+      for (let i = 0; i < kids.length; i++) {
+        const k = kids[i];
+        const keyed = k.nodeType === 1 && k.hasAttribute("data-key");
+        if (k.nodeType !== 1) continue;
+        if (keyed && (!run.length || k.tagName === tag)) {
+          run.push(k);
+          tag = k.tagName;
+          continue;
+        }
+        close(k);
+        if (keyed) {
+          run.push(k);
+          tag = k.tagName;
+        }
+      }
+      close(null);
+    }
+    function restore() {
+      for (let i = raised.length - 1; i >= 0; i--) {
+        const r = raised[i];
+        if (r.home.parentNode) r.home.parentNode.replaceChild(r.node, r.home);
+      }
+      raised = [];
+    }
+    function raiseSelected() {
+      restore();
+      if (ws.fx.ringMode()) return;
+      const keys = ws.fx.selectedKeys();
+      if (!keys.length) return;
+      const nodes = [];
+      for (let i = 0; i < keys.length; i++) {
+        const ns = ws.fx.elementsForKey(keys[i]);
+        for (let j = 0; j < ns.length; j++) if (ns[j].parentNode) nodes.push(ns[j]);
+      }
+      if (!nodes.length) return;
+      nodes.sort((a, b) => a === b ? 0 : a.compareDocumentPosition(b) & 4 ? -1 : 1);
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i], p = n.parentNode;
+        markParent(p);
+        let tp = p, end = segEnd.has(n) ? segEnd.get(n) : null;
+        if (end === null) tp = lastOfLayer(p);
+        if (end && end.parentNode !== p) continue;
+        let nx = n.nextSibling;
+        while (nx && nx.nodeType !== 1 && nx !== end) nx = nx.nextSibling;
+        if (tp === p && nx === end) continue;
+        if (tp !== p) end = null;
+        const home = document.createComment("vw-home");
+        p.replaceChild(home, n);
+        tp.insertBefore(n, end);
+        raised.push({ node: n, home });
+      }
+    }
+    let cacheDl = null, cacheRev = -1, cacheOrd = null;
+    function raiseOrder(dl) {
+      if (cacheDl === dl && cacheRev === ws.selRev) return cacheOrd;
+      cacheDl = dl;
+      cacheRev = ws.selRev;
+      cacheOrd = null;
+      const keys = ws.fx.selectedKeys();
+      if (!keys.length) return null;
+      const ids = ws.fx.keyIds(keys);
+      const member = new Uint8Array(dl.keys.length);
+      for (let i = 0; i < ids.length; i++) if (ids[i] >= 0) member[ids[i]] = 1;
+      cacheOrd = raisedOrder(dl, member);
+      return cacheOrd;
+    }
+    return { raiseSelected, raiseOrder };
+  }
+
   // srcts/features/runStyle.ts
   var ATLAS_GAP = 4;
   var ATLAS_MAX = 4e3;
@@ -6562,7 +6714,8 @@
       }) : isZoomedIn(vb, vb0);
       const styled = ws.msActive && !!ws.msFlags && !!ws.msColor;
       const blending = dl.exact && !!dl.runImgs && dl.blendRuns;
-      if (!(zoomed || styled && dl.exact || blending) || !dl.n) {
+      const raising = dl.exact && !!ws.fx.raiseOrder(dl);
+      if (!(zoomed || styled && dl.exact || blending || raising) || !dl.n) {
         hideCanvas();
         showMarksLayer(true);
         return;
@@ -6887,7 +7040,9 @@
       };
       let curGroup = 0;
       tgt.save();
-      for (let i = 0; i < dl.n; i++) {
+      const ord = ws.fx.raiseOrder(dl);
+      for (let q = 0; q < dl.n; q++) {
+        const i = ord ? ord[q] : q;
         if (runImgs && dl.run[i] > 0) {
           const r = dl.run[i];
           if (!drawnRun[r]) {
@@ -6962,10 +7117,10 @@
             tgt.beginPath();
             tgt.rect(cx0, cy0, A.ax * (cr.x1 - cr.x0), A.ay * (cr.y1 - cr.y0));
             tgt.clip();
-            for (let q = 0; q < cr.pn; q++) {
+            for (let q2 = 0; q2 < cr.pn; q2++) {
               tgt.beginPath();
-              traceClipPath(tgt, dl, cr.ps + q, A);
-              tgt.clip(dl.cpEvenodd[cr.ps + q] === 1 ? "evenodd" : "nonzero");
+              traceClipPath(tgt, dl, cr.ps + q2, A);
+              tgt.clip(dl.cpEvenodd[cr.ps + q2] === 1 ? "evenodd" : "nonzero");
             }
           }
           curState = st;
@@ -7764,6 +7919,8 @@
       }
     }
     function refreshSelected() {
+      ws.selRev++;
+      ws.fx.raiseSelected();
       if (ws.fx.ringMode()) {
         ws.fx.drawSelFeedback();
         ws.fx.reevaluateInteractions();
@@ -8365,6 +8522,7 @@
       elements: [],
       panels: [],
       selected: {},
+      selRev: 0,
       nodesByKey: {},
       hoverRAF: 0,
       spatialIndex: null,
@@ -8502,7 +8660,8 @@
         a11yFeature(ws),
         detailFeature(ws),
         markStateFeature(ws),
-        runStyleFeature(ws)
+        runStyleFeature(ws),
+        raiseFeature(ws)
       );
       ensureStyle();
       el.classList.add("vellumwidget-root");
@@ -8567,6 +8726,10 @@
           },
           runStyled: ws.fx.runStyled,
           exportMarksImage: ws.fx.exportMarksImage,
+          raiseOrder: function() {
+            const o = ws.dl ? ws.fx.raiseOrder(ws.dl) : null;
+            return o ? Array.from(o) : null;
+          },
           condTags: function() {
             return Object.keys(ws.condTagElems).map(function(k) {
               return k + "=" + ws.condTagElems[k].length;
