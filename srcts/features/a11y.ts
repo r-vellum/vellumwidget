@@ -46,6 +46,7 @@ export function a11yFeature(
 
   // A mark received DOM focus (Tab or assistive tech): adopt it as the cursor.
   function onMarkFocus(ev: FocusEvent): void {
+    if (ws.focusHold) return; // a raise putting focus back (VW-57)
     const k = keyOf(ev.target);
     if (k == null) return;
     const i = ws.focusables.findIndex((f) => f.key === k);
@@ -54,6 +55,7 @@ export function a11yFeature(
 
   // Focus left a mark: if it did not move to another mark, exit traversal mode.
   function onMarkBlur(ev: FocusEvent): void {
+    if (ws.focusHold) return; // a raise moving the focused node (VW-57)
     const to = keyOf((ev as unknown as { relatedTarget: EventTarget | null }).relatedTarget);
     if (to == null) {
       ws.focusIdx = -1;
