@@ -7062,6 +7062,7 @@
     function clearPointData() {
       ws.ptCx = ws.ptCy = ws.ptRad = null;
       ws.ptRGB = null;
+      ws.ptShape = null;
       ws.ptN = 0;
       ws.ptAllRound = false;
       hideCanvas();
@@ -7096,9 +7097,10 @@
         } catch (e) {
           return;
         }
-        const cx = [], cy = [], rad = [], rgb = [];
+        const cx = [], cy = [], rad = [], rgb = [], shp = [];
         let allRound = true;
         const known = markColorTable(colors, els.length);
+        const shapes = markShapes(colors, els.length);
         for (let i = 0; i < els.length; i++) {
           const e = els[i];
           if (!hasBbox(e)) continue;
@@ -7114,12 +7116,14 @@
           const c = known ? known.pal[known.idx[i]] : null;
           if (c) rgb.push(c[0], c[1], c[2], c[3]);
           else rgb.push(data[o], data[o + 1], data[o + 2], 255);
+          if (shapes) shp.push(shapes[i] ? shapes[i] - 1 : 0);
         }
         ws.ptN = cx.length;
         ws.ptCx = Float64Array.from(cx);
         ws.ptCy = Float64Array.from(cy);
         ws.ptRad = Float64Array.from(rad);
         ws.ptRGB = Uint8Array.from(rgb);
+        ws.ptShape = shapes ? Uint8Array.from(shp) : null;
         ws.ptAllRound = allRound && cx.length > 0;
         drawPoints();
       };
@@ -7135,6 +7139,11 @@
       const src = asColumn(colors.pal);
       for (let k = 0; k < src.length; k++) pal.push(hexRGBA(String(src[k])));
       return { pal, idx };
+    }
+    function markShapes(colors, n) {
+      if (!colors || !colors.shape) return null;
+      const s = dlColumn(colors.shape);
+      return s.length === n ? s : null;
     }
     function hexRGBA(s) {
       const h = /^#([0-9a-f]+)$/i.exec(s.trim());
@@ -7184,11 +7193,25 @@
       const W = ws.canvasEl.width, H = ws.canvasEl.height;
       ctx.clearRect(0, 0, W, H);
       const cx = ws.ptCx, cy = ws.ptCy, rad = ws.ptRad, rgb = ws.ptRGB, n = ws.ptN;
+      const shp = ws.ptShape && ws.ptShape.length === n ? ws.ptShape : null;
       const dot = function(px, py, r, i) {
-        ctx.beginPath();
-        ctx.arc(px, py, Math.max(0.75, r), 0, 6.283185307179586);
         const a = rgb[i * 4 + 3];
-        ctx.fillStyle = a === 255 ? "rgb(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + ")" : "rgba(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + "," + a / 255 + ")";
+        const style = a === 255 ? "rgb(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + ")" : "rgba(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + "," + a / 255 + ")";
+        const rr = Math.max(0.75, r);
+        const sh = shp ? shp[i] : 0;
+        ctx.beginPath();
+        if (!sh) {
+          ctx.arc(px, py, rr, 0, 6.283185307179586);
+        } else {
+          tracePoint(ctx, sh, px, py, rr);
+        }
+        if (isLineGlyph(sh)) {
+          ctx.strokeStyle = style;
+          ctx.lineWidth = Math.max(1, rr / 4);
+          ctx.stroke();
+          return;
+        }
+        ctx.fillStyle = style;
         ctx.fill();
       };
       if (az) {
@@ -9105,6 +9128,7 @@
       ptCy: null,
       ptRad: null,
       ptRGB: null,
+      ptShape: null,
       ptN: 0,
       ptAllRound: false,
       opts: {
