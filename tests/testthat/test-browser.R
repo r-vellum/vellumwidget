@@ -339,6 +339,42 @@ test_that("VW-22: a condition and filter_by() show in the overview and mid tiers
   expect_identical(right, 0L)
 })
 
+test_that("VW-46: a per-row if_false paints non-members in the raster tiers", {
+  skip_browser()
+  skip_if_not(.split_render_supported() && .display_list_supported(), "vellum without the display list")
+  set.seed(6)
+  n <- 4000L
+  df <- data.frame(x = runif(n), y = runif(n), g = sample(letters[1:3], n, TRUE), id = seq_len(n))
+  df$col <- ifelse(df$y > 0.5, "#ff00ff", "#00ffff")
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id, color = vellumplot::condition("pick", g, col)) |>
+    vellumplot::select_point("pick", on = "click")
+  w <- as_widget(p, elementId = "w1", render = render_options(mode = "raster", detail_marks = 0))
+  skip_if(is.null(w$x$elements$cond_value), "vellumplot without per-row if_false colours")
+  b <- open_widget(w)
+  ev <- function(js) b$Runtime$evaluate(js)$result$value
+  colours <- function() {
+    seen <- jsonlite::fromJSON(ev("(function(){
+      var c = document.querySelector('.vellumwidget-canvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, seen = {};
+      for (var i = 0; i < d.length; i += 4 * 7) if (d[i + 3] === 255) { var k = d[i] + ',' + d[i + 1] + ',' + d[i + 2]; seen[k] = (seen[k] || 0) + 1; }
+      return JSON.stringify(seen); })()"))
+    names(sort(unlist(seen), decreasing = TRUE))
+  }
+  ev(sprintf("HTMLWidgets.find('#w1')._call('select', %s)", jsonlite::toJSON(as.character(df$id[df$x < 0.2]))))
+  Sys.sleep(0.4)
+  expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), "overview")
+  expect_setequal(colours()[1:2], c("255,0,255", "0,255,255"))
+  pn <- w$x$panels[[1]]
+  ev(sprintf(
+    "HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f})",
+    pn$px0 + 0.4 * (pn$px1 - pn$px0), pn$py0 + 0.25 * (pn$py1 - pn$py0),
+    0.5 * (pn$px1 - pn$px0), 0.5 * (pn$py1 - pn$py0)
+  ))
+  Sys.sleep(0.6)
+  expect_identical(ev("HTMLWidgets.find('#w1')._test.markTier()"), "mid")
+  expect_setequal(colours()[1:2], c("255,0,255", "0,255,255"))
+})
+
 test_that("VW-21: a reference line added after the points is drawn over them", {
   skip_browser()
   skip_if_not(.paint_order_supported(), "vellum without the paint-order split")

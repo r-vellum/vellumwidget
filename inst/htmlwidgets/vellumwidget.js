@@ -552,6 +552,13 @@
     const legend = col("legend");
     const filterValue = col("filter_value");
     const cond = col("cond");
+    const condValue = [];
+    if (c.cond_value && typeof c.cond_value === "object") {
+      for (const t in c.cond_value) {
+        const v = decodeColumn(c.cond_value[t], n, key);
+        if (v) condValue.push([t, v]);
+      }
+    }
     const filt = col("filt");
     const join = col("join");
     const source = col("source");
@@ -584,6 +591,10 @@
         if (v != null && !(Array.isArray(v) && v.length === 0)) {
           e.cond = Array.isArray(v) ? v : [String(v)];
         }
+      }
+      for (let t = 0; t < condValue.length; t++) {
+        const v = condValue[t][1][i];
+        if (v != null) (e.cond_value = e.cond_value || {})[condValue[t][0]] = String(v);
       }
       if (filt) {
         const v = filt[i];
@@ -2583,8 +2594,8 @@
       paletteIdx = {};
       ws.msPalette = [];
       ws.msFlags = new Uint8Array(dl.keys.length);
-      ws.msColor = new Uint16Array(dl.keys.length);
-      ws.msCond = new Uint16Array(dl.keys.length);
+      ws.msColor = new Uint32Array(dl.keys.length);
+      ws.msCond = new Uint32Array(dl.keys.length);
       ws.msActive = false;
       return true;
     }
@@ -2602,24 +2613,30 @@
       ws.msCond.fill(0);
       return true;
     }
-    function condStateSet(tag, tagged, members, active, color) {
+    function colorCode(color) {
+      if (color == null) return 1;
+      let p = paletteIdx[color];
+      if (p == null) {
+        p = paletteIdx[color] = ws.msPalette.length;
+        ws.msPalette.push(color);
+      }
+      return p + 2;
+    }
+    function condStateSet(tag, tagged, members, active, color, colors) {
       const cond = ws.msCond;
       if (!cond || !ws.dl) return;
       let ids = tagIds[tag];
       if (!ids) ids = tagIds[tag] = keyIds(tagged);
-      let code = 1;
-      if (color != null) {
-        let p = paletteIdx[color];
-        if (p == null) {
-          p = paletteIdx[color] = ws.msPalette.length;
-          ws.msPalette.push(color);
-        }
-        code = p + 2;
-      }
+      const code = colorCode(color);
       for (let i = 0; i < ids.length; i++) {
         const id = ids[i];
         if (id < 0) continue;
-        cond[id] = active && !members[tagged[i]] ? code : 0;
+        if (!active || members[tagged[i]]) {
+          cond[id] = 0;
+          continue;
+        }
+        const own = colors ? colors[i] : null;
+        cond[id] = own != null ? colorCode(own) : code;
       }
     }
     function updateMarkStates() {
@@ -4382,14 +4399,21 @@
   function declarativeFeature(ws) {
     function setupInteractions() {
       ws.condTagElems = {};
+      ws.condTagVals = {};
       ws.filtSelElems = {};
       ws.joinOf = {};
       if (!ws.interactions) return;
+      const vals = {};
+      const any = {};
       for (let i = 0; i < ws.elements.length; i++) {
         const e = ws.elements[i];
         if (e.cond) {
           for (let t = 0; t < e.cond.length; t++) {
-            (ws.condTagElems[e.cond[t]] = ws.condTagElems[e.cond[t]] || []).push(e.key);
+            const tag = e.cond[t];
+            (ws.condTagElems[tag] = ws.condTagElems[tag] || []).push(e.key);
+            const v = e.cond_value ? e.cond_value[tag] : void 0;
+            (vals[tag] = vals[tag] || []).push(v == null ? null : v);
+            if (v != null) any[tag] = true;
           }
         }
         if (e.filt) {
@@ -4399,6 +4423,7 @@
         }
         if (e.join != null) ws.joinOf[e.key] = e.join;
       }
+      for (const tag in vals) ws.condTagVals[tag] = any[tag] ? vals[tag] : null;
     }
     function selectionMembers(sel) {
       const set = {};
@@ -4454,17 +4479,19 @@
         const c = ws.interactions.conditions[ci];
         const tag = c.tag || c.selection + ":" + c.aes;
         const tagged = ws.condTagElems[tag] || [];
+        const vals = ws.condTagVals[tag] || null;
         const sel = selByName[c.selection];
         const members = sel ? selectionMembers(sel) : {};
         const active = Object.keys(members).length > 0 || c.empty === false;
-        if (ms) ws.fx.condStateSet(tag, tagged, members, active, c.if_false);
+        if (ms) ws.fx.condStateSet(tag, tagged, members, active, c.if_false, vals);
         if (ring) continue;
         for (let i = 0; i < tagged.length; i++) {
           const nodes = ws.fx.elementsForKey(tagged[i]);
           const member = !!members[tagged[i]];
+          const color = vals && vals[i] != null ? vals[i] : c.if_false;
           for (let j = 0; j < nodes.length; j++) {
             clearCondNode(nodes[j]);
-            if (active && !member) styleCondNode(nodes[j], c.if_false);
+            if (active && !member) styleCondNode(nodes[j], color);
           }
         }
       }
@@ -7436,6 +7463,7 @@
       ws.interactions = x.interactions || null;
       ws.provenance = x.provenance || null;
       ws.condTagElems = {};
+      ws.condTagVals = {};
       ws.filtSelElems = {};
       ws.joinOf = {};
       ws.lastHoverKeys = [];
@@ -8259,6 +8287,7 @@
       interactions: null,
       provenance: null,
       condTagElems: {},
+      condTagVals: {},
       filtSelElems: {},
       joinOf: {},
       lastHoverKeys: [],

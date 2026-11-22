@@ -15,14 +15,23 @@ export function declarativeFeature(
   // each condition tag ("<sel>:<aes>"). Called once per render.
   function setupInteractions(): void {
     ws.condTagElems = {};
+    ws.condTagVals = {};
     ws.filtSelElems = {};
     ws.joinOf = {};
     if (!ws.interactions) return;
+    // Per tag, the keys' own if_false colours (VW-46), kept only for a tag
+    // where some key has one.
+    const vals: Record<string, (string | null)[]> = {};
+    const any: Record<string, boolean> = {};
     for (let i = 0; i < ws.elements.length; i++) {
       const e = ws.elements[i];
       if (e.cond) {
         for (let t = 0; t < e.cond.length; t++) {
-          (ws.condTagElems[e.cond[t]] = ws.condTagElems[e.cond[t]] || []).push(e.key);
+          const tag = e.cond[t];
+          (ws.condTagElems[tag] = ws.condTagElems[tag] || []).push(e.key);
+          const v = e.cond_value ? e.cond_value[tag] : undefined;
+          (vals[tag] = vals[tag] || []).push(v == null ? null : v);
+          if (v != null) any[tag] = true;
         }
       }
       if (e.filt) {
@@ -32,6 +41,7 @@ export function declarativeFeature(
       }
       if (e.join != null) ws.joinOf[e.key] = e.join;
     }
+    for (const tag in vals) ws.condTagVals[tag] = any[tag] ? vals[tag] : null;
   }
 
   // The member key set of a selection given the current gesture state. A
@@ -76,7 +86,8 @@ export function declarativeFeature(
     return set;
   }
 
-  // Apply an active condition's `if_false` to a non-member node: an explicit
+  // Apply an active condition's `if_false` to a non-member node (the key's own
+  // per-row colour when it has one, VW-46, else the constant): an explicit
   // colour recolours the paints the node actually uses: fill and stroke of a
   // point drawn as one element, or the fill of the fill element and the stroke
   // of its fill="none" stroke twin (older vellum) -- never the twin's fill:none.
@@ -124,17 +135,20 @@ export function declarativeFeature(
       // tags are always "<sel>:<aes>".
       const tag = c.tag || c.selection + ":" + c.aes;
       const tagged = ws.condTagElems[tag] || [];
+      // Each key's own per-row if_false colour (VW-46), or null.
+      const vals = ws.condTagVals[tag] || null;
       const sel = selByName[c.selection];
       const members = sel ? selectionMembers(sel) : {};
       const active = Object.keys(members).length > 0 || c.empty === false;
-      if (ms) ws.fx.condStateSet(tag, tagged, members, active, c.if_false);
+      if (ms) ws.fx.condStateSet(tag, tagged, members, active, c.if_false, vals);
       if (ring) continue;
       for (let i = 0; i < tagged.length; i++) {
         const nodes = ws.fx.elementsForKey(tagged[i]);
         const member = !!members[tagged[i]];
+        const color = vals && vals[i] != null ? vals[i] : c.if_false;
         for (let j = 0; j < nodes.length; j++) {
           clearCondNode(nodes[j]);
-          if (active && !member) styleCondNode(nodes[j], c.if_false);
+          if (active && !member) styleCondNode(nodes[j], color);
         }
       }
     }

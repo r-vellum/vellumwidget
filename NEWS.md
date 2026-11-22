@@ -1,5 +1,17 @@
 # vellumwidget 0.16.0.9000
 
+* **A per-row `if_false` reaches the widget (VW-46).** For
+  `color = condition(sel, if_true, col)` with a column `col`, a non-member
+  used to get the theme dim, because the payload dropped vellumplot's
+  per-element `cond_value`. It now ships as one CSS colour column per
+  condition tag, in the same compact encodings as the other element columns,
+  and each non-member is painted its own colour in SVG mode and in every
+  raster tier: the overview and mid canvas, the detail nodes, restyled
+  flagged runs and the export. Members keep their own `if_true` paint. A
+  mark without a per-row colour, or with a value that is not a colour, falls
+  back to the constant `if_false` or the theme dim, as before, and payloads
+  from an older vellumplot work unchanged.
+
 # vellumwidget 0.16.0
 
 * Requires vellum (>= 0.13.0).

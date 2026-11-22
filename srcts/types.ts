@@ -36,6 +36,9 @@ export interface ElemMeta extends Partial<Bbox> {
   legend_for?: string; // a legend swatch: the series it highlights/selects
   filter_value?: number; // value on a continuous colour scale (for the colorbar filter)
   cond?: string[]; // conditional-encoding tags ("<sel>:<aes>") this element participates in
+  // VW-46: a per-row `if_false` colour per tag (a CSS colour), which replaces
+  // the condition's constant `if_false` / theme dim for this element.
+  cond_value?: Record<string, string>;
   filt?: string[]; // filter selection names whose filter_by() targets this element's view
   join?: string; // cross-view identity (a composition cell's original id, keys being per-cell unique)
   source?: string; // graph edge: key of the endpoint node it starts at
@@ -189,6 +192,9 @@ export interface ColumnElements {
   legend?: (string[] | string | null)[] | string[] | string;
   filter_value?: (number | null)[] | number;
   cond?: (string[] | string | null)[] | string[] | string;
+  // VW-46: tag -> one CSS colour per element (`null` where none), each a
+  // column in any of the compact encodings.
+  cond_value?: Record<string, unknown>;
   filt?: (string[] | string | null)[] | string[] | string;
   join?: (string | null)[] | string;
   source?: (string | null)[] | string;
