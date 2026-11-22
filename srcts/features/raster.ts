@@ -10,6 +10,9 @@ import type { WidgetFns, WidgetState } from "../state";
 import type { RunPatch, RunSplit } from "./runStyle";
 import { isZoomedIn, userToCanvas } from "../viewbox";
 
+// Ids of the rings' panel clips (VW-48), unique across the page's widgets.
+let ringClipSeq = 0;
+
 export function rasterFeature(
   ws: WidgetState
 ): Pick<
@@ -812,6 +815,48 @@ export function rasterFeature(
     return c;
   }
 
+  // The clip that keeps a ring inside its mark's panel under axis zoom
+  // (VW-48), as the panel's clip keeps the mark: the panel's fixed rect taken
+  // back through T to the ring's own (scene) coordinates, which a ring has
+  // both under the single-panel overlay viewBox and inside azOverlayWrap's
+  // per-panel transform. One <clipPath> per panel per redraw, kept in `g`
+  // (`made`: panel index -> its url). Null when nothing zooms by axis.
+  function ringClip(g: SVGGElement, k: string, made: Record<number, string>): string | null {
+    if (!ws.axisZoomActive) return null;
+    const m = ws.meta[k];
+    if (!m || !hasBbox(m)) return null;
+    const a = ws.fx.azNearest((m.x0 + m.x1) / 2, (m.y0 + m.y1) / 2);
+    if (!a) return null;
+    const i = ws.azPanels.indexOf(a);
+    if (made[i]) return made[i];
+    const t = ws.fx.azT(a), p = a.p;
+    if (!(t.sx > 0) || !(t.sy > 0)) return null;
+    const id = "vw-ring-" + (++ringClipSeq);
+    const cp = document.createElementNS(SVGNS, "clipPath");
+    cp.setAttribute("id", id);
+    cp.setAttribute("clipPathUnits", "userSpaceOnUse");
+    const rc = document.createElementNS(SVGNS, "rect");
+    rc.setAttribute("x", String((p.px0 - t.tx) / t.sx));
+    rc.setAttribute("y", String((p.py0 - t.ty) / t.sy));
+    rc.setAttribute("width", String((p.px1 - p.px0) / t.sx));
+    rc.setAttribute("height", String((p.py1 - p.py0) / t.sy));
+    cp.appendChild(rc);
+    g.appendChild(cp);
+    return (made[i] = "url(#" + id + ")");
+  }
+
+  // Rings for `keys` into `g`, each clipped to its panel (VW-48).
+  function drawRings(g: SVGGElement, keys: string[], cls: string): void {
+    const made: Record<number, string> = {};
+    for (let i = 0; i < keys.length; i++) {
+      const c = ringFor(keys[i], cls);
+      if (!c) continue;
+      const cl = ringClip(g, keys[i], made);
+      if (cl) c.setAttribute("clip-path", cl);
+      g.appendChild(ws.fx.azOverlayWrap(c, keys[i]));
+    }
+  }
+
   function clearGroup(g: SVGGElement | null): void {
     if (g) while (g.firstChild) g.removeChild(g.firstChild);
   }
@@ -823,19 +868,13 @@ export function rasterFeature(
     if (!ws.selGroup) return;
     const keys = ws.fx.selectedKeys();
     if (keys.length > OVERLAY_MARK_CAP) return;
-    for (let i = 0; i < keys.length; i++) {
-      const c = ringFor(keys[i], "vellumwidget-fb-sel");
-      if (c) ws.selGroup.appendChild(ws.fx.azOverlayWrap(c, keys[i]));
-    }
+    drawRings(ws.selGroup, keys, "vellumwidget-fb-sel");
   }
 
   function drawHovFeedback(keys: string[]): void {
     clearGroup(ws.hovGroup);
     if (!ws.hovGroup) return;
-    for (let i = 0; i < keys.length; i++) {
-      const c = ringFor(keys[i], "vellumwidget-fb-hov");
-      if (c) ws.hovGroup.appendChild(ws.fx.azOverlayWrap(c, keys[i]));
-    }
+    drawRings(ws.hovGroup, keys, "vellumwidget-fb-hov");
   }
 
   // Highlight an explicit set of keys (the shared path for closest-mark hover,
