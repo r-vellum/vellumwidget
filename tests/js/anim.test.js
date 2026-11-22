@@ -215,6 +215,61 @@ const T = window.__vellumwidgetTest;
     "and its scoped stylesheet");
 }
 
+// --- the bar sits below the plot, not over it (VW-60) ---
+{
+  reduce = false;
+  const w = mount(animPayload(6, 0));
+  const bar = w.el.querySelector(".vellumwidget-anim");
+  const stage = w.el.querySelector(".vellumwidget-stage");
+  ok(bar && bar.parentNode === w.el, "the control bar is a row of the widget root");
+  ok(stage && !stage.contains(bar), "not inside the stage that holds the plot");
+  ok(stage.compareDocumentPosition(bar) & window.Node.DOCUMENT_POSITION_FOLLOWING, "and after it");
+  const css = Array.prototype.map.call(document.querySelectorAll("style"), (s) => s.textContent).join("");
+  ok(!/\.vellumwidget-anim\s*\{[^}]*position:\s*absolute/.test(css), "the bar is not absolutely positioned over the plot");
+}
+
+// --- autoplay = false: starts paused on the first frame (VW-61) ---
+{
+  reduce = false;
+  const p = animPayload(12, 11);
+  p.options.autoplay = false;
+  const w = mount(p);
+  const st = w.inst._test.animState();
+  ok(st && !st.playing && st.frame === 0, "autoplay = false: paused on frame 1");
+  ok(w.el.querySelectorAll(".vl1234-vf")[0].classList.contains("vellumwidget-anim-cur"), "autoplay = false: frame 1 is shown");
+  ok(w.el.querySelector("button.vellumwidget-anim-btn").getAttribute("aria-label") === "Play animation",
+    "autoplay = false: the button offers Play");
+  w.el.querySelector("button.vellumwidget-anim-btn").click();
+  ok(w.inst._test.animState().playing, "autoplay = false: play still plays");
+}
+
+// --- loop = false: plays once and stops on the last frame (VW-61) ---
+{
+  reduce = false;
+  const realSet = window.setTimeout;
+  const timers = [];
+  window.setTimeout = function (fn, ms) { timers.push({ fn: fn, ms: ms }); return timers.length; };
+  const p = animPayload(10, 9);
+  p.options.loop = false;
+  const w = mount(p);
+  ok(w.inst._test.animState().playing, "loop = false: still autoplays");
+  const t = timers[timers.length - 1];
+  ok(t && Math.abs(t.ms - 9 * 120) < 1, "loop = false: stops after the remaining frames (" + (t && t.ms) + " ms)");
+  t.fn();
+  let st = w.inst._test.animState();
+  ok(!st.playing && st.frame === 9, "loop = false: paused on the last frame");
+  ok(w.el.querySelectorAll(".vl1234-vf")[9].classList.contains("vellumwidget-anim-cur"), "loop = false: the last frame is shown");
+  // Play on the last frame starts over from the first.
+  w.inst._test.animPlay(true);
+  const t2 = timers[timers.length - 1];
+  ok(w.inst._test.animState().playing && Math.abs(t2.ms - 9 * 120) < 1, "loop = false: play at the end starts over");
+  // Pausing cancels the stop; a looping widget arms none.
+  const before = timers.length;
+  const lw = mount(animPayload(10, 9));
+  ok(timers.length === before, "a looping widget arms no stop timer");
+  window.setTimeout = realSet;
+}
+
 // --- pure helpers ---
 {
   const info = { frames: [0, 1, 2, 3], delays: [0, 0.9, 0.6, 0.3], dur: 1.2, dt: 0.3 };

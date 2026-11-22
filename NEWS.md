@@ -1,5 +1,18 @@
 # vellumwidget 0.17.0.9000
 
+* **The animation controls sit below the plot (VW-60).** The play/pause bar
+  was drawn over the plot's bottom-left corner, where it could cover a long
+  left-aligned x title. It now has a row of its own under the plot (the
+  widget's default height grows by 30 px for it), and the scrubber is always
+  shown rather than only on hover.
+
+* **`render_options(autoplay =, loop =)` (VW-61).** An animated widget can
+  start paused on its first frame (`autoplay = FALSE`) and play once, stopping
+  on its last frame (`loop = FALSE`; pressing play there starts it over).
+  Reduced motion still starts paused; the bare SVG still loops. Pauses and
+  rewind set in `vellumplot::animate()` (VP-95) are frames of the SVG, so the
+  scrubber steps through them like any other frame.
+
 * **Animated widgets have playback controls (VW-55).** An animation from
   `vellumplot::animate()` looped forever with no way to stop it, and the
   runtime never read `options$animated`. The widget now adds a play/pause

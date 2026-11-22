@@ -174,6 +174,13 @@ navigator_options <- function(height = 56) {
 #'   SVG, including raster mode's SVG furniture under the split render; with an
 #'   older vellum, raster mode bakes text into the base image and this argument
 #'   is ignored (with a warning if set explicitly).
+#' @param autoplay,loop For an animation (from `vellumplot::animate()`):
+#'   whether it starts playing as soon as it is shown (default `TRUE`; `FALSE`
+#'   starts paused on the first frame, for the reader to press play), and
+#'   whether it loops (default `TRUE`; `FALSE` plays once and stops on the last
+#'   frame, and pressing play there starts it over). A reader whose system asks
+#'   for reduced motion always gets it paused. They need JavaScript: the
+#'   animated SVG on its own always plays and loops. Ignored for a static plot.
 #' @export
 render_options <- function(
   mode = c("auto", "svg", "raster"),
@@ -182,7 +189,9 @@ render_options <- function(
   max_marks = 2000000L,
   detail_marks = 3000L,
   precision = c("compact", "f32"),
-  max_zoom = 100
+  max_zoom = 100,
+  autoplay = TRUE,
+  loop = TRUE
 ) {
   text_set <- !missing(text)
   structure(
@@ -198,6 +207,8 @@ render_options <- function(
       detail_marks = .check_number(detail_marks, "detail_marks", min = 0),
       precision = .check_choice(precision, c("compact", "f32"), "precision"),
       max_zoom = .check_max_zoom(max_zoom),
+      autoplay = .check_bool(autoplay, "autoplay"),
+      loop = .check_bool(loop, "loop"),
       text_set = text_set
     ),
     class = "vellumwidget_render_options"
