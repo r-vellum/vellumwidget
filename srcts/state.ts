@@ -349,6 +349,7 @@ export interface WidgetFns {
   teardownLinking: () => void;
   shinyInput: (event: string, value: unknown, opts?: { priority?: string }) => void;
   showHighlightOverlay: (keys: string[]) => void;
+  refreshHighlightOverlay: () => void;
   showTip: (clientX: number, clientY: number, k: string) => void;
   showTipMulti: (clientX: number, clientY: number, keys: string[]) => void;
   swatchSeries: (k: string | null) => string | null;

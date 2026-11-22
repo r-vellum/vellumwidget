@@ -1,5 +1,11 @@
 # vellumwidget 0.16.0.9000
 
+* **The large-scene hover clone follows a zoom (VW-54).** A hover clone takes
+  its panel's counter-scale when it is made (VW-47), so zooming with the
+  wheel while a hover showed left it at the old size, twice the mark's size
+  after a 2x zoom, until the pointer moved. A view change now re-clones the
+  hovered marks for the new zoom.
+
 * **Brush and lasso test constant-size marks where they are drawn (VW-47).**
   Under axis zoom a point or label keeps its pixel size, and hover has
   hit-tested it at that size since VW-42. A brush, though, still tested its
