@@ -30,12 +30,13 @@
 #' @param x A `vellumplot` plot (a `PlotSpec` / `PlotComposition`) or a `vellum`
 #'   scene --- anything [vellum::as_vellum_scene()] accepts. Also a keyframe
 #'   animation from `vellumplot::animate()`, embedded as a self-contained animated
-#'   SVG (no per-element interaction). It autoplays and loops, with playback
-#'   controls in the bottom-left corner: a play/pause button, always shown, and
-#'   a frame scrubber that appears on hover or keyboard focus. Dragging the
-#'   scrubber pauses on the chosen frame. When the reader's system asks for
-#'   reduced motion (`prefers-reduced-motion`), the animation starts paused on
-#'   its still frame; the button still plays it. Without JavaScript (the SVG on
+#'   SVG (no per-element interaction). It autoplays and loops (set
+#'   `render = render_options(autoplay = FALSE, loop = FALSE)` to change
+#'   either), with playback controls in a row below the plot, where they never
+#'   cover it: a play/pause button and a frame scrubber. Dragging the scrubber
+#'   pauses on the chosen frame. When the reader's system asks for reduced
+#'   motion (`prefers-reduced-motion`), the animation starts paused on its
+#'   still frame; the button still plays it. Without JavaScript (the SVG on
 #'   its own) it loops as before.
 #' @param width,height Widget size (any valid CSS size, or `NULL` to size from the
 #'   scene). Passed to [htmlwidgets::createWidget()].
@@ -241,7 +242,7 @@ as_widget <- function(
   # SVG that plays on its own -- its marks move every frame, so there is no stable
   # per-element geometry to hover, and the interactive machinery is skipped.
   if (.is_animation(x)) {
-    return(.animation_widget(x, width, height, elementId, alt, a11y))
+    return(.animation_widget(x, width, height, elementId, alt, a11y, render))
   }
   scene <- vellum::as_vellum_scene(x)
   # Meta as columns (VR-19): one vector per field, never a record per element.
@@ -458,7 +459,15 @@ as_widget <- function(
 # raster canvas. Vector-only: an animated SVG is the resolution-independent path.
 # `options$animated` tells the runtime to add its play/pause button and frame
 # scrubber (srcts/features/anim.ts, VW-55).
-.animation_widget <- function(x, width, height, elementId, alt, a11y) {
+.animation_widget <- function(
+  x,
+  width,
+  height,
+  elementId,
+  alt,
+  a11y,
+  render = render_options()
+) {
   if (!requireNamespace("vellumplot", quietly = TRUE)) {
     stop(
       "Rendering an animation as a widget needs the 'vellumplot' package.",
@@ -479,23 +488,27 @@ as_widget <- function(
     colorbar = NULL,
     options = list(
       animated = TRUE,
+      autoplay = !isFALSE(render$autoplay),
+      loop = !isFALSE(render$loop),
       raster = FALSE,
       toolbar = FALSE,
       a11y = isTRUE(a11y),
       alt = if (is.null(alt)) NULL else as.character(alt)
     )
   )
+  # The playback bar has a row of its own below the plot (VW-60).
+  bar_h <- .ANIM_BAR_PX
 
   htmlwidgets::createWidget(
     name = "vellumwidget",
     x = payload,
     width = width %||% dims$width,
-    height = height %||% dims$height,
+    height = height %||% (dims$height + bar_h),
     package = "vellumwidget",
     elementId = elementId,
     sizingPolicy = htmlwidgets::sizingPolicy(
       defaultWidth = dims$width,
-      defaultHeight = dims$height,
+      defaultHeight = dims$height + bar_h,
       browser.fill = FALSE,
       viewer.fill = FALSE,
       knitr.figure = FALSE,
@@ -503,6 +516,10 @@ as_widget <- function(
     )
   )
 }
+
+# Height of the animation playback bar's row below the plot, in px: a 26px
+# bar plus its 4px top margin (srcts/css.ts, `.vellumwidget-anim`).
+.ANIM_BAR_PX <- 30
 
 # Normalise a `tooltip_style` list (background/color/fontsize/max_width) into the
 # JS `style` fields (tipBg/tipFg/tipFontSize/tipMaxWidth). Colours are CSS-

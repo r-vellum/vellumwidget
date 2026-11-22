@@ -29,12 +29,13 @@ as_widget(
 \item{x}{A \code{vellumplot} plot (a \code{PlotSpec} / \code{PlotComposition}) or a \code{vellum}
 scene --- anything \code{\link[vellum:as_vellum_scene]{vellum::as_vellum_scene()}} accepts. Also a keyframe
 animation from \code{vellumplot::animate()}, embedded as a self-contained animated
-SVG (no per-element interaction). It autoplays and loops, with playback
-controls in the bottom-left corner: a play/pause button, always shown, and
-a frame scrubber that appears on hover or keyboard focus. Dragging the
-scrubber pauses on the chosen frame. When the reader's system asks for
-reduced motion (\code{prefers-reduced-motion}), the animation starts paused on
-its still frame; the button still plays it. Without JavaScript (the SVG on
+SVG (no per-element interaction). It autoplays and loops (set
+\code{render = render_options(autoplay = FALSE, loop = FALSE)} to change
+either), with playback controls in a row below the plot, where they never
+cover it: a play/pause button and a frame scrubber. Dragging the scrubber
+pauses on the chosen frame. When the reader's system asks for reduced
+motion (\code{prefers-reduced-motion}), the animation starts paused on its
+still frame; the button still plays it. Without JavaScript (the SVG on
 its own) it loops as before.}
 
 \item{width, height}{Widget size (any valid CSS size, or \code{NULL} to size from the

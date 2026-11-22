@@ -13,6 +13,11 @@
 // where the API exists, seeks it to the frame playback resumes from. Under
 // prefers-reduced-motion the widget starts paused on the still frame; pressing
 // play still plays it (the user asked for it).
+//
+// The bar sits below the plot, in its own row, so it never covers the plot
+// (VW-60). `options.autoplay = false` starts paused on the first frame and
+// `options.loop = false` plays once and stops on the last frame (VW-61); the
+// SVG on its own (no JavaScript) still loops.
 
 import { cssEscape } from "../css";
 import type { WidgetFns, WidgetState } from "../state";
@@ -144,6 +149,8 @@ export function animFeature(ws: WidgetState): Pick<WidgetFns, "buildAnimControls
   let playT0 = 0;
   let playFrom = 0;
   let raf = 0;
+  // Playing once (`loop: false`): the timer that stops on the last frame.
+  let endTimer = 0;
 
   function now(): number {
     return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
@@ -196,10 +203,39 @@ export function animFeature(ws: WidgetState): Pick<WidgetFns, "buildAnimControls
     raf = window.requestAnimationFrame(tick);
   }
 
+  function clearEnd(): void {
+    if (endTimer) clearTimeout(endTimer);
+    endTimer = 0;
+  }
+
+  // Not looping: stop on the last frame, halfway through its slot, rather
+  // than letting the CSS animation wrap round to the first.
+  function armEnd(): void {
+    clearEnd();
+    if (!info || ws.opts.loop !== false) return;
+    const n = info.frames.length;
+    const ms = Math.max(0, (n - 1 - playFrom) * info.dt * 1000);
+    endTimer = window.setTimeout(function () {
+      endTimer = 0;
+      if (!info || !playing) return;
+      frame = n - 1;
+      playing = false;
+      ws.el.classList.add("vellumwidget-anim-paused");
+      ws.el.classList.remove("vellumwidget-anim-playing");
+      if (raf && typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(raf);
+      raf = 0;
+      showFrame(frame);
+      syncRange(frame);
+      syncButton();
+    }, ms);
+  }
+
   function setPlaying(on: boolean): void {
     if (!info) return;
     if (on === playing) return;
     if (!on) frame = currentFrame();
+    // Not looping, and play pressed on the last frame: start over.
+    if (on && ws.opts.loop === false && frame >= info.frames.length - 1) frame = 0;
     playing = on;
     ws.el.classList.toggle("vellumwidget-anim-paused", !on);
     ws.el.classList.toggle("vellumwidget-anim-playing", on);
@@ -218,7 +254,9 @@ export function animFeature(ws: WidgetState): Pick<WidgetFns, "buildAnimControls
         for (let i = 0; i < as.length; i++) as[i].currentTime = t;
       }
       if (typeof window.requestAnimationFrame === "function" && !raf) raf = window.requestAnimationFrame(tick);
+      armEnd();
     } else {
+      clearEnd();
       if (raf && typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(raf);
       raf = 0;
       showFrame(frame);
@@ -238,6 +276,7 @@ export function animFeature(ws: WidgetState): Pick<WidgetFns, "buildAnimControls
   }
 
   function teardown(): void {
+    clearEnd();
     if (raf && typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(raf);
     raf = 0;
     if (bar) bar.remove();
@@ -289,12 +328,20 @@ export function animFeature(ws: WidgetState): Pick<WidgetFns, "buildAnimControls
     range.addEventListener("input", function () { if (range) seek(parseInt(range.value, 10) || 0); });
     bar.appendChild(btn);
     bar.appendChild(range);
-    ws.stage.appendChild(bar);
+    // Below the plot, not over it (VW-60): a row of its own after the stage.
+    ws.el.appendChild(bar);
 
     frame = info.still;
     playing = false;
     if (reducedMotion()) {
       // Start paused on the still frame the SVG itself shows under reduced motion.
+      ws.el.classList.add("vellumwidget-anim-paused");
+      showFrame(frame);
+      syncRange(frame);
+      syncButton();
+    } else if (ws.opts.autoplay === false) {
+      // Start paused on the first frame (VW-61).
+      frame = 0;
       ws.el.classList.add("vellumwidget-anim-paused");
       showFrame(frame);
       syncRange(frame);

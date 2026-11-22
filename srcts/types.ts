@@ -186,6 +186,8 @@ export interface Options {
   tooltipFollow?: boolean; // true (default): tip tracks the cursor; false: anchor above the mark
   tooltipSticky?: boolean; // true: tip accepts pointer events + lingers so links are clickable
   animated?: boolean; // an anim_save() animated SVG: play/pause + scrubber controls, no interaction index (VW-55)
+  autoplay?: boolean; // animated: start playing (default true), else start paused on the first frame (VW-61)
+  loop?: boolean; // animated: loop forever (default true), else stop on the last frame (VW-61)
   raster?: boolean; // the marks are a single base image; interaction is index-driven (no per-element DOM nodes)
   a11y: boolean; // screen-reader + keyboard accessibility (focusable marks, live region, data table)
   alt?: string | null; // accessible label for the whole chart (falls back to the SVG's <title>/<desc>)

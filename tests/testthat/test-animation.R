@@ -66,3 +66,35 @@ test_that("a static widget's options carry no animated flag (VW-55)", {
   w <- as_widget(vellumplot::vplot(mtcars) |> vellumplot::mark_point(x = wt, y = mpg))
   expect_null(w$x$options$animated)
 })
+
+test_that("render_options(autoplay, loop) reach an animation widget (VW-61)", {
+  skip_if_not_installed("vellumplot")
+  a <- vellumplot::vplot(mtcars) |>
+    vellumplot::mark_point(x = wt, y = mpg) |>
+    vellumplot::transition_states(cyl) |>
+    vellumplot::animate(nframes = 6)
+  w <- as_widget(a)
+  expect_true(w$x$options$autoplay)
+  expect_true(w$x$options$loop)
+  w2 <- as_widget(a, render = render_options(autoplay = FALSE, loop = FALSE))
+  expect_false(w2$x$options$autoplay)
+  expect_false(w2$x$options$loop)
+  expect_error(render_options(loop = NA), "loop")
+  expect_error(render_options(autoplay = "yes"), "autoplay")
+  # A static plot's payload does not carry them.
+  p <- vellumplot::vplot(mtcars) |> vellumplot::mark_point(x = wt, y = mpg)
+  expect_null(as_widget(p)$x$options$autoplay)
+})
+
+test_that("an animation widget reserves a row below the plot for its controls (VW-60)", {
+  skip_if_not_installed("vellumplot")
+  a <- vellumplot::vplot(mtcars, width = 4, height = 3, dpi = 96) |>
+    vellumplot::mark_point(x = wt, y = mpg) |>
+    vellumplot::transition_states(cyl) |>
+    vellumplot::animate(nframes = 6)
+  w <- as_widget(a)
+  dims <- vellumwidget:::.svg_dims(w$x$svg)
+  expect_equal(w$height, dims$height + 30)
+  expect_equal(w$sizingPolicy$defaultHeight, dims$height + 30)
+  expect_equal(w$width, dims$width)
+})

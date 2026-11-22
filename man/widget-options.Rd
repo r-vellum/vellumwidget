@@ -21,7 +21,9 @@ render_options(
   max_marks = 2000000L,
   detail_marks = 3000L,
   precision = c("compact", "f32"),
-  max_zoom = 100
+  max_zoom = 100,
+  autoplay = TRUE,
+  loop = TRUE
 )
 }
 \arguments{
@@ -130,6 +132,14 @@ writes SVG coordinates on (and the 0.005 px error of \code{precision = "compact"
 their gridlines; past it they drift (a few pixels at 1000x) and show only
 the rounding. A number from 1 (no zoom in) to \code{10000}: past about 16,000x
 a 32-bit float can no longer place a mark at all.}
+
+\item{autoplay, loop}{For an animation (from \code{vellumplot::animate()}):
+whether it starts playing as soon as it is shown (default \code{TRUE}; \code{FALSE}
+starts paused on the first frame, for the reader to press play), and
+whether it loops (default \code{TRUE}; \code{FALSE} plays once and stops on the last
+frame, and pressing play there starts it over). A reader whose system asks
+for reduced motion always gets it paused. They need JavaScript: the
+animated SVG on its own always plays and loops. Ignored for a static plot.}
 }
 \value{
 An object of class \code{vellumwidget_tooltip_options},
