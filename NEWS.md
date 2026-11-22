@@ -1,4 +1,6 @@
-# vellumwidget 0.17.0.9000
+# vellumwidget 0.18.0
+
+* Requires vellum (>= 0.14.0) and vellumplot (>= 0.19.0).
 
 * **Selecting a mark from the keyboard keeps its focus (VW-57).** Raising
   the selection above its layer (VW-53) moves the selected nodes in the DOM,
