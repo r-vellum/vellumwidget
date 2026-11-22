@@ -159,6 +159,7 @@ export interface WidgetState {
   ptRad: Float64Array | null; // sampled point radii (viewBox units)
   ptRGB: Uint8Array | null; // packed [r,g,b,a, r,g,b,a, …] per sampled point
   ptShape: Uint8Array | null; // per sampled point its marker (vellum's shape code, 0 = circle; VW-58), or null: all round
+  ptHollow: Uint8Array | null; // per sampled point 1 when it is stroke-only (a transparent fill; VW-63), or null: none
   ptN: number; // number of sampled (drawable) points
   ptAllRound: boolean; // every sampled point is a round mark (the canvas draws it exactly)
   opts: Options;
@@ -457,6 +458,7 @@ export function createState(el: HTMLElement): WidgetState {
     ptRad: null,
     ptRGB: null,
     ptShape: null,
+    ptHollow: null,
     ptN: 0,
     ptAllRound: false,
     opts: {

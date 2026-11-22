@@ -229,3 +229,47 @@ test_that("raster mode builds single-valued ragged columns flat (VW-39)", {
   m <- model_of(cases[[1]])
   expect_type(.vellumwidget_elements(m)$legend, "list")
 })
+
+test_that("a ragged column with several values ships as a dictionary of sets (VW-62)", {
+  # Two legend aesthetics: every element carries two series. The sets are
+  # few, so they ship once each with a code per element, and decode to the
+  # very arrays the list form carried.
+  n <- 400L
+  g <- c("a", "b", "c")[(seq_len(n) %% 3) + 1L]
+  v <- lapply(g, function(x) c(paste0("color:", x), paste0("shape:", x)))
+  v[[7]] <- character(0)
+  cols <- list(key = paste0("k", seq_len(n)), legend = v)
+  enc <- .encode_elements(cols)$legend
+  expect_false(is.null(enc$levels))
+  expect_true(!is.null(enc$cb) || !is.null(enc$rv))
+  expect_setequal(
+    vapply(enc$levels, paste, "", collapse = "+"),
+    paste0("color:", c("a", "b", "c"), "+shape:", c("a", "b", "c"))
+  )
+  codes <- if (!is.null(enc$cb)) {
+    .uint_column_r(enc$cb)
+  } else {
+    rep(enc$rv, enc$rl) + 1L
+  }
+  dec <- lapply(codes, function(k) if (k) enc$levels[[k]] else character(0))
+  expect_identical(dec, v)
+  # runs when the sets come in long runs
+  vr <- rep(list(c("color:a", "shape:u"), c("color:b", "shape:v")), each = n / 2)
+  er <- .encode_elements(list(key = paste0("k", seq_len(n)), legend = vr))$legend
+  expect_identical(er$rv, c(0L, 1L))
+  expect_identical(er$rl, c(200L, 200L))
+  # too many distinct sets: the list form stays
+  vu <- lapply(seq_len(n), function(i) c(paste0("color:", i), "shape:a"))
+  expect_type(.encode_elements(list(key = paste0("k", seq_len(n)), legend = vu))$legend, "list")
+})
+
+test_that("two legend aesthetics no longer ship the list form in raster mode (VW-62)", {
+  skip_if_not(.split_render_supported(), "vellum without the split render")
+  set.seed(62)
+  df <- data.frame(x = rnorm(300), y = rnorm(300), g = sample(c("a", "b", "c"), 300, TRUE), id = 1:300)
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, shape = g, data_id = id)
+  lg <- suppressMessages(as_widget(p, render = render_options(mode = "raster")))$x$elements$legend
+  expect_false(is.null(lg$levels))
+  expect_true(all(lengths(lg$levels) == 2L))
+})

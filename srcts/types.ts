@@ -305,10 +305,13 @@ export interface Payload {
 // `shape` (VW-58), present when some point is not a circle: per element row
 // 1 + vellum's marker code (0 circle, 1 square, 2 triangle, 3 diamond, 4 plus,
 // 5 cross, 6 triangle down, 7 star), 0 for a row that is no point (a dot).
+// `hollow` (VW-63), present when some mark is stroke-only: per element row 1
+// for a transparent-fill mark (its dot is stroked, not filled), else 0.
 export interface MarkColors {
   pal: string[] | string;
   idx: DLColumn;
   shape?: DLColumn;
+  hollow?: DLColumn;
 }
 
 // The split render's mark layer (raster mode with vellum's `layer =` split): a
