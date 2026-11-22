@@ -30,6 +30,24 @@
   `if_false` colour is used for colour aesthetics only, and R no longer
   reads a non-colour `if_false` such as `"1"` as a palette colour.
 
+* **A zoomed y axis moves its title out of the way of longer labels
+  (VW-51).** At deep zoom the re-ticked y labels need more digits than the
+  static ones ("0.5002" for "0.5") and ran into the y-axis title. The title
+  now moves out by however much wider the widest re-ticked label is than the
+  widest static one, never past the edge of the canvas, and goes back when
+  the labels fit again. The same holds for a secondary y axis on the right.
+
+* **Above `max_marks` the zoomed-in dots keep each mark's colour (VW-50).**
+  Without the display list, the dots took their colour from the mark image's
+  pixel under each mark's centre. In a dense scatter that pixel belongs to
+  whichever mark was painted last, so a plot coloured by group drew every
+  dot in the last group's colour. The widget now ships each element's mark
+  colour (`markColors`: a palette plus a packed index per element, a few
+  hundred bytes for a grouped 600k scatter), read from vellum's display list,
+  which is built for its colours only. An element with no known colour (a
+  gradient fill) still takes the pixel. The dots stay dots: shapes are still
+  only drawn exactly with the display list.
+
 * **Raster mode no longer ships line and polygon vertices twice (VW-49).**
   The geometry block that exact hit-testing uses repeated, as JSON numbers,
   the vertices the display list already carries. For line-heavy plots it was

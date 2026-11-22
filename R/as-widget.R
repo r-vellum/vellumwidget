@@ -259,6 +259,7 @@ as_widget <- function(
   )
   marks <- NULL
   dlist <- NULL
+  mark_colors <- NULL
   # Raster mode ships the compact wire encoding, which wants single-valued
   # ragged columns (legend, cond, filt) flat (VW-39).
   elements <- .vellumwidget_elements(model, flat_ragged = use_raster)
@@ -302,6 +303,17 @@ as_widget <- function(
       keys = elements$key,
       precision = render$precision
     )
+    # Above `max_marks` (no list), the dots the runtime zooms into still take
+    # each mark's own colour (VW-50).
+    mark_colors <- if (is.null(dlist)) {
+      .fallback_mark_colors(
+        scene,
+        model,
+        panel_names,
+        render$max_marks,
+        keys = elements$key
+      )
+    }
     # The mixed tier (VW-30): the marks the display list flags, as one PNG per
     # run in paint order, so the runtime draws the rest exactly around them.
     flagged <- .raster_flagged(scene, panel_names, dlist, marks, render$text)
@@ -384,6 +396,12 @@ as_widget <- function(
       )
     )
   )
+
+  # Above `max_marks`: each element's colour for the fallback dots (VW-50).
+  # Only when there is one, so every other payload is unchanged.
+  if (!is.null(mark_colors)) {
+    payload$markColors <- mark_colors
+  }
 
   # Click-to-source (from vellumplot::inspect_source()): attach the per-grob
   # source-row payload only when the spec opted in, so an ordinary widget carries
@@ -2070,7 +2088,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   }
   if (n > max_marks) {
     cli::cli_inform(c(
-      "i" = "This plot has {n} marks, more than {.code max_marks} ({max_marks}): the widget ships a bounding-box index instead of the exact marks, so zoomed-in marks are drawn as plain dots.",
+      "i" = "This plot has {n} marks, more than {.code max_marks} ({max_marks}): the widget ships a bounding-box index instead of the exact marks, so zoomed-in marks are drawn as plain dots in their own colours.",
       "*" = "A plot this big reads better as density: try {.fn vellumplot::mark_datashade} or {.fn vellumplot::mark_hex}.",
       "*" = "Or raise the cap with {.code render_options(max_marks = )}."
     ))
@@ -2101,6 +2119,62 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     return(vellum::scene_display_list(scene, what = "keyed", panels = panels, version = 2L))
   }
   vellum::scene_display_list(scene, what = "keyed", panels = panels)
+}
+
+# The colour of each element-table row's mark, for the dots the runtime draws
+# in place of the exact marks above `max_marks` (VW-50). Sampling the mark PNG
+# under each mark's centre, as the runtime otherwise does, reads back whichever
+# mark was painted last there: in a dense scatter drawn one colour group after
+# another, the last group's colour for nearly every mark. The display list
+# knows each mark's paint, so it is built here for its colours only (it costs
+# little to build next to the scene model; it was the payload that was big):
+# a palette of `#rrggbbaa` strings and a bit-packed 1-based index per row, 0
+# where a row has no keyed mark or its fill is a gradient (the runtime samples
+# the pixel for those). The fill, or the stroke when the fill is transparent.
+# NULL at or under `max_marks` (the list itself ships) or without a vellum
+# whose list indexes the element keys (VR-22).
+.fallback_mark_colors <- function(scene, model, panels, max_marks, keys) {
+  el <- model$elements
+  if (!.display_list_keys_supported() || !length(keys) || is.null(el)) {
+    return(NULL)
+  }
+  keyed <- !is.na(el$key)
+  if (!is.null(panels) && !is.null(el$panel)) {
+    keyed <- keyed & el$panel %in% panels
+  }
+  if (sum(keyed) <= max_marks) {
+    return(NULL)
+  }
+  dl <- vellum::scene_display_list(
+    scene,
+    what = "keyed",
+    panels = panels,
+    version = 2L,
+    keys = keys
+  )
+  if (!dl$n) {
+    return(NULL)
+  }
+  rk <- .dl_col(dl$record$key) + 1L
+  rp <- .dl_col(dl$record$paint) + 1L
+  # The first record of each mark: a filled-and-stroked point is one record,
+  # and a mark of several records is painted mostly by its first.
+  first <- !duplicated(rk)
+  rk <- rk[first]
+  rp <- rp[first]
+  pt <- dl$paints
+  clear <- function(v) is.na(v) | grepl("^#[0-9A-Fa-f]{6}00$", v)
+  col <- ifelse(clear(pt$fill), pt$stroke, pt$fill)
+  col[(!clear(pt$fill) & pt$fill_gradient != 0L) | clear(col)] <- NA_character_
+  pal <- unique(col[!is.na(col)])
+  if (!length(pal)) {
+    return(NULL)
+  }
+  idx <- integer(length(keys))
+  # Keys past `keys_given` are the list's own (marks the table lacks): skip.
+  own <- rk <= length(keys)
+  idx[rk[own]] <- match(col[rp[own]], pal, nomatch = 0L)
+  list(pal = pal, idx = .uint_column(idx, pack = TRUE))
 }
 
 # One display-list column (`list(type, n, data | const | seq | rle)`) as an R

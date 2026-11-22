@@ -2115,6 +2115,46 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   const tmR = /matrix\(([-\d.eE]+)/.exec(on.inst._test.panTransform());
   ok(tmR && Math.abs(parseFloat(tmR[1]) - 1) < 1e-6, "axis_zoom: reset to full view -> identity scale");
 
+  // VW-51: at deep zoom the re-ticked y labels ("25.0002") outgrow the static
+  // ones ("25"); the y title moves out by the difference, never past the canvas
+  // edge, and goes back home when the labels fit again. (jsdom has no text
+  // layout, so widths come from the 0.6 em per character fallback.)
+  {
+    const tPanels = Object.assign({}, linPanels, { px0: 80 });
+    const tSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<g data-vellum-panel="panel-1-1" clip-path="url(#c0)">' +
+      '<g data-vellum-pan="panel-1-1">' +
+      '<g role="grid"><path d="M0 0 L0 80" stroke="#ffffff" stroke-width="1"/></g>' +
+      '<path data-key="a" d="M100 50h2v2z"/></g></g>' +
+      '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 80 90)" fill="#333333" font-family="sans-serif" font-size="12">50</text></g>' +
+      '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 80 50)" fill="#333333" font-family="sans-serif" font-size="12" text-anchor="end">25</text></g>' +
+      '<g data-vellum-panel="axis-title-y"><text x="40" y="50" transform="rotate(-90 40 50)" font-size="12" text-anchor="middle" dominant-baseline="central">y</text></g></svg>';
+    const tz = mountAZ({ axisZoom: true, maxZoom: 1e6 }, tSvg, tPanels);
+    ok(tz.inst._test.axisZoomActive() === true, "VW-51: the titled fixture is axis-zoomable");
+    const title = () => tz.el.querySelector('[data-vellum-panel="axis-title-y"] text');
+    const shiftOf = () => {
+      const m = /^translate\(([-\d.eE]+) 0\)/.exec(title().getAttribute("transform") || "");
+      return m ? parseFloat(m[1]) : 0;
+    };
+    ok(shiftOf() === 0 && title().getAttribute("transform") === "rotate(-90 40 50)",
+      "VW-51: at the full view the y title keeps its static place");
+    // a moderate zoom: labels like "24.5" (4 chars vs 2) need 2 * 0.6 * 12 = 14.4 px
+    tz.inst._test.setView({ x: 90, y: 49, w: 2, h: 1 });
+    const labs = tz.inst._test.retickLabels().map((l) => l.text);
+    const wide = Math.max.apply(null, labs.filter((t) => t.indexOf(".") >= 0).map((t) => t.length));
+    ok(wide > 2, "VW-51: the zoomed y axis re-ticks to longer labels (" + labs.join(",") + ")");
+    const sh = shiftOf();
+    ok(sh < 0, "VW-51: the y title moves left when the labels grow (" + sh + ")");
+    ok(/rotate\(-90 40 50\)$/.test(title().getAttribute("transform")),
+      "VW-51: the title keeps its own rotation after the shift");
+    // deep zoom: the shift is capped at the title's room (40 - 6 = 34 px)
+    tz.inst._test.setView({ x: 90, y: 49.99, w: 0.0002, h: 0.0001 });
+    ok(shiftOf() >= -34 - 1e-6 && shiftOf() < sh, "VW-51: the shift grows with the labels but stops at the canvas edge (" + shiftOf() + ")");
+    tz.inst._test.setView({ x: 0, y: 0, w: 200, h: 100 });
+    ok(title().getAttribute("transform") === "rotate(-90 40 50)", "VW-51: back at the full view the title returns home");
+  }
+
   // fallbacks: an axis the re-ticker can't follow, raster mode, and a described
   // panel with no pannable group all decline axis_zoom.
   const symPanels = Object.assign({}, linPanels, {
@@ -6509,6 +6549,74 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   // sparse bbox columns (a display list covers the rest): the uncovered boxes survive
   const sp = T.normalizeElements({ key: ["1", "2", "legend:a"], x0: { at: 2, v: 520.5 }, y0: { at: 2, v: 10 }, x1: { at: 2, v: 535 }, y1: { at: 2, v: 25 } });
   ok(sp[2].x0 === 520.5 && sp[2].y1 === 25 && sp[0].x0 === undefined, "sparse bbox columns: the listed rows keep their boxes");
+}
+
+// VW-50: above max_marks the zoomed-in fallback dots take each mark's colour
+// from `markColors`, not the mark image's pixel under its centre (which, in a
+// dense scatter, is whichever group was painted last). An element with index 0
+// (no colour known) still takes the sampled pixel.
+{
+  const proto = window.HTMLCanvasElement.prototype;
+  const origGC = proto.getContext, origImage = global.Image;
+  const log = [];
+  let arcs = [];
+  const ctx = {
+    fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1,
+    save() {}, restore() {}, setTransform() {}, clearRect() { log.length = 0; }, rect() {}, clip() {},
+    beginPath() { arcs = []; }, arc(x) { arcs.push(Math.round(x)); },
+    fill() { log.push({ style: this.fillStyle, xs: arcs.slice() }); },
+    drawImage() {},
+    // every pixel of the mark image: opaque green (the last group painted)
+    getImageData(x, y, w, h) {
+      const d = new Uint8ClampedArray(w * h * 4);
+      for (let i = 0; i < d.length; i += 4) { d[i + 1] = 158; d[i + 2] = 115; d[i + 3] = 255; }
+      return { data: d };
+    }
+  };
+  proto.getContext = function () { return ctx; };
+  // An Image that "decodes" as soon as its src is set.
+  global.Image = function () {
+    const im = {};
+    Object.defineProperty(im, "src", { set(v) { this._src = v; if (this.onload) this.onload(); }, get() { return this._src; } });
+    return im;
+  };
+  function mountFB(markColors) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    inst.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+        '<image width="200" height="100" href="data:image/png;base64,AAAA"/></svg>',
+      elements: { key: ["p1", "p2", "p3"], mark: ["point", "point", "point"],
+        x0: [38, 78, 118], y0: [48, 48, 48], x1: [42, 82, 122], y1: [52, 52, 52] },
+      markColors: markColors,
+      options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple" }
+    });
+    inst._test.setView({ x: 0, y: 0, w: 180, h: 90 });
+    return { el: e, inst: inst };
+  }
+  const fills = () => log.flatMap((r) => r.xs.map(() => r.style));
+  try {
+    mountFB(null);
+    const plain = fills();
+    ok(plain.length === 3 && plain.every((s) => s === "rgb(0,158,115)"),
+      "VW-50: without markColors the dots take the sampled pixel (" + plain.join(" ") + ")");
+    // p1 blue, p2 dark (half alpha), p3 unknown -> sampled pixel; packed as u8 [1, 2, 0]
+    mountFB({ pal: ["#0072b2ff", "#2f485880"], idx: { type: "u8", n: 3, data: Buffer.from([1, 2, 0]).toString("base64") } });
+    const own = fills();
+    ok(own.length === 3, "VW-50: markColors: all three dots drawn when zoomed in");
+    ok(own[0] === "rgb(0,114,178)", "VW-50: a dot takes its own palette colour (" + own[0] + ")");
+    ok(/^rgba\(47,72,88,0\.50/.test(own[1]), "VW-50: a palette alpha is kept (" + own[1] + ")");
+    ok(own[2] === "rgb(0,158,115)", "VW-50: an element with no known colour falls back to the pixel (" + own[2] + ")");
+    // an rle column, and one that doesn't fit the element count, is ignored
+    mountFB({ pal: "#d55e00ff", idx: { type: "u8", n: 3, rle: { values: [1], lengths: [3] } } });
+    ok(fills().every((s) => s === "rgb(213,94,0)"), "VW-50: an rle-coded index with a one-colour palette");
+    mountFB({ pal: ["#d55e00ff"], idx: { type: "u8", n: 2, rle: { values: [1], lengths: [2] } } });
+    ok(fills().every((s) => s === "rgb(0,158,115)"), "VW-50: a colour index of the wrong length is ignored");
+  } finally {
+    proto.getContext = origGC;
+    global.Image = origImage;
+  }
 }
 
 // Checks that need the MutationObserver (removal watcher) to have run.

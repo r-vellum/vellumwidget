@@ -1,7 +1,7 @@
 // Shared type declarations for the vellumwidget runtime: the payload shapes the R
 // side ships and the small structural types the helpers and the factory share.
 
-import type { DLPayload } from "./dlist";
+import type { DLColumn, DLPayload } from "./dlist";
 import type { GeometryPayload } from "./geometry";
 
 // The subset of the object a widget's factory returns that the proxy needs: the
@@ -288,11 +288,20 @@ export interface Payload {
   colorbar?: ColorbarInfo; // interactive continuous-colour colorbar (optional)
   marks?: MarksLayer; // split-render mark layer (raster mode, VW-14)
   displayList?: DLPayload; // marks-only display list (raster mode, VW-15)
+  markColors?: MarkColors | null; // per-element dot colours above max_marks (raster mode, VW-50)
   above?: string | null; // furniture painted after the marks, as SVG (raster mode, VW-21)
   flagged?: FlaggedLayer | null; // per-run rasters of the flagged keyed marks (raster mode, VW-30)
   interactions?: InteractionSpec; // declarative interactivity (from the plot spec)
   provenance?: Provenance; // click-to-source rows per element (from inspect_source())
   options: Options;
+}
+
+// Above `max_marks` (no display list), each element's mark colour for the
+// fallback dots (VW-50): `#rrggbbaa` palette strings and, per element row, a
+// 1-based palette index (0: unknown, sample the mark image's pixel instead).
+export interface MarkColors {
+  pal: string[] | string;
+  idx: DLColumn;
 }
 
 // The split render's mark layer (raster mode with vellum's `layer =` split): a
@@ -348,7 +357,25 @@ export interface ViewBox {
 // for an x axis, anchor x for a y axis) and the text alignment, scraped from the
 // static axis group vellum drew for that panel. `gap` > 0 when vellum wrapped the
 // static labels onto two lines (a long datetime label): the line spacing to reuse.
-export interface AxisAnchor { pos: number; anchor: string; baseline: string; gap: number; rot?: number; }
+export interface AxisAnchor {
+  pos: number; anchor: string; baseline: string; gap: number; rot?: number;
+  // A y axis: the widest static tick label (device px), the room its title was
+  // laid out around, and the title beside it, moved out when re-ticked labels
+  // grow wider (VW-51).
+  w0?: number;
+  title?: AxisTitle | null;
+}
+// A static y-axis title the re-ticker may move sideways: its text node and
+// original transform, the most it can move (to the canvas edge), the direction
+// it moves (-1 left, +1 right) and the shift now applied.
+export interface AxisTitle {
+  node: Element;
+  orig: string | null;
+  room: number;
+  dir: number;
+  need: number;
+  shift: number;
+}
 // A secondary axis (sec_axis()/dup_axis()), read back from its static labels:
 // matched (primary native, secondary value) pairs, ascending in native, and the
 // label decoration to reuse (a shared prefix/suffix, thousands commas). The

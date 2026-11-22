@@ -2114,6 +2114,7 @@
       ws.axisZoomActive = true;
       scrapeAxisStyle();
       scrapeAxisAnchors();
+      scrapeAxisTitles();
       hideStaticAxes();
       for (let i = 0; i < ws.azPanels.length; i++) {
         const a = ws.azPanels[i];
@@ -2317,6 +2318,11 @@
           gap: rot ? 0 : gap,
           rot
         };
+        if (!isX && !rot) {
+          let w0 = 0;
+          for (let i = 0; i < texts.length; i++) w0 = Math.max(w0, labelWidth(texts[i]));
+          anchor.w0 = w0;
+        }
         if (isSec) {
           const p = best.p;
           const sc = isX ? p.x : p.y;
@@ -2341,6 +2347,88 @@
         if (isX && !best.xLab) best.xLab = anchor;
         if (!isX && !best.yLab) best.yLab = anchor;
       }
+    }
+    function scrapeAxisTitles() {
+      if (!ws.svgEl || !ws.vb0) return;
+      const vb0 = ws.vb0;
+      const groups = ws.svgEl.querySelectorAll('[data-vellum-panel^="axis-title-y"]');
+      const titles = [];
+      for (let g = 0; g < groups.length; g++) {
+        const node = groups[g].querySelector("text");
+        if (!node) continue;
+        const at = anchorThrough(node);
+        const fs = parseFloat(node.getAttribute("font-size") || "") || ws.axisStyle.fontSize;
+        const half = rotationOf(node) ? fs / 2 : labelWidth(node) / 2;
+        const sec = /^axis-title-y2/.test(groups[g].getAttribute("data-vellum-panel") || "");
+        const room = sec ? vb0.x + vb0.w - (at.x + half) : at.x - half - vb0.x;
+        titles.push({
+          t: { node, orig: node.getAttribute("transform"), room: Math.max(0, room), dir: sec ? 1 : -1, need: 0, shift: 0 },
+          x: at.x,
+          y: at.y
+        });
+      }
+      if (!titles.length) return;
+      for (let i = 0; i < ws.azPanels.length; i++) {
+        const a = ws.azPanels[i];
+        const labs = [a.yLab, a.y2Lab];
+        for (let j = 0; j < labs.length; j++) {
+          const lab = labs[j];
+          if (!lab || lab.w0 === void 0) continue;
+          const dir = lab.anchor === "end" ? -1 : lab.anchor === "start" ? 1 : 0;
+          if (!dir) continue;
+          let best = null, bestD = Infinity;
+          for (let k = 0; k < titles.length; k++) {
+            const c = titles[k];
+            if (c.t.dir !== dir || (c.x - lab.pos) * dir <= 0) continue;
+            const dy = c.y < a.p.py0 ? a.p.py0 - c.y : c.y > a.p.py1 ? c.y - a.p.py1 : 0;
+            const d = Math.abs(c.x - lab.pos) + dy;
+            if (d < bestD) {
+              bestD = d;
+              best = c.t;
+            }
+          }
+          lab.title = best;
+        }
+      }
+    }
+    function labelWidth(t) {
+      const f = t.getComputedTextLength;
+      if (typeof f === "function") {
+        try {
+          const w = f.call(t);
+          if (w > 0) return w;
+        } catch (e) {
+        }
+      }
+      const fs = parseFloat(t.getAttribute("font-size") || "") || ws.axisStyle.fontSize;
+      return (t.textContent || "").length * 0.6 * fs;
+    }
+    function placeAxisTitles() {
+      const seen = [];
+      for (let i = 0; i < ws.azPanels.length; i++) {
+        const labs = [ws.azPanels[i].yLab, ws.azPanels[i].y2Lab];
+        for (let j = 0; j < labs.length; j++) {
+          const t = labs[j] && labs[j].title;
+          if (t && seen.indexOf(t) < 0) seen.push(t);
+        }
+      }
+      for (let i = 0; i < seen.length; i++) {
+        const t = seen[i];
+        const shift = Math.min(t.room, Math.max(0, t.need));
+        t.need = 0;
+        if (Math.abs(shift - t.shift) < 0.01) continue;
+        t.shift = shift;
+        if (shift > 0) {
+          t.node.setAttribute("transform", "translate(" + t.dir * shift + " 0)" + (t.orig ? " " + t.orig : ""));
+        } else if (t.orig !== null) {
+          t.node.setAttribute("transform", t.orig);
+        } else {
+          t.node.removeAttribute("transform");
+        }
+      }
+    }
+    function noteLabelWidth(lab, w) {
+      if (lab.title && lab.w0 !== void 0) lab.title.need = Math.max(lab.title.need, w - lab.w0);
     }
     function hideStaticAxes() {
       if (!ws.svgEl) return;
@@ -2504,6 +2592,7 @@
       if (!ws.axisZoomActive || !ws.vb || !ws.vb0 || !ws.retickLayer) return;
       while (ws.retickLayer.firstChild) ws.retickLayer.removeChild(ws.retickLayer.firstChild);
       for (let i = 0; i < ws.azPanels.length; i++) retickPanel(ws.azPanels[i]);
+      placeAxisTitles();
     }
     function retickPanel(a) {
       const p = a.p, grid = a.grid, layer = ws.retickLayer;
@@ -2551,7 +2640,9 @@
           grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
           if (a.yTick) ticks_.push(tickLine(a.yTick, sy, p));
           if (a.yLab) {
-            layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline, a.yLab.rot));
+            const lab = axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline, a.yLab.rot);
+            layer.appendChild(lab);
+            noteLabelWidth(a.yLab, labelWidth(lab));
           }
         }
         if (a.y2Lab && a.y2Map) {
@@ -2559,7 +2650,9 @@
           for (let i = 0; i < st.length; i++) {
             const sy = t.sy * (p.py0 + (ay.native_hi - st[i].n) / k) + t.ty;
             if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
-            layer.appendChild(axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline, a.y2Lab.rot));
+            const lab = axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline, a.y2Lab.rot);
+            layer.appendChild(lab);
+            noteLabelWidth(a.y2Lab, labelWidth(lab));
           }
         }
       }
@@ -6661,7 +6754,7 @@
       hideCanvas();
       showMarksLayer(true);
     }
-    function sampleBaseRaster() {
+    function sampleBaseRaster(colors) {
       clearPointData();
       if (ws.dl) {
         drawPoints();
@@ -6692,6 +6785,7 @@
         }
         const cx = [], cy = [], rad = [], rgb = [];
         let allRound = true;
+        const known = markColorTable(colors, els.length);
         for (let i = 0; i < els.length; i++) {
           const e = els[i];
           if (!hasBbox(e)) continue;
@@ -6704,7 +6798,9 @@
           cx.push(mx);
           cy.push(my);
           rad.push(Math.max(e.x1 - e.x0, e.y1 - e.y0) / 2 + 0.5);
-          rgb.push(data[o], data[o + 1], data[o + 2]);
+          const c = known ? known.pal[known.idx[i]] : null;
+          if (c) rgb.push(c[0], c[1], c[2], c[3]);
+          else rgb.push(data[o], data[o + 1], data[o + 2], 255);
         }
         ws.ptN = cx.length;
         ws.ptCx = Float64Array.from(cx);
@@ -6717,6 +6813,27 @@
       img.onerror = function() {
       };
       img.src = href;
+    }
+    function markColorTable(colors, n) {
+      if (!colors || !colors.idx) return null;
+      const idx = dlColumn(colors.idx);
+      if (idx.length !== n) return null;
+      const pal = [null];
+      const src = asColumn(colors.pal);
+      for (let k = 0; k < src.length; k++) pal.push(hexRGBA(String(src[k])));
+      return { pal, idx };
+    }
+    function hexRGBA(s) {
+      const h = /^#([0-9a-f]+)$/i.exec(s.trim());
+      if (!h) return null;
+      let v = h[1];
+      if (v.length === 3) v = v[0] + v[0] + v[1] + v[1] + v[2] + v[2];
+      if (v.length === 6) v += "ff";
+      if (v.length !== 8) return null;
+      const out = [0, 2, 4, 6].map(function(k) {
+        return parseInt(v.slice(k, k + 2), 16);
+      });
+      return out.every(isFinite) ? out : null;
     }
     function drawPoints(stateOnly) {
       if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
@@ -6757,7 +6874,8 @@
       const dot = function(px, py, r, i) {
         ctx.beginPath();
         ctx.arc(px, py, Math.max(0.75, r), 0, 6.283185307179586);
-        ctx.fillStyle = "rgb(" + rgb[i * 3] + "," + rgb[i * 3 + 1] + "," + rgb[i * 3 + 2] + ")";
+        const a = rgb[i * 4 + 3];
+        ctx.fillStyle = a === 255 ? "rgb(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + ")" : "rgba(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + "," + a / 255 + ")";
         ctx.fill();
       };
       if (az) {
@@ -7906,7 +8024,7 @@
         ws.fx.clearCrosshair();
         if (ws.rasterMode) {
           ws.fx.ensureCanvas();
-          ws.fx.sampleBaseRaster();
+          ws.fx.sampleBaseRaster(x.markColors);
           if (ws.marksLayer && x.flagged) loadFlagged(x.flagged);
         } else {
           ws.fx.clearPointData();
