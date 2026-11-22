@@ -1,5 +1,14 @@
 # vellumwidget 0.17.0.9000
 
+* **A per-row alpha `if_false` is applied (VW-56).** With
+  `alpha = condition(sel, 1, af)`, where `af` is a column, the per-row
+  opacities were dropped on the R side (only colours were kept), so
+  non-members fell back to the theme dim. They now ship as one opacity per
+  element and each non-member takes its own, in SVG mode (per node) and in
+  every raster tier; a value outside [0, 1] falls back to the constant
+  `if_false` or the theme dim. Per-row values for other aesthetics (size,
+  shape) are still not shipped.
+
 * **The animation controls sit below the plot (VW-60).** The play/pause bar
   was drawn over the plot's bottom-left corner, where it could cover a long
   left-aligned x title. It now has a row of its own under the plot (the

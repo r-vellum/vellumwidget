@@ -804,10 +804,11 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     # ragged like `legend`. The JS runtime styles non-members of an active
     # selection by these tags.
     cond = .meta_ragged(field("cond"), flat_ragged),
-    # A per-row `if_false` colour per condition tag (VW-46): a named list,
-    # tag -> one CSS colour per element (`NA` where the element has none),
-    # which the runtime paints a non-member with in place of the condition's
-    # constant `if_false` / theme dim.
+    # A per-row `if_false` per condition tag (VW-46): a named list, tag -> one
+    # CSS colour per element (`NA` where the element has none), or for an
+    # alpha condition one opacity per element (VW-56), which the runtime
+    # applies to a non-member in place of the condition's constant `if_false`
+    # / theme dim.
     cond_value = .meta_cond_value(field("cond_value")),
     # Filter selection tags (a view filtered by `filter_by()`) -- ragged like
     # `cond`. The runtime hides a tagged element when its `join` is not in the
@@ -890,7 +891,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   cols$key <- .encode_keys(keys, kpos)
   for (f in setdiff(names(cols), c("key", "bbox"))) {
     v <- cols[[f]]
-    # `cond_value` (VW-46): one CSS colour column per condition tag, each
+    # `cond_value` (VW-46): one CSS colour (or opacity) column per tag, each
     # encoded as a column of its own (a tag on few elements goes sparse).
     if (f == "cond_value") {
       cv <- lapply(v, function(x) {
@@ -1423,11 +1424,14 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 }
 
 # The `cond_value` meta field (a list-column, each entry a named list
-# tag -> that element's per-row `if_false`, VW-46) as one column per tag of CSS
-# colours (`NA` where an element has none or its value is not a colour), or
-# NULL when no element has a colour. Built from one `unlist()`, never a pass
-# per element. A number (an `if_false` for `size`, say) is no colour here,
-# though `col2rgb()` would read it as a palette index.
+# tag -> that element's per-row `if_false`, VW-46) as one column per tag, or
+# NULL when no element has a value the runtime can apply. A colour tag's
+# column holds CSS colours (`NA` where an element has none or its value is not
+# a colour); an alpha tag's (VW-56, its aesthetic read off the tag) holds the
+# opacities in [0, 1] as strings, so a few distinct values take the compact
+# dictionary/run encodings (`NA` elsewhere). Built from one `unlist()`, never a
+# pass per element. A number on any other aesthetic (an `if_false` for `size`,
+# say) is dropped, though `col2rgb()` would read it as a palette index.
 .meta_cond_value <- function(v) {
   if (!is.list(v)) {
     return(NULL)
@@ -1437,31 +1441,60 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     return(NULL)
   }
   vals <- unlist(v, use.names = TRUE)
-  if (!is.character(vals) && !is.factor(vals)) {
+  if (!is.atomic(vals) || (!is.character(vals) && !is.factor(vals) && !is.numeric(vals))) {
     return(NULL)
   }
   tags <- names(vals)
+  num <- is.numeric(vals)
   vals <- as.character(vals)
   if (is.null(tags) || length(vals) != sum(len)) {
     return(NULL)
   }
   at <- rep.int(seq_along(v), len)
-  lv <- unique(vals[!is.na(vals)])
-  hex <- vapply(lv, function(x) {
-    if (grepl("^[-+0-9.eE]+$", x)) {
-      return(NA_character_)
-    }
-    tryCatch(.css_color(x) %||% NA_character_, error = function(e) NA_character_)
-  }, character(1), USE.NAMES = FALSE)
-  css <- hex[match(vals, lv)]
+  alpha <- .cond_tag_is_alpha(tags)
   out <- list()
-  for (t in unique(tags[!is.na(css)])) {
-    hit <- tags == t & !is.na(css)
-    col <- rep(NA_character_, length(v))
-    col[at[hit]] <- css[hit]
-    out[[t]] <- col
+  # alpha tags: opacities (a number, or a numeric string after unlist() met a
+  # colour column of another tag)
+  if (any(alpha)) {
+    a <- suppressWarnings(as.numeric(vals[alpha]))
+    ok <- !is.na(a) & a >= 0 & a <= 1
+    ta <- tags[alpha]
+    aa <- at[alpha]
+    for (t in unique(ta[ok])) {
+      hit <- ta == t & ok
+      col <- rep(NA_character_, length(v))
+      col[aa[hit]] <- as.character(a[hit])
+      out[[t]] <- col
+    }
+  }
+  # colour tags: CSS colours (numbers are no colours here)
+  if (!num && any(!alpha)) {
+    vc <- vals[!alpha]
+    tc <- tags[!alpha]
+    ac <- at[!alpha]
+    lv <- unique(vc[!is.na(vc)])
+    hex <- vapply(lv, function(x) {
+      if (grepl("^[-+0-9.eE]+$", x)) {
+        return(NA_character_)
+      }
+      tryCatch(.css_color(x) %||% NA_character_, error = function(e) NA_character_)
+    }, character(1), USE.NAMES = FALSE)
+    css <- hex[match(vc, lv)]
+    for (t in unique(tc[!is.na(css)])) {
+      hit <- tc == t & !is.na(css)
+      col <- rep(NA_character_, length(v))
+      col[ac[hit]] <- css[hit]
+      out[[t]] <- col
+    }
   }
   if (length(out)) out else NULL
+}
+
+# Is a condition tag ("[<cell>:]<sel>:<aes>[@<layer>]") an alpha condition's?
+# Its aesthetic is the part after the last ":" (less any "@<layer>").
+.cond_tag_is_alpha <- function(tags) {
+  aes <- sub("@[0-9]+$", "", sub("^.*:", "", tags))
+  grepl("(^|_)(alpha|opacity)$", aes)
 }
 
 # A ragged meta field as a list-column of character vectors (`character(0)`

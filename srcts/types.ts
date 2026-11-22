@@ -38,7 +38,7 @@ export interface ElemMeta extends Partial<Bbox> {
   cond?: string[]; // conditional-encoding tags ("<sel>:<aes>") this element participates in
   // VW-46: a per-row `if_false` colour per tag (a CSS colour), which replaces
   // the condition's constant `if_false` / theme dim for this element.
-  cond_value?: Record<string, string>;
+  cond_value?: Record<string, string>; // per tag: a colour, or an opacity (alpha, VW-56)
   filt?: string[]; // filter selection names whose filter_by() targets this element's view
   join?: string; // cross-view identity (a composition cell's original id, keys being per-cell unique)
   source?: string; // graph edge: key of the endpoint node it starts at
@@ -141,7 +141,7 @@ export function isColorAes(aes: string | null | undefined): boolean {
   return /(^|_)(colou?r|fill|stroke)$/.test(aes);
 }
 
-function isAlphaAes(aes: string | null | undefined): boolean {
+export function isAlphaAes(aes: string | null | undefined): boolean {
   return aes != null && /(^|_)(alpha|opacity)$/.test(aes);
 }
 

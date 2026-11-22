@@ -100,7 +100,7 @@ test_that("a per-row if_false ships as CSS colours per condition tag (VW-46)", {
   expect_null(as_widget(p0)$x$elements$cond_value)
 })
 
-test_that(".meta_cond_value() keeps colours only, one column per tag (VW-46)", {
+test_that(".meta_cond_value() keeps colours and opacities, one column per tag (VW-46, VW-56)", {
   v <- list(
     NULL,
     list(`s:color` = "grey80", `s:fill` = "nope"),
@@ -112,6 +112,25 @@ test_that(".meta_cond_value() keeps colours only, one column per tag (VW-46)", {
   expect_identical(out$`s:fill`, c(NA, NA, "#123456", NA))
   # a number (a size if_false) is no colour, though col2rgb() would read it
   expect_null(.meta_cond_value(list(list(`s:size` = 3), list(`s:size` = 5))))
+  # an alpha tag keeps its opacities (VW-56), as strings; out of [0, 1] is NA
+  out <- .meta_cond_value(list(
+    list(`s:alpha` = 0.1),
+    NULL,
+    list(`s:alpha` = 0.5),
+    list(`s:alpha` = 7),
+    list(`s:alpha` = NA_real_)
+  ))
+  expect_identical(out, list(`s:alpha` = c("0.1", NA, "0.5", NA, NA)))
+  # next to a colour tag (unlist() makes the numbers strings), with a layer
+  # suffix and a cell prefix on the tags
+  out <- .meta_cond_value(list(
+    list(`cell-1:s:color` = "red", `s:alpha@2` = 0.25),
+    list(`cell-1:s:color` = "0.5", `s:alpha@2` = 1)
+  ))
+  expect_identical(out$`cell-1:s:color`, c("#ff0000", NA))
+  expect_identical(out$`s:alpha@2`, c("0.25", "1"))
+  expect_true(.cond_tag_is_alpha("my_sel:edge_alpha"))
+  expect_false(.cond_tag_is_alpha("alpha:color"))
   expect_null(.meta_cond_value(list(NULL, NULL)))
   expect_null(.meta_cond_value(NULL))
   # each tag's column takes the compact encodings
@@ -298,4 +317,43 @@ test_that("only a colour condition's if_false is read as a colour (VW-52)", {
   expect_true(.is_colour_aes(NULL))
   expect_false(.is_colour_aes("alpha"))
   expect_false(.is_colour_aes("size"))
+})
+
+test_that("a per-row alpha if_false ships as opacities (VW-56)", {
+  d <- data.frame(
+    x = 1:6, y = 1:6, id = paste0("p", 1:6),
+    af = c(0.1, 0.5, 0.1, 0.5, 0.1, 0.5)
+  )
+  p <- vellumplot::vplot(d) |>
+    vellumplot::mark_point(
+      x = x, y = y, data_id = id,
+      alpha = vellumplot::condition("s", 1, af)
+    ) |>
+    vellumplot::select_point("s")
+  for (mode in c("svg", "raster")) {
+    w <- as_widget(p, render = render_options(mode = mode))
+    el <- w$x$elements
+    cv <- el$cond_value$`s:alpha`
+    expect_false(is.null(cv), label = mode)
+    vals <- if (is.list(cv) && !is.null(cv$levels)) {
+      lv <- as.character(cv$levels)
+      if (!is.null(cv$rv)) rep(lv[cv$rv + 1L], cv$rl) else cv
+    } else {
+      as.character(cv)
+    }
+    keys <- if (is.character(el$key)) el$key else NULL
+    if (!is.null(keys)) {
+      expect_identical(vals[match(d$id, keys)], as.character(d$af), label = mode)
+    } else {
+      expect_setequal(stats::na.omit(vals), c("0.1", "0.5"))
+    }
+  }
+  # a size if_false stays off the payload
+  q <- vellumplot::vplot(d) |>
+    vellumplot::mark_point(
+      x = x, y = y, data_id = id,
+      size = vellumplot::condition("s", 3, af * 4)
+    ) |>
+    vellumplot::select_point("s")
+  expect_null(as_widget(q)$x$elements$cond_value)
 })

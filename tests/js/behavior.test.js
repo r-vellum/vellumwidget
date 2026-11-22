@@ -2858,6 +2858,36 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   ok(sz.n.classList.contains("vellumwidget-cond-dim"), "VW-52 svg: no if_false is still the theme dim, whatever the aesthetic");
   const col = mountAes("fill", "#cccccc");
   ok(/#222222|rgb\(34, 34, 34\)/.test(col.n.style.fill), "VW-52 svg: a colour aesthetic keeps its per-row colour");
+
+  // VW-56: an alpha condition's per-row values are opacities, per node.
+  function mountRowAlpha(ifFalse, vals) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const w = widgetDef.factory(e, 200, 100);
+    w.renderValue({
+      svg: svgCV,
+      elements: { key: ["p1", "p2"], cond: ["hi:alpha", "hi:alpha"], cond_value: { "hi:alpha": vals } },
+      interactions: {
+        selections: [{ name: "hi", kind: "point", on: "click", empty: true }],
+        conditions: [{ selection: "hi", aes: "alpha", if_false: ifFalse, empty: true, tag: "hi:alpha" }]
+      },
+      options: { hover: true, select: true, selectMode: "multiple" }
+    });
+    return { e: e, w: w, n: (k) => e.querySelector('[data-key="' + k + '"]') };
+  }
+  const ra = mountRowAlpha(null, ["0.1", "0.6"]);
+  ra.w._call("select", ["p1"]);
+  ok(ra.n("p2").classList.contains("vellumwidget-cond-dim") && ra.n("p2").style.getPropertyValue("--vellumwidget-dim-opacity") === "0.6" &&
+    !ra.n("p2").style.fill && !ra.n("p2").style.stroke,
+    "VW-56 svg: a non-member takes its own per-row opacity, not the theme dim [" + ra.n("p2").getAttribute("style") + "]");
+  ok(!ra.n("p1").classList.contains("vellumwidget-cond-dim"), "VW-56 svg: the member is left as drawn");
+  ra.w._call("select", ["p2"]);
+  ok(ra.n("p1").style.getPropertyValue("--vellumwidget-dim-opacity") === "0.1" && !ra.n("p2").classList.contains("vellumwidget-cond-dim"),
+    "VW-56 svg: the opacities follow the selection");
+  const rb = mountRowAlpha(0.3, [null, "9"]);
+  rb.w._call("select", ["p1"]);
+  ok(rb.n("p2").style.getPropertyValue("--vellumwidget-dim-opacity") === "0.3",
+    "VW-56 svg: a value that is no opacity falls back to the constant if_false [" + rb.n("p2").getAttribute("style") + "]");
 }
 
 // ===================== VW-12: one element per point, or a fill + stroke twin =====================
@@ -5015,6 +5045,26 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     "VW-46: a detail node takes its per-row if_false [" + (n4 && n4.style.fill) + "]");
   pr.inst._call("clearSelection");
   ok(pr.inst._test.markTier() !== "detail" || !n4.style.fill, "VW-46: clearing the selection reverts the per-row colour");
+
+  // VW-56: a per-row alpha if_false (an opacity column) draws each non-member
+  // at its own opacity, never as a colour; a key without one (or with a value
+  // that is no opacity) takes the constant look -- in every tier.
+  const pa = mountMS({ cond: "dim", aes: "alpha", options: { detailMarks: 2 },
+    condValue: { levels: ["0.1", "0.5", "7"], rv: [0, 1, -1, 2], rl: [1, 1, 1, 1] } });
+  pa.inst._call("select", ["p1"]);
+  ok(fills(pa.ctx).join(",") === "120:#ff0000ff@0.28,160:#ff0000ff@0.28,40:#ff0000ff@1,80:#ff0000ff@0.5",
+    "VW-56: non-members draw at their own per-row opacity, the rest dim [" + fills(pa.ctx).join(",") + "]");
+  pa.inst._call("select", ["p2"]);
+  ok(fills(pa.ctx).join(",") === "120:#ff0000ff@0.28,160:#ff0000ff@0.28,40:#ff0000ff@0.1,80:#ff0000ff@1",
+    "VW-56: the opacities follow the selection [" + fills(pa.ctx).join(",") + "]");
+  pa.inst._test.setView({ x: 30, y: 25, w: 100, h: 50 }); pa.inst._test.evalTier();
+  ok(pa.inst._test.markTier() === "mid" && fills(pa.ctx).some((f) => /^20:#ff0000ff@0.1$/.test(f)),
+    "VW-56: the mid canvas keeps the per-row opacity [" + fills(pa.ctx).join(",") + "]");
+  pa.inst._test.setView({ x: 30, y: 40, w: 20, h: 20 }); pa.inst._test.evalTier();
+  const a1 = pa.el.querySelector('.vellumwidget-detail [data-key="p1"]');
+  ok(pa.inst._test.markTier() === "detail" && a1 && a1.classList.contains("vellumwidget-cond-dim") &&
+    a1.style.getPropertyValue("--vellumwidget-dim-opacity") === "0.1" && !a1.style.fill,
+    "VW-56: a detail node takes its per-row opacity [" + (a1 && a1.getAttribute("style")) + "]");
 
   // VW-53: a selection is drawn above the non-members of its segment: the
   // canvas stands in for the image at the overview and draws the members
