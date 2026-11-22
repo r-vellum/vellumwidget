@@ -6704,7 +6704,7 @@
       hideCanvas();
       showMarksLayer(true);
     }
-    function sampleBaseRaster() {
+    function sampleBaseRaster(colors) {
       clearPointData();
       if (ws.dl) {
         drawPoints();
@@ -6735,6 +6735,7 @@
         }
         const cx = [], cy = [], rad = [], rgb = [];
         let allRound = true;
+        const known = markColorTable(colors, els.length);
         for (let i = 0; i < els.length; i++) {
           const e = els[i];
           if (!hasBbox(e)) continue;
@@ -6747,7 +6748,9 @@
           cx.push(mx);
           cy.push(my);
           rad.push(Math.max(e.x1 - e.x0, e.y1 - e.y0) / 2 + 0.5);
-          rgb.push(data[o], data[o + 1], data[o + 2]);
+          const c = known ? known.pal[known.idx[i]] : null;
+          if (c) rgb.push(c[0], c[1], c[2], c[3]);
+          else rgb.push(data[o], data[o + 1], data[o + 2], 255);
         }
         ws.ptN = cx.length;
         ws.ptCx = Float64Array.from(cx);
@@ -6760,6 +6763,27 @@
       img.onerror = function() {
       };
       img.src = href;
+    }
+    function markColorTable(colors, n) {
+      if (!colors || !colors.idx) return null;
+      const idx = dlColumn(colors.idx);
+      if (idx.length !== n) return null;
+      const pal = [null];
+      const src = asColumn(colors.pal);
+      for (let k = 0; k < src.length; k++) pal.push(hexRGBA(String(src[k])));
+      return { pal, idx };
+    }
+    function hexRGBA(s) {
+      const h = /^#([0-9a-f]+)$/i.exec(s.trim());
+      if (!h) return null;
+      let v = h[1];
+      if (v.length === 3) v = v[0] + v[0] + v[1] + v[1] + v[2] + v[2];
+      if (v.length === 6) v += "ff";
+      if (v.length !== 8) return null;
+      const out = [0, 2, 4, 6].map(function(k) {
+        return parseInt(v.slice(k, k + 2), 16);
+      });
+      return out.every(isFinite) ? out : null;
     }
     function drawPoints(stateOnly) {
       if (!ws.rasterMode || !ws.canvasEl || !ws.ctx || !ws.vb || !ws.vb0) return;
@@ -6800,7 +6824,8 @@
       const dot = function(px, py, r, i) {
         ctx.beginPath();
         ctx.arc(px, py, Math.max(0.75, r), 0, 6.283185307179586);
-        ctx.fillStyle = "rgb(" + rgb[i * 3] + "," + rgb[i * 3 + 1] + "," + rgb[i * 3 + 2] + ")";
+        const a = rgb[i * 4 + 3];
+        ctx.fillStyle = a === 255 ? "rgb(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + ")" : "rgba(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + "," + a / 255 + ")";
         ctx.fill();
       };
       if (az) {
@@ -7949,7 +7974,7 @@
         ws.fx.clearCrosshair();
         if (ws.rasterMode) {
           ws.fx.ensureCanvas();
-          ws.fx.sampleBaseRaster();
+          ws.fx.sampleBaseRaster(x.markColors);
           if (ws.marksLayer && x.flagged) loadFlagged(x.flagged);
         } else {
           ws.fx.clearPointData();

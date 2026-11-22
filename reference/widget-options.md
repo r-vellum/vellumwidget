@@ -132,8 +132,8 @@ render_options(
   million points (1 million: 6.2 MB, 2 million: 12.2 MB, keys included)
   and about 5 s per million to build. Above it, the widget ships only a
   bounding-box index, about as big (6.3 MB per million), draws zoomed-in
-  marks as plain dots, and says so with a message: a plot that big is
-  better drawn as density, with
+  marks as plain dots (each in its own mark's colour), and says so with
+  a message: a plot that big is better drawn as density, with
   [`vellumplot::mark_datashade()`](https://r-vellum.github.io/vellumplot/reference/mark_datashade.html)
   or
   [`vellumplot::mark_hex()`](https://r-vellum.github.io/vellumplot/reference/mark_tile.html).
