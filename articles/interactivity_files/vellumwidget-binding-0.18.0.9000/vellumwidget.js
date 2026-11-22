@@ -7136,6 +7136,7 @@
       ws.ptCx = ws.ptCy = ws.ptRad = null;
       ws.ptRGB = null;
       ws.ptShape = null;
+      ws.ptHollow = null;
       ws.ptN = 0;
       ws.ptAllRound = false;
       hideCanvas();
@@ -7170,10 +7171,11 @@
         } catch (e) {
           return;
         }
-        const cx = [], cy = [], rad = [], rgb = [], shp = [];
+        const cx = [], cy = [], rad = [], rgb = [], shp = [], hol = [];
         let allRound = true;
         const known = markColorTable(colors, els.length);
         const shapes = markShapes(colors, els.length);
+        const hollow = markHollow(colors, els.length);
         for (let i = 0; i < els.length; i++) {
           const e = els[i];
           if (!hasBbox(e)) continue;
@@ -7181,7 +7183,8 @@
           const sx = Math.min(iw - 1, Math.max(0, Math.round(mx)));
           const sy = Math.min(ih - 1, Math.max(0, Math.round(my)));
           const o = (sy * iw + sx) * 4;
-          if (data[o + 3] < 8) continue;
+          const isHollow = !!(hollow && hollow[i] && known && known.pal[known.idx[i]]);
+          if (data[o + 3] < 8 && !isHollow) continue;
           if (!isRoundMark(e.mark)) allRound = false;
           cx.push(mx);
           cy.push(my);
@@ -7190,6 +7193,7 @@
           if (c) rgb.push(c[0], c[1], c[2], c[3]);
           else rgb.push(data[o], data[o + 1], data[o + 2], 255);
           if (shapes) shp.push(shapes[i] ? shapes[i] - 1 : 0);
+          if (hollow) hol.push(isHollow ? 1 : 0);
         }
         ws.ptN = cx.length;
         ws.ptCx = Float64Array.from(cx);
@@ -7197,6 +7201,7 @@
         ws.ptRad = Float64Array.from(rad);
         ws.ptRGB = Uint8Array.from(rgb);
         ws.ptShape = shapes ? Uint8Array.from(shp) : null;
+        ws.ptHollow = hollow ? Uint8Array.from(hol) : null;
         ws.ptAllRound = allRound && cx.length > 0;
         drawPoints();
       };
@@ -7217,6 +7222,11 @@
       if (!colors || !colors.shape) return null;
       const s = dlColumn(colors.shape);
       return s.length === n ? s : null;
+    }
+    function markHollow(colors, n) {
+      if (!colors || !colors.hollow) return null;
+      const h = dlColumn(colors.hollow);
+      return h.length === n ? h : null;
     }
     function hexRGBA(s) {
       const h = /^#([0-9a-f]+)$/i.exec(s.trim());
@@ -7267,6 +7277,7 @@
       ctx.clearRect(0, 0, W, H);
       const cx = ws.ptCx, cy = ws.ptCy, rad = ws.ptRad, rgb = ws.ptRGB, n = ws.ptN;
       const shp = ws.ptShape && ws.ptShape.length === n ? ws.ptShape : null;
+      const hol = ws.ptHollow && ws.ptHollow.length === n ? ws.ptHollow : null;
       const dot = function(px, py, r, i) {
         const a = rgb[i * 4 + 3];
         const style = a === 255 ? "rgb(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + ")" : "rgba(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + "," + a / 255 + ")";
@@ -7278,7 +7289,7 @@
         } else {
           tracePoint(ctx, sh, px, py, rr);
         }
-        if (isLineGlyph(sh)) {
+        if (isLineGlyph(sh) || hol && hol[i]) {
           ctx.strokeStyle = style;
           ctx.lineWidth = Math.max(1, rr / 4);
           ctx.stroke();
@@ -9202,6 +9213,7 @@
       ptRad: null,
       ptRGB: null,
       ptShape: null,
+      ptHollow: null,
       ptN: 0,
       ptAllRound: false,
       opts: {

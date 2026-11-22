@@ -2,6 +2,22 @@
 
 ## vellumwidget 0.18.0.9000
 
+### Improvements
+
+- With two legend aesthetics (`color = g, shape = g`), each element’s
+  legend membership ships as a dictionary of the distinct value sets,
+  coded per element like `markColors`, instead of one JSON list per
+  element (VW-62). At 600k points in raster mode the payload drops from
+  17.1 MB to 3.9 MB (`shape = s`, 12 sets: 17.4 MB to 4.6 MB). Legend
+  hover, hide and mute are unchanged.
+
+### Bug fixes
+
+- Above `max_marks`, hollow marks (a transparent fill under a visible
+  stroke, e.g. a dot plot’s `fill = "transparent"`) are drawn as stroked
+  dots in the fallback dots, not filled in their stroke colour (VW-63).
+  They are drawn even where the mark’s centre pixel is transparent.
+
 ## vellumwidget 0.18.0
 
 - Requires vellum (\>= 0.14.0) and vellumplot (\>= 0.19.0).

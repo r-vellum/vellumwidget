@@ -50,6 +50,14 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.18.0.9000" id="vellumwidget-01809000">vellumwidget 0.18.0.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-01809000"></a></h2>
+<div class="section level3">
+<h3 id="improvements-0-18-0-9000">Improvements<a class="anchor" aria-label="anchor" href="#improvements-0-18-0-9000"></a></h3>
+<ul><li>With two legend aesthetics (<code>color = g, shape = g</code>), each element’s legend membership ships as a dictionary of the distinct value sets, coded per element like <code>markColors</code>, instead of one JSON list per element (VW-62). At 600k points in raster mode the payload drops from 17.1 MB to 3.9 MB (<code>shape = s</code>, 12 sets: 17.4 MB to 4.6 MB). Legend hover, hide and mute are unchanged.</li>
+</ul></div>
+<div class="section level3">
+<h3 id="bug-fixes-0-18-0-9000">Bug fixes<a class="anchor" aria-label="anchor" href="#bug-fixes-0-18-0-9000"></a></h3>
+<ul><li>Above <code>max_marks</code>, hollow marks (a transparent fill under a visible stroke, e.g. a dot plot’s <code>fill = "transparent"</code>) are drawn as stroked dots in the fallback dots, not filled in their stroke colour (VW-63). They are drawn even where the mark’s centre pixel is transparent.</li>
+</ul></div>
 </div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.18.0" id="vellumwidget-0180">vellumwidget 0.18.0<a class="anchor" aria-label="anchor" href="#vellumwidget-0180"></a></h2>
