@@ -1,5 +1,35 @@
 # vellumwidget 0.16.0.9000
 
+* **Selected marks are drawn above the rest of their layer (VW-53).** A
+  selected point kept its paint order, so a later neighbour could cover part
+  of it: in raster mode this showed as a pale crescent inside its ring. While
+  a selection is active, its marks now draw above the non-members of their
+  own layer, in SVG mode and in every raster tier (the canvas stands in for
+  the mark image at the overview to do it) and in exports. Clearing the
+  selection restores the original order. Members never rise above a later
+  layer of another kind (a line, a bar, text): in SVG mode a node moves to
+  the end of its layer's last series group, and on the canvas the display
+  list's records are reordered only within a stretch of same-kind records in
+  one panel. Two adjacent point layers count as one there. Marks drawn from
+  a flagged run image (text, masks, effects) are not raised.
+
+* **The large-scene hover clone follows a zoom (VW-54).** A hover clone takes
+  its panel's counter-scale when it is made (VW-47), so zooming with the
+  wheel while a hover showed left it at the old size, twice the mark's size
+  after a 2x zoom, until the pointer moved. A view change now re-clones the
+  hovered marks for the new zoom.
+
+* **A condition's `if_false` is applied by its aesthetic (VW-52).** A
+  constant `if_false` on `alpha`, `size` or `shape` was written as a
+  fill/stroke colour, which the browser and the canvas could not read. Now
+  a colour aesthetic's `if_false` recolours non-members as before, an
+  `alpha` one draws them at that opacity (in SVG mode, every raster tier,
+  restyled flagged runs and exports), and one the widget can't apply (a
+  size, a shape, a line width) leaves them as drawn. Size is left alone
+  because the widget has the drawn marks but not the size scale. A per-row
+  `if_false` colour is used for colour aesthetics only, and R no longer
+  reads a non-colour `if_false` such as `"1"` as a palette colour.
+
 * **Above `max_marks` the zoomed-in dots keep each mark's colour (VW-50).**
   Without the display list, the dots took their colour from the mark image's
   pixel under each mark's centre. In a dense scatter that pixel belongs to

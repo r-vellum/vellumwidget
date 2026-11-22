@@ -271,7 +271,11 @@ export function rasterFeature(
     // beneath, which the mark PNG (blended against a transparent page) can't
     // show: the canvas stands in for it at the overview zoom too.
     const blending = dl.exact && !!dl.runImgs && dl.blendRuns;
-    if (!(zoomed || (styled && dl.exact) || blending) || !dl.n) {
+    // A selection whose marks a non-member partly covers (VW-53): the
+    // canvas draws them above it, standing in for the image (which can't
+    // reorder its pixels) at the overview zoom too.
+    const raising = dl.exact && !!ws.fx.raiseOrder(dl);
+    if (!(zoomed || (styled && dl.exact) || blending || raising) || !dl.n) {
       hideCanvas();
       showMarksLayer(true);
       return;
@@ -418,7 +422,7 @@ export function rasterFeature(
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
     const flags = styled ? ws.msFlags! : null, recol = styled ? ws.msColor! : null, pal = ws.msPalette;
-    const dimA = ws.msDimAlpha;
+    const dimA = ws.msDimAlpha, am = styled ? ws.msAlpha : null, apal = ws.msAlphaPal;
     // Opacity groups (display list v2, VW-23): a group's records are drawn
     // into a layer of their own, composited onto its parent at the group's
     // alpha when the group ends, as the engine composites an isolated group.
@@ -618,7 +622,10 @@ export function rasterFeature(
     };
     let curGroup = 0;
     tgt.save();
-    for (let i = 0; i < dl.n; i++) {
+    // Selected marks after the rest of their segment (VW-53, raise.ts).
+    const ord = ws.fx.raiseOrder(dl);
+    for (let q = 0; q < dl.n; q++) {
+      const i = ord ? ord[q] : q;
       if (runImgs && dl.run[i] > 0) {
         // The run's records are all in its image, drawn where the run starts.
         // The image carries its own groups (a run takes whole opacity groups),
@@ -653,7 +660,9 @@ export function rasterFeature(
         const k = dl.key[i], f = flags[k];
         if (f & MS_HIDDEN) continue;
         // As the CSS: a condition's dim wins over the legend mute.
-        if (f & MS_DIM) alpha = dimA; else if (f & MS_MUTED) alpha = MUTED_ALPHA;
+        // An alpha condition's own opacity, else the theme dim (VW-52).
+        if (f & MS_DIM) alpha = am && am[k] ? apal[am[k] - 1] : dimA;
+        else if (f & MS_MUTED) alpha = MUTED_ALPHA;
         ov = recol![k];
       }
       const p = dl.panel[i] <= np ? dl.panel[i] : 0;

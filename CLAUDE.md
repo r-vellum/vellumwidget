@@ -156,6 +156,13 @@ isolate`; `hideCanvas()` hides them all); in the export, extra images
 (`exportMarksImage().layers`) stacked with `mix-blend-mode`. The canvas also
 replaces the mark PNG at the overview while blend runs exist. Blend modes (flag 32), a flagged record outside every run, more than
 `.MAX_FLAGGED_RUNS` runs or an older vellum keep the old behaviour.
+Selected marks draw above their layer's non-members (VW-53,
+`features/raise.ts`): in SVG mode and the detail tier member nodes move to the
+end of their run of keyed siblings (or of the layer's last plain series group,
+`layer-<n>-g*`), with placeholder comments to restore them; the canvas paints
+`raiseOrder()` (`srcts/raise.ts`: members last within a stretch of same
+panel/group/kind unflagged records), cached by `ws.selRev`, and stands in for
+the mark PNG at the overview while it reorders anything.
 Exports (`exportSvgString()`) redraw an exact display list at export
 resolution with that state (`exportMarksImage()`, raster.ts `paintList`, the
 painter shared with the canvas) instead of embedding the mark PNG (VW-25).
