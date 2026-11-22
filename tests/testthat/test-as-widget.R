@@ -1076,6 +1076,35 @@ test_that("above max_marks each element ships its point marker for the dots (VW-
   expect_null(wq$x$markColors$shape)
 })
 
+test_that("above max_marks hollow marks are flagged for the dots (VW-63)", {
+  skip_if_not(.split_render_supported(), "vellum without the split render")
+  skip_if_not(.display_list_keys_supported(), "vellum without display-list keys")
+  set.seed(63)
+  df <- data.frame(x = round(rnorm(80), 1), g = rep(c("a", "b"), 40), id = 1:80)
+  # a dot plot's transparent fill under a mapped colour: stroke-only dots
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_dotplot(x = x, color = g, fill = "transparent", data_id = id, binwidth = 0.1)
+  w <- suppressMessages(
+    as_widget(p, render = render_options(mode = "raster", max_marks = 10))
+  )
+  mc <- w$x$markColors
+  expect_false(is.null(mc$hollow))
+  keys <- .decode_keys_r(w$x$elements$key)
+  hol <- .uint_column_r(mc$hollow)
+  expect_length(hol, length(keys))
+  pt <- keys %in% as.character(df$id)
+  expect_true(all(hol[pt] == 1L))
+  expect_true(all(hol[!pt] == 0L))
+  # filled dots: no hollow column, the payload as before
+  q <- vellumplot::vplot(df) |>
+    vellumplot::mark_dotplot(x = x, fill = g, data_id = id, binwidth = 0.1)
+  wq <- suppressMessages(
+    as_widget(q, render = render_options(mode = "raster", max_marks = 10))
+  )
+  expect_false(is.null(wq$x$markColors))
+  expect_null(wq$x$markColors$hollow)
+})
+
 test_that("raster geometry leaves the listed keys to the display list (VW-49)", {
   skip_if_not(.split_render_supported(), "vellum without the split render")
   skip_if_not(.display_list_keys_supported(), "vellum without display-list keys")

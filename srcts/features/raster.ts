@@ -41,6 +41,7 @@ export function rasterFeature(
     ws.ptCx = ws.ptCy = ws.ptRad = null;
     ws.ptRGB = null;
     ws.ptShape = null;
+    ws.ptHollow = null;
     ws.ptN = 0;
     ws.ptAllRound = false;
     hideCanvas();
@@ -84,10 +85,11 @@ export function rasterFeature(
       } catch (e) {
         return; // tainted canvas (shouldn't happen for a same-origin data: URI)
       }
-      const cx: number[] = [], cy: number[] = [], rad: number[] = [], rgb: number[] = [], shp: number[] = [];
+      const cx: number[] = [], cy: number[] = [], rad: number[] = [], rgb: number[] = [], shp: number[] = [], hol: number[] = [];
       let allRound = true;
       const known = markColorTable(colors, els.length);
       const shapes = markShapes(colors, els.length);
+      const hollow = markHollow(colors, els.length);
       for (let i = 0; i < els.length; i++) {
         const e = els[i];
         if (!hasBbox(e)) continue;
@@ -95,7 +97,10 @@ export function rasterFeature(
         const sx = Math.min(iw - 1, Math.max(0, Math.round(mx)));
         const sy = Math.min(ih - 1, Math.max(0, Math.round(my)));
         const o = (sy * iw + sx) * 4;
-        if (data[o + 3] < 8) continue; // transparent -> background, not a drawn mark
+        // A transparent centre is background, not a drawn mark -- unless R
+        // says the mark is hollow and knows its colour (VW-63).
+        const isHollow = !!(hollow && hollow[i] && known && known.pal[known.idx[i]]);
+        if (data[o + 3] < 8 && !isHollow) continue;
         if (!isRoundMark(e.mark)) allRound = false;
         cx.push(mx);
         cy.push(my);
@@ -104,6 +109,7 @@ export function rasterFeature(
         if (c) rgb.push(c[0], c[1], c[2], c[3]);
         else rgb.push(data[o], data[o + 1], data[o + 2], 255);
         if (shapes) shp.push(shapes[i] ? shapes[i] - 1 : 0);
+        if (hollow) hol.push(isHollow ? 1 : 0);
       }
       ws.ptN = cx.length;
       ws.ptCx = Float64Array.from(cx);
@@ -111,6 +117,7 @@ export function rasterFeature(
       ws.ptRad = Float64Array.from(rad);
       ws.ptRGB = Uint8Array.from(rgb);
       ws.ptShape = shapes ? Uint8Array.from(shp) : null;
+      ws.ptHollow = hollow ? Uint8Array.from(hol) : null;
       ws.ptAllRound = allRound && cx.length > 0;
       drawPoints(); // in case the view is already zoomed
     };
@@ -137,6 +144,14 @@ export function rasterFeature(
     if (!colors || !colors.shape) return null;
     const s = dlColumn(colors.shape);
     return s.length === n ? s : null;
+  }
+
+  // The fallback dots' hollow flags (VW-63): per element 1 for a stroke-only
+  // mark; null when R sent none (no mark is hollow) or it doesn't fit.
+  function markHollow(colors: MarkColors | null | undefined, n: number): ArrayLike<number> | null {
+    if (!colors || !colors.hollow) return null;
+    const h = dlColumn(colors.hollow);
+    return h.length === n ? h : null;
   }
 
   // "#rgb", "#rrggbb" or "#rrggbbaa" -> [r, g, b, a] (0-255), else null.
@@ -192,6 +207,7 @@ export function rasterFeature(
     ctx.clearRect(0, 0, W, H);
     const cx = ws.ptCx, cy = ws.ptCy, rad = ws.ptRad, rgb = ws.ptRGB, n = ws.ptN;
     const shp = ws.ptShape && ws.ptShape.length === n ? ws.ptShape : null;
+    const hol = ws.ptHollow && ws.ptHollow.length === n ? ws.ptHollow : null;
     // Each dot in its own marker (VW-58): a circle without shapes, else the
     // shape the display list would draw (the line glyphs plus / cross
     // stroked, the rest filled), at the same radius: a marker's box is 2r
@@ -209,7 +225,9 @@ export function rasterFeature(
       } else {
         tracePoint(ctx, sh, px, py, rr);
       }
-      if (isLineGlyph(sh)) {
+      // Line glyphs (plus / cross) and hollow markers (a transparent fill,
+      // VW-63) are stroked; the rest filled.
+      if (isLineGlyph(sh) || (hol && hol[i])) {
         ctx.strokeStyle = style;
         ctx.lineWidth = Math.max(1, rr / 4);
         ctx.stroke();

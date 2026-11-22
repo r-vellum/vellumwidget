@@ -6829,6 +6829,122 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   }
 }
 
+// VW-62: a legend column with two aesthetics ships as a dictionary of value
+// sets (`{levels, rv, rl}` or `{levels, cb}`, each level the element's array),
+// which decodes to the same per-element arrays as the list form, so legend
+// hover, hide and mute behave identically.
+{
+  const keys = ["s1", "s2", "t1", "legend:color:s", "legend:color:t"];
+  const legList = [["color:s", "shape:s"], ["color:s", "shape:s"], ["color:t", "shape:t"], [], []];
+  const base = {
+    key: keys, mark: ["point", "point", "point", "rect", "rect"],
+    x0: [1, 10, 20, 70, 70], y0: [1, 1, 1, 1, 12], x1: [6, 15, 25, 75, 75], y1: [6, 6, 6, 6, 17],
+    legend_for: [null, null, null, "color:s", "color:t"], tooltip: [null, null, null, "s", "t"]
+  };
+  const lv = [["color:s", "shape:s"], ["color:t", "shape:t"]];
+  const runs = Object.assign({}, base, { legend: { levels: lv, rv: [0, 1, -1], rl: [2, 1, 2] } });
+  const typed = Object.assign({}, base, {
+    legend: { levels: lv, cb: { type: "u8", n: 5, data: Buffer.from([1, 1, 2, 0, 0]).toString("base64") } }
+  });
+  const plain = Object.assign({}, base, { legend: legList });
+  const dec = (c) => T.normalizeElements(c).map((e) => JSON.stringify(e.legend || null));
+  const want = dec(plain);
+  ok(JSON.stringify(dec(runs)) === JSON.stringify(want), "VW-62: run-coded legend sets decode as the list form");
+  ok(JSON.stringify(dec(typed)) === JSON.stringify(want), "VW-62: typed-code legend sets decode as the list form");
+  ok(JSON.parse(want[0]).length === 2 && JSON.parse(want[3]) === null, "VW-62: two series per mark, none on a swatch");
+  const svg62 = '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
+    '<path data-key="s1" d="M1 1h5v5z"/><path data-key="s2" d="M10 1h5v5z"/><path data-key="t1" d="M20 1h5v5z"/>' +
+    '<path data-key="legend:color:s" d="M70 1h5v5z"/><path data-key="legend:color:t" d="M70 12h5v5z"/></svg>';
+  // (a later block's own `mount` leaks out of its block, so mount directly)
+  const mount62 = (opts) => {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    widgetDef.factory(e, 100, 100).renderValue(opts);
+    return e;
+  };
+  const state = (policy, elements) => {
+    const el = mount62({ svg: svg62, elements: elements, options: { tooltip: true, hover: true, select: true, nearest: false, selectMode: "multiple", legendClick: policy } });
+    fireOn(el.querySelector("svg"), "click", el.querySelector('[data-key="legend:color:s"]'));
+    return ["s1", "s2", "t1"].map((k) => el.querySelector('[data-key="' + k + '"]').getAttribute("class") || "").join("|");
+  };
+  for (const policy of ["hide", "mute"]) {
+    const ref = state(policy, plain);
+    ok(/legend-(hidden|muted)/.test(ref), "VW-62: the list form " + policy + "s the clicked series (" + ref + ")");
+    ok(state(policy, runs) === ref && state(policy, typed) === ref,
+      "VW-62: legend " + policy + " is identical with the encoded sets");
+  }
+}
+
+// VW-63: a hollow mark (transparent fill) is a stroked dot in the fallback
+// dots, drawn even where its centre pixel is transparent; filled marks stay
+// filled.
+{
+  const proto = window.HTMLCanvasElement.prototype;
+  const origGC = proto.getContext, origImage = global.Image;
+  let ops = [], cur = null, alpha = 255;
+  const ctx = {
+    fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1,
+    save() {}, restore() {}, setTransform() {}, clearRect() { ops = []; }, rect() {}, clip() {},
+    beginPath() { cur = { arcs: 0, pts: [] }; },
+    arc(x, y, r) { cur.arcs++; cur.r = r; }, moveTo(x, y) { cur.pts.push([x, y]); }, lineTo(x, y) { cur.pts.push([x, y]); }, closePath() {},
+    fill() { ops.push(Object.assign({ op: "fill", style: this.fillStyle }, cur)); },
+    stroke() { ops.push(Object.assign({ op: "stroke", style: this.strokeStyle, lw: this.lineWidth }, cur)); },
+    drawImage() {},
+    getImageData(x, y, w, h) {
+      const d = new Uint8ClampedArray(w * h * 4);
+      for (let i = 0; i < d.length; i += 4) { d[i + 1] = 158; d[i + 2] = 115; d[i + 3] = alpha; }
+      return { data: d };
+    }
+  };
+  proto.getContext = function () { return ctx; };
+  global.Image = function () {
+    const im = {};
+    Object.defineProperty(im, "src", { set(v) { this._src = v; if (this.onload) this.onload(); }, get() { return this._src; } });
+    return im;
+  };
+  function mountH(markColors) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    inst.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+        '<image width="200" height="100" href="data:image/png;base64,AAAA"/></svg>',
+      elements: { key: ["p1", "p2", "p3"], mark: ["point", "point", "point"],
+        x0: [36, 76, 116], y0: [46, 46, 46], x1: [44, 84, 124], y1: [54, 54, 54] },
+      markColors: markColors,
+      options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple" }
+    });
+    inst._test.setView({ x: 0, y: 0, w: 180, h: 90 });
+    return inst;
+  }
+  const pal = ["#0072b2ff", "#d55e00ff"];
+  const idx = { type: "u8", n: 3, data: Buffer.from([1, 2, 1]).toString("base64") };
+  const hollow = { type: "u8", n: 3, data: Buffer.from([1, 0, 1]).toString("base64") };
+  try {
+    mountH({ pal: pal, idx: idx });
+    ok(ops.length === 3 && ops.every((o) => o.op === "fill"), "VW-63: without hollow flags every dot is filled (as before)");
+    // p1 an open circle, p2 filled, p3 an open square (1 + 1)
+    mountH({ pal: pal, idx: idx, hollow: hollow, shape: { type: "u8", n: 3, data: Buffer.from([0, 0, 2]).toString("base64") } });
+    ok(ops.length === 3, "VW-63: all three dots drawn (" + ops.length + ")");
+    ok(ops[0].op === "stroke" && ops[0].arcs === 1 && ops[0].style === "rgb(0,114,178)" && ops[0].lw >= 1,
+      "VW-63: a hollow circle is stroked in its colour, not filled (" + ops[0].op + ")");
+    ok(ops[1].op === "fill" && ops[1].style === "rgb(213,94,0)", "VW-63: a filled mark stays filled");
+    ok(ops[2].op === "stroke" && ops[2].pts.length === 4, "VW-63: a hollow square is a stroked square");
+    // a transparent centre pixel: the hollow marks still draw, the filled one does not
+    alpha = 0;
+    mountH({ pal: pal, idx: idx, hollow: hollow });
+    ok(ops.length === 2 && ops.every((o) => o.op === "stroke"),
+      "VW-63: hollow marks draw over a transparent centre pixel; a filled one there is background (" + ops.length + ")");
+    alpha = 255;
+    // a hollow column of the wrong length is ignored
+    mountH({ pal: pal, idx: idx, hollow: { type: "u8", n: 2, data: Buffer.from([1, 1]).toString("base64") } });
+    ok(ops.every((o) => o.op === "fill"), "VW-63: a hollow column of the wrong length is ignored");
+  } finally {
+    proto.getContext = origGC;
+    global.Image = origImage;
+  }
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();

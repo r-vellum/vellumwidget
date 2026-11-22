@@ -862,7 +862,8 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # A ragged list-column (`legend`, `cond`, `filt`) whose entries all hold at most
 # one value is first flattened to a character column (`NA` for empty), which the
 # runtime already reads as "one value" / "none"; one with several values somewhere
-# can still go sparse. (`as_widget()` builds such columns flat in raster mode,
+# can still go sparse, or a dictionary of value sets (`.encode_ragged_dict()`,
+# VW-62). (`as_widget()` builds such columns flat in raster mode,
 # `.vellumwidget_elements(flat_ragged = TRUE)`, VW-39, so this is for callers
 # that hand over the list form.)
 .encode_elements <- function(cols) {
@@ -919,10 +920,13 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
           character(1)
         )
       } else {
-        # Ragged with several values somewhere: only the sparse form applies.
+        # Ragged with several values somewhere: sparse when few elements
+        # carry one, else a dictionary of the distinct value sets (VW-62).
         set <- lengths(v) > 0L
         if (sum(set) < 0.1 * n) {
           cols[[f]] <- list(at = which(set) - 1L, v = v[set])
+        } else {
+          cols[[f]] <- .encode_ragged_dict(v, n) %||% v
         }
         next
       }
@@ -944,6 +948,32 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     }
   }
   cols
+}
+
+# A ragged list-column with several values on some elements (`legend` with
+# two legend aesthetics, `cond` with two conditions) as a dictionary whose
+# levels are the distinct value *sets* (VW-62): `{levels, cb}` or
+# `{levels, rv, rl}` exactly as `.encode_column()` ships a string column, but
+# each level a character vector (an element with none codes as 0, `null`).
+# The runtime's dictionary decoder hands each element its level, the same
+# array the list form carried, so nothing downstream changes. With
+# `color = g, shape = g` on 600k points the list form was 13 MB of a 17 MB
+# payload; the sets number a handful. NULL when the sets are too many (over a
+# quarter of the elements) or a value holds the separator.
+.encode_ragged_dict <- function(v, n) {
+  sep <- "\x1f"
+  flat <- unlist(v, use.names = FALSE)
+  if (any(grepl(sep, flat, fixed = TRUE))) {
+    return(NULL)
+  }
+  joined <- vapply(v, paste, character(1), collapse = sep)
+  joined[lengths(v) == 0L] <- NA_character_
+  if (length(unique(joined[!is.na(joined)])) > n / 4) {
+    return(NULL)
+  }
+  enc <- .encode_column(joined, n, NULL, NULL)
+  enc$levels <- strsplit(enc$levels, sep, fixed = TRUE)
+  enc
 }
 
 # One atomic element column in its compact form (`.encode_elements()`): the
@@ -2194,7 +2224,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 # 4 plus, 5 cross, 6 triangle down, 7 star), bit-packed like `idx`, 0 where a
 # row is no point (the runtime draws a round dot there, as before); absent
 # when every point is a circle, so such a payload is unchanged. (The size
-# needs nothing: a marker's box is 2r wide whatever its shape.)
+# needs nothing: a marker's box is 2r wide whatever its shape.) `hollow`
+# (VW-63), present when some mark is stroke-only (a transparent fill), is 1 for
+# such a row and 0 elsewhere, bit-packed: the runtime strokes that dot.
 # NULL at or under `max_marks` (the list itself ships) or without a vellum
 # whose list indexes the element keys (VR-22).
 .fallback_mark_colors <- function(scene, model, panels, max_marks, keys) {
@@ -2254,6 +2286,15 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     shape <- integer(length(keys))
     shape[rk[own]] <- rs[own] + 1L
     out$shape <- .uint_column(shape, pack = TRUE)
+  }
+  # Hollow marks (VW-63): a transparent fill under a visible stroke, as a
+  # hollow point shape draws. The runtime strokes those dots rather than
+  # filling them with the stroke colour.
+  hol <- clear(pt$fill) & !clear(pt$stroke)
+  if (any(hol[rp[own]])) {
+    hollow <- integer(length(keys))
+    hollow[rk[own]] <- as.integer(hol[rp[own]])
+    out$hollow <- .uint_column(hollow, pack = TRUE)
   }
   out
 }
