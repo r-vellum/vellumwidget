@@ -167,6 +167,7 @@ export interface WidgetState {
   tableEl: HTMLElement | null; // hidden data-table fallback
   focusables: { key: string; node: Element }[]; // roving-tabindex marks, in draw order
   focusIdx: number; // index into focusables of the currently-focused mark, or -1
+  focusHold: boolean; // marks are being moved (VW-57): their focus / blur handlers stand down
   vb0: ViewBox | null; // original viewBox (for reset)
   vb: ViewBox | null; // current viewBox
   // Axis-aware zoom (opt-in). When active, applyViewBox scales `panGroup` by T
@@ -467,6 +468,7 @@ export function createState(el: HTMLElement): WidgetState {
     tableEl: null,
     focusables: [],
     focusIdx: -1,
+    focusHold: false,
     vb0: null,
     vb: null,
     azPanels: [],

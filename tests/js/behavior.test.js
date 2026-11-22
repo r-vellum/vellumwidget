@@ -2818,6 +2818,55 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   });
 }
 
+// VW-57: raising the selection (VW-53) moves nodes in the DOM, which takes
+// keyboard focus off a moved node. Selecting the focused mark with Enter must
+// keep focus (and the roving cursor and its announcement) on it, and the
+// keyboard order must stay the data order whatever the DOM order: arrows walk
+// the marks as before, and only the roving mark is tabbable.
+{
+  const svgK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><g data-vellum-panel="panel-1-1">' +
+    '<g data-vellum-id="layer-1-point-g1"><circle data-key="a" cx="10" cy="10" r="5"/><circle data-key="b" cx="20" cy="10" r="5"/>' +
+    '<circle data-key="c" cx="30" cy="10" r="5"/></g></g></svg>';
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const w = widgetDef.factory(e, 200, 100);
+  w.renderValue({
+    svg: svgK,
+    elements: [
+      { key: "a", tooltip: "A", x0: 5, y0: 5, x1: 15, y1: 15 },
+      { key: "b", tooltip: "B", x0: 15, y0: 5, x1: 25, y1: 15 },
+      { key: "c", tooltip: "C", x0: 25, y0: 5, x1: 35, y1: 15 }
+    ],
+    options: { tooltip: true, hover: true, select: true, a11y: true, selectMode: "multiple" }
+  });
+  const svgEl = e.querySelector("svg");
+  const node = (k) => e.querySelector('[data-key="' + k + '"]');
+  const domOrder = () => Array.from(e.querySelectorAll("[data-key]")).map((n) => n.getAttribute("data-key")).join(",");
+  const live = e.querySelector('[aria-live="polite"]');
+  const press = (k) => svgEl.dispatchEvent(new window.KeyboardEvent("keydown", { key: k, bubbles: true }));
+  node("a").focus();
+  ok(document.activeElement === node("a"), "VW-57: a mark takes keyboard focus");
+  press("Enter");
+  ok(domOrder() === "b,c,a", "VW-57: selecting raises the mark in the DOM (" + domOrder() + ")");
+  ok(document.activeElement === node("a"), "VW-57: the raised mark keeps keyboard focus [" + (document.activeElement && document.activeElement.getAttribute("data-key")) + "]");
+  ok(node("a").classList.contains("vellumwidget-focus") && node("a").getAttribute("tabindex") === "0",
+    "VW-57: the focus ring and the roving tabindex stay on it");
+  ok(live.textContent === "A, selected", "VW-57: the selection announcement is not replaced (" + live.textContent + ")");
+  const tabbable = () => Array.from(e.querySelectorAll('[data-key][tabindex="0"]')).map((n) => n.getAttribute("data-key")).join(",");
+  ok(tabbable() === "a", "VW-57: only the roving mark is tabbable, wherever it sits in the DOM");
+  press("ArrowRight");
+  ok(document.activeElement === node("b"), "VW-57: ArrowRight from the raised mark goes to the next mark in data order, not DOM order");
+  press("ArrowLeft");
+  ok(document.activeElement === node("a"), "VW-57: ArrowLeft comes back to it");
+  press("Enter");
+  ok(domOrder() === "a,b,c" && document.activeElement === node("a") && live.textContent === "A, not selected",
+    "VW-57: deselecting puts the node back and keeps focus [" + domOrder() + " | " + live.textContent + "]");
+  press("ArrowRight"); press("Enter");
+  ok(domOrder() === "a,c,b" && document.activeElement === node("b"), "VW-57: selecting the middle mark keeps its focus too");
+  press("ArrowRight");
+  ok(document.activeElement === node("c") && tabbable() === "c", "VW-57: arrows still walk the data order (b -> c) after the raise");
+}
+
 // VW-53: while a selection is active its nodes are drawn above the
 // non-members of their own layer (the end of their run of keyed siblings),
 // never above a later layer; clearing it restores the paint order exactly.

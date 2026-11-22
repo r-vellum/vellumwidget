@@ -98,7 +98,30 @@ export function raiseFeature(ws: WidgetState): Pick<WidgetFns, "raiseSelected" |
 
   // Raise the current selection's nodes (and put back those no longer in
   // it). A no-op in the node-less raster tiers, which draw `raiseOrder()`.
+  //
+  // Moving a node in the DOM takes keyboard focus off it (the browser's focus
+  // fixup sends it to the body), so selecting the focused mark with Enter /
+  // Space lost the keyboard user's place (VW-57). The focused element is put
+  // back in focus after the moves, with the marks' focus / blur handlers held
+  // off meanwhile (`ws.focusHold`), so the roving cursor and the spoken
+  // "selected" announcement stand. Focus order never follows the DOM: arrow
+  // keys walk `ws.focusables` (data order) and only the roving mark is
+  // tabbable, so where a raised node sits does not change it.
   function raiseSelected(): void {
+    const active = document.activeElement as (HTMLElement & SVGElement) | null;
+    const keep = active && active !== document.body && ws.el.contains(active) ? active : null;
+    ws.focusHold = true;
+    try {
+      moveSelected();
+      if (keep && keep.isConnected && document.activeElement !== keep && typeof keep.focus === "function") {
+        keep.focus({ preventScroll: true });
+      }
+    } finally {
+      ws.focusHold = false;
+    }
+  }
+
+  function moveSelected(): void {
     restore();
     if (ws.fx.ringMode()) return;
     const keys = ws.fx.selectedKeys();
