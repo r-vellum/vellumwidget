@@ -278,6 +278,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     ws.interactions = x.interactions || null;
     ws.provenance = x.provenance || null;
     ws.condTagElems = {};
+    ws.condTagVals = {};
     ws.filtSelElems = {};
     ws.joinOf = {};
     ws.lastHoverKeys = [];

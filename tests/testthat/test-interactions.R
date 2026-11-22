@@ -65,6 +65,71 @@ test_that("two layers' conditions on one selection and aesthetic keep their own 
   )
 })
 
+test_that("a per-row if_false ships as CSS colours per condition tag (VW-46)", {
+  df <- data.frame(
+    x = 1:6, y = 1:6, g = rep(c("a", "b"), 3), id = paste0("p", 1:6),
+    col = c("grey80", "red", "#00ff0080", "blue", "grey80", "orange")
+  )
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(
+      x = x, y = y, data_id = id,
+      color = vellumplot::condition("pick", g, col)
+    ) |>
+    vellumplot::select_point("pick", on = "click")
+  els <- as_widget(p, render = render_options(mode = "svg"))$x$elements
+  expect_named(els$cond_value, "pick:color")
+  cv <- stats::setNames(els$cond_value[["pick:color"]], els$key)
+  expect_identical(
+    unname(cv[df$id]),
+    c("#cccccc", "#ff0000", "#00ff0080", "#0000ff", "#cccccc", "#ffa500")
+  )
+  # the legend swatches carry none
+  expect_true(all(is.na(cv[startsWith(names(cv), "legend")])))
+  # raster mode: the tag's column in a compact encoding
+  rw <- as_widget(p, render = render_options(mode = "raster"))$x$elements
+  expect_named(rw$cond_value, "pick:color")
+  enc <- rw$cond_value[["pick:color"]]
+  expect_true(is.list(enc) || is.character(enc))
+  # a plot without a per-row if_false ships no cond_value
+  p0 <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(
+      x = x, y = y, data_id = id,
+      color = vellumplot::condition("pick", g, "grey80")
+    ) |>
+    vellumplot::select_point("pick", on = "click")
+  expect_null(as_widget(p0)$x$elements$cond_value)
+})
+
+test_that(".meta_cond_value() keeps colours only, one column per tag (VW-46)", {
+  v <- list(
+    NULL,
+    list(`s:color` = "grey80", `s:fill` = "nope"),
+    list(`s:color` = NA_character_, `s:fill` = "#123456"),
+    list(`s:color` = "red")
+  )
+  out <- .meta_cond_value(v)
+  expect_identical(out$`s:color`, c(NA, "#cccccc", NA, "#ff0000"))
+  expect_identical(out$`s:fill`, c(NA, NA, "#123456", NA))
+  # a number (a size if_false) is no colour, though col2rgb() would read it
+  expect_null(.meta_cond_value(list(list(`s:size` = 3), list(`s:size` = 5))))
+  expect_null(.meta_cond_value(list(NULL, NULL)))
+  expect_null(.meta_cond_value(NULL))
+  # each tag's column takes the compact encodings
+  n <- 400
+  cols <- list(
+    key = paste0("k", seq_len(n)),
+    cond_value = list(
+      `s:color` = rep(c("#ff0000", "#00ff00"), n / 2),
+      `t:color` = c("#0000ff", rep(NA, n - 1)),
+      `u:color` = rep(NA_character_, n)
+    )
+  )
+  enc <- .encode_elements(cols)$cond_value
+  expect_named(enc, c("s:color", "t:color"))
+  expect_identical(enc$`s:color`$levels, c("#ff0000", "#00ff00"))
+  expect_identical(enc$`t:color`, list(at = 0L, v = "#0000ff"))
+})
+
 test_that("a cross-view composition carries join + filt for the target cell", {
   df <- data.frame(x = 1:4, y = 1:4)
   sel <- vellumplot::select_interval("br", on = "x")

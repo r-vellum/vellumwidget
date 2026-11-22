@@ -9,7 +9,8 @@
 //   ws.msFlags[k]  bit 1 = dimmed by a condition (no if_false colour)
 //                  bit 2 = hidden (filter_by(), cross-filter, legend "hide")
 //                  bit 4 = legend-muted
-//   ws.msColor[k]  0, or 1 + an index into ws.msPalette (a condition's if_false)
+//   ws.msColor[k]  0, or 1 + an index into ws.msPalette (a condition's if_false,
+//                  or the key's own per-row if_false colour, VW-46)
 //
 // Everything is keyed by integer: the key -> id map and each condition tag's
 // id list are built once per display list, so a pass never looks a key up in
@@ -51,8 +52,8 @@ export function markStateFeature(
     paletteIdx = {};
     ws.msPalette = [];
     ws.msFlags = new Uint8Array(dl.keys.length);
-    ws.msColor = new Uint16Array(dl.keys.length);
-    ws.msCond = new Uint16Array(dl.keys.length);
+    ws.msColor = new Uint32Array(dl.keys.length);
+    ws.msCond = new Uint32Array(dl.keys.length);
     ws.msActive = false;
     return true;
   }
@@ -75,24 +76,30 @@ export function markStateFeature(
     return true;
   }
 
+  // The state code of a non-member painted `color` (1, the dim, when null).
+  function colorCode(color: string | null | undefined): number {
+    if (color == null) return 1;
+    let p = paletteIdx[color];
+    if (p == null) { p = paletteIdx[color] = ws.msPalette.length; ws.msPalette.push(color); }
+    return p + 2;
+  }
+
   // One condition's outcome for its tagged keys: members keep their colour,
-  // non-members get `color` (or the dim when null). As in SVG mode, the last
-  // condition that tags a key decides its style.
-  function condStateSet(tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, color: string | null | undefined): void {
+  // non-members get `color` (or the dim when null), or their own per-row
+  // colour, `colors[i]` (aligned with `tagged`), where they have one (VW-46).
+  // As in SVG mode, the last condition that tags a key decides its style.
+  function condStateSet(tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, color: string | null | undefined, colors?: (string | null)[] | null): void {
     const cond = ws.msCond;
     if (!cond || !ws.dl) return;
     let ids = tagIds[tag];
     if (!ids) ids = tagIds[tag] = keyIds(tagged);
-    let code = 1; // dim
-    if (color != null) {
-      let p = paletteIdx[color];
-      if (p == null) { p = paletteIdx[color] = ws.msPalette.length; ws.msPalette.push(color); }
-      code = p + 2;
-    }
+    const code = colorCode(color);
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
       if (id < 0) continue;
-      cond[id] = active && !members[tagged[i]] ? code : 0;
+      if (!active || members[tagged[i]]) { cond[id] = 0; continue; }
+      const own = colors ? colors[i] : null;
+      cond[id] = own != null ? colorCode(own) : code;
     }
   }
 
