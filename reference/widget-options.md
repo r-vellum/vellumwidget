@@ -20,7 +20,9 @@ render_options(
   max_marks = 2000000L,
   detail_marks = 3000L,
   precision = c("compact", "f32"),
-  max_zoom = 100
+  max_zoom = 100,
+  autoplay = TRUE,
+  loop = TRUE
 )
 ```
 
@@ -177,6 +179,18 @@ render_options(
   number from 1 (no zoom in) to `10000`: past about 16,000x a 32-bit
   float can no longer place a mark at all.
 
+- autoplay, loop:
+
+  For an animation (from
+  [`vellumplot::animate()`](https://r-vellum.github.io/vellumplot/reference/animate.html)):
+  whether it starts playing as soon as it is shown (default `TRUE`;
+  `FALSE` starts paused on the first frame, for the reader to press
+  play), and whether it loops (default `TRUE`; `FALSE` plays once and
+  stops on the last frame, and pressing play there starts it over). A
+  reader whose system asks for reduced motion always gets it paused.
+  They need JavaScript: the animated SVG on its own always plays and
+  loops. Ignored for a static plot.
+
 ## Value
 
 An object of class `vellumwidget_tooltip_options`,
@@ -227,6 +241,8 @@ render_options(mode = "raster")
 #>   detail_marks: 3000
 #>   precision: compact
 #>   max_zoom: 100
+#>   autoplay: TRUE
+#>   loop: TRUE
 
 if (FALSE) { # \dontrun{
 library(vellumplot)

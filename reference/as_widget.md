@@ -50,9 +50,10 @@ as_widget(
   accepts. Also a keyframe animation from
   [`vellumplot::animate()`](https://r-vellum.github.io/vellumplot/reference/animate.html),
   embedded as a self-contained animated SVG (no per-element
-  interaction). It autoplays and loops, with playback controls in the
-  bottom-left corner: a play/pause button, always shown, and a frame
-  scrubber that appears on hover or keyboard focus. Dragging the
+  interaction). It autoplays and loops (set
+  `render = render_options(autoplay = FALSE, loop = FALSE)` to change
+  either), with playback controls in a row below the plot, where they
+  never cover it: a play/pause button and a frame scrubber. Dragging the
   scrubber pauses on the chosen frame. When the reader's system asks for
   reduced motion (`prefers-reduced-motion`), the animation starts paused
   on its still frame; the button still plays it. Without JavaScript (the
