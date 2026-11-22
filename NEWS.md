@@ -1,5 +1,13 @@
 # vellumwidget 0.17.0.9000
 
+* **The fallback dots above `max_marks` have the marks' shapes (VW-58).** In
+  raster mode above `max_marks` (no display list), zooming in drew every mark
+  as a round dot, even squares and triangles. R now ships each element's
+  point marker next to its colour (`markColors$shape`, bit-packed, only when
+  some point is not a circle) and the dots are drawn as their own marker,
+  at the same radius: squares, triangles, diamonds, stars filled, plus and
+  cross stroked.
+
 * **A per-row alpha `if_false` is applied (VW-56).** With
   `alpha = condition(sel, 1, af)`, where `af` is a column, the per-row
   opacities were dropped on the R side (only colours were kept), so

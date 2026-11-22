@@ -6669,6 +6669,77 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   }
 }
 
+// VW-58: above max_marks the fallback dots take each mark's own marker from
+// `markColors.shape` (1 + vellum's shape code, 0 = no point: a round dot), at
+// the same radius; without it every dot is round, as before.
+{
+  const proto = window.HTMLCanvasElement.prototype;
+  const origGC = proto.getContext, origImage = global.Image;
+  let ops = [], cur = null;
+  const ctx = {
+    fillStyle: "#000", strokeStyle: "#000", globalAlpha: 1, lineWidth: 1,
+    save() {}, restore() {}, setTransform() {}, clearRect() { ops = []; }, rect() {}, clip() {},
+    beginPath() { cur = { arcs: 0, pts: [], closed: false }; },
+    arc(x, y, r) { cur.arcs++; cur.r = r; cur.x = x; },
+    moveTo(x, y) { cur.pts.push([x, y]); }, lineTo(x, y) { cur.pts.push([x, y]); }, closePath() { cur.closed = true; },
+    fill() { ops.push(Object.assign({ op: "fill", style: this.fillStyle }, cur)); },
+    stroke() { ops.push(Object.assign({ op: "stroke", style: this.strokeStyle, lw: this.lineWidth }, cur)); },
+    drawImage() {},
+    getImageData(x, y, w, h) {
+      const d = new Uint8ClampedArray(w * h * 4);
+      for (let i = 0; i < d.length; i += 4) { d[i + 1] = 158; d[i + 2] = 115; d[i + 3] = 255; }
+      return { data: d };
+    }
+  };
+  proto.getContext = function () { return ctx; };
+  global.Image = function () {
+    const im = {};
+    Object.defineProperty(im, "src", { set(v) { this._src = v; if (this.onload) this.onload(); }, get() { return this._src; } });
+    return im;
+  };
+  function mountSh(markColors) {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 200, 100);
+    inst.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+        '<image width="200" height="100" href="data:image/png;base64,AAAA"/></svg>',
+      elements: { key: ["p1", "p2", "p3", "p4"], mark: ["point", "point", "point", "point"],
+        x0: [36, 76, 116, 156], y0: [46, 46, 46, 46], x1: [44, 84, 124, 164], y1: [54, 54, 54, 54] },
+      markColors: markColors,
+      options: { raster: true, hover: true, select: true, zoom: true, selectMode: "multiple" }
+    });
+    inst._test.setView({ x: 0, y: 0, w: 180, h: 90 });
+    return inst;
+  }
+  const pal = ["#0072b2ff", "#d55e00ff"];
+  const idx = { type: "u8", n: 4, data: Buffer.from([1, 2, 1, 2]).toString("base64") };
+  try {
+    mountSh({ pal: pal, idx: idx });
+    ok(ops.length === 4 && ops.every((o) => o.op === "fill" && o.arcs === 1 && o.pts.length === 0),
+      "VW-58: without shapes every fallback dot is a round dot (as before)");
+    const rRound = ops[0].r;
+    // p1 square (1 + 1), p2 triangle (1 + 2), p3 plus (1 + 4), p4 no point (0)
+    mountSh({ pal: pal, idx: idx, shape: { type: "u8", n: 4, data: Buffer.from([2, 3, 5, 0]).toString("base64") } });
+    const [sq, tri, plus, dot] = ops;
+    ok(ops.length === 4, "VW-58: all four dots drawn (" + ops.length + ")");
+    ok(sq.op === "fill" && sq.arcs === 0 && sq.pts.length === 4 && sq.closed && sq.style === "rgb(0,114,178)",
+      "VW-58: a square mark is a filled square in its own colour");
+    const half = (o) => (Math.max(...o.pts.map((p) => p[0])) - Math.min(...o.pts.map((p) => p[0]))) / 2;
+    ok(Math.abs(half(sq) - rRound) < 1e-6, "VW-58: the square has the round dot's radius (" + half(sq) + " vs " + rRound + ")");
+    ok(tri.op === "fill" && tri.pts.length === 3 && tri.closed && tri.style === "rgb(213,94,0)", "VW-58: a triangle mark is a filled triangle");
+    ok(plus.op === "stroke" && plus.pts.length === 4 && plus.style === "rgb(0,114,178)" && plus.lw >= 1,
+      "VW-58: a plus is stroked, not filled (" + plus.op + ")");
+    ok(dot.op === "fill" && dot.arcs === 1, "VW-58: a row with no point keeps the round dot");
+    // a shape column of the wrong length is ignored
+    mountSh({ pal: pal, idx: idx, shape: { type: "u8", n: 3, data: Buffer.from([2, 2, 2]).toString("base64") } });
+    ok(ops.every((o) => o.arcs === 1), "VW-58: a shape column of the wrong length is ignored");
+  } finally {
+    proto.getContext = origGC;
+    global.Image = origImage;
+  }
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();

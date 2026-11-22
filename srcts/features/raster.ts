@@ -4,7 +4,7 @@
 import { LIVE_DRAW_MAX, OVERLAY_MARK_CAP, RUN_BOX_PAD, SETTLE_MS, SVGNS } from "./constants";
 import { asColumn, dlColumn } from "../elements";
 import { hasBbox, isRoundMark } from "../geometry";
-import { DL_POINT, DL_RECT, fillGradient, traceClipPath, tracePoint, traceShape } from "../dlist";
+import { DL_POINT, DL_RECT, fillGradient, isLineGlyph, traceClipPath, tracePoint, traceShape } from "../dlist";
 import { MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
 import type { Affine, DisplayList } from "../dlist";
 import type { WidgetFns, WidgetState } from "../state";
@@ -40,6 +40,7 @@ export function rasterFeature(
   function clearPointData(): void {
     ws.ptCx = ws.ptCy = ws.ptRad = null;
     ws.ptRGB = null;
+    ws.ptShape = null;
     ws.ptN = 0;
     ws.ptAllRound = false;
     hideCanvas();
@@ -83,9 +84,10 @@ export function rasterFeature(
       } catch (e) {
         return; // tainted canvas (shouldn't happen for a same-origin data: URI)
       }
-      const cx: number[] = [], cy: number[] = [], rad: number[] = [], rgb: number[] = [];
+      const cx: number[] = [], cy: number[] = [], rad: number[] = [], rgb: number[] = [], shp: number[] = [];
       let allRound = true;
       const known = markColorTable(colors, els.length);
+      const shapes = markShapes(colors, els.length);
       for (let i = 0; i < els.length; i++) {
         const e = els[i];
         if (!hasBbox(e)) continue;
@@ -101,12 +103,14 @@ export function rasterFeature(
         const c = known ? known.pal[known.idx[i]] : null;
         if (c) rgb.push(c[0], c[1], c[2], c[3]);
         else rgb.push(data[o], data[o + 1], data[o + 2], 255);
+        if (shapes) shp.push(shapes[i] ? shapes[i] - 1 : 0);
       }
       ws.ptN = cx.length;
       ws.ptCx = Float64Array.from(cx);
       ws.ptCy = Float64Array.from(cy);
       ws.ptRad = Float64Array.from(rad);
       ws.ptRGB = Uint8Array.from(rgb);
+      ws.ptShape = shapes ? Uint8Array.from(shp) : null;
       ws.ptAllRound = allRound && cx.length > 0;
       drawPoints(); // in case the view is already zoomed
     };
@@ -125,6 +129,14 @@ export function rasterFeature(
     const src = asColumn(colors.pal);
     for (let k = 0; k < src.length; k++) pal.push(hexRGBA(String(src[k])));
     return { pal: pal, idx: idx };
+  }
+
+  // The fallback dots' markers (VW-58): per element 1 + vellum's shape code,
+  // 0 for none (a round dot); null when R sent none or it doesn't fit.
+  function markShapes(colors: MarkColors | null | undefined, n: number): ArrayLike<number> | null {
+    if (!colors || !colors.shape) return null;
+    const s = dlColumn(colors.shape);
+    return s.length === n ? s : null;
   }
 
   // "#rgb", "#rrggbb" or "#rrggbbaa" -> [r, g, b, a] (0-255), else null.
@@ -179,13 +191,31 @@ export function rasterFeature(
     const W = ws.canvasEl.width, H = ws.canvasEl.height;
     ctx.clearRect(0, 0, W, H);
     const cx = ws.ptCx, cy = ws.ptCy, rad = ws.ptRad, rgb = ws.ptRGB, n = ws.ptN;
+    const shp = ws.ptShape && ws.ptShape.length === n ? ws.ptShape : null;
+    // Each dot in its own marker (VW-58): a circle without shapes, else the
+    // shape the display list would draw (the line glyphs plus / cross
+    // stroked, the rest filled), at the same radius: a marker's box is 2r
+    // wide whatever its shape.
     const dot = function (px: number, py: number, r: number, i: number): void {
-      ctx.beginPath();
-      ctx.arc(px, py, Math.max(0.75, r), 0, 6.283185307179586);
       const a = rgb[i * 4 + 3];
-      ctx.fillStyle = a === 255
+      const style = a === 255
         ? "rgb(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + ")"
         : "rgba(" + rgb[i * 4] + "," + rgb[i * 4 + 1] + "," + rgb[i * 4 + 2] + "," + (a / 255) + ")";
+      const rr = Math.max(0.75, r);
+      const sh = shp ? shp[i] : 0;
+      ctx.beginPath();
+      if (!sh) {
+        ctx.arc(px, py, rr, 0, 6.283185307179586);
+      } else {
+        tracePoint(ctx, sh, px, py, rr);
+      }
+      if (isLineGlyph(sh)) {
+        ctx.strokeStyle = style;
+        ctx.lineWidth = Math.max(1, rr / 4);
+        ctx.stroke();
+        return;
+      }
+      ctx.fillStyle = style;
       ctx.fill();
     };
     if (az) {

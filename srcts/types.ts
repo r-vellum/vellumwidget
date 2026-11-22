@@ -302,9 +302,13 @@ export interface Payload {
 // Above `max_marks` (no display list), each element's mark colour for the
 // fallback dots (VW-50): `#rrggbbaa` palette strings and, per element row, a
 // 1-based palette index (0: unknown, sample the mark image's pixel instead).
+// `shape` (VW-58), present when some point is not a circle: per element row
+// 1 + vellum's marker code (0 circle, 1 square, 2 triangle, 3 diamond, 4 plus,
+// 5 cross, 6 triangle down, 7 star), 0 for a row that is no point (a dot).
 export interface MarkColors {
   pal: string[] | string;
   idx: DLColumn;
+  shape?: DLColumn;
 }
 
 // The split render's mark layer (raster mode with vellum's `layer =` split): a

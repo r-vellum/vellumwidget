@@ -1034,6 +1034,48 @@ test_that("above max_marks each element ships its mark colour for the dots (VW-5
   expect_null(as_widget(p, render = render_options(mode = "svg"))$x$markColors)
 })
 
+test_that("above max_marks each element ships its point marker for the dots (VW-58)", {
+  skip_if_not(.split_render_supported(), "vellum without the split render")
+  skip_if_not(.display_list_keys_supported(), "vellum without display-list keys")
+  set.seed(58)
+  df <- data.frame(
+    x = rnorm(60),
+    y = rnorm(60),
+    g = rep(c("a", "b", "c"), each = 20),
+    id = 1:60
+  )
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, shape = g, data_id = id)
+  w <- suppressMessages(
+    as_widget(p, render = render_options(mode = "raster", max_marks = 10))
+  )
+  mc <- w$x$markColors
+  expect_false(is.null(mc$shape))
+  keys <- .decode_keys_r(w$x$elements$key)
+  sh <- .dl_col(mc$shape)
+  expect_length(sh, length(keys))
+  pt <- keys %in% as.character(df$id)
+  # the display list's own markers, 1-based
+  dl <- as_widget(p, render = render_options(mode = "raster"))$x$displayList
+  kind <- .dl_col(dl$record$kind)
+  rk <- .dl_key_table(dl, keys)[.dl_col(dl$record$key) + 1L][kind == 0L]
+  dsh <- .dl_col(dl$point$shape)
+  expect_identical(as.integer(sh[pt]), as.integer(dsh[match(keys[pt], rk)] + 1L))
+  # one marker per group, three in all, at least one not a circle
+  grp <- df$g[match(keys[pt], df$id)]
+  expect_true(all(tapply(sh[pt], grp, function(v) length(unique(v))) == 1L))
+  expect_length(unique(sh[pt]), 3L)
+  expect_true(any(sh[pt] > 1L))
+  # no shapes when every point is a circle: the payload is as before
+  q <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id)
+  wq <- suppressMessages(
+    as_widget(q, render = render_options(mode = "raster", max_marks = 10))
+  )
+  expect_false(is.null(wq$x$markColors))
+  expect_null(wq$x$markColors$shape)
+})
+
 test_that("raster geometry leaves the listed keys to the display list (VW-49)", {
   skip_if_not(.split_render_supported(), "vellum without the split render")
   skip_if_not(.display_list_keys_supported(), "vellum without display-list keys")
