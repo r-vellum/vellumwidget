@@ -6,7 +6,8 @@ import { applyAffine6, parseTransformList } from "../geometry";
 import { SVGNS } from "./constants";
 import { GLYPH_MARKS } from "../scales";
 import type { WidgetFns, WidgetState } from "../state";
-import { axisRetickable, axisTicks, secAxisMap, secTicks } from "../ticks";
+import { axisRetickable, axisTicks, axisTicksAtDecimals, labelDecimals, secAxisMap, secTicks } from "../ticks";
+import type { Tick } from "../ticks";
 import type { AxisAnchor, AxisTitle, AzPanel, TickStyle } from "../types";
 import { fmtViewBox } from "../viewbox";
 import type { PanTransform } from "../viewbox";
@@ -475,6 +476,41 @@ export function axisZoomFeature(
     if (lab.title && lab.w0 !== undefined) lab.title.need = Math.max(lab.title.need, w - lab.w0);
   }
 
+  // The second step after the title shift (VW-59): when a y axis's re-ticked
+  // labels outgrow the static ones by more than its title can move out (the
+  // shift stops at the canvas edge), re-tick with one decimal fewer at a time,
+  // a coarser step whose labels stay exact and distinct, until they fit, two
+  // ticks would no longer be in view, or there are no decimals left. A linear
+  // axis only; any other keeps its ticks.
+  function fitYTicks(lab: AxisAnchor, ax: AzPanel["p"]["y"], lo: number, hi: number, ticks: Tick[]): Tick[] {
+    const title = lab.title;
+    if (!ax || !title || lab.w0 === undefined || !ws.retickLayer) return ticks;
+    const over = function (tk: Tick[]): number {
+      let w = 0;
+      for (let i = 0; i < tk.length; i++) w = Math.max(w, measureLabel(tk[i].label, lab));
+      return w - lab.w0! - title.room;
+    };
+    if (over(ticks) <= 0.5) return ticks;
+    let best = ticks;
+    for (let dec = labelDecimals(ticks.map(function (x) { return x.label; })) - 1; dec >= 0; dec--) {
+      const tk = axisTicksAtDecimals(ax, lo, hi, 5, dec);
+      if (!tk) break;
+      best = tk;
+      if (over(tk) <= 0.5) break;
+    }
+    return best;
+  }
+
+  // A y label's width as the re-ticker would draw it (laid out in the retick
+  // layer for the measure, then removed).
+  function measureLabel(text: string, lab: AxisAnchor): number {
+    const t = axisLabel(text, lab.pos, 0, lab.anchor, lab.baseline, lab.rot);
+    ws.retickLayer!.appendChild(t);
+    const w = labelWidth(t);
+    ws.retickLayer!.removeChild(t);
+    return w;
+  }
+
   // Hide vellum's gridlines (role="grid", inside the pan group -> would stretch
   // with T) and its axis tick-label groups (axis-x-*/axis-y-*, outside the panel
   // -> would go stale). Axis TITLES (axis-title-*) are left visible, and so is an
@@ -685,7 +721,8 @@ export function axisZoomFeature(
       const k = (ay.native_hi - ay.native_lo) / (p.py1 - p.py0);
       const nA = ay.native_hi - ((p.py0 - t.ty) / t.sy - p.py0) * k;
       const nB = ay.native_hi - ((p.py1 - t.ty) / t.sy - p.py0) * k;
-      const ticks = axisTicks(ay, Math.min(nA, nB), Math.max(nA, nB), 5);
+      let ticks = axisTicks(ay, Math.min(nA, nB), Math.max(nA, nB), 5);
+      if (a.yLab) ticks = fitYTicks(a.yLab, ay, Math.min(nA, nB), Math.max(nA, nB), ticks);
       for (let i = 0; i < ticks.length; i++) {
         const py = p.py0 + (ay.native_hi - ticks[i].n) / k;
         const sy = t.sy * py + t.ty;

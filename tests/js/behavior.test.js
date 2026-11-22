@@ -2155,6 +2155,46 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
     ok(title().getAttribute("transform") === "rotate(-90 40 50)", "VW-51: back at the full view the title returns home");
   }
 
+  // VW-59: when the shift is capped (a title with little room, near the canvas
+  // edge), the y labels are re-ticked with fewer decimals -- a coarser step,
+  // still exact and distinct -- until they fit or two ticks would not stay in
+  // view. Here the title has 12 - 6 = 6 px of room; "24.5" (4 chars) needs
+  // 2 * 7.2 = 14.4 px beyond the static "25", so the axis drops to whole numbers.
+  {
+    const ePanels = Object.assign({}, linPanels, { px0: 80 });
+    const eSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<g data-vellum-panel="panel-1-1" clip-path="url(#c0)">' +
+      '<g data-vellum-pan="panel-1-1">' +
+      '<g role="grid"><path d="M0 0 L0 80" stroke="#ffffff" stroke-width="1"/></g>' +
+      '<path data-key="a" d="M100 50h2v2z"/></g></g>' +
+      '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 80 90)" fill="#333333" font-family="sans-serif" font-size="12">50</text></g>' +
+      '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 80 50)" fill="#333333" font-family="sans-serif" font-size="12" text-anchor="end">25</text></g>' +
+      '<g data-vellum-panel="axis-title-y"><text x="12" y="50" transform="rotate(-90 12 50)" font-size="12" text-anchor="middle" dominant-baseline="central">y</text></g></svg>';
+    const ez = mountAZ({ axisZoom: true, maxZoom: 1e6 }, eSvg, ePanels);
+    const yLabs = () => ez.inst._test.retickLabels().filter((l) => l.x < 80).map((l) => l.text);
+    const wide = (labs) => Math.max.apply(null, labs.map((s) => s.length));
+    // a view spanning ~2.5 y units: the plain re-tick would be 0.5 steps
+    ez.inst._test.setView({ x: 90, y: 44, w: 10, h: 5 });
+    const trimmed = yLabs();
+    ok(trimmed.length >= 2 && trimmed.every((s) => /^\d+$/.test(s)),
+      "VW-59: a capped shift trims the y labels to whole numbers (" + trimmed.join(",") + ")");
+    ok(new Set(trimmed).size === trimmed.length, "VW-59: the trimmed labels stay distinct");
+    // the same view with room for the title keeps the finer labels (VW-51 only)
+    const roomy = mountAZ({ axisZoom: true, maxZoom: 1e6 }, eSvg.replace(/x="12" y="50" transform="rotate\(-90 12 50\)"/, 'x="60" y="50" transform="rotate(-90 60 50)"'), ePanels);
+    roomy.inst._test.setView({ x: 90, y: 44, w: 10, h: 5 });
+    const fine = roomy.inst._test.retickLabels().filter((l) => l.x < 80).map((l) => l.text);
+    ok(fine.some((s) => s.indexOf(".") >= 0) && fine.length > trimmed.length,
+      "VW-59: with room to move the title, the finer labels stay (" + fine.join(",") + ")");
+    // a deep zoom where no coarser step leaves two ticks keeps the exact labels
+    ez.inst._test.setView({ x: 90, y: 49.99, w: 0.0002, h: 0.0001 });
+    const deep = yLabs();
+    ok(deep.length >= 2 && wide(deep) > 4 && new Set(deep).size === deep.length,
+      "VW-59: when trimming would leave under two ticks the labels keep their precision (" + deep.join(",") + ")");
+    ez.inst._test.setView({ x: 0, y: 0, w: 200, h: 100 });
+    ok(yLabs().length >= 2, "VW-59: back at the full view the axis re-ticks as before (" + yLabs().join(",") + ")");
+  }
+
   // fallbacks: an axis the re-ticker can't follow, raster mode, and a described
   // panel with no pannable group all decline axis_zoom.
   const symPanels = Object.assign({}, linPanels, {

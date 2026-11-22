@@ -2177,6 +2177,36 @@
     }
     return statics();
   }
+  function axisTicksAtDecimals(ax, lo, hi, n, dec) {
+    if (!(hi > lo) || dec < 0 || ax.type === "discrete" || ax.type === "binned") return null;
+    if (ax.time_unit === "day" || ax.time_unit === "second" || !NICE_TRANSFORMS[ax.transform]) return null;
+    const sq = ax.transform === "sqrt";
+    const a = nativeToData(ax, sq ? Math.max(lo, 0) : lo), b = nativeToData(ax, sq ? Math.max(hi, 0) : hi);
+    const dlo = Math.min(a, b), dhi = Math.max(a, b);
+    const mults = [1, 2, 5];
+    for (let m = 0; m < mults.length; m++) {
+      const step = mults[m] * Math.pow(10, -dec);
+      const vals = [];
+      for (let v = Math.ceil(dlo / step - 1e-9) * step; v <= dhi + step * 1e-9 && vals.length <= 2 * n + 1; v += step) {
+        vals.push(Math.round(v / step) * step);
+      }
+      if (vals.length < 2) return null;
+      if (vals.length <= Math.max(2, 2 * n) || m === mults.length - 1) {
+        return vals.map(function(d) {
+          return { n: dataToNative(ax, d), label: fmtTick(d, step) };
+        });
+      }
+    }
+    return null;
+  }
+  function labelDecimals(labels) {
+    let dec = 0;
+    for (let i = 0; i < labels.length; i++) {
+      const m = /\.(\d+)$/.exec(labels[i]);
+      if (m && m[1].length > dec) dec = m[1].length;
+    }
+    return dec;
+  }
   function parseSecLabels(labels) {
     if (labels.length < 2) return null;
     const NUM = /[-+\u2212]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?(?:[eE][-+]?\d+)?/;
@@ -2729,6 +2759,33 @@
     function noteLabelWidth(lab, w) {
       if (lab.title && lab.w0 !== void 0) lab.title.need = Math.max(lab.title.need, w - lab.w0);
     }
+    function fitYTicks(lab, ax, lo, hi, ticks) {
+      const title = lab.title;
+      if (!ax || !title || lab.w0 === void 0 || !ws.retickLayer) return ticks;
+      const over = function(tk) {
+        let w = 0;
+        for (let i = 0; i < tk.length; i++) w = Math.max(w, measureLabel(tk[i].label, lab));
+        return w - lab.w0 - title.room;
+      };
+      if (over(ticks) <= 0.5) return ticks;
+      let best = ticks;
+      for (let dec = labelDecimals(ticks.map(function(x) {
+        return x.label;
+      })) - 1; dec >= 0; dec--) {
+        const tk = axisTicksAtDecimals(ax, lo, hi, 5, dec);
+        if (!tk) break;
+        best = tk;
+        if (over(tk) <= 0.5) break;
+      }
+      return best;
+    }
+    function measureLabel(text, lab) {
+      const t = axisLabel(text, lab.pos, 0, lab.anchor, lab.baseline, lab.rot);
+      ws.retickLayer.appendChild(t);
+      const w = labelWidth(t);
+      ws.retickLayer.removeChild(t);
+      return w;
+    }
     function hideStaticAxes() {
       if (!ws.svgEl) return;
       const grids = ws.svgEl.querySelectorAll('[role="grid"]');
@@ -2931,7 +2988,8 @@
         const k = (ay.native_hi - ay.native_lo) / (p.py1 - p.py0);
         const nA = ay.native_hi - ((p.py0 - t.ty) / t.sy - p.py0) * k;
         const nB = ay.native_hi - ((p.py1 - t.ty) / t.sy - p.py0) * k;
-        const ticks = axisTicks(ay, Math.min(nA, nB), Math.max(nA, nB), 5);
+        let ticks = axisTicks(ay, Math.min(nA, nB), Math.max(nA, nB), 5);
+        if (a.yLab) ticks = fitYTicks(a.yLab, ay, Math.min(nA, nB), Math.max(nA, nB), ticks);
         for (let i = 0; i < ticks.length; i++) {
           const py = p.py0 + (ay.native_hi - ticks[i].n) / k;
           const sy = t.sy * py + t.ty;

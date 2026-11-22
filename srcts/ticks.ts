@@ -449,6 +449,42 @@ export function axisTicks(ax: AxisScale, lo: number, hi: number, n: number): Tic
   return statics();
 }
 
+// The linear ticks for the visible native range [lo, hi] with labels of at
+// most `dec` decimals (VW-59): the finest 1/2/5 x 10^-dec step that leaves at
+// least two ticks in view (and not more than 2n), so the labels stay exact and
+// distinct, only coarser. Null when the axis is not a plain linear one, or no
+// such step leaves two ticks.
+export function axisTicksAtDecimals(ax: AxisScale, lo: number, hi: number, n: number, dec: number): Tick[] | null {
+  if (!(hi > lo) || dec < 0 || ax.type === "discrete" || ax.type === "binned") return null;
+  if (ax.time_unit === "day" || ax.time_unit === "second" || !NICE_TRANSFORMS[ax.transform]) return null;
+  const sq = ax.transform === "sqrt";
+  const a = nativeToData(ax, sq ? Math.max(lo, 0) : lo), b = nativeToData(ax, sq ? Math.max(hi, 0) : hi);
+  const dlo = Math.min(a, b), dhi = Math.max(a, b);
+  const mults = [1, 2, 5];
+  for (let m = 0; m < mults.length; m++) {
+    const step = mults[m] * Math.pow(10, -dec);
+    const vals: number[] = [];
+    for (let v = Math.ceil(dlo / step - 1e-9) * step; v <= dhi + step * 1e-9 && vals.length <= 2 * n + 1; v += step) {
+      vals.push(Math.round(v / step) * step);
+    }
+    if (vals.length < 2) return null; // a coarser step leaves fewer still
+    if (vals.length <= Math.max(2, 2 * n) || m === mults.length - 1) {
+      return vals.map(function (d) { return { n: dataToNative(ax, d), label: fmtTick(d, step) }; });
+    }
+  }
+  return null;
+}
+
+// The most decimals any of `labels` shows (0 for whole numbers or none).
+export function labelDecimals(labels: string[]): number {
+  let dec = 0;
+  for (let i = 0; i < labels.length; i++) {
+    const m = /\.(\d+)$/.exec(labels[i]);
+    if (m && m[1].length > dec) dec = m[1].length;
+  }
+  return dec;
+}
+
 // --- secondary axes (VW-10b) ---
 // Parse a secondary axis's static labels as numbers, keeping any decoration
 // shared by every label (a unit prefix/suffix such as "$" or " km", thousands
