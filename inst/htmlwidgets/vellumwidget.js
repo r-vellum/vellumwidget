@@ -2113,6 +2113,7 @@
       ws.axisZoomActive = true;
       scrapeAxisStyle();
       scrapeAxisAnchors();
+      scrapeAxisTitles();
       hideStaticAxes();
       for (let i = 0; i < ws.azPanels.length; i++) {
         const a = ws.azPanels[i];
@@ -2316,6 +2317,11 @@
           gap: rot ? 0 : gap,
           rot
         };
+        if (!isX && !rot) {
+          let w0 = 0;
+          for (let i = 0; i < texts.length; i++) w0 = Math.max(w0, labelWidth(texts[i]));
+          anchor.w0 = w0;
+        }
         if (isSec) {
           const p = best.p;
           const sc = isX ? p.x : p.y;
@@ -2340,6 +2346,88 @@
         if (isX && !best.xLab) best.xLab = anchor;
         if (!isX && !best.yLab) best.yLab = anchor;
       }
+    }
+    function scrapeAxisTitles() {
+      if (!ws.svgEl || !ws.vb0) return;
+      const vb0 = ws.vb0;
+      const groups = ws.svgEl.querySelectorAll('[data-vellum-panel^="axis-title-y"]');
+      const titles = [];
+      for (let g = 0; g < groups.length; g++) {
+        const node = groups[g].querySelector("text");
+        if (!node) continue;
+        const at = anchorThrough(node);
+        const fs = parseFloat(node.getAttribute("font-size") || "") || ws.axisStyle.fontSize;
+        const half = rotationOf(node) ? fs / 2 : labelWidth(node) / 2;
+        const sec = /^axis-title-y2/.test(groups[g].getAttribute("data-vellum-panel") || "");
+        const room = sec ? vb0.x + vb0.w - (at.x + half) : at.x - half - vb0.x;
+        titles.push({
+          t: { node, orig: node.getAttribute("transform"), room: Math.max(0, room), dir: sec ? 1 : -1, need: 0, shift: 0 },
+          x: at.x,
+          y: at.y
+        });
+      }
+      if (!titles.length) return;
+      for (let i = 0; i < ws.azPanels.length; i++) {
+        const a = ws.azPanels[i];
+        const labs = [a.yLab, a.y2Lab];
+        for (let j = 0; j < labs.length; j++) {
+          const lab = labs[j];
+          if (!lab || lab.w0 === void 0) continue;
+          const dir = lab.anchor === "end" ? -1 : lab.anchor === "start" ? 1 : 0;
+          if (!dir) continue;
+          let best = null, bestD = Infinity;
+          for (let k = 0; k < titles.length; k++) {
+            const c = titles[k];
+            if (c.t.dir !== dir || (c.x - lab.pos) * dir <= 0) continue;
+            const dy = c.y < a.p.py0 ? a.p.py0 - c.y : c.y > a.p.py1 ? c.y - a.p.py1 : 0;
+            const d = Math.abs(c.x - lab.pos) + dy;
+            if (d < bestD) {
+              bestD = d;
+              best = c.t;
+            }
+          }
+          lab.title = best;
+        }
+      }
+    }
+    function labelWidth(t) {
+      const f = t.getComputedTextLength;
+      if (typeof f === "function") {
+        try {
+          const w = f.call(t);
+          if (w > 0) return w;
+        } catch (e) {
+        }
+      }
+      const fs = parseFloat(t.getAttribute("font-size") || "") || ws.axisStyle.fontSize;
+      return (t.textContent || "").length * 0.6 * fs;
+    }
+    function placeAxisTitles() {
+      const seen = [];
+      for (let i = 0; i < ws.azPanels.length; i++) {
+        const labs = [ws.azPanels[i].yLab, ws.azPanels[i].y2Lab];
+        for (let j = 0; j < labs.length; j++) {
+          const t = labs[j] && labs[j].title;
+          if (t && seen.indexOf(t) < 0) seen.push(t);
+        }
+      }
+      for (let i = 0; i < seen.length; i++) {
+        const t = seen[i];
+        const shift = Math.min(t.room, Math.max(0, t.need));
+        t.need = 0;
+        if (Math.abs(shift - t.shift) < 0.01) continue;
+        t.shift = shift;
+        if (shift > 0) {
+          t.node.setAttribute("transform", "translate(" + t.dir * shift + " 0)" + (t.orig ? " " + t.orig : ""));
+        } else if (t.orig !== null) {
+          t.node.setAttribute("transform", t.orig);
+        } else {
+          t.node.removeAttribute("transform");
+        }
+      }
+    }
+    function noteLabelWidth(lab, w) {
+      if (lab.title && lab.w0 !== void 0) lab.title.need = Math.max(lab.title.need, w - lab.w0);
     }
     function hideStaticAxes() {
       if (!ws.svgEl) return;
@@ -2503,6 +2591,7 @@
       if (!ws.axisZoomActive || !ws.vb || !ws.vb0 || !ws.retickLayer) return;
       while (ws.retickLayer.firstChild) ws.retickLayer.removeChild(ws.retickLayer.firstChild);
       for (let i = 0; i < ws.azPanels.length; i++) retickPanel(ws.azPanels[i]);
+      placeAxisTitles();
     }
     function retickPanel(a) {
       const p = a.p, grid = a.grid, layer = ws.retickLayer;
@@ -2550,7 +2639,9 @@
           grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
           if (a.yTick) ticks_.push(tickLine(a.yTick, sy, p));
           if (a.yLab) {
-            layer.appendChild(axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline, a.yLab.rot));
+            const lab = axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline, a.yLab.rot);
+            layer.appendChild(lab);
+            noteLabelWidth(a.yLab, labelWidth(lab));
           }
         }
         if (a.y2Lab && a.y2Map) {
@@ -2558,7 +2649,9 @@
           for (let i = 0; i < st.length; i++) {
             const sy = t.sy * (p.py0 + (ay.native_hi - st[i].n) / k) + t.ty;
             if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
-            layer.appendChild(axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline, a.y2Lab.rot));
+            const lab = axisLabel(st[i].label, a.y2Lab.pos, sy, a.y2Lab.anchor, a.y2Lab.baseline, a.y2Lab.rot);
+            layer.appendChild(lab);
+            noteLabelWidth(a.y2Lab, labelWidth(lab));
           }
         }
       }

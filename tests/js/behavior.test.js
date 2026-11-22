@@ -2115,6 +2115,46 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
   const tmR = /matrix\(([-\d.eE]+)/.exec(on.inst._test.panTransform());
   ok(tmR && Math.abs(parseFloat(tmR[1]) - 1) < 1e-6, "axis_zoom: reset to full view -> identity scale");
 
+  // VW-51: at deep zoom the re-ticked y labels ("25.0002") outgrow the static
+  // ones ("25"); the y title moves out by the difference, never past the canvas
+  // edge, and goes back home when the labels fit again. (jsdom has no text
+  // layout, so widths come from the 0.6 em per character fallback.)
+  {
+    const tPanels = Object.assign({}, linPanels, { px0: 80 });
+    const tSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
+      '<g data-vellum-panel="panel-1-1" clip-path="url(#c0)">' +
+      '<g data-vellum-pan="panel-1-1">' +
+      '<g role="grid"><path d="M0 0 L0 80" stroke="#ffffff" stroke-width="1"/></g>' +
+      '<path data-key="a" d="M100 50h2v2z"/></g></g>' +
+      '<g data-vellum-panel="axis-x-3"><text x="20" y="4" transform="matrix(1 0 0 1 80 90)" fill="#333333" font-family="sans-serif" font-size="12">50</text></g>' +
+      '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 80 50)" fill="#333333" font-family="sans-serif" font-size="12" text-anchor="end">25</text></g>' +
+      '<g data-vellum-panel="axis-title-y"><text x="40" y="50" transform="rotate(-90 40 50)" font-size="12" text-anchor="middle" dominant-baseline="central">y</text></g></svg>';
+    const tz = mountAZ({ axisZoom: true, maxZoom: 1e6 }, tSvg, tPanels);
+    ok(tz.inst._test.axisZoomActive() === true, "VW-51: the titled fixture is axis-zoomable");
+    const title = () => tz.el.querySelector('[data-vellum-panel="axis-title-y"] text');
+    const shiftOf = () => {
+      const m = /^translate\(([-\d.eE]+) 0\)/.exec(title().getAttribute("transform") || "");
+      return m ? parseFloat(m[1]) : 0;
+    };
+    ok(shiftOf() === 0 && title().getAttribute("transform") === "rotate(-90 40 50)",
+      "VW-51: at the full view the y title keeps its static place");
+    // a moderate zoom: labels like "24.5" (4 chars vs 2) need 2 * 0.6 * 12 = 14.4 px
+    tz.inst._test.setView({ x: 90, y: 49, w: 2, h: 1 });
+    const labs = tz.inst._test.retickLabels().map((l) => l.text);
+    const wide = Math.max.apply(null, labs.filter((t) => t.indexOf(".") >= 0).map((t) => t.length));
+    ok(wide > 2, "VW-51: the zoomed y axis re-ticks to longer labels (" + labs.join(",") + ")");
+    const sh = shiftOf();
+    ok(sh < 0, "VW-51: the y title moves left when the labels grow (" + sh + ")");
+    ok(/rotate\(-90 40 50\)$/.test(title().getAttribute("transform")),
+      "VW-51: the title keeps its own rotation after the shift");
+    // deep zoom: the shift is capped at the title's room (40 - 6 = 34 px)
+    tz.inst._test.setView({ x: 90, y: 49.99, w: 0.0002, h: 0.0001 });
+    ok(shiftOf() >= -34 - 1e-6 && shiftOf() < sh, "VW-51: the shift grows with the labels but stops at the canvas edge (" + shiftOf() + ")");
+    tz.inst._test.setView({ x: 0, y: 0, w: 200, h: 100 });
+    ok(title().getAttribute("transform") === "rotate(-90 40 50)", "VW-51: back at the full view the title returns home");
+  }
+
   // fallbacks: an axis the re-ticker can't follow, raster mode, and a described
   // panel with no pannable group all decline axis_zoom.
   const symPanels = Object.assign({}, linPanels, {
