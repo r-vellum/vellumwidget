@@ -16,6 +16,7 @@ import { sourceTable } from "./dom";
 import { decodeBbox, decodeKeys, dlColumn, normalizeElements, normalizePanels } from "./elements";
 import { decodeDisplayList, fillBboxes, tracePoint, traceShape } from "./dlist";
 import { a11yFeature } from "./features/a11y";
+import { animFeature, frameAt, timeOfFrame } from "./features/anim";
 import { axisZoomFeature } from "./features/axisZoom";
 import { markStateFeature } from "./features/markState";
 import { raiseFeature } from "./features/raise";
@@ -78,6 +79,7 @@ HTMLWidgets.widget({
       pointerFeature(ws),
       sourceFeature(ws),
       toolbarFeature(ws),
+      animFeature(ws),
       renderFeature(ws),
       a11yFeature(ws),
       detailFeature(ws),
@@ -119,6 +121,10 @@ HTMLWidgets.widget({
         },
         largeDim: function () { return ws.largeDim; },
         rasterMode: function () { return ws.rasterMode; },
+        // Animation playback (VW-55): state, play/pause, seek to a frame.
+        animState: ws.fx.animState,
+        animPlay: ws.fx.animPlay,
+        animSeek: ws.fx.animSeek,
         hasCanvas: function () { return !!ws.canvasEl; },
         displayListSize: function () { return ws.dl ? ws.dl.n : 0; },
         displayListKeys: function () { return ws.dl ? ws.dl.keys.slice() : null; },
@@ -316,5 +322,7 @@ registerProxyHandler();
   traceShape,
   decodeKeys,
   dlColumn,
+  animFrameAt: frameAt,
+  animTimeOfFrame: timeOfFrame,
   bus: vellumwidgetBus
 };

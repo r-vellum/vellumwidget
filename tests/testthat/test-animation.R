@@ -38,3 +38,31 @@ test_that(".is_animation() is false for an ordinary plot or scene", {
   expect_false(vellumwidget:::.is_animation(p))
   expect_false(vellumwidget:::.is_animation(vellum::as_vellum_scene(p)))
 })
+
+test_that("the animated SVG has the frame structure the playback controls read (VW-55)", {
+  skip_if_not_installed("vellumplot")
+  a <- vellumplot::vplot(data.frame(g = c("a", "b", "a", "b"), v = 1:4, t = c(1, 1, 2, 2))) |>
+    vellumplot::mark_bar(x = g, y = v) |>
+    vellumplot::transition_states(t) |>
+    vellumplot::animate(nframes = 6)
+  svg <- as_widget(a)$x$svg
+  # srcts/features/anim.ts finds the frames by their `<prefix>-vf` class, the
+  # still frame by `<prefix>-vs`, each frame's offset by its inline
+  # animation-delay, and the loop length from the frame rule's animation.
+  prefix <- regmatches(svg, regexpr("[A-Za-z0-9_]+(?=-vf\\b)", svg, perl = TRUE))
+  expect_length(prefix, 1L)
+  frames <- gregexpr(paste0('class="', prefix, '-vf[ "]'), svg)[[1]]
+  expect_identical(length(frames), 6L)
+  expect_match(svg, paste0('class="', prefix, "-vf ", prefix, '-vs"'))
+  expect_identical(lengths(regmatches(svg, gregexpr("animation-delay:-[0-9.]+s", svg))), 6L)
+  expect_match(
+    svg,
+    paste0("\\.", prefix, "-vf\\{[^}]*animation:", prefix, "-vc [0-9.]+s steps\\(1,end\\) infinite")
+  )
+})
+
+test_that("a static widget's options carry no animated flag (VW-55)", {
+  skip_if_not_installed("vellumplot")
+  w <- as_widget(vellumplot::vplot(mtcars) |> vellumplot::mark_point(x = wt, y = mpg))
+  expect_null(w$x$options$animated)
+})

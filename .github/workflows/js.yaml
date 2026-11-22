@@ -62,3 +62,6 @@ jobs:
 
       - name: Headless behaviour suite
         run: node tests/js/behavior.test.js
+
+      - name: Animation controls suite
+        run: node tests/js/anim.test.js

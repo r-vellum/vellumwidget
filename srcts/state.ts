@@ -267,6 +267,10 @@ export interface WidgetFns {
   buildNavigator: () => void;
   buildSpatialIndex: () => void;
   buildToolbar: () => void;
+  buildAnimControls: () => void;
+  animState: () => { playing: boolean; frame: number; frames: number } | null;
+  animPlay: (on: boolean) => void;
+  animSeek: (k: number) => void;
   calibrateXform: (clientX: number, clientY: number) => CalibFit | null;
   sceneToClient: (x: number, y: number) => { x: number; y: number } | null;
   clearClass: (cls: string) => void;
