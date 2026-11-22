@@ -2,6 +2,16 @@
 
 ## vellumwidget 0.17.0.9000
 
+- **Selecting a mark from the keyboard keeps its focus (VW-57).**
+  Raising the selection above its layer (VW-53) moves the selected nodes
+  in the DOM, and the browser drops keyboard focus from a moved node:
+  pressing Enter on a focused mark sent focus to the page body, so the
+  arrow keys stopped walking the marks. The raise now puts focus back on
+  the mark, keeping the focus ring, the roving tabindex and the
+  “selected” announcement. Tab order was not affected: only the roving
+  mark is tabbable and the arrow keys walk the marks in data order, not
+  DOM order.
+
 - **Long re-ticked y labels trim their precision when the title can’t
   move further (VW-59).** Under axis zoom the y title moves out as the
   re-ticked labels grow (VW-51), but stops at the canvas edge, so long

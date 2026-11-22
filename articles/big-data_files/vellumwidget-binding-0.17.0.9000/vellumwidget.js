@@ -1022,12 +1022,14 @@
       announce(focusLabel(k));
     }
     function onMarkFocus(ev) {
+      if (ws.focusHold) return;
       const k = keyOf(ev.target);
       if (k == null) return;
       const i = ws.focusables.findIndex((f) => f.key === k);
       if (i >= 0) showMarkFocus(i);
     }
     function onMarkBlur(ev) {
+      if (ws.focusHold) return;
       const to = keyOf(ev.relatedTarget);
       if (to == null) {
         ws.focusIdx = -1;
@@ -3286,6 +3288,19 @@
       raised = [];
     }
     function raiseSelected() {
+      const active = document.activeElement;
+      const keep = active && active !== document.body && ws.el.contains(active) ? active : null;
+      ws.focusHold = true;
+      try {
+        moveSelected();
+        if (keep && keep.isConnected && document.activeElement !== keep && typeof keep.focus === "function") {
+          keep.focus({ preventScroll: true });
+        }
+      } finally {
+        ws.focusHold = false;
+      }
+    }
+    function moveSelected() {
       restore();
       if (ws.fx.ringMode()) return;
       const keys = ws.fx.selectedKeys();
@@ -9208,6 +9223,7 @@
       tableEl: null,
       focusables: [],
       focusIdx: -1,
+      focusHold: false,
       vb0: null,
       vb: null,
       azPanels: [],
