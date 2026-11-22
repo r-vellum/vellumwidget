@@ -39,7 +39,7 @@
 // constant marks' boxes cleared, plus, where another mark of the run shows
 // in those boxes, the run's SVG without the constant marks drawn there.
 
-import { MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
+import { dimAlphaOf, MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
 import { RUN_BOX_PAD } from "./constants";
 import { asColumn } from "../elements";
 import { applyAffine6, parseTransformList } from "../geometry";
@@ -130,7 +130,7 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
     let s = "";
     for (let q = 0; q < ids.length; q++) {
       const k = ids[q], f = flags[k], c = color[k];
-      if (f || c) s += k + ":" + f + ":" + (c ? ws.msPalette[c - 1] : "") + ";";
+      if (f || c) s += k + ":" + f + ":" + (c ? ws.msPalette[c - 1] : "") + (f & MS_DIM ? ":" + dimAlphaOf(ws, k) : "") + ";";
     }
     return s ? s + "@" + ws.msDimAlpha : "";
   }
@@ -164,7 +164,7 @@ export function runStyleFeature(ws: WidgetState): Pick<WidgetFns, "restyleRuns" 
       if (sa && sa !== "none") st += ";stroke:" + col;
     }
     // As the stylesheet: a condition's dim wins over the legend mute.
-    if (f & MS_DIM) st += ";opacity:" + ws.msDimAlpha;
+    if (f & MS_DIM) st += ";opacity:" + dimAlphaOf(ws, k);
     else if (f & MS_MUTED) st += ";opacity:" + MUTED_ALPHA;
     if (st) n.setAttribute("style", st.replace(/^;/, ""));
     return true;

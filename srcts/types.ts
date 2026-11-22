@@ -96,12 +96,55 @@ export interface SelDef {
 export interface CondDef {
   selection: string;
   aes: string; // "color" | "fill" | ...
-  if_false?: string | null; // a constant style for non-members, or null = theme dim
+  // A constant style for non-members, or null = theme dim. A colour for a
+  // colour aesthetic, a number for alpha/size, a shape name for shape: the
+  // runtime routes it by `aes` (condLook(), VW-52).
+  if_false?: string | number | null;
   empty?: boolean;
   // The element tag this condition styles; absent from an older vellumplot,
   // whose tags are "<sel>:<aes>" (VP-72).
   tag?: string;
 }
+// How an active condition styles a non-member (VW-52), routed by its
+// aesthetic: "dim" the theme dim, "color" a fill/stroke colour, "alpha" an
+// opacity, "none" no change (an if_false the widget can't apply, such as a
+// size or a shape).
+export interface CondLook {
+  kind: "dim" | "color" | "alpha" | "none";
+  color?: string;
+  alpha?: number;
+}
+
+// The look of a condition's constant if_false for its aesthetic (VW-52). A
+// colour aesthetic takes a colour string; alpha takes a number in [0, 1] as
+// the non-members' opacity; anything else (size, shape, linewidth, a value of
+// the wrong type) is not applied, so it is never painted as a colour. Size is
+// left alone too: the widget has the drawn marks but not the size scale, so it
+// can't tell how big a non-member of `size = condition(sel, x, 1)` should be.
+// No if_false is the theme dim, whatever the aesthetic.
+export function condLook(aes: string | null | undefined, ifFalse: unknown): CondLook {
+  let v = ifFalse;
+  if (Array.isArray(v)) v = v.length === 1 ? v[0] : null;
+  if (v == null) return { kind: "dim" };
+  if (isColorAes(aes)) return typeof v === "string" && v !== "" ? { kind: "color", color: v } : { kind: "none" };
+  if (isAlphaAes(aes)) {
+    const a = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+    return isFinite(a) && a >= 0 && a <= 1 ? { kind: "alpha", alpha: a } : { kind: "none" };
+  }
+  return { kind: "none" };
+}
+
+// A colour aesthetic: color/colour/fill/stroke, or a prefixed one such as
+// edge_color. An older payload without `aes` counts as colour, as before.
+export function isColorAes(aes: string | null | undefined): boolean {
+  if (aes == null || aes === "") return true;
+  return /(^|_)(colou?r|fill|stroke)$/.test(aes);
+}
+
+function isAlphaAes(aes: string | null | undefined): boolean {
+  return aes != null && /(^|_)(alpha|opacity)$/.test(aes);
+}
+
 export interface InteractionSpec {
   selections?: SelDef[];
   conditions?: CondDef[];

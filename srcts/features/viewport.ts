@@ -154,6 +154,9 @@ export function viewportFeature(
     if (ws.dimLayer && overlayVb) ws.dimLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
     if (ws.crosshairLayer && overlayVb) ws.crosshairLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
     ws.fx.placeIntervalBand(); // an active interval band follows the per-panel zoom
+    // A hover clone in the large-scene overlay carries its panel's T as of
+    // its creation: re-clone it for the new view (VW-54).
+    if (ws.largeDim) ws.fx.refreshHighlightOverlay();
     // Raster selection rings follow the view: placed per panel (azOverlayWrap)
     // when several panels zoom independently, sized to a constant-size mark
     // as drawn at this zoom (VW-42) and clipped to the panel at its current
