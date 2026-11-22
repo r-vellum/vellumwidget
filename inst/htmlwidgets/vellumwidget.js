@@ -6383,6 +6383,7 @@
   }
 
   // srcts/features/raster.ts
+  var ringClipSeq = 0;
   function rasterFeature(ws) {
     function ensureCanvas() {
       if (ws.canvasEl) return;
@@ -7113,6 +7114,39 @@
       c.setAttribute("vector-effect", "non-scaling-stroke");
       return c;
     }
+    function ringClip(g, k, made) {
+      if (!ws.axisZoomActive) return null;
+      const m = ws.meta[k];
+      if (!m || !hasBbox(m)) return null;
+      const a = ws.fx.azNearest((m.x0 + m.x1) / 2, (m.y0 + m.y1) / 2);
+      if (!a) return null;
+      const i = ws.azPanels.indexOf(a);
+      if (made[i]) return made[i];
+      const t = ws.fx.azT(a), p = a.p;
+      if (!(t.sx > 0) || !(t.sy > 0)) return null;
+      const id = "vw-ring-" + ++ringClipSeq;
+      const cp = document.createElementNS(SVGNS, "clipPath");
+      cp.setAttribute("id", id);
+      cp.setAttribute("clipPathUnits", "userSpaceOnUse");
+      const rc = document.createElementNS(SVGNS, "rect");
+      rc.setAttribute("x", String((p.px0 - t.tx) / t.sx));
+      rc.setAttribute("y", String((p.py0 - t.ty) / t.sy));
+      rc.setAttribute("width", String((p.px1 - p.px0) / t.sx));
+      rc.setAttribute("height", String((p.py1 - p.py0) / t.sy));
+      cp.appendChild(rc);
+      g.appendChild(cp);
+      return made[i] = "url(#" + id + ")";
+    }
+    function drawRings(g, keys, cls) {
+      const made = {};
+      for (let i = 0; i < keys.length; i++) {
+        const c = ringFor(keys[i], cls);
+        if (!c) continue;
+        const cl = ringClip(g, keys[i], made);
+        if (cl) c.setAttribute("clip-path", cl);
+        g.appendChild(ws.fx.azOverlayWrap(c, keys[i]));
+      }
+    }
     function clearGroup(g) {
       if (g) while (g.firstChild) g.removeChild(g.firstChild);
     }
@@ -7121,18 +7155,12 @@
       if (!ws.selGroup) return;
       const keys = ws.fx.selectedKeys();
       if (keys.length > OVERLAY_MARK_CAP) return;
-      for (let i = 0; i < keys.length; i++) {
-        const c = ringFor(keys[i], "vellumwidget-fb-sel");
-        if (c) ws.selGroup.appendChild(ws.fx.azOverlayWrap(c, keys[i]));
-      }
+      drawRings(ws.selGroup, keys, "vellumwidget-fb-sel");
     }
     function drawHovFeedback(keys) {
       clearGroup(ws.hovGroup);
       if (!ws.hovGroup) return;
-      for (let i = 0; i < keys.length; i++) {
-        const c = ringFor(keys[i], "vellumwidget-fb-hov");
-        if (c) ws.hovGroup.appendChild(ws.fx.azOverlayWrap(c, keys[i]));
-      }
+      drawRings(ws.hovGroup, keys, "vellumwidget-fb-hov");
     }
     function setHoverKeys(keys) {
       ws.hoverSig = "";
@@ -8256,7 +8284,7 @@
       if (ws.dimLayer && overlayVb) ws.dimLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
       if (ws.crosshairLayer && overlayVb) ws.crosshairLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
       ws.fx.placeIntervalBand();
-      if (ws.rasterMode && ws.fx.azMulti()) ws.fx.drawSelFeedback();
+      if (ws.rasterMode && ws.axisZoomActive) ws.fx.drawSelFeedback();
       if (ws.colorbarLayer && (ws.vb || ws.vb0)) {
         ws.colorbarLayer.setAttribute("viewBox", fmtViewBox(ws.axisZoomActive && ws.vb0 ? ws.vb0 : ws.vb));
       }
