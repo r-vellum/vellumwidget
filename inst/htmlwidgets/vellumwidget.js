@@ -4818,8 +4818,10 @@
       const d = ws.opts.style && ws.opts.style.dimOpacity;
       return d == null || d === "" ? "0.28" : String(d);
     }
+    let overlayKeys = [];
     function showHighlightOverlay(keys) {
       if (!ws.holder || !ws.dimLayer) return;
+      overlayKeys = keys;
       ws.holder.style.opacity = dimOpacityVal();
       while (ws.dimLayer.firstChild) ws.dimLayer.removeChild(ws.dimLayer.firstChild);
       for (let i = 0; i < keys.length; i++) {
@@ -4854,7 +4856,12 @@
       g.appendChild(node);
       return g;
     }
+    function refreshHighlightOverlay() {
+      if (!overlayKeys.length || !ws.dimLayer || !ws.dimLayer.firstChild) return;
+      showHighlightOverlay(overlayKeys);
+    }
     function hideHighlightOverlay() {
+      overlayKeys = [];
       if (ws.holder) ws.holder.style.opacity = "";
       if (ws.dimLayer) while (ws.dimLayer.firstChild) ws.dimLayer.removeChild(ws.dimLayer.firstChild);
     }
@@ -5028,7 +5035,7 @@
         ws.fx.reevaluateInteractions();
       }
     }
-    return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover, azOverlayWrap };
+    return { showHighlightOverlay, hideHighlightOverlay, clearCrosshair, drawCrosshair, showTip, showTipMulti, hideTip, moveTip, clearHover, azOverlayWrap, refreshHighlightOverlay };
   }
 
   // srcts/features/interval.ts
@@ -8492,6 +8499,7 @@
       if (ws.dimLayer && overlayVb) ws.dimLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
       if (ws.crosshairLayer && overlayVb) ws.crosshairLayer.setAttribute("viewBox", fmtViewBox(overlayVb));
       ws.fx.placeIntervalBand();
+      if (ws.largeDim) ws.fx.refreshHighlightOverlay();
       if (ws.rasterMode && ws.axisZoomActive) ws.fx.drawSelFeedback();
       if (ws.colorbarLayer && (ws.vb || ws.vb0)) {
         ws.colorbarLayer.setAttribute("viewBox", fmtViewBox(ws.axisZoomActive && ws.vb0 ? ws.vb0 : ws.vb));

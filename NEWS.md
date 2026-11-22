@@ -13,6 +13,12 @@
   one panel. Two adjacent point layers count as one there. Marks drawn from
   a flagged run image (text, masks, effects) are not raised.
 
+* **The large-scene hover clone follows a zoom (VW-54).** A hover clone takes
+  its panel's counter-scale when it is made (VW-47), so zooming with the
+  wheel while a hover showed left it at the old size, twice the mark's size
+  after a 2x zoom, until the pointer moved. A view change now re-clones the
+  hovered marks for the new zoom.
+
 * **A condition's `if_false` is applied by its aesthetic (VW-52).** A
   constant `if_false` on `alpha`, `size` or `shape` was written as a
   fill/stroke colour, which the browser and the canvas could not read. Now
