@@ -11,12 +11,15 @@
 //                  bit 4 = legend-muted
 //   ws.msColor[k]  0, or 1 + an index into ws.msPalette (a condition's if_false,
 //                  or the key's own per-row if_false colour, VW-46)
+//   ws.msAlpha[k]  0, or 1 + an index into ws.msAlphaPal: the opacity a dimmed
+//                  key takes from an alpha condition's if_false (VW-52)
 //
 // Everything is keyed by integer: the key -> id map and each condition tag's
 // id list are built once per display list, so a pass never looks a key up in
 // the DOM (a per-key DOM lookup froze the page in sprint 15).
 
 import type { WidgetFns, WidgetState } from "../state";
+import type { CondLook } from "../types";
 
 export const MS_DIM = 1;
 export const MS_HIDDEN = 2;
@@ -24,6 +27,17 @@ export const MS_MUTED = 4;
 // The CSS defaults: --vellumwidget-dim-opacity and the legend-muted opacity.
 const DIM_DEFAULT = 0.28;
 export const MUTED_ALPHA = 0.12;
+// msCond codes at or above this are an alpha if_false (VW-52): the low bits
+// index ws.msAlphaPal. Below it: 0 none, 1 the theme dim, 2+ a palette colour.
+const ALPHA_CODE = 0x80000000;
+
+// The opacity of a key flagged MS_DIM: its alpha condition's if_false, or the
+// theme dim (VW-52).
+export function dimAlphaOf(ws: WidgetState, k: number): number {
+  const a = ws.msAlpha;
+  const i = a ? a[k] : 0;
+  return i ? ws.msAlphaPal[i - 1] : ws.msDimAlpha;
+}
 
 export function markStateFeature(
   ws: WidgetState
@@ -33,12 +47,14 @@ export function markStateFeature(
   let keyIdx: Map<string, number> = new Map();
   let tagIds: Record<string, Int32Array> = {};
   let paletteIdx: Record<string, number> = {};
+  let alphaIdx: Record<string, number> = {};
 
   function sync(): boolean {
     const dl = ws.dl;
     if (!dl) {
       forDl = null;
       ws.msFlags = ws.msColor = ws.msCond = null;
+      ws.msAlpha = null;
       ws.msActive = false;
       return false;
     }
@@ -50,7 +66,10 @@ export function markStateFeature(
     for (let i = 0; i < dl.keys.length; i++) if (!keyIdx.has(dl.keys[i])) keyIdx.set(dl.keys[i], i);
     tagIds = {};
     paletteIdx = {};
+    alphaIdx = {};
     ws.msPalette = [];
+    ws.msAlphaPal = [];
+    ws.msAlpha = new Uint16Array(dl.keys.length);
     ws.msFlags = new Uint8Array(dl.keys.length);
     ws.msColor = new Uint32Array(dl.keys.length);
     ws.msCond = new Uint32Array(dl.keys.length);
@@ -84,16 +103,31 @@ export function markStateFeature(
     return p + 2;
   }
 
-  // One condition's outcome for its tagged keys: members keep their colour,
-  // non-members get `color` (or the dim when null), or their own per-row
+  // The state code of a non-member at opacity `a` (VW-52).
+  function alphaCode(a: number): number {
+    const s = String(a);
+    let p = alphaIdx[s];
+    if (p == null) {
+      // A Uint16 index: past 65535 distinct opacities, reuse the last.
+      if (ws.msAlphaPal.length >= 65535) return ALPHA_CODE + ws.msAlphaPal.length - 1;
+      p = alphaIdx[s] = ws.msAlphaPal.length; ws.msAlphaPal.push(a);
+    }
+    return ALPHA_CODE + p;
+  }
+
+  // One condition's outcome for its tagged keys: members keep their look;
+  // non-members take `look` (routed by the condition's aesthetic, VW-52: the
+  // theme dim, a colour, an opacity, or nothing), or their own per-row
   // colour, `colors[i]` (aligned with `tagged`), where they have one (VW-46).
   // As in SVG mode, the last condition that tags a key decides its style.
-  function condStateSet(tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, color: string | null | undefined, colors?: (string | null)[] | null): void {
+  function condStateSet(tag: string, tagged: string[], members: Record<string, boolean>, active: boolean, look: CondLook, colors?: (string | null)[] | null): void {
     const cond = ws.msCond;
     if (!cond || !ws.dl) return;
     let ids = tagIds[tag];
     if (!ids) ids = tagIds[tag] = keyIds(tagged);
-    const code = colorCode(color);
+    const code = look.kind === "color" ? colorCode(look.color)
+      : look.kind === "alpha" ? alphaCode(look.alpha!)
+      : look.kind === "dim" ? 1 : 0;
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
       if (id < 0) continue;
@@ -107,15 +141,18 @@ export function markStateFeature(
   // flags the canvas reads, then redraw the canvas tiers. Raster mode only.
   function updateMarkStates(): void {
     if (!ws.rasterMode || !sync() || !ws.msFlags || !ws.msColor || !ws.msCond) return;
-    const flags = ws.msFlags, color = ws.msColor, cond = ws.msCond;
+    const flags = ws.msFlags, color = ws.msColor, cond = ws.msCond, alpha = ws.msAlpha;
     flags.fill(0);
     color.fill(0);
+    if (alpha) alpha.fill(0);
     let active = false;
     for (let k = 0; k < cond.length; k++) {
       const c = cond[k];
       if (!c) continue;
       active = true;
-      if (c === 1) flags[k] = MS_DIM; else color[k] = c - 1;
+      if (c === 1) flags[k] = MS_DIM;
+      else if (c >= ALPHA_CODE) { flags[k] = MS_DIM; if (alpha) alpha[k] = c - ALPHA_CODE + 1; }
+      else color[k] = c - 1;
     }
     const hide = function (set: Record<string, boolean>): void {
       for (const key in set) {

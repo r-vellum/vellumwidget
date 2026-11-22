@@ -1,5 +1,16 @@
 # vellumwidget 0.16.0.9000
 
+* **A condition's `if_false` is applied by its aesthetic (VW-52).** A
+  constant `if_false` on `alpha`, `size` or `shape` was written as a
+  fill/stroke colour, which the browser and the canvas could not read. Now
+  a colour aesthetic's `if_false` recolours non-members as before, an
+  `alpha` one draws them at that opacity (in SVG mode, every raster tier,
+  restyled flagged runs and exports), and one the widget can't apply (a
+  size, a shape, a line width) leaves them as drawn. Size is left alone
+  because the widget has the drawn marks but not the size scale. A per-row
+  `if_false` colour is used for colour aesthetics only, and R no longer
+  reads a non-colour `if_false` such as `"1"` as a palette colour.
+
 * **Brush and lasso test constant-size marks where they are drawn (VW-47).**
   Under axis zoom a point or label keeps its pixel size, and hover has
   hit-tested it at that size since VW-42. A brush, though, still tested its
