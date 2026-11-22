@@ -2,6 +2,15 @@
 
 ## vellumwidget 0.17.0.9000
 
+- **Long re-ticked y labels trim their precision when the title can’t
+  move further (VW-59).** Under axis zoom the y title moves out as the
+  re-ticked labels grow (VW-51), but stops at the canvas edge, so long
+  labels could still crowd it. When that shift is capped, a linear y
+  axis is now re-ticked with one decimal fewer at a time (a coarser
+  step, so the labels stay exact and distinct) until they fit or fewer
+  than two ticks would be in view. At the deepest zooms, where no
+  coarser step leaves two ticks, the labels keep their precision.
+
 - **The fallback dots above `max_marks` have the marks’ shapes
   (VW-58).** In raster mode above `max_marks` (no display list), zooming
   in drew every mark as a round dot, even squares and triangles. R now
