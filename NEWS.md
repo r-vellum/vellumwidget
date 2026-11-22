@@ -1,5 +1,16 @@
 # vellumwidget 0.16.0.9000
 
+* **Raster mode no longer ships line and polygon vertices twice (VW-49).**
+  The geometry block that exact hit-testing uses repeated, as JSON numbers,
+  the vertices the display list already carries. For line-heavy plots it was
+  most of the payload. The keys the display list draws exactly now leave
+  the block, and the runtime takes their shapes from the list's paths. A
+  20-spiral plot goes from 2.39 to 0.98 MB, a world map from 2.15 to 0.74 MB,
+  and 2-D density contours from 0.48 to 0.23 MB. Picking is unchanged up to
+  near-ties. The list's paths are the drawn shapes (to within its
+  coordinate precision), so a tapered line is measured to its ribbon and a
+  dense density curve to its drawn outline.
+
 * **Brush and lasso test constant-size marks where they are drawn (VW-47).**
   Under axis zoom a point or label keeps its pixel size, and hover has
   hit-tested it at that size since VW-42. A brush, though, still tested its

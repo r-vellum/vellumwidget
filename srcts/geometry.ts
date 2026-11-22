@@ -43,6 +43,9 @@ export interface GeometryPayload {
   // Per element, 1 when it is filled under the even-odd rule. Absent when no
   // element is (nonzero, the engine's default) or from an older engine.
   eo?: number[] | number;
+  // 1 when the keys the raster display list draws exactly were left out: the
+  // runtime takes their shapes from the list's path records (VW-49).
+  dl?: number;
 }
 
 // One geometry element, as a slice of the flat coordinate arrays.

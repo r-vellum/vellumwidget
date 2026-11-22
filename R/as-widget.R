@@ -334,7 +334,14 @@ as_widget <- function(
     } else {
       elements
     },
-    geometry = .vellumwidget_geometry(scene),
+    # Raster mode with a display list: the keys the list draws exactly take
+    # their shapes from it at runtime, so their vertices don't ship twice
+    # (VW-49).
+    geometry = .drop_listed_geometry(
+      .vellumwidget_geometry(scene),
+      dlist,
+      elements$key
+    ),
     panels = .vellumwidget_panels(model),
     colorbar = .vellumwidget_colorbar(model),
     # The split render's mark layer (raster mode, VW-14), or NULL.
@@ -1586,6 +1593,55 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     rl = if (multi) as.integer(rl),
     eo = if (any(eo)) as.integer(eo)
   ))
+}
+
+# Drop from the geometry block every element whose key the raster display list
+# draws exactly (no flagged record) with at least one path record: the runtime
+# derives those keys' shapes from the list's paths instead (`geometryFromList()`
+# in picking.ts), so the vertices don't ship twice (VW-49). For line-heavy
+# plots the block was most of the payload (spirals 1.40 of 2.39 MB, a world
+# map 1.41 of 2.15 MB). The list's paths are what is drawn: the same vertices
+# to within its coordinate precision, with a ribbon's outline for a tapered
+# line and the renderer's simplified outline for a dense density curve. The
+# block keeps the rest and gains `dl = 1`, which tells the runtime to look in
+# the list; an older runtime, which ignores it, falls back to boxes for the
+# dropped keys.
+.drop_listed_geometry <- function(geom, dl, keys) {
+  if (is.null(geom) || is.null(dl) || !dl$n) {
+    return(geom)
+  }
+  kt <- .dl_key_table(dl, keys)
+  rk <- kt[.dl_col(dl$record$key) + 1L]
+  paths <- unique(rk[.dl_col(dl$record$kind) == 2L])
+  listed <- intersect(.dl_exact_keys(dl, keys), paths)
+  drop <- geom$key %in% listed
+  if (!any(drop)) {
+    return(geom)
+  }
+  n <- geom$n
+  keep_v <- rep.int(!drop, n)
+  out <- list(
+    key = geom$key[!drop],
+    kind = geom$kind[!drop],
+    n = n[!drop],
+    x = geom$x[keep_v],
+    y = geom$y[keep_v]
+  )
+  if (!is.null(geom$nr)) {
+    nr <- geom$nr
+    out$nr <- nr[!drop]
+    # each element owns `max(nr, 1)` ring lengths in `rl`
+    out$rl <- geom$rl[rep.int(!drop, pmax(nr, 1L))]
+    if (all(out$nr <= 1L)) {
+      out$nr <- out$rl <- NULL
+    }
+  }
+  if (!is.null(geom$eo)) {
+    out$eo <- geom$eo[!drop]
+    if (!any(out$eo == 1L)) out$eo <- NULL
+  }
+  out$dl <- 1L
+  out
 }
 
 # The per-panel geometry + scale descriptors the runtime needs to map device
