@@ -4,10 +4,10 @@
 import Flatbush from "flatbush";
 import { asColumn } from "../elements";
 import { PICK_CANDIDATES } from "./constants";
-import { applyAffine6, distToBbox, distToGeom, hasBbox, isRoundMark, parseTransformList } from "../geometry";
+import { applyAffine6, distToBbox, distToGeom, hasBbox, isRoundMark, parseTransformList, rectsIntersect } from "../geometry";
 import { GLYPH_MARKS } from "../scales";
 import type { Geom, GeometryPayload } from "../geometry";
-import { bboxInPolygon, bboxInRect, brushKeys, columnTolerance, dropPartialSeries, lassoKeys, nearestSortedIdx, pointInPolygon, polyBounds } from "../spatial";
+import { bboxInPolygon, bboxInRect, columnTolerance, dropPartialSeries, nearestSortedIdx, pointInPolygon, polyBounds } from "../spatial";
 import type { Pt } from "../spatial";
 import type { WidgetFns, WidgetState } from "../state";
 import type { Bbox, ElemMeta } from "../types";
@@ -262,42 +262,63 @@ export function pickingFeature(
     return best;
   }
 
-  // Distinct keys whose bbox intersects `rect` — index-backed when available.
-  // Item ids are mapped back to element order and de-duplicated so a key spanning
-  // several elements is returned once (parity with the pure `brushKeys`).
-  function brushKeysIn(rect: Bbox): string[] {
-    if (!ws.spatialIndex) return brushKeys(ws.elements, rect);
-    const eids = ws.spatialIndex.search(rect.x0, rect.y0, rect.x1, rect.y1)
+  // Whether a constant-size mark's box can reach past its record box: a panel
+  // zoomed out below 1x grows it (VW-47), so the index, built on the record
+  // boxes, can no longer prefilter a brush or lasso.
+  function constOutgrows(): boolean {
+    if (!ws.axisZoomActive || ws.opts.zoomMarks === "scale") return false;
+    return ws.azPanels.some(function (a) { const t = ws.fx.azT(a); return t.sx < 1 || t.sy < 1; });
+  }
+
+  // Candidate element positions for a region with bounds `b`: from the index
+  // when it can prefilter, else every element; in element order.
+  function candidates(b: Bbox): number[] {
+    if (!ws.spatialIndex || constOutgrows()) {
+      const all: number[] = new Array(ws.elements.length);
+      for (let i = 0; i < all.length; i++) all[i] = i;
+      return all;
+    }
+    return ws.spatialIndex.search(b.x0, b.y0, b.x1, b.y1)
       .map((id) => ws.indexToElem[id])
       .sort((a, b) => a - b);
+  }
+
+  // Distinct keys whose box intersects `rect` — index-backed when available.
+  // Item ids are mapped back to element order and de-duplicated so a key spanning
+  // several elements is returned once (parity with the pure `brushKeys`). A
+  // constant-size mark under axis zoom is tested at its drawn box, as hover
+  // hit-tests it (VW-42), not at its T-scaled record box (VW-47).
+  function brushKeysIn(rect: Bbox): string[] {
+    const indexed = !!ws.spatialIndex && !constOutgrows();
+    const eids = candidates(rect);
     const out: string[] = [];
     const seen: Record<string, boolean> = {};
     for (let i = 0; i < eids.length; i++) {
-      const k = ws.elements[eids[i]].key;
-      if (!seen[k]) {
-        seen[k] = true;
-        out.push(k);
-      }
+      const e = ws.elements[eids[i]];
+      if (seen[e.key]) continue;
+      const cb = constBox(e);
+      // (the index already tested a record box)
+      if (cb ? !rectsIntersect(cb, rect) : !hasBbox(e) || (!indexed && !rectsIntersect(e, rect))) continue;
+      seen[e.key] = true;
+      out.push(e.key);
     }
     return out;
   }
 
   // Distinct keys whose centre is inside the lasso polygon — index-backed when
-  // available (prefilter by the polygon's bounds, then centre-in-polygon), else
-  // the pure `lassoKeys` scan.
+  // available (prefilter by the polygon's bounds, then centre-in-polygon). A
+  // constant-size mark's centre is its drawn box's (a label's sits off its
+  // record box's centre under zoom, VW-47).
   function lassoKeysIn(poly: Pt[]): string[] {
     if (poly.length < 3) return [];
-    if (!ws.spatialIndex) return lassoKeys(ws.elements, poly);
-    const b = polyBounds(poly);
-    const eids = ws.spatialIndex.search(b.x0, b.y0, b.x1, b.y1)
-      .map((id) => ws.indexToElem[id])
-      .sort((a, b) => a - b);
+    const eids = candidates(polyBounds(poly));
     const out: string[] = [];
     const seen: Record<string, boolean> = {};
     for (let i = 0; i < eids.length; i++) {
       const e = ws.elements[eids[i]];
       if (seen[e.key] || !hasBbox(e)) continue;
-      if (pointInPolygon((e.x0 + e.x1) / 2, (e.y0 + e.y1) / 2, poly)) {
+      const b = constBox(e) || e;
+      if (pointInPolygon((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, poly)) {
         seen[e.key] = true;
         out.push(e.key);
       }
