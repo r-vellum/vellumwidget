@@ -1,4 +1,4 @@
-# vellumwidget 0.16.0.9000
+# vellumwidget 0.17.0
 
 * **Selected marks are drawn above the rest of their layer (VW-53).** A
   selected point kept its paint order, so a later neighbour could cover part
