@@ -58,6 +58,12 @@
 <h3 id="bug-fixes-0-18-0-9000">Bug fixes<a class="anchor" aria-label="anchor" href="#bug-fixes-0-18-0-9000"></a></h3>
 <ul><li>Above <code>max_marks</code>, hollow marks (a transparent fill under a visible stroke, e.g. a dot plot’s <code>fill = "transparent"</code>) are drawn as stroked dots in the fallback dots, not filled in their stroke colour (VW-63). They are drawn even where the mark’s centre pixel is transparent.</li>
 </ul></div>
+<div class="section level3">
+<h3 id="internal-0-18-0-9000">Internal<a class="anchor" aria-label="anchor" href="#internal-0-18-0-9000"></a></h3>
+<ul><li><p><code>.dl_col()</code> reads bit-packed typed columns (<code>.uint_column(pack = TRUE)</code>’s <code>bits</code> field), so the R tests decode packed columns with the same helper as every other display-list column; the test-only <code>.uint_column_r()</code> is gone (VW-64).</p></li>
+<li><p><code>tests/js/behavior.test.js</code> declared a second <code>function mount()</code> inside a block, which in sloppy mode replaced the file’s global <code>mount()</code> once that block ran. It is now <code>mountRuns()</code>, and both JS test files run in strict mode, so block-level functions stay in their block. No test after the block called <code>mount()</code>, so none had been running against the wrong helper (VW-65).</p></li>
+<li><p>The JS CI workflow (<code>js.yaml</code>) now also runs when only <code>tests/js/</code> changes; a change to the headless test suites alone used to run no JS checks.</p></li>
+</ul></div>
 </div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.18.0" id="vellumwidget-0180">vellumwidget 0.18.0<a class="anchor" aria-label="anchor" href="#vellumwidget-0180"></a></h2>

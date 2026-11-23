@@ -18,6 +18,24 @@
   dots in the fallback dots, not filled in their stroke colour (VW-63).
   They are drawn even where the mark’s centre pixel is transparent.
 
+### Internal
+
+- `.dl_col()` reads bit-packed typed columns
+  (`.uint_column(pack = TRUE)`’s `bits` field), so the R tests decode
+  packed columns with the same helper as every other display-list
+  column; the test-only `.uint_column_r()` is gone (VW-64).
+
+- `tests/js/behavior.test.js` declared a second `function mount()`
+  inside a block, which in sloppy mode replaced the file’s global
+  `mount()` once that block ran. It is now `mountRuns()`, and both JS
+  test files run in strict mode, so block-level functions stay in their
+  block. No test after the block called `mount()`, so none had been
+  running against the wrong helper (VW-65).
+
+- The JS CI workflow (`js.yaml`) now also runs when only `tests/js/`
+  changes; a change to the headless test suites alone used to run no JS
+  checks.
+
 ## vellumwidget 0.18.0
 
 - Requires vellum (\>= 0.14.0) and vellumplot (\>= 0.19.0).
