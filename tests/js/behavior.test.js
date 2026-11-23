@@ -2,6 +2,7 @@
 // a jsdom DOM, drive it with a synthetic payload, simulate hover/click, and
 // assert the resulting DOM state (tooltip text, highlight + selection classes).
 // Run with: node tests/js/behavior.test.js
+"use strict";
 const fs = require("fs");
 const path = require("path");
 const { JSDOM, VirtualConsole } = require("jsdom");
@@ -5936,7 +5937,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     get() { return this._vwSrc || ""; },
     set(v) { this._vwSrc = v; if (autoLoad) { if (this.onload) this.onload(); } else pending.push(this); }
   });
-  function mount(o) {
+  function mountRuns(o) {
     o = o || {};
     const ctx = recCtx();
     const orig = proto.getContext;
@@ -5970,7 +5971,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   const marksShown = (t) => { const u = t.el.querySelector("svg use.vellumwidget-marks, svg > image.vellumwidget-marks"); return !!u && u.style.visibility !== "hidden"; };
 
   // raw scene (viewBox zoom): the runs are drawn in paint order between the exact marks
-  const a = mount({});
+  const a = mountRuns({});
   ok(a.inst._test.runsAttached() && a.inst._test.listExact() === true, "VW-30: with the run rasters loaded the list counts as exact");
   a.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); a.inst._test.evalTier();
   ok(a.inst._test.markTier() === "mid", "VW-30 setup: mid tier");
@@ -5992,7 +5993,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   a.restore();
 
   // detail: the runs are <use>s of one image each, in paint order, and the flagged marks get stand-ins
-  const d = mount({ detailMarks: 100 });
+  const d = mountRuns({ detailMarks: 100 });
   d.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); d.inst._test.evalTier();
   ok(d.inst._test.markTier() === "detail", "VW-30: a list with covered flagged runs reaches the detail tier");
   const kids = Array.from(d.el.querySelectorAll("g.vellumwidget-detail > *")).map((n) =>
@@ -6008,7 +6009,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   d.restore();
 
   // axis zoom: each run is drawn through the panel's transform, clipped to it
-  const z = mount({ panels: true, options: { axisZoom: true } });
+  const z = mountRuns({ panels: true, options: { axisZoom: true } });
   z.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); z.inst._test.evalTier();
   const zi = z.ctx.log.filter((r) => r.op === "img");
   ok(zi.length === 2 && zi.every((r) => r.clipped) && Math.abs(zi[0].t[0] - 2) < 1e-6,
@@ -6018,7 +6019,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   // VW-34: under axis zoom a run's marks in a display-list panel with no
   // axis-zoom entry (here p2, run 1, in "panel-x") are drawn untransformed,
   // clipped to their record boxes; the rest of the image does not show there.
-  const zx = mount({ panels: true, options: { axisZoom: true }, dlPanels: ["panel-1-1", "panel-x"], recPanels: [1, 2, 1, 1] });
+  const zx = mountRuns({ panels: true, options: { axisZoom: true }, dlPanels: ["panel-1-1", "panel-x"], recPanels: [1, 2, 1, 1] });
   ok(zx.inst._test.axisZoomActive() && zx.inst._test.runsAttached(), "VW-34 setup: axis zoom, runs attached");
   zx.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); zx.inst._test.evalTier();
   const zxi = zx.ctx.log.filter((r) => r.op === "img");
@@ -6031,7 +6032,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   zx.restore();
   // a run with marks in both kinds of panel: drawn once through T (clipped to
   // the panel) and once untransformed (clipped to the loose marks)
-  const zb = mount({ panels: true, options: { axisZoom: true }, dlPanels: ["panel-1-1", "panel-x"], recPanels: [1, 2, 1, 1], marks: ["point", "polygon", "polygon", "path"], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2] });
+  const zb = mountRuns({ panels: true, options: { axisZoom: true }, dlPanels: ["panel-1-1", "panel-x"], recPanels: [1, 2, 1, 1], marks: ["point", "polygon", "polygon", "path"], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2] });
   zb.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); zb.inst._test.evalTier();
   const zbi = zb.ctx.log.filter((r) => r.op === "img");
   ok(zbi.length === 3 && Math.abs(zbi[0].t[0] - 2) < 1e-6 && zbi[0].clip[0].join(",") === "20,10,160,80" &&
@@ -6044,7 +6045,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   // clipped to the root panels' marks, so nothing is drawn twice
   const twoPan = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">' +
     '<g data-vellum-panel="panel-1-1"><g data-vellum-pan="panel-1-1"></g></g><g data-vellum-panel="panel-x"></g></svg>';
-  const dd = mount({ detailMarks: 100, svg: twoPan, dlPanels: ["panel-1-1", "panel-x", "panel-y"], recPanels: [1, 1, 2, 3], flags: [0, 4, 4, 4], runs: [0, 1, 1, 1], nRuns: 1, runHrefs: ["data:image/png;base64,RUN1"], options: { axisZoom: false } });
+  const dd = mountRuns({ detailMarks: 100, svg: twoPan, dlPanels: ["panel-1-1", "panel-x", "panel-y"], recPanels: [1, 1, 2, 3], flags: [0, 4, 4, 4], runs: [0, 1, 1, 1], nRuns: 1, runHrefs: ["data:image/png;base64,RUN1"], options: { axisZoom: false } });
   dd.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); dd.inst._test.evalTier();
   ok(dd.inst._test.markTier() === "detail", "VW-34 setup: detail tier");
   const uses = Array.from(dd.el.querySelectorAll("use.vellumwidget-detail-run"));
@@ -6058,7 +6059,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     "VW-34: the root <use> is clipped to the boxes of the root panels' marks");
   dd.restore();
   // a raw scene (no pan groups at all) keeps one unclipped root <use> per run
-  const dr = mount({ detailMarks: 100 });
+  const dr = mountRuns({ detailMarks: 100 });
   dr.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); dr.inst._test.evalTier();
   ok(Array.from(dr.el.querySelectorAll("use.vellumwidget-detail-run")).every((u) => !u.hasAttribute("clip-path")),
     "VW-34: without pan groups the run <use>s stay unclipped");
@@ -6071,7 +6072,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   {
     // canvas: panned right at 2x (T: x' = 2x - 300), the panel's own area
     // maps to -260..60, so the runs are clipped to 20..60 of its 20..180 rect
-    const zp = mount({ panels: true, options: { axisZoom: true } });
+    const zp = mountRuns({ panels: true, options: { axisZoom: true } });
     zp.inst._test.setView({ x: 150, y: 25, w: 100, h: 50 }); zp.inst._test.evalTier();
     ok(zp.inst._test.markTier() === "mid", "VW-36 setup: mid tier, panned past the panel's right edge");
     const zpi = zp.ctx.log.filter((r) => r.op === "img");
@@ -6089,7 +6090,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     zp.restore();
     // detail tier: the run <use> in the pan group gets the same clip, and one
     // clipPath per panel serves every rebuild
-    const zd = mount({ panels: true, detailMarks: 100, options: { axisZoom: true } });
+    const zd = mountRuns({ panels: true, detailMarks: 100, options: { axisZoom: true } });
     zd.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); zd.inst._test.evalTier();
     ok(zd.inst._test.markTier() === "detail", "VW-36 setup: detail tier");
     const du = Array.from(zd.el.querySelectorAll("[data-vellum-pan] use.vellumwidget-detail-run"));
@@ -6112,7 +6113,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   // VW-37: only the touched marks' boxes are re-rendered: the run's PNG is
   // drawn (from a scratch layer) with those boxes cleared, and the restyled
   // run inside them. (perCanvas: the scratch layer records on its own.)
-  const st = mount({ runSvg: RUN_SVG, perCanvas: true });
+  const st = mountRuns({ runSvg: RUN_SVG, perCanvas: true });
   st.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); st.inst._test.evalTier();
   ok(st.inst._test.runStyled().join(",") === "false,false" && seq(st.ctx) === "fill:25,img:RUN1,fill:125,img:RUN2",
     "VW-33: no active state -> the runs draw their PNGs");
@@ -6159,7 +6160,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   // VW-52: an alpha if_false restyles a run's marks at that opacity, on the
   // canvas and in the export; a size one leaves the runs as drawn
   {
-    const ra = mount({ runSvg: RUN_SVG, perCanvas: true, cond: { selection: "pick", aes: "alpha", tag: "pick:color", if_false: 0.4, empty: true } });
+    const ra = mountRuns({ runSvg: RUN_SVG, perCanvas: true, cond: { selection: "pick", aes: "alpha", tag: "pick:color", if_false: 0.4, empty: true } });
     ra.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); ra.inst._test.evalTier();
     ra.inst._call("select", ["p1"]);
     const fs = runImgs(ra.ctx).filter((i) => svgOf(i.src));
@@ -6174,7 +6175,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     const eims = runImgs(exp).filter((i) => svgOf(i.src));
     ok(r && eims.length === 2 && eims.every((i) => /opacity:0.4/.test(svgOf(i.src) || "")), "VW-52: the export redraw keeps the alpha");
     ra.restore();
-    const rs = mount({ runSvg: RUN_SVG, perCanvas: true, cond: { selection: "pick", aes: "size", tag: "pick:color", if_false: 2, empty: true } });
+    const rs = mountRuns({ runSvg: RUN_SVG, perCanvas: true, cond: { selection: "pick", aes: "size", tag: "pick:color", if_false: 2, empty: true } });
     rs.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); rs.inst._test.evalTier();
     rs.inst._call("select", ["p1"]);
     ok(rs.inst._test.runStyled().join(",") === "false,false" && seq(rs.ctx) === "fill:25,img:RUN1,fill:125,img:RUN2",
@@ -6185,13 +6186,13 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   // with it (so no mark is half PNG, half browser); one apart keeps the PNG
   {
     const two = ['<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><circle data-key="p2" cx="80" cy="50" r="3"/><circle data-key="p3" cx="84" cy="50" r="3"/></svg>', RUN_SVG[1]];
-    const ov = mount({ runSvg: two, perCanvas: true, cx: [40, 80, 84, 160], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2] });
+    const ov = mountRuns({ runSvg: two, perCanvas: true, cx: [40, 80, 84, 160], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2] });
     ov.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); ov.inst._test.evalTier();
     ov.inst._call("select", ["p1", "p3"]); // dims p2 (and p4), not p3
     const fills = runImgs(ov.ctx).filter((i) => svgOf(i.src));
     ok(fills.length === 2 && fills[0].clip.length === 2, "VW-37: the overlapping untouched mark's box joins the re-rendered region");
     ov.restore();
-    const ap = mount({ runSvg: two, perCanvas: true, cx: [40, 80, 120, 160], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2] });
+    const ap = mountRuns({ runSvg: two, perCanvas: true, cx: [40, 80, 120, 160], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2] });
     ap.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); ap.inst._test.evalTier();
     ap.inst._call("select", ["p1", "p3"]);
     const f2 = runImgs(ap.ctx).filter((i) => svgOf(i.src));
@@ -6199,7 +6200,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     ap.restore();
   }
   // the detail tier's runs follow the state
-  const sd = mount({ runSvg: RUN_SVG, detailMarks: 100 });
+  const sd = mountRuns({ runSvg: RUN_SVG, detailMarks: 100 });
   sd.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); sd.inst._test.evalTier();
   ok(sd.inst._test.markTier() === "detail", "VW-33 setup: detail tier");
   const runImgEl = (r) => sd.el.querySelector('defs.vellumwidget-detail image[data-run="' + r + '"]');
@@ -6219,7 +6220,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(!sd.el.querySelector("g.vellumwidget-detail-patch") && /RUN1$/.test(runImgEl(1).getAttribute("href")), "VW-33: detail: clearing it puts the PNGs back");
   sd.restore();
   // a payload without the SVGs (an older vellumwidget R side): the PNGs stay
-  const ns = mount({});
+  const ns = mountRuns({});
   ns.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); ns.inst._test.evalTier();
   ns.inst._call("select", ["p1"]);
   ok(ns.inst._test.runStyled().join(",") === "false,false" && /RUN1$/.test(runImgs(ns.ctx)[0].src),
@@ -6236,7 +6237,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     // (77..83 x 47..53, padded by 2) keeps its 10 x 10 size at its centre
     // (80, 50) -> (60, 50): drawn at 55..65 x 45..55 from the PNG at 2 px
     // per scene px (75..85 -> 150..170); p4 maps to x = 220, out of view
-    const c1 = mount({ panels: true, marks: GL, options: { axisZoom: true } });
+    const c1 = mountRuns({ panels: true, marks: GL, options: { axisZoom: true } });
     c1.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c1.inst._test.evalTier();
     ok(c1.inst._test.markTier() === "mid", "VW-35 setup: mid tier at 2x");
     const ci = c1.ctx.log.filter((r) => r.op === "img");
@@ -6268,7 +6269,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     // size about the anchor: at 2x its box 150..170 x 45..55 is 150..160 x 47.5..52.5
     {
       const lab = [RUN_SVG[0], '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><text data-key="p4" x="150" y="50">lab</text></svg>'];
-      const c9 = mount({ panels: true, marks: GL, runSvg: lab, options: { axisZoom: true } });
+      const c9 = mountRuns({ panels: true, marks: GL, runSvg: lab, options: { axisZoom: true } });
       c9.inst._test.setView({ x: 100, y: 25, w: 100, h: 50 }); c9.inst._test.evalTier();
       const d1 = c9.inst._test.distToKey(158, 50, "p4"), d2 = c9.inst._test.distToKey(165, 50, "p4");
       ok(d1 === 0 && Math.abs(d2 - 5) < 1e-9, "VW-42: a constant label's hit box shrinks about its anchor [" + d1 + "," + d2 + "]");
@@ -6284,7 +6285,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     }
     // at 1x nothing changes: the record box, a circle ring
     {
-      const c0 = mount({ panels: true, marks: GL, options: { axisZoom: true } });
+      const c0 = mountRuns({ panels: true, marks: GL, options: { axisZoom: true } });
       c0.inst._call("select", ["p2"]);
       const r0 = c0.el.querySelector(".vellumwidget-fb-sel");
       ok(c0.inst._test.distToKey(82.5, 50, "p2") === 0 && (!r0 || (r0.tagName.toLowerCase() === "circle" && r0.getAttribute("r") === "5")),
@@ -6307,14 +6308,14 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       c0.restore();
     }
     // zoom_marks = "scale" keeps the run scaling with the zoom
-    const c2 = mount({ panels: true, marks: GL, options: { axisZoom: true, zoomMarks: "scale" } });
+    const c2 = mountRuns({ panels: true, marks: GL, options: { axisZoom: true, zoomMarks: "scale" } });
     c2.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c2.inst._test.evalTier();
     const c2i = c2.ctx.log.filter((r) => r.op === "img");
     ok(c2i.length === 2 && c2i.every((r) => r.a.length === 4 && Math.abs(r.t[0] - 2) < 1e-6),
       "VW-35: zoom_marks = 'scale' draws the runs scaled by T, as before");
     c2.restore();
     // a restyled glyph comes from the atlas: alone in its cell, at the dim opacity
-    const c3 = mount({ panels: true, marks: GL, runSvg: RUN_SVG, options: { axisZoom: true } });
+    const c3 = mountRuns({ panels: true, marks: GL, runSvg: RUN_SVG, options: { axisZoom: true } });
     c3.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c3.inst._test.evalTier();
     c3.inst._call("select", ["p1"]); // dims p2 and p4
     const c3i = c3.ctx.log.filter((r) => r.op === "img");
@@ -6331,7 +6332,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     // no slice carries a neighbour's ink
     const ov = ['<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><g mask="url(#m)"><circle data-key="p2" cx="80" cy="50" r="3"/><circle data-key="p3" cx="82" cy="50" r="3"/></g><defs><mask id="m"/></defs></svg>',
       RUN_SVG[1]];
-    const c4 = mount({ panels: true, marks: GL, runSvg: ov, cx: [40, 80, 84, 160], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2], options: { axisZoom: true } });
+    const c4 = mountRuns({ panels: true, marks: GL, runSvg: ov, cx: [40, 80, 84, 160], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2], options: { axisZoom: true } });
     c4.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c4.inst._test.evalTier();
     c4.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); // (the mock loads images at once, mid-paint: redraw)
     const c4i = c4.ctx.log.filter((r) => r.op === "img");
@@ -6341,7 +6342,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     c4.restore();
     // a run with a mark that scales (a polygon): the PNG with the constant
     // marks' boxes cleared, then the constant marks
-    const c5 = mount({ panels: true, marks: ["point", "point", "polygon", "path"], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2], options: { axisZoom: true } });
+    const c5 = mountRuns({ panels: true, marks: ["point", "point", "polygon", "path"], flags: [0, 4, 4, 8], runs: [0, 1, 1, 2], options: { axisZoom: true } });
     c5.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c5.inst._test.evalTier();
     const c5i = c5.ctx.log.filter((r) => r.op === "img");
     ok(c5i.length === 3 && !c5i[0].src && c5i[1].a.length === 8 && /RUN1$/.test(c5i[1].src),
@@ -6350,7 +6351,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     // detail tier: the constant mark is a cell in a nested viewport,
     // counter-scaled about its anchor from the pan group's vars; its
     // stand-in follows it
-    const c6 = mount({ panels: true, marks: GL, detailMarks: 100, options: { axisZoom: true } });
+    const c6 = mountRuns({ panels: true, marks: GL, detailMarks: 100, options: { axisZoom: true } });
     c6.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 }); c6.inst._test.evalTier();
     ok(c6.inst._test.markTier() === "detail", "VW-35 setup: detail tier");
     const sp = c6.el.querySelector("g.vellumwidget-detail-split");
@@ -6369,7 +6370,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   // VW-32: a run under a blend mode is drawn on a canvas of its own, stacked
   // over the marks before it with the run's mix-blend-mode; the marks after it
   // go on the next canvas up, composited normally
-  const bl = mount({ perCanvas: true, flags: [0, 36, 0, 8], runBlend: ["multiply", "normal"] });
+  const bl = mountRuns({ perCanvas: true, flags: [0, 36, 0, 8], runBlend: ["multiply", "normal"] });
   const layersOf = (t) => Array.from(t.el.querySelectorAll("canvas.vellumwidget-canvas-layer"));
   const shownLayers = (t) => layersOf(t).filter((c) => c.style.display === "block");
   ok(bl.inst._test.runsAttached() && bl.inst._test.listExact() === true, "VW-32: a blend-mode run with its mode attaches: the list is exact");
@@ -6403,7 +6404,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
       "VW-32: the export redraw is split the same way: the marks, then each layer with its blend mode");
   }
   bl.restore();
-  const bd = mount({ perCanvas: true, flags: [0, 36, 0, 8], runBlend: ["multiply", "normal"], detailMarks: 100 });
+  const bd = mountRuns({ perCanvas: true, flags: [0, 36, 0, 8], runBlend: ["multiply", "normal"], detailMarks: 100 });
   bd.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); bd.inst._test.evalTier();
   {
     const uses = Array.from(bd.el.querySelectorAll("use.vellumwidget-detail-run"));
@@ -6415,23 +6416,23 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   }
   bd.restore();
   // fallbacks: a run that can't be composited, or an unknown mode
-  const be = mount({ flags: [0, 36, 0, 8], runBlend: ["", "normal"] });
+  const be = mountRuns({ flags: [0, 36, 0, 8], runBlend: ["", "normal"] });
   ok(!be.inst._test.runsAttached() && be.inst._test.listExact() === false, "VW-32 fallback: a run vellum can't composite (\"\") keeps the PNG path");
   be.restore();
-  const bu = mount({ flags: [0, 36, 0, 8], runBlend: ["plus-lighter", "normal"] });
+  const bu = mountRuns({ flags: [0, 36, 0, 8], runBlend: ["plus-lighter", "normal"] });
   ok(!bu.inst._test.runsAttached(), "VW-32 fallback: an unknown blend mode keeps the PNG path");
   bu.restore();
-  const bs = mount({ flags: [0, 36, 0, 8], runBlend: ["multiply"] });
+  const bs = mountRuns({ flags: [0, 36, 0, 8], runBlend: ["multiply"] });
   ok(!bs.inst._test.runsAttached(), "VW-32 fallback: a run_blend that doesn't match the runs is ignored (flag 32 -> PNG path)");
   bs.restore();
   // no blend run: one canvas, no layers, and the overview keeps the mark PNG
-  const bn = mount({ perCanvas: true, runBlend: ["normal", "normal"] });
+  const bn = mountRuns({ perCanvas: true, runBlend: ["normal", "normal"] });
   ok(bn.inst._test.listExact() === true && layersOf(bn).length === 0 && marksShown(bn),
     "VW-32: runs without a blend mode: no stacked layers, the overview keeps the mark PNG");
   bn.restore();
 
   // export (VW-25 path): the redraw includes the runs
-  const x = mount({});
+  const x = mountRuns({});
   {
     const exp = recCtx();
     let captured = null;
@@ -6455,26 +6456,26 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   x.restore();
 
   // fallbacks: exactly the old behaviour
-  const none = mount({ noFlagged: true });
+  const none = mountRuns({ noFlagged: true });
   none.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); none.inst._test.evalTier();
   ok(!none.inst._test.runsAttached() && none.inst._test.listExact() === false && none.inst._test.markTier() === "mid" &&
     marksShown(none) && seq(none.ctx) === "fill:25/125",
     "VW-30 fallback: no run rasters (older vellum) -> inexact list, mark PNG kept, no detail");
   none.restore();
-  const old = mount({ noRuns: true });
+  const old = mountRuns({ noRuns: true });
   ok(!old.inst._test.runsAttached() && old.inst._test.listExact() === false, "VW-30 fallback: a list without runs ignores the rasters");
   old.restore();
-  const short = mount({ runHrefs: ["data:image/png;base64,RUN1"] });
+  const short = mountRuns({ runHrefs: ["data:image/png;base64,RUN1"] });
   ok(!short.inst._test.runsAttached() && short.inst._test.listExact() === false, "VW-30 fallback: one raster short of the runs -> unchanged");
   short.restore();
-  const blend = mount({ flags: [0, 36, 0, 8] });
+  const blend = mountRuns({ flags: [0, 36, 0, 8] });
   ok(!blend.inst._test.runsAttached() && blend.inst._test.listExact() === false, "VW-30 fallback: a blend-mode mark (flag 32) keeps the PNG path");
   blend.restore();
-  const uncovered = mount({ flags: [0, 4, 8, 8] });
+  const uncovered = mountRuns({ flags: [0, 4, 8, 8] });
   ok(!uncovered.inst._test.runsAttached(), "VW-30 fallback: a flagged record outside every run -> unchanged");
   uncovered.restore();
   autoLoad = false;
-  const lazy = mount({});
+  const lazy = mountRuns({});
   lazy.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); lazy.inst._test.evalTier();
   ok(!lazy.inst._test.runsAttached() && lazy.inst._test.markTier() === "mid" && marksShown(lazy),
     "VW-30: until the rasters load, the old behaviour holds");

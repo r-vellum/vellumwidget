@@ -2300,7 +2300,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 }
 
 # One display-list column (`list(type, n, data | const | seq | rle)`) as an R
-# vector; the runtime's `dlColumn()` is the same in JS.
+# vector; the runtime's `dlColumn()` is the same in JS. Reads every form
+# `.uint_column()` writes, the bit-packed one (`bits`, VW-38) included
+# (VW-64).
 .dl_col <- function(col) {
   n <- col$n
   if (!n) {
@@ -2316,6 +2318,14 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     return(rep(col$rle$values, col$rle$lengths))
   }
   raw <- base64enc::base64decode(col$data)
+  if (!is.null(col$bits)) {
+    # each value in `bits` bits, least significant first, from the low bit of
+    # the first byte on
+    k <- col$bits
+    b <- as.integer(rawToBits(raw))[seq_len(n * k)]
+    v <- colSums(matrix(b, nrow = k) * 2^(seq_len(k) - 1L))
+    return(if (k < 32L) as.integer(v) else v)
+  }
   if (!is.null(col$step)) {
     # Quantised coordinates (VR-18): lo + u * step, u of 1, 2 or 3 bytes.
     w <- switch(col$type, u8 = 1L, u16 = 2L, u24 = 3L)

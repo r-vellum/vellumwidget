@@ -16,7 +16,7 @@ local_single_raster <- function(env = parent.frame()) {
   }
   delta <- key$delta
   if (!is.null(key$db)) {
-    delta <- as.numeric(.uint_column_r(key$db))
+    delta <- as.numeric(.dl_col(key$db))
     delta[key$dx + 1L] <- key$dv
   }
   n <- length(delta) + length(key$at)
@@ -36,32 +36,9 @@ local_single_raster <- function(env = parent.frame()) {
   if (is.null(key$db)) {
     return(key$delta)
   }
-  d <- as.numeric(.uint_column_r(key$db))
+  d <- as.numeric(.dl_col(key$db))
   d[key$dx + 1L] <- key$dv
   d
-}
-
-# A typed column (`.uint_column()`, the runtime's `dlColumn()`) as integers.
-.uint_column_r <- function(col) {
-  n <- col$n
-  if (!is.null(col$const)) {
-    return(rep(as.integer(col$const), n))
-  }
-  if (!is.null(col$rle)) {
-    return(as.integer(rep(col$rle$values, col$rle$lengths)))
-  }
-  raw <- base64enc::base64decode(col$data)
-  if (!is.null(col$bits)) {
-    k <- col$bits
-    b <- as.integer(rawToBits(raw))[seq_len(n * k)]
-    return(as.integer(colSums(matrix(b, nrow = k) * 2^(seq_len(k) - 1L))))
-  }
-  switch(
-    col$type,
-    u8 = as.integer(raw),
-    u16 = readBin(raw, "integer", n, size = 2, signed = FALSE, endian = "little"),
-    u32 = readBin(raw, "integer", n, size = 4, endian = "little")
-  )
 }
 
 # One encoded element column as R strings (`NA` for none), whatever its wire
@@ -76,7 +53,7 @@ local_single_raster <- function(env = parent.frame()) {
     return(out)
   }
   if (!is.null(col$cb)) {
-    code <- .uint_column_r(col$cb)
+    code <- .dl_col(col$cb)
     return(ifelse(code == 0L, NA_character_, col$levels[pmax(code, 1L)]))
   }
   if (!is.null(col$rv)) {
@@ -87,7 +64,7 @@ local_single_raster <- function(env = parent.frame()) {
     return(col$levels[col$codes + 1L])
   }
   if (!is.null(col$tpl)) {
-    tc <- .uint_column_r(col$tc)
+    tc <- .dl_col(col$tc)
     tn <- if (is.list(col$tn)) col$tn else list(col$tn)
     key_int <- regmatches(keys, regexpr("(0|[1-9][0-9]{0,14})$", keys, perl = TRUE))
     at <- rep(0L, length(tn))
@@ -104,7 +81,7 @@ local_single_raster <- function(env = parent.frame()) {
           v <- sub(".*?(0|[1-9][0-9]{0,14})$", "\\1", keys[i], perl = TRUE)
           if (is.list(st)) {
             at[j] <- at[j] + 1L
-            w <- if (is.list(st$w)) .uint_column_r(st$w)[at[j]] else st$w
+            w <- if (is.list(st$w)) .dl_col(st$w)[at[j]] else st$w
             if (nchar(v) < w) v <- paste0(strrep("0", w - nchar(v)), v)
           }
           v
@@ -113,12 +90,12 @@ local_single_raster <- function(env = parent.frame()) {
           vals <- if (!is.null(st$d) || !is.null(st$db)) {
             cumsum(.key_deltas_r(list(delta = st$d, db = st$db, dx = st$dx, dv = st$dv)))
           } else if (!is.null(st$vb)) {
-            .uint_column_r(st$vb)
+            .dl_col(st$vb)
           } else {
             st$v
           }
           v <- format(vals[at[j]], scientific = FALSE)
-          w <- if (is.list(st$w)) .uint_column_r(st$w)[at[j]] else st$w
+          w <- if (is.list(st$w)) .dl_col(st$w)[at[j]] else st$w
           if (!is.null(w) && nchar(v) < w) {
             v <- paste0(strrep("0", w - nchar(v)), v)
           }
