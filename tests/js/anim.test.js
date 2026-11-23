@@ -3,6 +3,7 @@
 // the play/pause button and the frame scrubber. jsdom has no Web Animations API,
 // so getAnimations() is stubbed where a test needs it.
 // Run with: node tests/js/anim.test.js
+"use strict";
 const fs = require("fs");
 const path = require("path");
 const { JSDOM, VirtualConsole } = require("jsdom");

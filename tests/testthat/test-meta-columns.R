@@ -247,7 +247,7 @@ test_that("a ragged column with several values ships as a dictionary of sets (VW
     paste0("color:", c("a", "b", "c"), "+shape:", c("a", "b", "c"))
   )
   codes <- if (!is.null(enc$cb)) {
-    .uint_column_r(enc$cb)
+    .dl_col(enc$cb)
   } else {
     rep(enc$rv, enc$rl) + 1L
   }

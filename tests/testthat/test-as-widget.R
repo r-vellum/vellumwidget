@@ -590,7 +590,7 @@ test_that("raster mode ships the element index in the compact encoding (VW-13)",
   # code + 1, bit-packed (VW-38)
   alt <- encode(list(key = cols$key, g = rep(c("a", "b"), n / 2)))
   expect_identical(alt$g$cb$bits, 2L)
-  expect_identical(.uint_column_r(alt$g$cb), rep(1:2, n / 2))
+  expect_identical(.dl_col(alt$g$cb), rep(1:2, n / 2))
   expect_identical(.decode_column_r(alt$g, n), rep(c("a", "b"), n / 2))
   # mostly-integer keys: a first value and differences, the rest sparse
   k <- encode(list(key = c("5", "7", "legend:a", "6", as.character(10:50))))$key
@@ -1090,7 +1090,7 @@ test_that("above max_marks hollow marks are flagged for the dots (VW-63)", {
   mc <- w$x$markColors
   expect_false(is.null(mc$hollow))
   keys <- .decode_keys_r(w$x$elements$key)
-  hol <- .uint_column_r(mc$hollow)
+  hol <- .dl_col(mc$hollow)
   expect_length(hol, length(keys))
   pt <- keys %in% as.character(df$id)
   expect_true(all(hol[pt] == 1L))
@@ -1201,12 +1201,12 @@ test_that("a big bbox index ships as integers on the 1/100 px grid (VW-43)", {
   expect_identical(b$n, n)
   expect_equal(as.vector(b$na), c(6L, 3999L))
   # R's twin of the runtime's decodeBbox(): the same doubles as the plain form
-  gx <- b$lo[1] + .uint_column_r(b$x0)
-  gy <- b$lo[2] + .uint_column_r(b$y0)
+  gx <- b$lo[1] + .dl_col(b$x0)
+  gy <- b$lo[2] + .dl_col(b$y0)
   got <- list(
     x0 = gx / 100, y0 = gy / 100,
-    x1 = (gx + b$lo[3] + .uint_column_r(b$w)) / 100,
-    y1 = (gy + b$lo[4] + .uint_column_r(b$h)) / 100
+    x1 = (gx + b$lo[3] + .dl_col(b$w)) / 100,
+    y1 = (gy + b$lo[4] + .dl_col(b$h)) / 100
   )
   # the odd extents ship plain, so they don't widen every row's `w`
   expect_equal(as.vector(b$ex$at), c(9L, 19L))
@@ -1698,7 +1698,9 @@ test_that(".uint_column() round-trips in every form (VW-38)", {
     x[1] <- top
     for (pack in c(FALSE, TRUE)) {
       col <- .uint_column(x, pack = pack)
-      expect_identical(.uint_column_r(col), x)
+      # `.dl_col()` reads the packed form too (VW-64); a u32 comes back double
+      expect_equal(.dl_col(col), x)
+      if (pack || top <= 65535L) expect_identical(.dl_col(col), x)
       expect_identical(!is.null(col$bits), pack && !ceiling(log2(top + 1)) %in% c(8, 16, 32))
     }
   }
