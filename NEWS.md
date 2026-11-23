@@ -1,4 +1,7 @@
-# vellumwidget 0.18.0.9000
+# vellumwidget 0.19.0
+
+* Requires vellumplot (>= 0.20.0), whose open point shapes reach the
+  fallback dots as hollow marks (VP-103, VW-63).
 
 ## Improvements
 
