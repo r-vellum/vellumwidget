@@ -413,18 +413,34 @@ export function axisRetickable(ax: AxisScale | undefined): boolean {
 //  - date / datetime: calendar steps (timeTicks);
 //  - log10: decades + subdivisions (logTicks), labelled like the static axis;
 //  - linear / reverse / sqrt: nice 1-2-5 steps in data space (niceTicks).
+// The static render's own breaks and labels inside the native range [lo, hi].
+export function staticTicks(ax: AxisScale, lo: number, hi: number): Tick[] {
+  const b = asColumn(ax.breaks), l = asColumn(ax.labels);
+  const tol = Math.abs(hi - lo) * 1e-6;
+  const out: Tick[] = [];
+  for (let i = 0; i < b.length && i < l.length; i++) {
+    const v = Number(b[i]);
+    if (isFinite(v) && v >= lo - tol && v <= hi + tol) out.push({ n: v, label: String(l[i]) });
+  }
+  return out;
+}
+
+// Minor gridline positions for a set of major breaks, as vellumplot's
+// `.minor_breaks()` places them: the midpoints, plus half the local gap beyond
+// each end. Fewer than two breaks give none.
+export function minorBreaks(b: number[]): number[] {
+  const s = b.filter(isFinite).slice().sort(function (p, q) { return p - q; });
+  const n = s.length;
+  if (n < 2) return [];
+  const out: number[] = [s[0] - (s[1] - s[0]) / 2];
+  for (let i = 0; i + 1 < n; i++) out.push((s[i] + s[i + 1]) / 2);
+  out.push(s[n - 1] + (s[n - 1] - s[n - 2]) / 2);
+  return out;
+}
+
 export function axisTicks(ax: AxisScale, lo: number, hi: number, n: number): Tick[] {
   if (!(hi > lo)) return [];
-  const statics = function (): Tick[] {
-    const b = asColumn(ax.breaks), l = asColumn(ax.labels);
-    const tol = (hi - lo) * 1e-6;
-    const out: Tick[] = [];
-    for (let i = 0; i < b.length && i < l.length; i++) {
-      const v = Number(b[i]);
-      if (isFinite(v) && v >= lo - tol && v <= hi + tol) out.push({ n: v, label: String(l[i]) });
-    }
-    return out;
-  };
+  const statics = function (): Tick[] { return staticTicks(ax, lo, hi); };
   if (ax.type === "discrete" || ax.type === "binned") return statics();
   if (ax.time_unit === "day" || ax.time_unit === "second") return timeTicks(ax, lo, hi, n);
   if (ax.transform === "log10") {

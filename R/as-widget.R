@@ -1796,7 +1796,14 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
       # axis's levels in position order, for interval-selection membership. A
       # list keeps a one-level axis a JSON array.
       aes = if (is.null(a$aesthetic)) NULL else as.character(a$aesthetic),
-      levels = if (is.null(a$levels)) NULL else as.list(as.character(a$levels))
+      levels = if (is.null(a$levels)) NULL else as.list(as.character(a$levels)),
+      # Which gridlines the static panel drew along this axis (vellumplot's
+      # theme panel.grid.*), so the re-ticked grid matches (VW-66).
+      grid = if (is.null(a$grid)) {
+        NULL
+      } else {
+        list(major = isTRUE(a$grid$major), minor = isTRUE(a$grid$minor))
+      }
     ))
   }
   out <- list()

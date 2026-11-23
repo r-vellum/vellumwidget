@@ -357,3 +357,22 @@ test_that("a per-row alpha if_false ships as opacities (VW-56)", {
     vellumplot::select_point("s")
   expect_null(as_widget(q)$x$elements$cond_value)
 })
+
+test_that("each composition cell's panel carries its gridline flags (VW-66)", {
+  df <- data.frame(t = 1:30, v = sin(1:30 / 4))
+  a <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = t, y = v) |>
+    vellumplot::theme_minimal()
+  b <- a |>
+    vellumplot::theme(panel.grid = vellumplot::element_blank())
+  model <- vellum::scene_model(
+    vellum::as_vellum_scene(vellumplot::vconcat(a, b)),
+    meta = "columns"
+  )
+  p <- vellumwidget:::.vellumwidget_panels(model)
+  skip_if(is.null(p[[1]]$x$grid), "vellumplot without panel grid flags")
+  expect_identical(p[[1]]$x$grid, list(major = TRUE, minor = TRUE))
+  expect_identical(p[[1]]$y$grid, list(major = TRUE, minor = TRUE))
+  expect_identical(p[[2]]$x$grid, list(major = FALSE, minor = FALSE))
+  expect_identical(p[[2]]$y$grid, list(major = FALSE, minor = FALSE))
+})
