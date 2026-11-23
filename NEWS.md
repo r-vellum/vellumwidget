@@ -30,6 +30,9 @@
   block called `mount()`, so none had been running against the wrong helper
   (VW-65).
 
+* The JS CI workflow (`js.yaml`) now also runs when only `tests/js/` changes;
+  a change to the headless test suites alone used to run no JS checks.
+
 # vellumwidget 0.18.0
 
 * Requires vellum (>= 0.14.0) and vellumplot (>= 0.19.0).
