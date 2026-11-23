@@ -6,9 +6,9 @@ import { applyAffine6, parseTransformList } from "../geometry";
 import { SVGNS } from "./constants";
 import { GLYPH_MARKS } from "../scales";
 import type { WidgetFns, WidgetState } from "../state";
-import { axisRetickable, axisTicks, axisTicksAtDecimals, labelDecimals, secAxisMap, secTicks } from "../ticks";
+import { axisRetickable, axisTicks, axisTicksAtDecimals, labelDecimals, minorBreaks, secAxisMap, secTicks, staticTicks } from "../ticks";
 import type { Tick } from "../ticks";
-import type { AxisAnchor, AxisTitle, AzPanel, TickStyle } from "../types";
+import type { AxisAnchor, AxisScale, AxisTitle, AzPanel, LineStyle, PanelGridStyle, TickStyle } from "../types";
 import { fmtViewBox } from "../viewbox";
 import type { PanTransform } from "../viewbox";
 
@@ -68,13 +68,15 @@ export function axisZoomFeature(
         p: p, pan: pan as SVGGElement, mirror: mirror as SVGGElement | null, outer: outer as SVGGElement, grid: null,
         ax: ax, bx: p.px0 - ax * ref.px0, ay: ay, by: p.py0 - ay * ref.py0,
         xLab: null, yLab: null, x2Lab: null, y2Lab: null, x2Map: null, y2Map: null,
-        xTick: null, yTick: null
+        xTick: null, yTick: null,
+        gridStyle: { xMajor: null, xMinor: null, yMajor: null, yMinor: null }
       });
     }
     ws.azPanels = found;
     ws.panGroup = found[0].pan;
     ws.axisZoomActive = true;
     scrapeAxisStyle();
+    for (let i = 0; i < found.length; i++) scrapePanelGrid(found[i]);
     scrapeAxisAnchors();
     scrapeAxisTitles();
     hideStaticAxes();
@@ -291,6 +293,63 @@ export function axisZoomFeature(
       const sw = parseFloat(grid.getAttribute("stroke-width") || "");
       if (sw) ws.axisStyle.gridWidth = sw;
     }
+  }
+
+  // The static gridlines of one panel (VW-66): each role="grid" group inside it
+  // is one batch of axis-aligned segments, vertical ones along x and horizontal
+  // ones along y. vellumplot draws them minor x, minor y, major x, major y
+  // (`.draw_panel_bg()`), so of two groups along an axis the first is the minor
+  // set; a lone group is the major set unless the axis descriptor says this
+  // panel has minor lines only.
+  function scrapePanelGrid(a: AzPanel): void {
+    const nodes = a.outer.querySelectorAll('[role="grid"] path, [role="grid"] line');
+    const along: { x: LineStyle[]; y: LineStyle[] } = { x: [], y: [] };
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      let seg: number[] | null = null;
+      if (n.tagName.toLowerCase() === "line") {
+        seg = ["x1", "y1", "x2", "y2"].map(function (k) { return parseFloat(n.getAttribute(k) || ""); });
+      } else {
+        const segs = pathSegments(n.getAttribute("d") || "");
+        seg = segs ? segs[0] : null;
+      }
+      if (!seg || !seg.every(isFinite)) continue;
+      const st: LineStyle = {
+        stroke: n.getAttribute("stroke") || ws.axisStyle.gridStroke,
+        width: parseFloat(n.getAttribute("stroke-width") || "") || ws.axisStyle.gridWidth
+      };
+      if (Math.abs(seg[0] - seg[2]) < 0.01) along.x.push(st);
+      else if (Math.abs(seg[1] - seg[3]) < 0.01) along.y.push(st);
+    }
+    const pick = function (sts: LineStyle[], ax: AxisScale | undefined): [LineStyle | null, LineStyle | null] {
+      if (sts.length >= 2) return [sts[sts.length - 1], sts[0]];
+      if (sts.length === 1) {
+        const g = ax && ax.grid;
+        return g && g.minor && !g.major ? [null, sts[0]] : [sts[0], null];
+      }
+      return [null, null];
+    };
+    const px = pick(along.x, a.p.x), py = pick(along.y, a.p.y);
+    a.gridStyle = { xMajor: px[0], xMinor: px[1], yMajor: py[0], yMinor: py[1] };
+  }
+
+  // The gridline style to draw along one axis of a panel, or null for none. The
+  // axis descriptor's `grid` flags decide (a blank panel.grid draws nothing).
+  // A payload without them (an older vellumplot) keeps the earlier behaviour:
+  // major lines always, minor ones where the static panel drew some. Style
+  // from the panel's own static lines, else the scraped theme default.
+  function gridFor(a: AzPanel, axis: "x" | "y", kind: "major" | "minor"): LineStyle | null {
+    const ax = axis === "x" ? a.p.x : a.p.y;
+    const key = (axis + (kind === "major" ? "Major" : "Minor")) as keyof PanelGridStyle;
+    const scraped = a.gridStyle[key];
+    const g = ax && ax.grid;
+    if (g && (g.major !== undefined || g.minor !== undefined)) {
+      if (!g[kind]) return null;
+      if (kind === "minor" && ax && (ax.type === "discrete" || ax.type === "binned")) return null;
+      return scraped || { stroke: ws.axisStyle.gridStroke, width: ws.axisStyle.gridWidth };
+    }
+    if (kind === "major") return scraped || { stroke: ws.axisStyle.gridStroke, width: ws.axisStyle.gridWidth };
+    return scraped;
   }
 
   // Assign each static tick-label group (axis-x-* / axis-y-*) to the panel it
@@ -633,12 +692,12 @@ export function axisZoomFeature(
   }
 
   // A gridline / an axis label, styled to match the scraped theme.
-  function gridLine(x1: number, y1: number, x2: number, y2: number): SVGLineElement {
+  function gridLine(x1: number, y1: number, x2: number, y2: number, st: LineStyle): SVGLineElement {
     const l = document.createElementNS(SVGNS, "line") as SVGLineElement;
     l.setAttribute("x1", String(x1)); l.setAttribute("y1", String(y1));
     l.setAttribute("x2", String(x2)); l.setAttribute("y2", String(y2));
-    l.setAttribute("stroke", ws.axisStyle.gridStroke);
-    l.setAttribute("stroke-width", String(ws.axisStyle.gridWidth));
+    l.setAttribute("stroke", st.stroke);
+    l.setAttribute("stroke-width", String(st.width));
     return l;
   }
 
@@ -680,12 +739,26 @@ export function axisZoomFeature(
     placeAxisTitles();
   }
 
+  // Does the axis descriptor carry the static render's breaks (an older payload,
+  // or a hand-made one, may not)?
+  function hasStatic(ax: AxisScale): boolean {
+    const b = ax.breaks;
+    return b !== undefined && b !== null && (!Array.isArray(b) || b.length > 0);
+  }
+
   function retickPanel(a: AzPanel): void {
     const p = a.p, grid = a.grid, layer = ws.retickLayer;
     if (!grid || !layer) return;
     while (grid.firstChild) grid.removeChild(grid.firstChild);
     const t = ws.fx.azT(a);
+    // At the unzoomed view the axes show the static render's own breaks and
+    // labels, so the widget opens identical to the static plot; re-ticking
+    // starts with the first zoom (VW-66). (Nice ticks over the expanded native
+    // range could add a break the static axis left out, e.g. 400 on a 0-398 axis.)
+    const identity = Math.abs(t.sx - 1) < 1e-9 && Math.abs(t.sy - 1) < 1e-9 && Math.abs(t.tx) < 1e-6 && Math.abs(t.ty) < 1e-6;
     const ticks_: SVGLineElement[] = []; // tick marks go on top of every gridline
+    const minors: SVGLineElement[] = []; // minor gridlines go under the major ones
+    const majors: SVGLineElement[] = [];
     // Visible native range: invert the panel's fixed screen rect through T_i to
     // the device px now sitting there, then px -> native via the panel affine.
     if (p.x && p.px1 !== p.px0) {
@@ -693,12 +766,20 @@ export function axisZoomFeature(
       const k = (ax.native_hi - ax.native_lo) / (p.px1 - p.px0);
       const nA = ax.native_lo + ((p.px0 - t.tx) / t.sx - p.px0) * k;
       const nB = ax.native_lo + ((p.px1 - t.tx) / t.sx - p.px0) * k;
-      const ticks = axisTicks(ax, Math.min(nA, nB), Math.max(nA, nB), 5);
+      const ticks = identity && hasStatic(ax) ? staticTicks(ax, Math.min(nA, nB), Math.max(nA, nB)) : axisTicks(ax, Math.min(nA, nB), Math.max(nA, nB), 5);
+      const toSx = function (n: number): number { return t.sx * (p.px0 + (n - ax.native_lo) / k) + t.tx; };
+      const gMaj = gridFor(a, "x", "major"), gMin = gridFor(a, "x", "minor");
+      if (gMin) {
+        const mb = minorBreaks(ticks.map(function (x) { return x.n; }));
+        for (let i = 0; i < mb.length; i++) {
+          const sx = toSx(mb[i]);
+          if (isFinite(sx) && sx >= p.px0 - 0.5 && sx <= p.px1 + 0.5) minors.push(gridLine(sx, p.py0, sx, p.py1, gMin));
+        }
+      }
       for (let i = 0; i < ticks.length; i++) {
-        const px = p.px0 + (ticks[i].n - ax.native_lo) / k;
-        const sx = t.sx * px + t.tx; // screen device-px
+        const sx = toSx(ticks[i].n); // screen device-px
         if (!isFinite(sx) || sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
-        grid.appendChild(gridLine(sx, p.py0, sx, p.py1));
+        if (gMaj) majors.push(gridLine(sx, p.py0, sx, p.py1, gMaj));
         if (a.xTick) ticks_.push(tickLine(a.xTick, sx, p));
         if (a.xLab) {
           const lab = axisLabel(ticks[i].label, sx, a.xLab.pos, a.xLab.anchor, a.xLab.baseline, a.xLab.rot);
@@ -721,13 +802,22 @@ export function axisZoomFeature(
       const k = (ay.native_hi - ay.native_lo) / (p.py1 - p.py0);
       const nA = ay.native_hi - ((p.py0 - t.ty) / t.sy - p.py0) * k;
       const nB = ay.native_hi - ((p.py1 - t.ty) / t.sy - p.py0) * k;
-      let ticks = axisTicks(ay, Math.min(nA, nB), Math.max(nA, nB), 5);
-      if (a.yLab) ticks = fitYTicks(a.yLab, ay, Math.min(nA, nB), Math.max(nA, nB), ticks);
+      const fromStatic = identity && hasStatic(ay);
+      let ticks = fromStatic ? staticTicks(ay, Math.min(nA, nB), Math.max(nA, nB)) : axisTicks(ay, Math.min(nA, nB), Math.max(nA, nB), 5);
+      if (a.yLab && !fromStatic) ticks = fitYTicks(a.yLab, ay, Math.min(nA, nB), Math.max(nA, nB), ticks);
+      const toSy = function (n: number): number { return t.sy * (p.py0 + (ay.native_hi - n) / k) + t.ty; };
+      const gMaj = gridFor(a, "y", "major"), gMin = gridFor(a, "y", "minor");
+      if (gMin) {
+        const mb = minorBreaks(ticks.map(function (x) { return x.n; }));
+        for (let i = 0; i < mb.length; i++) {
+          const sy = toSy(mb[i]);
+          if (isFinite(sy) && sy >= p.py0 - 0.5 && sy <= p.py1 + 0.5) minors.push(gridLine(p.px0, sy, p.px1, sy, gMin));
+        }
+      }
       for (let i = 0; i < ticks.length; i++) {
-        const py = p.py0 + (ay.native_hi - ticks[i].n) / k;
-        const sy = t.sy * py + t.ty;
+        const sy = toSy(ticks[i].n);
         if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
-        grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
+        if (gMaj) majors.push(gridLine(p.px0, sy, p.px1, sy, gMaj));
         if (a.yTick) ticks_.push(tickLine(a.yTick, sy, p));
         if (a.yLab) {
           const lab = axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline, a.yLab.rot);
@@ -746,6 +836,8 @@ export function axisZoomFeature(
         }
       }
     }
+    for (let i = 0; i < minors.length; i++) grid.appendChild(minors[i]);
+    for (let i = 0; i < majors.length; i++) grid.appendChild(majors[i]);
     for (let i = 0; i < ticks_.length; i++) grid.appendChild(ticks_[i]);
   }
 

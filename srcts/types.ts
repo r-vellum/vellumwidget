@@ -268,6 +268,11 @@ export interface AxisScale {
   levels?: string[] | string; // discrete axis: the levels in position order (level i at native i)
   breaks?: number[] | number; // static tick positions (native units), as vellumplot drew them
   labels?: string[] | string; // their formatted strings (htmlwidgets may unbox length-1)
+  // Which gridlines the static panel drew along this axis (its theme's
+  // panel.grid.major.* / panel.grid.minor.*), so the re-ticker draws the same
+  // set (VW-66). Absent from an older vellumplot: the widget then goes by the
+  // static gridlines it finds in the panel.
+  grid?: { major?: boolean; minor?: boolean };
 }
 // A cartesian data panel: its device-px rectangle (from vellum's resolved layout)
 // plus each axis's scale descriptor. The px rect + native domain give the affine
@@ -422,6 +427,20 @@ export interface AzPanel {
   // re-drawn at the re-ticked breaks with the same stroke, length and edge.
   xTick: TickStyle | null;
   yTick: TickStyle | null;
+  // The static gridlines this panel drew, per axis and kind (null: none),
+  // re-drawn at the re-ticked breaks with the same stroke (VW-66).
+  gridStyle: PanelGridStyle;
+}
+
+export interface LineStyle {
+  stroke: string;
+  width: number;
+}
+export interface PanelGridStyle {
+  xMajor: LineStyle | null;
+  xMinor: LineStyle | null;
+  yMajor: LineStyle | null;
+  yMinor: LineStyle | null;
 }
 
 // A panel's static tick marks: their stroke, length (device px) and the panel

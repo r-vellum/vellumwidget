@@ -2272,6 +2272,61 @@ ok(T.nativeToData({ transform: "sqrt" }, 3) === 9, "nativeToData: sqrt -> n^2");
       "VW-17: the background is outside the pan group, so a zoom does not scale it");
   }
 
+  // VW-66: a composition cell themed panel.grid = element_blank() keeps no
+  // gridlines in the widget, the cells show the static breaks at the unzoomed
+  // view (no extra 400 on a 0-418 axis whose static breaks stop at 300), and a
+  // panel's minor / major gridlines keep their own static strokes.
+  {
+    const cmpSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">' +
+      '<g data-vellum-panel="cell-1-panel-1-1" clip-path="url(#c0)"><g data-vellum-pan="cell-1-panel-1-1">' +
+      '<g role="grid"><path d="M40 90 L40 10 M120 90 L120 10" stroke="#eeeeee" stroke-width="0.5"/></g>' +
+      '<g role="grid"><path d="M20 70 L180 70 M20 30 L180 30" stroke="#eeeeee" stroke-width="0.5"/></g>' +
+      '<g role="grid"><path d="M80 90 L80 10 M160 90 L160 10" stroke="#dddddd" stroke-width="1"/></g>' +
+      '<g role="grid"><path d="M20 90 L180 90 M20 50 L180 50" stroke="#dddddd" stroke-width="1"/></g>' +
+      '<path data-key="a" d="M100 50h2v2z"/></g></g>' +
+      '<g data-vellum-panel="cell-2-panel-1-1" clip-path="url(#c1)"><g data-vellum-pan="cell-2-panel-1-1">' +
+      '<path data-key="b" d="M100 150h2v2z"/></g></g>' +
+      '<g data-vellum-panel="axis-x-3"><text x="0" y="4" transform="matrix(1 0 0 1 80 90)" fill="#333333" font-family="sans-serif" font-size="12">100</text></g>' +
+      '<g data-vellum-panel="axis-y-1"><text x="-4" y="0" transform="matrix(1 0 0 1 20 50)" fill="#333333" font-family="sans-serif" font-size="12">200</text></g>' +
+      '<g data-vellum-panel="axis-x-4"><text x="0" y="4" transform="matrix(1 0 0 1 80 190)" fill="#333333" font-family="sans-serif" font-size="12">100</text></g></svg>';
+    const yAx = { type: "continuous", transform: "identity", data_lo: 0, data_hi: 398, native_lo: 0, native_hi: 400,
+      breaks: [0, 200], labels: ["0", "200"], grid: { major: true, minor: true } };
+    const xAx = { type: "continuous", transform: "identity", data_lo: 0, data_hi: 200, native_lo: 0, native_hi: 200,
+      breaks: [100, 200], labels: ["100", "200"], grid: { major: true, minor: true } };
+    const blank = { major: false, minor: false };
+    const cmpPanels = [
+      { name: "cell-1-panel-1-1", cell: "cell-1", px0: 20, py0: 10, px1: 180, py1: 90, x: xAx, y: yAx },
+      { name: "cell-2-panel-1-1", cell: "cell-2", px0: 20, py0: 110, px1: 180, py1: 190,
+        x: Object.assign({}, xAx, { grid: blank }), y: Object.assign({}, yAx, { grid: blank }) }
+    ];
+    const cz = mountAZ({ axisZoom: true, maxZoom: 1e6 }, cmpSvg, cmpPanels);
+    ok(cz.inst._test.axisZoomActive() === true, "VW-66: the composition fixture is axis-zoomable");
+    const gridOf = (nm) => Array.prototype.slice.call(
+      cz.el.querySelectorAll('[data-vellum-panel="' + nm + '"] .vellumwidget-retick-grid line'));
+    ok(gridOf("cell-2-panel-1-1").length === 0,
+      "VW-66: a cell with panel.grid = element_blank() gets no re-ticked gridlines");
+    const g1 = gridOf("cell-1-panel-1-1");
+    ok(g1.length > 0, "VW-66: the gridded cell keeps its gridlines");
+    const yLabs0 = cz.inst._test.retickLabels().filter((l) => l.x < 20).map((l) => l.text);
+    ok(JSON.stringify(yLabs0.slice().sort()) === JSON.stringify(["0", "200"]),
+      "VW-66: the unzoomed view shows the static y breaks (got " + yLabs0.join(",") + ")");
+    const strokes = g1.map((l) => l.getAttribute("stroke") + "/" + l.getAttribute("stroke-width"));
+    ok(strokes.indexOf("#dddddd/1") >= 0 && strokes.indexOf("#eeeeee/0.5") >= 0,
+      "VW-66: major and minor gridlines keep their own static strokes");
+    const firstMajor = g1.findIndex((l) => l.getAttribute("stroke") === "#dddddd");
+    ok(g1.slice(firstMajor).every((l) => l.getAttribute("stroke") === "#dddddd"),
+      "VW-66: minor gridlines are drawn under the major ones");
+    cz.inst._test.setView({ x: 50, y: 25, w: 100, h: 50 });
+    ok(gridOf("cell-2-panel-1-1").length === 0, "VW-66: the blank cell stays gridless after a zoom");
+    const yLabsZ = cz.inst._test.retickLabels().filter((l) => l.x < 20).map((l) => l.text);
+    ok(JSON.stringify(yLabsZ) !== JSON.stringify(yLabs0), "VW-66: a zoom re-ticks the axes");
+    cz.inst._test.setView({ x: 0, y: 0, w: 200, h: 200 });
+    const yLabsR = cz.inst._test.retickLabels().filter((l) => l.x < 20).map((l) => l.text);
+    ok(JSON.stringify(yLabsR.slice().sort()) === JSON.stringify(["0", "200"]),
+      "VW-66: resetting the zoom brings the static breaks back");
+  }
+
   // navigator + axis_zoom cooperate: the navigator's x-only zoom is rendered THROUGH
   // axis_zoom (fixed frame, re-ticked x-axis) rather than the stretch fallback.
   const nz = mountAZ({ axisZoom: true, navigator: true });
