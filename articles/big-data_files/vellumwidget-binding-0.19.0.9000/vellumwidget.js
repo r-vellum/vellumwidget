@@ -2141,17 +2141,31 @@
     if (ax.type === "continuous" && NICE_TRANSFORMS[ax.transform]) return true;
     return hasStaticBreaks(ax);
   }
+  function staticTicks(ax, lo, hi) {
+    const b = asColumn(ax.breaks), l = asColumn(ax.labels);
+    const tol = Math.abs(hi - lo) * 1e-6;
+    const out = [];
+    for (let i = 0; i < b.length && i < l.length; i++) {
+      const v = Number(b[i]);
+      if (isFinite(v) && v >= lo - tol && v <= hi + tol) out.push({ n: v, label: String(l[i]) });
+    }
+    return out;
+  }
+  function minorBreaks(b) {
+    const s = b.filter(isFinite).slice().sort(function(p, q) {
+      return p - q;
+    });
+    const n = s.length;
+    if (n < 2) return [];
+    const out = [s[0] - (s[1] - s[0]) / 2];
+    for (let i = 0; i + 1 < n; i++) out.push((s[i] + s[i + 1]) / 2);
+    out.push(s[n - 1] + (s[n - 1] - s[n - 2]) / 2);
+    return out;
+  }
   function axisTicks(ax, lo, hi, n) {
     if (!(hi > lo)) return [];
     const statics = function() {
-      const b = asColumn(ax.breaks), l = asColumn(ax.labels);
-      const tol = (hi - lo) * 1e-6;
-      const out = [];
-      for (let i = 0; i < b.length && i < l.length; i++) {
-        const v = Number(b[i]);
-        if (isFinite(v) && v >= lo - tol && v <= hi + tol) out.push({ n: v, label: String(l[i]) });
-      }
-      return out;
+      return staticTicks(ax, lo, hi);
     };
     if (ax.type === "discrete" || ax.type === "binned") return statics();
     if (ax.time_unit === "day" || ax.time_unit === "second") return timeTicks(ax, lo, hi, n);
@@ -2437,13 +2451,15 @@
           x2Map: null,
           y2Map: null,
           xTick: null,
-          yTick: null
+          yTick: null,
+          gridStyle: { xMajor: null, xMinor: null, yMajor: null, yMinor: null }
         });
       }
       ws.azPanels = found;
       ws.panGroup = found[0].pan;
       ws.axisZoomActive = true;
       scrapeAxisStyle();
+      for (let i = 0; i < found.length; i++) scrapePanelGrid(found[i]);
       scrapeAxisAnchors();
       scrapeAxisTitles();
       hideStaticAxes();
@@ -2593,6 +2609,52 @@
         const sw = parseFloat(grid.getAttribute("stroke-width") || "");
         if (sw) ws.axisStyle.gridWidth = sw;
       }
+    }
+    function scrapePanelGrid(a) {
+      const nodes = a.outer.querySelectorAll('[role="grid"] path, [role="grid"] line');
+      const along = { x: [], y: [] };
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        let seg = null;
+        if (n.tagName.toLowerCase() === "line") {
+          seg = ["x1", "y1", "x2", "y2"].map(function(k) {
+            return parseFloat(n.getAttribute(k) || "");
+          });
+        } else {
+          const segs = pathSegments(n.getAttribute("d") || "");
+          seg = segs ? segs[0] : null;
+        }
+        if (!seg || !seg.every(isFinite)) continue;
+        const st = {
+          stroke: n.getAttribute("stroke") || ws.axisStyle.gridStroke,
+          width: parseFloat(n.getAttribute("stroke-width") || "") || ws.axisStyle.gridWidth
+        };
+        if (Math.abs(seg[0] - seg[2]) < 0.01) along.x.push(st);
+        else if (Math.abs(seg[1] - seg[3]) < 0.01) along.y.push(st);
+      }
+      const pick = function(sts, ax) {
+        if (sts.length >= 2) return [sts[sts.length - 1], sts[0]];
+        if (sts.length === 1) {
+          const g = ax && ax.grid;
+          return g && g.minor && !g.major ? [null, sts[0]] : [sts[0], null];
+        }
+        return [null, null];
+      };
+      const px = pick(along.x, a.p.x), py = pick(along.y, a.p.y);
+      a.gridStyle = { xMajor: px[0], xMinor: px[1], yMajor: py[0], yMinor: py[1] };
+    }
+    function gridFor(a, axis, kind) {
+      const ax = axis === "x" ? a.p.x : a.p.y;
+      const key = axis + (kind === "major" ? "Major" : "Minor");
+      const scraped = a.gridStyle[key];
+      const g = ax && ax.grid;
+      if (g && (g.major !== void 0 || g.minor !== void 0)) {
+        if (!g[kind]) return null;
+        if (kind === "minor" && ax && (ax.type === "discrete" || ax.type === "binned")) return null;
+        return scraped || { stroke: ws.axisStyle.gridStroke, width: ws.axisStyle.gridWidth };
+      }
+      if (kind === "major") return scraped || { stroke: ws.axisStyle.gridStroke, width: ws.axisStyle.gridWidth };
+      return scraped;
     }
     function scrapeAxisAnchors() {
       if (!ws.svgEl) return;
@@ -2910,14 +2972,14 @@
       l.setAttribute("class", "vellumwidget-retick-tick");
       return l;
     }
-    function gridLine(x1, y1, x2, y2) {
+    function gridLine(x1, y1, x2, y2, st) {
       const l = document.createElementNS(SVGNS, "line");
       l.setAttribute("x1", String(x1));
       l.setAttribute("y1", String(y1));
       l.setAttribute("x2", String(x2));
       l.setAttribute("y2", String(y2));
-      l.setAttribute("stroke", ws.axisStyle.gridStroke);
-      l.setAttribute("stroke-width", String(ws.axisStyle.gridWidth));
+      l.setAttribute("stroke", st.stroke);
+      l.setAttribute("stroke-width", String(st.width));
       return l;
     }
     function axisLabel(text, x, y, anchor, baseline, rot) {
@@ -2952,23 +3014,42 @@
       for (let i = 0; i < ws.azPanels.length; i++) retickPanel(ws.azPanels[i]);
       placeAxisTitles();
     }
+    function hasStatic(ax) {
+      const b = ax.breaks;
+      return b !== void 0 && b !== null && (!Array.isArray(b) || b.length > 0);
+    }
     function retickPanel(a) {
       const p = a.p, grid = a.grid, layer = ws.retickLayer;
       if (!grid || !layer) return;
       while (grid.firstChild) grid.removeChild(grid.firstChild);
       const t = ws.fx.azT(a);
+      const identity = Math.abs(t.sx - 1) < 1e-9 && Math.abs(t.sy - 1) < 1e-9 && Math.abs(t.tx) < 1e-6 && Math.abs(t.ty) < 1e-6;
       const ticks_ = [];
+      const minors = [];
+      const majors = [];
       if (p.x && p.px1 !== p.px0) {
         const ax = p.x;
         const k = (ax.native_hi - ax.native_lo) / (p.px1 - p.px0);
         const nA = ax.native_lo + ((p.px0 - t.tx) / t.sx - p.px0) * k;
         const nB = ax.native_lo + ((p.px1 - t.tx) / t.sx - p.px0) * k;
-        const ticks = axisTicks(ax, Math.min(nA, nB), Math.max(nA, nB), 5);
+        const ticks = identity && hasStatic(ax) ? staticTicks(ax, Math.min(nA, nB), Math.max(nA, nB)) : axisTicks(ax, Math.min(nA, nB), Math.max(nA, nB), 5);
+        const toSx = function(n) {
+          return t.sx * (p.px0 + (n - ax.native_lo) / k) + t.tx;
+        };
+        const gMaj = gridFor(a, "x", "major"), gMin = gridFor(a, "x", "minor");
+        if (gMin) {
+          const mb = minorBreaks(ticks.map(function(x) {
+            return x.n;
+          }));
+          for (let i = 0; i < mb.length; i++) {
+            const sx = toSx(mb[i]);
+            if (isFinite(sx) && sx >= p.px0 - 0.5 && sx <= p.px1 + 0.5) minors.push(gridLine(sx, p.py0, sx, p.py1, gMin));
+          }
+        }
         for (let i = 0; i < ticks.length; i++) {
-          const px = p.px0 + (ticks[i].n - ax.native_lo) / k;
-          const sx = t.sx * px + t.tx;
+          const sx = toSx(ticks[i].n);
           if (!isFinite(sx) || sx < p.px0 - 0.5 || sx > p.px1 + 0.5) continue;
-          grid.appendChild(gridLine(sx, p.py0, sx, p.py1));
+          if (gMaj) majors.push(gridLine(sx, p.py0, sx, p.py1, gMaj));
           if (a.xTick) ticks_.push(tickLine(a.xTick, sx, p));
           if (a.xLab) {
             const lab = axisLabel(ticks[i].label, sx, a.xLab.pos, a.xLab.anchor, a.xLab.baseline, a.xLab.rot);
@@ -2990,13 +3071,26 @@
         const k = (ay.native_hi - ay.native_lo) / (p.py1 - p.py0);
         const nA = ay.native_hi - ((p.py0 - t.ty) / t.sy - p.py0) * k;
         const nB = ay.native_hi - ((p.py1 - t.ty) / t.sy - p.py0) * k;
-        let ticks = axisTicks(ay, Math.min(nA, nB), Math.max(nA, nB), 5);
-        if (a.yLab) ticks = fitYTicks(a.yLab, ay, Math.min(nA, nB), Math.max(nA, nB), ticks);
+        const fromStatic = identity && hasStatic(ay);
+        let ticks = fromStatic ? staticTicks(ay, Math.min(nA, nB), Math.max(nA, nB)) : axisTicks(ay, Math.min(nA, nB), Math.max(nA, nB), 5);
+        if (a.yLab && !fromStatic) ticks = fitYTicks(a.yLab, ay, Math.min(nA, nB), Math.max(nA, nB), ticks);
+        const toSy = function(n) {
+          return t.sy * (p.py0 + (ay.native_hi - n) / k) + t.ty;
+        };
+        const gMaj = gridFor(a, "y", "major"), gMin = gridFor(a, "y", "minor");
+        if (gMin) {
+          const mb = minorBreaks(ticks.map(function(x) {
+            return x.n;
+          }));
+          for (let i = 0; i < mb.length; i++) {
+            const sy = toSy(mb[i]);
+            if (isFinite(sy) && sy >= p.py0 - 0.5 && sy <= p.py1 + 0.5) minors.push(gridLine(p.px0, sy, p.px1, sy, gMin));
+          }
+        }
         for (let i = 0; i < ticks.length; i++) {
-          const py = p.py0 + (ay.native_hi - ticks[i].n) / k;
-          const sy = t.sy * py + t.ty;
+          const sy = toSy(ticks[i].n);
           if (!isFinite(sy) || sy < p.py0 - 0.5 || sy > p.py1 + 0.5) continue;
-          grid.appendChild(gridLine(p.px0, sy, p.px1, sy));
+          if (gMaj) majors.push(gridLine(p.px0, sy, p.px1, sy, gMaj));
           if (a.yTick) ticks_.push(tickLine(a.yTick, sy, p));
           if (a.yLab) {
             const lab = axisLabel(ticks[i].label, a.yLab.pos, sy, a.yLab.anchor, a.yLab.baseline, a.yLab.rot);
@@ -3015,6 +3109,8 @@
           }
         }
       }
+      for (let i = 0; i < minors.length; i++) grid.appendChild(minors[i]);
+      for (let i = 0; i < majors.length; i++) grid.appendChild(majors[i]);
       for (let i = 0; i < ticks_.length; i++) grid.appendChild(ticks_[i]);
     }
     return { setupAxisZoom, applyPanTransforms, retick };

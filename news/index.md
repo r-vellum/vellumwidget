@@ -2,6 +2,22 @@
 
 ## vellumwidget 0.19.0.9000
 
+### Bug fixes
+
+- Axis-aware zoom draws each panel’s own gridlines (VW-66). A
+  composition cell themed with `panel.grid = element_blank()` no longer
+  gets gridlines in the widget, minor gridlines are re-drawn with the
+  major ones, and each set keeps the stroke the static panel drew it
+  with (they all took the first gridline’s look). The panel descriptor
+  carries vellumplot’s per-axis `grid` flags; a payload without them
+  keeps the earlier behaviour.
+
+- At the unzoomed view the re-ticked axes show the static render’s own
+  breaks and labels, so a widget opens identical to the static plot
+  (VW-66). Nice breaks over the expanded range could add one the static
+  axis left out, such as 400 on an axis whose data stop at 398.
+  Re-ticking starts with the first zoom.
+
 ## vellumwidget 0.19.0
 
 - Requires vellumplot (\>= 0.20.0), whose open point shapes reach the
