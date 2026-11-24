@@ -20,6 +20,7 @@ render_options(
   text = c("native", "outline"),
   max_marks = 2000000L,
   detail_marks = 3000L,
+  webgl = c("auto", "always", "never"),
   precision = c("compact", "f32"),
   max_zoom = 100,
   autoplay = TRUE,
@@ -113,6 +114,17 @@ visible marks become real SVG nodes (the detail tier): hover, selection,
 \code{condition()} and \code{filter_by()} styling and keyboard focus then work on
 them as in SVG mode. Zooming back out past 1.5 times this many returns to
 the canvas. \code{0} turns the detail tier off.}
+
+\item{webgl}{In raster mode with the display list, how the zoomed-in (and
+restyled) marks are drawn. \code{"auto"} (default) draws a list of 50,000 marks
+or more with WebGL2 where the browser has it: a million points redraw in a
+few milliseconds, so pan, zoom and \code{condition()}, selection and filter
+styling stay live, where the 2D canvas redraws in about a second and waits
+for the view to settle. \code{"always"} uses WebGL2 for any size of list,
+\code{"never"} keeps the 2D canvas. WebGL2 draws point and rectangle marks with
+solid fills and strokes; a list holding other marks (lines, polygons,
+gradients, dashed strokes, grouped marks) is drawn on the canvas, as it is
+without WebGL2 or when the browser drops the context.}
 
 \item{precision}{How the display list ships its marks' coordinates (see
 \code{max_marks}). \code{"compact"} (default), with a vellum that supports it,

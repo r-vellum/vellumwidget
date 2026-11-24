@@ -141,6 +141,7 @@ export interface WidgetState {
   msAlphaPal: number[];
   msActive: boolean; // any mark dimmed, recoloured, muted or hidden
   msDimAlpha: number;
+  msRev: number; // bumped whenever the mark state above changes (the GL painter's colour cache, F-25)
   // The flagged runs' SVGs (VW-33, payload$flagged$svg), restyled into images
   // by features/runStyle.ts; null without them.
   runSvg: string[] | null;
@@ -306,6 +307,7 @@ export interface WidgetFns {
   refreshSelected: () => void;
   showMarksLayer: (on: boolean) => void;
   hideCanvas: () => void;
+  glState: () => { on: boolean; why: string | null };
   exportMarksImage: (scale: number) => { href: string; x: number; y: number; w: number; h: number; layers?: { href: string; blend: string }[] } | null;
   scheduleTier: () => void;
   evalTier: () => void;
@@ -446,6 +448,7 @@ export function createState(el: HTMLElement): WidgetState {
     msAlphaPal: [],
     msActive: false,
     msDimAlpha: 0.28,
+    msRev: 0,
     runSvg: null,
     detailGroups: [],
     detailKeys: [],

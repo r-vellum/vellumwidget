@@ -179,6 +179,7 @@ export interface Options {
   navigator?: boolean; // show an overview x-range navigator strip below the plot
   navigatorHeight?: number; // strip height in px (default 56)
   axisZoom?: boolean; // axis-aware zoom: scale the data region + re-tick the axes, keeping the frame fixed (linear cartesian panels; SVG only)
+  webgl?: "auto" | "always" | "never"; // raster mid tier: draw the display list with WebGL2 (F-25)
   detailMarks?: number; // raster detail tier: materialise SVG nodes below this many visible marks (0 = off)
   maxZoom?: number; // the most a view zooms in, per axis, over the original (VW-44; default 100, DEFAULT_MAX_ZOOM)
   zoomMarks?: "fixed" | "scale"; // under axis_zoom, keep glyph marks a constant pixel size ("fixed", default) or let them scale ("scale")

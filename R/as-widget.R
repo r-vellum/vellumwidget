@@ -376,6 +376,8 @@ as_widget <- function(
       raster = use_raster,
       # Raster detail tier threshold (VW-16): SVG nodes below this many visible marks.
       detailMarks = render$detail_marks,
+      # WebGL2 drawing of the raster mid tier (F-25).
+      webgl = render$webgl %||% "auto",
       # The most a view zooms in, per axis (VW-44).
       maxZoom = render$max_zoom %||% 100,
       # Hover tooltip, highlight, click-select, brush, lasso, pan/zoom, and

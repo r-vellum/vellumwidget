@@ -45,8 +45,9 @@ export const VELLUMWIDGET_CSS = `
 /* Blend runs (VW-32): a run with a blend mode is a canvas of its own stacked
    over the marks canvas (inline mix-blend-mode), the marks after it on the
    next one up. While any is shown the stage isolates the blending, so it
-   mixes with the widget's own furniture and marks, not the page. */
-.vellumwidget-canvas-layer {
+   mixes with the widget's own furniture and marks, not the page. The WebGL
+   marks layer (F-25) sits where the marks canvas does, in its place. */
+.vellumwidget-canvas-layer, .vellumwidget-gl {
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 2; display: none;
 }

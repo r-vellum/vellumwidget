@@ -50,6 +50,7 @@ import { vellumwidgetBus } from "./linking";
 import { createState } from "./state";
 import { axisRetickable, axisTicks, dataToNative, detectTimeFormat, fmtRNum, fmtTick, logTicks, niceTicks, parseSecLabels, secAxisMap, secTicks, strftimeUTC, timeTicks } from "./ticks";
 import { sanitizeTip } from "./tooltip";
+import { glColors, glInstances, glStyleReadable, glUnsupported } from "./features/webgl";
 import type { Bbox, ViewBox } from "./types";
 import { atMaxZoom, clampViewBox, clampZoomFactor, conjugatePan, fmtViewBox, isZoomedIn, panToView, parseViewBox, userToCanvas, viewToPan, zoomViewBox, zoomViewBoxCapped } from "./viewbox";
 
@@ -130,6 +131,12 @@ HTMLWidgets.widget({
         displayListKeys: function () { return ws.dl ? ws.dl.keys.slice() : null; },
         keyIds: function (keys: string[]) { return Array.from(ws.fx.keyIds(keys)); },
         markTier: function () { return ws.markTier; },
+        glState: ws.fx.glState,
+        // The GL painter's pure parts (F-25): eligibility, instances, colours.
+        glUnsupported: glUnsupported,
+        glInstances: glInstances,
+        glColors: glColors,
+        glStyleReadable: glStyleReadable,
         listExact: function () { return ws.dl ? ws.dl.exact : null; },
         runsAttached: function () { return !!(ws.dl && ws.dl.runImgs); },
         runStyled: ws.fx.runStyled,

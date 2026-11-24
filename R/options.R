@@ -148,6 +148,16 @@ navigator_options <- function(height = 56) {
 #'   `condition()` and `filter_by()` styling and keyboard focus then work on
 #'   them as in SVG mode. Zooming back out past 1.5 times this many returns to
 #'   the canvas. `0` turns the detail tier off.
+#' @param webgl In raster mode with the display list, how the zoomed-in (and
+#'   restyled) marks are drawn. `"auto"` (default) draws a list of 50,000 marks
+#'   or more with WebGL2 where the browser has it: a million points redraw in a
+#'   few milliseconds, so pan, zoom and `condition()`, selection and filter
+#'   styling stay live, where the 2D canvas redraws in about a second and waits
+#'   for the view to settle. `"always"` uses WebGL2 for any size of list,
+#'   `"never"` keeps the 2D canvas. WebGL2 draws point and rectangle marks with
+#'   solid fills and strokes; a list holding other marks (lines, polygons,
+#'   gradients, dashed strokes, grouped marks) is drawn on the canvas, as it is
+#'   without WebGL2 or when the browser drops the context.
 #' @param precision How the display list ships its marks' coordinates (see
 #'   `max_marks`). `"compact"` (default), with a vellum that supports it,
 #'   quantises each coordinate column within its range so that no coordinate
@@ -188,6 +198,7 @@ render_options <- function(
   text = c("native", "outline"),
   max_marks = 2000000L,
   detail_marks = 3000L,
+  webgl = c("auto", "always", "never"),
   precision = c("compact", "f32"),
   max_zoom = 100,
   autoplay = TRUE,
@@ -205,6 +216,7 @@ render_options <- function(
       text = .check_choice(text, c("native", "outline"), "text"),
       max_marks = .check_number(max_marks, "max_marks", min = 0),
       detail_marks = .check_number(detail_marks, "detail_marks", min = 0),
+      webgl = .check_choice(webgl, c("auto", "always", "never"), "webgl"),
       precision = .check_choice(precision, c("compact", "f32"), "precision"),
       max_zoom = .check_max_zoom(max_zoom),
       autoplay = .check_bool(autoplay, "autoplay"),

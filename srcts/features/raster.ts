@@ -11,6 +11,8 @@ import type { WidgetFns, WidgetState } from "../state";
 import type { MarkColors } from "../types";
 import type { RunPatch, RunSplit } from "./runStyle";
 import { isZoomedIn, userToCanvas } from "../viewbox";
+import { createGLPainter, glLastError, glStyleReadable, glUnsupported, GL_AUTO_MIN } from "./webgl";
+import type { GLPainter } from "./webgl";
 
 // Ids of the rings' panel clips (VW-48), unique across the page's widgets.
 let ringClipSeq = 0;
@@ -20,7 +22,7 @@ export function rasterFeature(
 ): Pick<
   WidgetFns,
   "ensureCanvas" | "clearPointData" | "sampleBaseRaster" | "drawPoints" | "clearGroup"
-  | "drawSelFeedback" | "setHoverKeys" | "setHover" | "showMarksLayer" | "exportMarksImage" | "hideCanvas"
+  | "drawSelFeedback" | "setHoverKeys" | "setHover" | "showMarksLayer" | "exportMarksImage" | "hideCanvas" | "glState"
 > {
   // --- crisp-zoom canvas point layer (raster mode, Phase 6) ---
   // Create the canvas once (sits above the base image, below the overlay rings).
@@ -306,6 +308,58 @@ export function rasterFeature(
   // its condition colour. While any such state is active the canvas also
   // stands in for the mark PNG at the overview zoom, when the list is exact
   // (a flagged record exists only in the image, which can't be restyled).
+  // The WebGL painter (F-25), created on the first list it can draw; `glOff`
+  // once WebGL2 is missing or its context was lost (the canvas then paints).
+  let glp: GLPainter | null = null, glOff = false;
+  // The eligibility of the list last asked about. Keyed on the run images
+  // too: attachRuns() sets them on the same list object once they load, and
+  // a list with run images is not the GL painter's (review of #124).
+  let glForDl: DisplayList | null = null, glForRuns: CanvasImageSource[] | null = null, glWhy: string | null = null;
+  // Why the last drawList() did not draw with GL (null when it did).
+  let glLast: string | null = "not drawn yet";
+  function glReason(dl: DisplayList): string | null {
+    const mode = ws.opts.webgl || "auto";
+    if (glOff) return "unavailable" + (glLastError ? ": " + glLastError : "");
+    if (mode === "never") return "never";
+    if (mode === "auto" && dl.n < GL_AUTO_MIN) return "small";
+    if (glForDl !== dl || glForRuns !== dl.runImgs) {
+      glForDl = dl; glForRuns = dl.runImgs; glWhy = glUnsupported(dl);
+    }
+    if (glWhy) return glWhy;
+    if (ws.msActive && ws.msColor) {
+      if (glStyleRev !== ws.msRev) { glStyleRev = ws.msRev; glStyleOk = glStyleReadable(ws.msColor, ws.msPalette); }
+      if (!glStyleOk) return "condition colours";
+    }
+    return null;
+  }
+  let glStyleRev = -1, glStyleOk = true;
+  function glUsable(dl: DisplayList): boolean {
+    const why = glReason(dl);
+    if (why) {
+      // a list the painter can't draw: let go of the last one's buffers
+      if (glp) glp.release();
+      glLast = why;
+      return false;
+    }
+    if (!glp) {
+      const base = ws.canvasEl;
+      glp = base && base.parentNode ? createGLPainter(function () {
+        glOff = true;
+        if (glp) glp.canvas.style.display = "none";
+        drawPoints();
+      }) : null;
+      if (!glp) { glOff = true; glLast = glReason(dl) || "unavailable"; return false; }
+      base!.parentNode!.insertBefore(glp.canvas, base!.nextSibling);
+    }
+    if (!glp.alive()) { glOff = true; glLast = glReason(dl) || "unavailable"; return false; }
+    return true;
+  }
+  // For tests: whether the GL layer shows, and why the last drawList() did
+  // not draw with it (null when it did).
+  function glState(): { on: boolean; why: string | null } {
+    return { on: !!(glp && glp.canvas.style.display === "block"), why: glLast };
+  }
+
   let settleTimer = 0;
   function drawList(dl: DisplayList, settled?: boolean, stateOnly?: boolean): void {
     const ctx = ws.ctx!, vb = ws.vb!, vb0 = ws.vb0!;
@@ -324,16 +378,20 @@ export function rasterFeature(
     // reorder its pixels) at the overview zoom too.
     const raising = dl.exact && !!ws.fx.raiseOrder(dl);
     if (!(zoomed || (styled && dl.exact) || blending || raising) || !dl.n) {
+      glLast = "image shown";
       hideCanvas();
       showMarksLayer(true);
       return;
     }
-    const wasShown = ws.canvasEl!.style.display === "block";
+    const wasShown = ws.canvasEl!.style.display === "block" || !!(glp && glp.canvas.style.display === "block");
     const [W, H] = fitCanvas();
     const L = listLayout(dl, W, H);
+    const useGL = !blending && glUsable(dl);
+    if (blending) glLast = "blend runs";
     // Too many marks in view to redraw within a frame: keep the scaled image
-    // up while the view is moving and draw once it settles.
-    if (!settled && dl.n > LIVE_DRAW_MAX) {
+    // up while the view is moving and draw once it settles. (The GL painter
+    // draws them all within a frame.)
+    if (!settled && !useGL && dl.n > LIVE_DRAW_MAX) {
       let vis = 0;
       const np = dl.panels.length;
       for (let i = 0; i < dl.n && vis <= LIVE_DRAW_MAX; i++) {
@@ -357,6 +415,24 @@ export function rasterFeature(
     // Every mark is redrawn exactly, so the scaled mark image goes; flagged
     // marks (gradients, groups, text) are only in the image, which then stays.
     showMarksLayer(!dl.exact);
+    if (useGL && glp) {
+      const st = styled ? {
+        flags: ws.msFlags!, color: ws.msColor!, palette: ws.msPalette, dimAlpha: ws.msDimAlpha,
+        alpha: ws.msAlpha, alphaPal: ws.msAlphaPal
+      } : null;
+      if (glp.draw(dl, L, W, H, ws.fx.raiseOrder(dl), st, ws.msRev)) {
+        glLast = null;
+        const c = glp.canvas;
+        c.style.width = ws.canvasEl!.style.width;
+        c.style.height = ws.canvasEl!.style.height;
+        c.style.display = "block";
+        ws.canvasEl!.style.display = "none";
+        hideLayers(0);
+        return;
+      }
+    }
+    if (glp) glp.canvas.style.display = "none";
+    if (useGL) glLast = "draw failed";
     // Blend runs (VW-32): each is drawn on a canvas of its own stacked over
     // the marks before it, with the run's CSS mix-blend-mode, so it blends
     // with the furniture and the marks beneath as in SVG mode; the marks
@@ -409,6 +485,7 @@ export function rasterFeature(
   // Hide the marks canvas and its stacked layers.
   function hideCanvas(): void {
     if (ws.canvasEl) ws.canvasEl.style.display = "none";
+    if (glp) glp.canvas.style.display = "none";
     hideLayers(0);
   }
 
@@ -1008,5 +1085,5 @@ export function rasterFeature(
     setHoverKeys(ws.fx.linkedKeys(k));
   }
 
-  return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover, showMarksLayer, exportMarksImage, hideCanvas };
+  return { ensureCanvas, clearPointData, sampleBaseRaster, drawPoints, clearGroup, drawSelFeedback, setHoverKeys, setHover, showMarksLayer, exportMarksImage, hideCanvas, glState };
 }
