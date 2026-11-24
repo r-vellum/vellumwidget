@@ -1,6 +1,6 @@
 # Changelog
 
-## vellumwidget (development version)
+## vellumwidget 0.20.1
 
 ### Bug fixes
 
