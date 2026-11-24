@@ -1,4 +1,4 @@
-// WebGL2 drawing of the display list's mid tier (F-25, phase A).
+// WebGL2 drawing of the display list's mid tier (F-25 phase A, F-29 phase B).
 //
 // The canvas mid tier (raster.ts drawList/paintList) redraws every record on
 // the CPU: about 1.3 s for a million points, so above LIVE_DRAW_MAX marks in
@@ -7,12 +7,22 @@
 // Here the same records go to the GPU as one instanced draw, in paint order:
 // a few ms for a million points.
 //
-// Phase A draws points (every marker shape) and rects with a solid fill and
-// stroke, through each panel's affine and clip (axis zoom) and the record's
-// own clip rect. A list holding anything else (paths, gradients, dashes,
-// opacity groups, run images, clip paths) stays on the canvas: `glUnsupported`
-// says why. Flagged records are skipped, as the canvas skips them (the mark
-// image, left showing, draws them).
+// Points (every marker shape) and rects with a solid fill and stroke are
+// instanced quads with the shape as a signed distance in the fragment shader.
+// Paths (phase B, glmesh.ts) are a triangle mesh: fills triangulated once,
+// strokes as screen-space quads with miter joins and the paint's caps. Both
+// go through each panel's affine and clip (axis zoom) and the record's own
+// clip rect, drawn as alternating batches in paint order. A list holding
+// anything else (gradients, dashes, opacity groups, run images, clip paths)
+// stays on the canvas: `glUnsupported` says why. Flagged records are skipped,
+// as the canvas skips them (the mark image, left showing, draws them).
+// Paint order is also a depth (zOf): each record covers a pixel once, as the
+// canvas's single fill() / stroke() per record does (a translucent line
+// crossing itself does not darken there), its stroke just above its fill,
+// and later records above earlier ones. With MSAA the test is per sample.
+// Strokes join with a miter whatever the paint's join, and at turns sharper
+// than 120 degrees with overlapping square ends; at sharp turns of thick lines
+// that differs from a round join.
 //
 // The per-key style state (markState.ts) is folded into each instance's fill
 // and stroke colour on the CPU, with the canvas's rules: hidden keys are not
@@ -27,8 +37,10 @@
 // draw. Browsers keep about 16 per page and drop the oldest beyond that; a
 // widget whose context is lost goes back to the canvas for good.
 
-import { DL_POINT, DL_RECT } from "../dlist";
+import { DL_PATH, DL_POINT, DL_RECT } from "../dlist";
 import type { DisplayList } from "../dlist";
+import { GL_MAX_MESH_VERTS, MESH_F, glMesh, glMeshOrder, meshVerts, pathMeshable } from "./glmesh";
+import type { GLMesh } from "./glmesh";
 import { MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
 
 // Panels and record clip rects travel as uniform arrays: at most this many
@@ -105,16 +117,53 @@ export function glUnsupported(dl: DisplayList): string | null {
     if (pt.fill != null && !parseColor(pt.fill)) return "colours";
     if (pt.stroke != null && !parseColor(pt.stroke)) return "colours";
   }
+  let verts = 0, switches = 0, last = -1;
   for (let i = 0; i < dl.n; i++) {
     if (dl.flags[i]) {
       if (dl.runImgs && dl.run[i] > 0) return "runs";
       continue;
     }
     const k = dl.kind[i];
-    if (k !== DL_POINT && k !== DL_RECT) return "paths";
+    if (k !== DL_POINT && k !== DL_RECT && k !== DL_PATH) return "kinds";
     if (dl.group[i] > 0) return "groups";
+    if (k === DL_PATH) {
+      verts += meshVerts(dl, i);
+      if (verts > GL_MAX_MESH_VERTS) return "large paths";
+      if (!pathMeshable(dl, i)) return "complex paths";
+    }
+    // marks and paths interleaved record by record: too many batches
+    const m = k === DL_PATH ? 1 : 0;
+    if (m !== last) { switches++; last = m; }
+    if (switches > GL_MAX_BATCHES) return "interleaved";
   }
   return null;
+}
+
+// The draw order as alternating batches: `mesh` false = instances [a, b),
+// true = mesh indices [a, b). Null when there are more than GL_MAX_BATCHES
+// (marks and paths interleaved record by record: the canvas paints it).
+export const GL_MAX_BATCHES = 512;
+export interface GLBatch { mesh: boolean; a: number; b: number }
+export function glBatches(dl: DisplayList, ord: ArrayLike<number> | null, recRange: Map<number, [number, number]>): GLBatch[] | null {
+  const out: GLBatch[] = [];
+  let k = 0;
+  for (let q = 0; q < dl.n; q++) {
+    const i = ord ? ord[q] : q;
+    if (dl.flags[i]) continue;
+    const last = out.length ? out[out.length - 1] : null;
+    if (dl.kind[i] === DL_PATH) {
+      const r = recRange.get(i);
+      if (!r || r[1] <= r[0]) continue;
+      if (last && last.mesh && last.b === r[0]) last.b = r[1];
+      else out.push({ mesh: true, a: r[0], b: r[1] });
+    } else {
+      if (last && !last.mesh && last.b === k) last.b = k + 1;
+      else out.push({ mesh: false, a: k, b: k + 1 });
+      k++;
+    }
+    if (out.length > GL_MAX_BATCHES) return null;
+  }
+  return out;
 }
 
 // Can every condition colour a key uses be read? (When not, the canvas
@@ -144,14 +193,14 @@ export interface GLInstances {
 
 export function glInstances(dl: DisplayList, ord: Uint32Array | null): GLInstances {
   let n = 0;
-  for (let i = 0; i < dl.n; i++) if (!dl.flags[i]) n++;
+  for (let i = 0; i < dl.n; i++) if (!dl.flags[i] && dl.kind[i] !== DL_PATH) n++;
   const pos = new Float32Array(2 * n), size = new Float32Array(2 * n);
   const meta = new Uint8Array(4 * n), width = new Float32Array(n), rec = new Uint32Array(n);
   const np = dl.panels.length;
   let m = 0;
   for (let q = 0; q < dl.n; q++) {
     const i = ord ? ord[q] : q;
-    if (dl.flags[i]) continue;
+    if (dl.flags[i] || dl.kind[i] === DL_PATH) continue;
     const j = dl.row[i];
     if (dl.kind[i] === DL_POINT) {
       pos[2 * m] = dl.cx[j]; pos[2 * m + 1] = dl.cy[j];
@@ -183,10 +232,11 @@ export interface GLStyle {
   alphaPal: number[];
 }
 
-// Each instance's fill and stroke as RGBA bytes (straight alpha), with the
-// style state folded in by the canvas's rules (raster.ts paintList).
-export function glColors(dl: DisplayList, inst: GLInstances, st: GLStyle | null): { fill: Uint8Array; stroke: Uint8Array } | null {
-  const n = inst.n;
+// Each record's fill and stroke as RGBA bytes (straight alpha), with the
+// style state folded in by the canvas's rules (raster.ts paintList); null
+// when a condition colour in use can't be read (the canvas paints it).
+export function glRecordColors(dl: DisplayList, st: GLStyle | null): { fill: Uint8Array; stroke: Uint8Array } | null {
+  const n = dl.n;
   const fill = new Uint8Array(4 * n), stroke = new Uint8Array(4 * n);
   const pf: (number[] | null)[] = dl.paints.map((p) => parseColor(p.fill));
   const ps: (number[] | null)[] = dl.paints.map((p) => parseColor(p.stroke));
@@ -196,8 +246,9 @@ export function glColors(dl: DisplayList, inst: GLInstances, st: GLStyle | null)
   const hex6: boolean[] = st ? st.palette.map((c) => /^#[0-9a-fA-F]{6}$/.test(c)) : [];
   const fHex8: boolean[] = dl.paints.map((p) => p.fill != null && /^#[0-9a-fA-F]{8}$/.test(p.fill));
   const sHex8: boolean[] = dl.paints.map((p) => p.stroke != null && /^#[0-9a-fA-F]{8}$/.test(p.stroke));
-  for (let m = 0; m < n; m++) {
-    const i = inst.rec[m], pi = dl.paint[i];
+  for (let i = 0; i < n; i++) {
+    if (dl.flags[i]) continue;
+    const pi = dl.paint[i];
     let f = pf[pi], s = ps[pi], mult = 1;
     if (st) {
       const k = dl.key[i], fl = st.flags[k];
@@ -215,10 +266,40 @@ export function glColors(dl: DisplayList, inst: GLInstances, st: GLStyle | null)
         if (s) s = [oc[0], oc[1], oc[2], h6 && sHex8[pi] ? s[3] : oc[3]];
       }
     }
-    if (f) { fill[4 * m] = f[0]; fill[4 * m + 1] = f[1]; fill[4 * m + 2] = f[2]; fill[4 * m + 3] = Math.round(f[3] * mult); }
-    if (s) { stroke[4 * m] = s[0]; stroke[4 * m + 1] = s[1]; stroke[4 * m + 2] = s[2]; stroke[4 * m + 3] = Math.round(s[3] * mult); }
+    if (f) { fill[4 * i] = f[0]; fill[4 * i + 1] = f[1]; fill[4 * i + 2] = f[2]; fill[4 * i + 3] = Math.round(f[3] * mult); }
+    if (s) { stroke[4 * i] = s[0]; stroke[4 * i + 1] = s[1]; stroke[4 * i + 2] = s[2]; stroke[4 * i + 3] = Math.round(s[3] * mult); }
   }
   return { fill: fill, stroke: stroke };
+}
+
+// Each instance's fill and stroke (from the records' colours).
+export function glColors(dl: DisplayList, inst: GLInstances, st: GLStyle | null): { fill: Uint8Array; stroke: Uint8Array } | null {
+  const rc = glRecordColors(dl, st);
+  return rc ? gatherColors(rc, inst.rec, null) : null;
+}
+
+// Gather per-record colours to per-item arrays: both fill and stroke, or
+// (mesh vertices) the one each vertex paints.
+function gatherColors(rc: { fill: Uint8Array; stroke: Uint8Array }, rec: Uint32Array, isStroke: Uint8Array | null): { fill: Uint8Array; stroke: Uint8Array } {
+  const n = rec.length;
+  const fill = new Uint8Array(4 * n), stroke = isStroke ? fill : new Uint8Array(4 * n);
+  for (let m = 0; m < n; m++) {
+    const i = rec[m];
+    if (isStroke) {
+      const src = isStroke[m] ? rc.stroke : rc.fill;
+      fill[4 * m] = src[4 * i]; fill[4 * m + 1] = src[4 * i + 1]; fill[4 * m + 2] = src[4 * i + 2]; fill[4 * m + 3] = src[4 * i + 3];
+    } else {
+      fill[4 * m] = rc.fill[4 * i]; fill[4 * m + 1] = rc.fill[4 * i + 1]; fill[4 * m + 2] = rc.fill[4 * i + 2]; fill[4 * m + 3] = rc.fill[4 * i + 3];
+      stroke[4 * m] = rc.stroke[4 * i]; stroke[4 * m + 1] = rc.stroke[4 * i + 1]; stroke[4 * m + 2] = rc.stroke[4 * i + 2]; stroke[4 * m + 3] = rc.stroke[4 * i + 3];
+    }
+  }
+  return { fill: fill, stroke: stroke };
+}
+
+// Each mesh vertex's colour: its record's fill or stroke.
+export function glMeshColors(dl: DisplayList, mesh: GLMesh, st: GLStyle | null): Uint8Array | null {
+  const rc = glRecordColors(dl, st);
+  return rc ? gatherColors(rc, mesh.rec, mesh.stroke).fill : null;
 }
 
 // --- renderer --------------------------------------------------------------
@@ -233,12 +314,14 @@ layout(location = 3) in uvec4 a_meta;
 layout(location = 4) in float a_width;
 layout(location = 5) in vec4 a_fill;
 layout(location = 6) in vec4 a_stroke;
+layout(location = 7) in float a_z;
 uniform vec4 u_aff[${GL_MAX_SLOTS}];
 uniform vec4 u_pclip[${GL_MAX_SLOTS}];
 uniform vec4 u_clip[${GL_MAX_SLOTS}];
 uniform float u_gs[${GL_MAX_SLOTS}];
 uniform float u_base;
 uniform vec2 u_vp;
+uniform float u_zn;
 out vec2 v_p;
 flat out vec2 v_half;
 flat out uint v_kind;
@@ -267,7 +350,8 @@ void main() {
   vec2 ext = hext + vec2(hw + 1.0);
   v_p = a_corner * ext;
   vec2 q = c + v_p;
-  gl_Position = vec4(q.x / u_vp.x * 2.0 - 1.0, 1.0 - q.y / u_vp.y * 2.0, 0.0, 1.0);
+  // depth by paint order (see zOf): later records nearer
+  gl_Position = vec4(q.x / u_vp.x * 2.0 - 1.0, 1.0 - q.y / u_vp.y * 2.0, 1.0 - 2.0 * (a_z + 1.0) / u_zn, 1.0);
   v_half = hext;
   v_kind = kind;
   v_cap = a_meta.x >> 4u;
@@ -396,6 +480,10 @@ export interface GLPainter {
   canvas: HTMLCanvasElement;
   draw(dl: DisplayList, frame: GLFrame, W: number, H: number, ord: Uint32Array | null, style: GLStyle | null, styleRev: number): boolean;
   alive(): boolean;
+  // Whether the context was created with MSAA (for lists with paths).
+  msaa: boolean;
+  // Give the context back (a painter with the other MSAA setting replaces it).
+  dispose(): void;
   // Drop the instance buffers (a list this painter can't draw replaced it).
   release(): void;
 }
@@ -403,25 +491,154 @@ export interface GLPainter {
 // Why the last createGLPainter() returned null (for glState / debugging).
 export let glLastError = "";
 
-export function createGLPainter(onLost: () => void): GLPainter | null {
+// The mesh program (paths, F-29): fill vertices as they are, stroke corners
+// pushed out in canvas px (glmesh.ts describes the vertex layout).
+const MESH_VS = `#version 300 es
+precision highp float;
+precision highp int;
+layout(location = 0) in vec2 a_a;
+layout(location = 1) in vec2 a_q;
+layout(location = 2) in vec2 a_n;
+layout(location = 3) in vec2 a_sw;
+layout(location = 4) in uvec4 a_meta;
+layout(location = 5) in vec4 a_col;
+layout(location = 6) in float a_z;
+uniform vec4 u_aff[${GL_MAX_SLOTS}];
+uniform vec4 u_pclip[${GL_MAX_SLOTS}];
+uniform vec4 u_clip[${GL_MAX_SLOTS}];
+uniform float u_base;
+uniform vec2 u_vp;
+uniform float u_zn;
+flat out vec4 v_col;
+flat out uint v_mode;
+flat out uint v_flags;
+flat out float v_hw;
+out vec3 v_cap;
+flat out vec4 v_pc;
+flat out vec4 v_rc;
+vec2 tf(vec4 A, vec2 p) { return vec2(A.x * p.x + A.z, A.y * p.y + A.w); }
+void main() {
+  uint p = a_meta.z;
+  vec4 A = u_aff[p];
+  vec2 P = tf(A, a_a);
+  uint mode = a_meta.x & 1u;
+  uint flags = a_meta.x >> 1u;
+  vec2 pos = P;
+  float hw = 0.5 * a_sw.y * u_base;
+  v_cap = vec3(0.0);
+  if (mode == 1u) {
+    vec2 Q = tf(A, a_q), N = tf(A, a_n);
+    bool atEnd = a_meta.y == 1u;
+    vec2 d = atEnd ? P - Q : Q - P;
+    float L = length(d);
+    if (L < 1e-6) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+    vec2 t = d / L, nrm = vec2(-t.y, t.x);
+    vec2 dn = atEnd ? N - P : P - N;
+    float side = a_sw.x;
+    vec2 off;
+    if (length(dn) < 1e-6) {
+      // an open end: the cap (square and round reach hw past the end)
+      off = nrm * side * hw;
+      bool ext = atEnd ? (flags & 10u) != 0u : (flags & 5u) != 0u;
+      if (ext) off += (atEnd ? t : -t) * hw;
+    } else {
+      // a miter with the neighbouring segment; at a sharp turn (a miter
+      // over twice the half width) the plain square end instead, reaching
+      // hw past the joint so the outer corner is covered
+      vec2 t2 = normalize(dn), n2 = vec2(-t2.y, t2.x);
+      vec2 m = nrm + n2;
+      float ml = length(m);
+      float k = ml < 1e-3 ? 0.0 : dot(m / ml, nrm);
+      if (k < 0.5) off = nrm * side * hw + (atEnd ? t : -t) * hw;
+      else off = (m / ml) * side * hw / k;
+    }
+    pos = P + off;
+    vec2 S = atEnd ? Q : P, E = atEnd ? P : Q;
+    v_cap = vec3(dot(pos - S, -t), dot(pos - E, t), dot(pos - P, nrm));
+  }
+  gl_Position = vec4(pos.x / u_vp.x * 2.0 - 1.0, 1.0 - pos.y / u_vp.y * 2.0, 1.0 - 2.0 * (a_z + 1.0) / u_zn, 1.0);
+  v_col = a_col;
+  v_mode = mode;
+  v_flags = flags;
+  v_hw = hw;
+  v_pc = u_pclip[p];
+  if (a_meta.w == 0u) {
+    v_rc = vec4(-1e9, -1e9, 1e9, 1e9);
+  } else {
+    vec4 cr = u_clip[a_meta.w];
+    vec2 r0 = tf(A, cr.xy), r1 = tf(A, cr.zw);
+    v_rc = vec4(min(r0, r1), max(r0, r1));
+  }
+  if (a_col.a == 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+}`;
+
+const MESH_FS = `#version 300 es
+precision highp float;
+precision highp int;
+flat in vec4 v_col;
+flat in uint v_mode;
+flat in uint v_flags;
+flat in float v_hw;
+in vec3 v_cap;
+flat in vec4 v_pc;
+flat in vec4 v_rc;
+uniform vec2 u_vp;
+out vec4 o;
+void main() {
+  vec2 fc = vec2(gl_FragCoord.x, u_vp.y - gl_FragCoord.y);
+  if (fc.x < v_pc.x || fc.x > v_pc.z || fc.y < v_pc.y || fc.y > v_pc.w) discard;
+  if (fc.x < v_rc.x || fc.x > v_rc.z || fc.y < v_rc.y || fc.y > v_rc.w) discard;
+  float cov = 1.0;
+  if (v_mode == 1u) {
+    // round caps: the square past each capped end cut to a circle (smoothed)
+    if ((v_flags & 1u) != 0u && v_cap.x > 0.0) cov = min(cov, clamp(v_hw + 0.5 - length(v_cap.xz), 0.0, 1.0));
+    if ((v_flags & 2u) != 0u && v_cap.y > 0.0) cov = min(cov, clamp(v_hw + 0.5 - length(v_cap.yz), 0.0, 1.0));
+    if (cov <= 0.0) discard;
+  }
+  float a = v_col.a * cov;
+  o = vec4(v_col.rgb * a, a);
+}`;
+
+// Each record's depth slot by its place in the draw order: 2 x rank (its
+// fill, or a mark), +1 for its stroke. The shaders map slot z to depth
+// 1 - (z + 1) / (2n + 2), so later records are nearer and pass LESS over
+// earlier ones, while a record's own overlapping pieces (a stroke crossing
+// itself) fail against its first and are drawn once.
+export function zOf(dl: DisplayList, ord: ArrayLike<number> | null): Float32Array {
+  const z = new Float32Array(dl.n);
+  for (let q = 0; q < dl.n; q++) z[ord ? ord[q] : q] = 2 * q;
+  return z;
+}
+
+// Does the list hold a path the GL painter draws? (Then its context needs
+// MSAA for the mesh's edges; without paths MSAA only costs fill rate: about
+// 3x the frame time for a million points.)
+export function glHasPaths(dl: DisplayList): boolean {
+  for (let i = 0; i < dl.n; i++) if (!dl.flags[i] && dl.kind[i] === DL_PATH) return true;
+  return false;
+}
+
+export function createGLPainter(onLost: () => void, msaa = true): GLPainter | null {
   glLastError = "";
   const canvas = document.createElement("canvas");
   canvas.className = "vellumwidget-gl";
   canvas.setAttribute("aria-hidden", "true");
   let gl: WebGL2RenderingContext | null = null;
   try {
+    // MSAA smooths the mesh's polygon and line edges (the marks' shapes are
+    // smoothed in the shader), so only a list with paths asks for it.
     gl = typeof canvas.getContext === "function"
-      ? (canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: false, alpha: true, preserveDrawingBuffer: false }) as WebGL2RenderingContext | null)
+      ? (canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: msaa, alpha: true, depth: true, preserveDrawingBuffer: false }) as WebGL2RenderingContext | null)
       : null;
   } catch (e) {
     gl = null;
   }
   if (!gl) { glLastError = "no webgl2"; return null; }
-  let lost = false;
+  let lost = false, disposed = false;
   canvas.addEventListener("webglcontextlost", function (e) {
     e.preventDefault();
     lost = true;
-    onLost();
+    if (!disposed) onLost();
   });
   const g = gl;
   const compile = function (type: number, src: string): WebGLShader | null {
@@ -433,16 +650,30 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
     glLastError = "shader: " + (g.getShaderInfoLog(s) || "").slice(0, 300);
     return null;
   };
-  const vs = compile(g.VERTEX_SHADER, VS), fs = compile(g.FRAGMENT_SHADER, FS);
-  if (!vs || !fs) return null;
-  const prog = g.createProgram();
-  if (!prog) return null;
-  g.attachShader(prog, vs);
-  g.attachShader(prog, fs);
-  g.linkProgram(prog);
-  if (!g.getProgramParameter(prog, g.LINK_STATUS)) { glLastError = "link: " + (g.getProgramInfoLog(prog) || "").slice(0, 300); return null; }
-  const U = (nm: string): WebGLUniformLocation | null => g.getUniformLocation(prog, nm);
-  const uAff = U("u_aff"), uPclip = U("u_pclip"), uClip = U("u_clip"), uGs = U("u_gs"), uBase = U("u_base"), uVp = U("u_vp");
+  const link = function (vsrc: string, fsrc: string): WebGLProgram | null {
+    const vs = compile(g.VERTEX_SHADER, vsrc), fs = compile(g.FRAGMENT_SHADER, fsrc);
+    if (!vs || !fs) return null;
+    const pr = g.createProgram();
+    if (!pr) return null;
+    g.attachShader(pr, vs);
+    g.attachShader(pr, fs);
+    g.linkProgram(pr);
+    if (!g.getProgramParameter(pr, g.LINK_STATUS)) { glLastError = "link: " + (g.getProgramInfoLog(pr) || "").slice(0, 300); return null; }
+    return pr;
+  };
+  const prog = link(VS, FS), mprog = link(MESH_VS, MESH_FS);
+  if (!prog || !mprog) return null;
+  const uniforms = function (pr: WebGLProgram) {
+    const U = (nm: string): WebGLUniformLocation | null => g.getUniformLocation(pr, nm);
+    return { aff: U("u_aff"), pclip: U("u_pclip"), clip: U("u_clip"), gs: U("u_gs"), base: U("u_base"), vp: U("u_vp"), zn: U("u_zn") };
+  };
+  const uI = uniforms(prog), uM = uniforms(mprog);
+  // Depth slots the depth buffer resolves (WebGL guarantees only 16 bits):
+  // a list with more records draws without the depth test (a translucent
+  // stroke crossing itself then darkens there, but nothing is dropped).
+  const depthSlots = Math.pow(2, Number(g.getParameter(g.DEPTH_BITS)) || 16) / 4;
+
+  // instanced marks
   const vao = g.createVertexArray();
   g.bindVertexArray(vao);
   const corner = g.createBuffer();
@@ -450,44 +681,99 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), g.STATIC_DRAW);
   g.enableVertexAttribArray(0);
   g.vertexAttribPointer(0, 2, g.FLOAT, false, 0, 0);
-  const mk = function (loc: number, size: number, type: number, norm: boolean, int: boolean): WebGLBuffer | null {
-    const b = g.createBuffer();
-    g.bindBuffer(g.ARRAY_BUFFER, b);
-    g.enableVertexAttribArray(loc);
-    if (int) g.vertexAttribIPointer(loc, size, type, 0, 0);
-    else g.vertexAttribPointer(loc, size, type, norm, 0, 0);
-    g.vertexAttribDivisor(loc, 1);
-    return b;
+  // per-instance attributes: [location, size, type, normalised, integer, bytes per instance]
+  const IATTR: [number, number, number, boolean, boolean, number][] = [
+    [1, 2, g.FLOAT, false, false, 8], [2, 2, g.FLOAT, false, false, 8], [3, 4, g.UNSIGNED_BYTE, false, true, 4],
+    [4, 1, g.FLOAT, false, false, 4], [5, 4, g.UNSIGNED_BYTE, true, false, 4], [6, 4, g.UNSIGNED_BYTE, true, false, 4],
+    [7, 1, g.FLOAT, false, false, 4]
+  ];
+  const ibuf: (WebGLBuffer | null)[] = IATTR.map(function () { return g.createBuffer(); });
+  // Point the instance attributes at instance `first` (WebGL2 has no base
+  // instance): each batch of marks starts its instances there.
+  const pointInstances = function (first: number): void {
+    for (let k = 0; k < IATTR.length; k++) {
+      const [loc, size, type, norm, int, bytes] = IATTR[k];
+      g.bindBuffer(g.ARRAY_BUFFER, ibuf[k]);
+      g.enableVertexAttribArray(loc);
+      if (int) g.vertexAttribIPointer(loc, size, type, 0, first * bytes);
+      else g.vertexAttribPointer(loc, size, type, norm, 0, first * bytes);
+      g.vertexAttribDivisor(loc, 1);
+    }
   };
-  const bPos = mk(1, 2, g.FLOAT, false, false), bSize = mk(2, 2, g.FLOAT, false, false);
-  const bMeta = mk(3, 4, g.UNSIGNED_BYTE, false, true), bWidth = mk(4, 1, g.FLOAT, false, false);
-  const bFill = mk(5, 4, g.UNSIGNED_BYTE, true, false), bStroke = mk(6, 4, g.UNSIGNED_BYTE, true, false);
+  pointInstances(0);
   g.bindVertexArray(null);
 
-  let instDl: DisplayList | null = null, instOrd: Uint32Array | null | undefined, inst: GLInstances | null = null;
+  // path mesh
+  const mvao = g.createVertexArray();
+  g.bindVertexArray(mvao);
+  const mV = g.createBuffer(), mMeta = g.createBuffer(), mCol = g.createBuffer(), mZ = g.createBuffer(), mIdx = g.createBuffer();
+  g.bindBuffer(g.ARRAY_BUFFER, mV);
+  for (let k = 0; k < 4; k++) {
+    g.enableVertexAttribArray(k);
+    g.vertexAttribPointer(k, 2, g.FLOAT, false, MESH_F * 4, k * 8);
+  }
+  g.bindBuffer(g.ARRAY_BUFFER, mMeta);
+  g.enableVertexAttribArray(4);
+  g.vertexAttribIPointer(4, 4, g.UNSIGNED_BYTE, 0, 0);
+  g.bindBuffer(g.ARRAY_BUFFER, mCol);
+  g.enableVertexAttribArray(5);
+  g.vertexAttribPointer(5, 4, g.UNSIGNED_BYTE, true, 0, 0);
+  g.bindBuffer(g.ARRAY_BUFFER, mZ);
+  g.enableVertexAttribArray(6);
+  g.vertexAttribPointer(6, 1, g.FLOAT, false, 0, 0);
+  g.bindBuffer(g.ELEMENT_ARRAY_BUFFER, mIdx);
+  g.bindVertexArray(null);
+
+  // The mesh is built once per list; the instances, the mesh's index order,
+  // the depths and the batches once per (list, draw order).
+  let meshDl: DisplayList | null = null, mesh: GLMesh | null = null;
+  let geoDl: DisplayList | null = null, geoOrd: Uint32Array | null | undefined;
+  let inst: GLInstances | null = null, batches: GLBatch[] | null = null;
   let colKey = "";
   const affU = new Float32Array(4 * GL_MAX_SLOTS), pclipU = new Float32Array(4 * GL_MAX_SLOTS);
   const clipU = new Float32Array(4 * GL_MAX_SLOTS), gsU = new Float32Array(GL_MAX_SLOTS);
-  const upload = function (b: WebGLBuffer | null, data: ArrayBufferView): void {
-    g.bindBuffer(g.ARRAY_BUFFER, b);
-    g.bufferData(g.ARRAY_BUFFER, data, g.STATIC_DRAW);
+  const upload = function (target: number, b: WebGLBuffer | null, data: ArrayBufferView): void {
+    g.bindBuffer(target, b);
+    g.bufferData(target, data, g.STATIC_DRAW);
   };
 
   function draw(dl: DisplayList, frame: GLFrame, W: number, H: number, ord: Uint32Array | null, style: GLStyle | null, styleRev: number): boolean {
     if (lost || g.isContextLost()) return false;
     if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
-    g.bindVertexArray(vao);
-    if (instDl !== dl || instOrd !== ord || !inst) {
+    g.bindVertexArray(null);
+    if (meshDl !== dl || !mesh) {
+      mesh = glMesh(dl);
+      meshDl = dl;
+      upload(g.ARRAY_BUFFER, mV, mesh.v); upload(g.ARRAY_BUFFER, mMeta, mesh.meta);
+      geoDl = null;
+    }
+    if (geoDl !== dl || geoOrd !== ord || !inst) {
       inst = glInstances(dl, ord);
-      instDl = dl; instOrd = ord;
-      upload(bPos, inst.pos); upload(bSize, inst.size); upload(bMeta, inst.meta); upload(bWidth, inst.width);
+      const mo = glMeshOrder(mesh, ord);
+      batches = glBatches(dl, ord, mo.recRange);
+      geoDl = dl; geoOrd = ord;
+      const z = zOf(dl, ord);
+      const iz = new Float32Array(inst.n);
+      for (let m = 0; m < inst.n; m++) iz[m] = z[inst.rec[m]];
+      const mz = new Float32Array(mesh.nv);
+      for (let v = 0; v < mesh.nv; v++) mz[v] = z[mesh.rec[v]] + mesh.stroke[v];
+      upload(g.ARRAY_BUFFER, ibuf[0], inst.pos); upload(g.ARRAY_BUFFER, ibuf[1], inst.size);
+      upload(g.ARRAY_BUFFER, ibuf[2], inst.meta); upload(g.ARRAY_BUFFER, ibuf[3], inst.width);
+      upload(g.ARRAY_BUFFER, ibuf[6], iz); upload(g.ARRAY_BUFFER, mZ, mz);
+      g.bindVertexArray(mvao);
+      upload(g.ELEMENT_ARRAY_BUFFER, mIdx, mo.idx);
+      g.bindVertexArray(null);
       colKey = "";
     }
+    // marks and paths interleaved too finely: the canvas paints the list
+    if (!batches) return false;
     const key = style ? "s" + styleRev : "u";
     if (key !== colKey) {
-      const c = glColors(dl, inst, style);
-      if (!c) { g.bindVertexArray(null); return false; }
-      upload(bFill, c.fill); upload(bStroke, c.stroke);
+      const rc = glColors(dl, inst, style), mc = mesh!.nv ? glMeshColors(dl, mesh!, style) : new Uint8Array(0);
+      if (!rc || !mc) return false;
+      g.bindVertexArray(null);
+      upload(g.ARRAY_BUFFER, ibuf[4], rc.fill); upload(g.ARRAY_BUFFER, ibuf[5], rc.stroke);
+      upload(g.ARRAY_BUFFER, mCol, mc);
       colKey = key;
     }
     const np = Math.min(frame.aff.length, GL_MAX_SLOTS);
@@ -503,32 +789,68 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
       const cr = dl.clips[c];
       clipU[4 * (c + 1)] = cr.x0; clipU[4 * (c + 1) + 1] = cr.y0; clipU[4 * (c + 1) + 2] = cr.x1; clipU[4 * (c + 1) + 3] = cr.y1;
     }
-    g.useProgram(prog);
-    g.uniform4fv(uAff, affU);
-    g.uniform4fv(uPclip, pclipU);
-    g.uniform4fv(uClip, clipU);
-    g.uniform1fv(uGs, gsU);
-    g.uniform1f(uBase, frame.base);
-    g.uniform2f(uVp, W, H);
+    const setU = function (pr: WebGLProgram, u: ReturnType<typeof uniforms>): void {
+      g.useProgram(pr);
+      g.uniform4fv(u.aff, affU);
+      g.uniform4fv(u.pclip, pclipU);
+      g.uniform4fv(u.clip, clipU);
+      if (u.gs) g.uniform1fv(u.gs, gsU);
+      g.uniform1f(u.base, frame.base);
+      g.uniform2f(u.vp, W, H);
+      g.uniform1f(u.zn, 2 * dl.n + 2);
+    };
+    setU(mprog!, uM);
+    setU(prog!, uI);
     g.viewport(0, 0, W, H);
     g.clearColor(0, 0, 0, 0);
-    g.clear(g.COLOR_BUFFER_BIT);
+    g.clearDepth(1);
+    g.clear(g.COLOR_BUFFER_BIT | g.DEPTH_BUFFER_BIT);
     g.enable(g.BLEND);
     g.blendFunc(g.ONE, g.ONE_MINUS_SRC_ALPHA);
-    if (inst.n) g.drawArraysInstanced(g.TRIANGLE_STRIP, 0, 4, inst.n);
+    if (2 * dl.n + 2 <= depthSlots) {
+      g.enable(g.DEPTH_TEST);
+      g.depthFunc(g.LESS);
+      g.depthMask(true);
+    } else {
+      g.disable(g.DEPTH_TEST);
+    }
+    let cur = -1;
+    for (const bt of batches) {
+      if (bt.mesh) {
+        if (cur !== 1) { g.useProgram(mprog); g.bindVertexArray(mvao); cur = 1; }
+        g.drawElements(g.TRIANGLES, bt.b - bt.a, g.UNSIGNED_INT, bt.a * 4);
+      } else {
+        if (cur !== 0) { g.useProgram(prog); g.bindVertexArray(vao); cur = 0; }
+        pointInstances(bt.a);
+        g.drawArraysInstanced(g.TRIANGLE_STRIP, 0, 4, bt.b - bt.a);
+      }
+    }
     g.bindVertexArray(null);
     return !g.isContextLost();
   }
 
   function release(): void {
-    if (!inst) return;
-    inst = null; instDl = null; instOrd = undefined; colKey = "";
+    if (!inst && !mesh) return;
+    inst = null; mesh = null; meshDl = null; batches = null; geoDl = null; geoOrd = undefined; colKey = "";
     if (lost || g.isContextLost()) return;
-    for (const b of [bPos, bSize, bMeta, bWidth, bFill, bStroke]) {
+    g.bindVertexArray(null);
+    for (const b of ibuf.concat([mV, mMeta, mCol, mZ])) {
       g.bindBuffer(g.ARRAY_BUFFER, b);
       g.bufferData(g.ARRAY_BUFFER, 0, g.STATIC_DRAW);
     }
+    g.bindVertexArray(mvao);
+    g.bindBuffer(g.ELEMENT_ARRAY_BUFFER, mIdx);
+    g.bufferData(g.ELEMENT_ARRAY_BUFFER, 0, g.STATIC_DRAW);
+    g.bindVertexArray(null);
   }
 
-  return { canvas: canvas, draw: draw, alive: function () { return !lost && !g.isContextLost(); }, release: release };
+  function dispose(): void {
+    release();
+    disposed = true;
+    const ext = g.getExtension("WEBGL_lose_context");
+    if (ext) ext.loseContext();
+    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+  }
+
+  return { canvas: canvas, draw: draw, alive: function () { return !lost && !g.isContextLost(); }, release: release, msaa: msaa, dispose: dispose };
 }

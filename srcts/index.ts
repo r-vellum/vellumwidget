@@ -50,7 +50,8 @@ import { vellumwidgetBus } from "./linking";
 import { createState } from "./state";
 import { axisRetickable, axisTicks, dataToNative, detectTimeFormat, fmtRNum, fmtTick, logTicks, niceTicks, parseSecLabels, secAxisMap, secTicks, strftimeUTC, timeTicks } from "./ticks";
 import { sanitizeTip } from "./tooltip";
-import { glColors, glInstances, glStyleReadable, glUnsupported } from "./features/webgl";
+import { glBatches, glColors, glInstances, glMeshColors, glStyleReadable, glUnsupported, zOf } from "./features/webgl";
+import { fillTriangles, glMesh, glMeshOrder, meshVerts, ringNesting } from "./features/glmesh";
 import type { Bbox, ViewBox } from "./types";
 import { atMaxZoom, clampViewBox, clampZoomFactor, conjugatePan, fmtViewBox, isZoomedIn, panToView, parseViewBox, userToCanvas, viewToPan, zoomViewBox, zoomViewBoxCapped } from "./viewbox";
 
@@ -137,6 +138,14 @@ HTMLWidgets.widget({
         glInstances: glInstances,
         glColors: glColors,
         glStyleReadable: glStyleReadable,
+        glMesh: glMesh,
+        glMeshColors: glMeshColors,
+        glBatches: glBatches,
+        fillTriangles: fillTriangles,
+        glMeshOrder: glMeshOrder,
+        meshVerts: meshVerts,
+        ringNesting: ringNesting,
+        zOf: zOf,
         listExact: function () { return ws.dl ? ws.dl.exact : null; },
         runsAttached: function () { return !!(ws.dl && ws.dl.runImgs); },
         runStyled: ws.fx.runStyled,

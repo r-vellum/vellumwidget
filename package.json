@@ -13,6 +13,7 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
+    "earcut": "3.0.2",
     "flatbush": "^4.6.2"
   }
 }
