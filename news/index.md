@@ -2,6 +2,18 @@
 
 ## vellumwidget (development version)
 
+### Bug fixes
+
+- Under `legend_click = "hide"` or `"mute"`, double-clicking the
+  isolated series’ swatch again now restores every series, as
+  documented. The first click of the double-click used to hide that
+  series, so the double-click isolated it again instead of restoring.
+- The hover highlight no longer paints past the plot when zoomed: a
+  hovered series or mark just outside the view used to draw over the
+  page around the widget.
+- Double-clicking a legend swatch, or brushing across labels, no longer
+  selects the chart’s text in the browser.
+
 ## vellumwidget 0.20.0
 
 ### New features
