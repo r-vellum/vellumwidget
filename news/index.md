@@ -4,6 +4,14 @@
 
 ### New features
 
+- The WebGL2 mid tier also draws lines and polygons (F-29, phase B).
+  Fills are triangulated once (holes kept), strokes are drawn at their
+  pixel width with miter joins and the paint’s caps, and marks and paths
+  are drawn in paint order. A big scatter with a keyed line or a map of
+  keyed polygons now stays on the GPU instead of going back to the 2D
+  canvas. Dashed strokes, gradients, grouped marks and paths above 4
+  million mesh vertices still use the canvas.
+
 - Raster mode draws the zoomed-in marks with WebGL2 (F-25, phase A). A
   display list of 50,000 marks or more is drawn on the GPU as one
   instanced draw, in paint order, through each panel’s axis-zoom

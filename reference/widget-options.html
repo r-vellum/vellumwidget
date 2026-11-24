@@ -197,10 +197,12 @@ or more with WebGL2 where the browser has it: a million points redraw in a
 few milliseconds, so pan, zoom and <code><a href="https://r-vellum.github.io/vellumplot/reference/condition.html" class="external-link">condition()</a></code>, selection and filter
 styling stay live, where the 2D canvas redraws in about a second and waits
 for the view to settle. <code>"always"</code> uses WebGL2 for any size of list,
-<code>"never"</code> keeps the 2D canvas. WebGL2 draws point and rectangle marks with
-solid fills and strokes; a list holding other marks (lines, polygons,
-gradients, dashed strokes, grouped marks) is drawn on the canvas, as it is
-without WebGL2 or when the browser drops the context.</p></dd>
+<code>"never"</code> keeps the 2D canvas. WebGL2 draws points, rectangles, lines and
+polygons with solid fills and strokes (lines join with a miter, which at
+sharp turns of thick lines differs a little from a round join); a list
+holding gradients, dashed strokes, grouped marks or very large paths is
+drawn on the canvas, as it is without WebGL2 or when the browser drops the
+context.</p></dd>
 
 
 <dt id="arg-precision">precision<a class="anchor" aria-label="anchor" href="#arg-precision"></a></dt>
