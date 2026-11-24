@@ -338,10 +338,15 @@ export function rasterFeature(
   // The list, draw order and style the GL painter last failed to draw (e.g.
   // a raise order interleaving marks and paths too finely): the canvas paints
   // that state, through the LIVE_DRAW_MAX deferral like any canvas draw.
-  let glFail: { dl: DisplayList; ord: Uint32Array | null; rev: number } | null = null;
+  let glFail: { dl: DisplayList; ord: Uint32Array | null } | null = null;
   function glUsable(dl: DisplayList): boolean {
-    let why = glReason(dl);
-    if (!why && glFail && glFail.dl === dl && glFail.ord === ws.fx.raiseOrder(dl) && glFail.rev === ws.msRev) why = "draw failed";
+    const why = glReason(dl);
+    if (!why && glFail && glFail.dl === dl && glFail.ord === ws.fx.raiseOrder(dl)) {
+      // the batches don't depend on the style: keep the painter's mesh for
+      // the next draw order
+      glLast = "draw failed";
+      return false;
+    }
     if (why) {
       // a list the painter can't draw: let go of the last one's buffers
       if (glp) glp.release();
@@ -444,7 +449,7 @@ export function rasterFeature(
     if (glp) glp.canvas.style.display = "none";
     if (useGL) {
       // GL couldn't draw this state: redraw it the canvas way (deferral included)
-      glFail = { dl: dl, ord: ws.fx.raiseOrder(dl), rev: ws.msRev };
+      glFail = { dl: dl, ord: ws.fx.raiseOrder(dl) };
       drawList(dl, settled, stateOnly);
       return;
     }

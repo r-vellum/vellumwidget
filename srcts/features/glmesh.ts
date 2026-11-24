@@ -89,12 +89,22 @@ function signedArea(r: number[]): number {
   return a / 2;
 }
 
+// Vertices of a ring sampled for the nesting test (evenly spaced).
+const NEST_SAMPLES = 8;
+
 // Each ring's nesting depth and the ring directly around it (-1: none), or
 // null when the rings don't nest cleanly, so earcut's outer-ring-plus-holes
-// model can't stand for the canvas's fill rule: two rings that cross (some
-// of a ring's vertices inside the other, some not), contain each other, more
-// than GL_MAX_RINGS rings, or (non-zero rule) a ring inside another wound the
-// same way, which the canvas fills rather than cuts out.
+// model can't stand for the canvas's fill rule: two rings that cross,
+// coincide or contain each other, more than GL_MAX_RINGS rings, or
+// (non-zero rule) a ring inside another wound the same way, which the
+// canvas fills rather than cuts out.
+//
+// Only rings whose boxes overlap are tested, on up to NEST_SAMPLES of a's
+// vertices; vertices on b's boundary (rings that touch, as neighbouring parts
+// of a multipolygon do) don't decide. With a's box inside b's: all decisive
+// ones inside means nested, all outside apart, a mix crossing. With a's box
+// reaching past b's, any inside means crossing. (Crossings the samples miss are invalid
+// geometry; the depth test still draws such a record once.)
 export function ringNesting(rs: number[][], evenodd: boolean): { depth: number[]; parent: number[] } | null {
   const n = rs.length;
   const depth = new Array(n).fill(0), parent = new Array(n).fill(-1);
@@ -113,19 +123,21 @@ export function ringNesting(rs: number[][], evenodd: boolean): { depth: number[]
   const inside: boolean[][] = [];
   for (let a = 0; a < n; a++) {
     inside.push(new Array(n).fill(false));
+    const A = bb[a], r = rs[a], nv = r.length / 2;
+    const step = Math.max(1, Math.floor(nv / NEST_SAMPLES));
     for (let b = 0; b < n; b++) {
       if (a === b) continue;
-      const A = bb[a], B = bb[b];
+      const B = bb[b];
       if (A[2] < B[0] || A[0] > B[2] || A[3] < B[1] || A[1] > B[3]) continue; // apart
-      // a's vertices strictly inside / outside b (those on b's boundary --
-      // rings that touch, as neighbouring parts of a multipolygon do -- don't
-      // decide)
+      const within = A[0] >= B[0] && A[1] >= B[1] && A[2] <= B[2] && A[3] <= B[3];
       let cin = 0, cout = 0;
-      const r = rs[a];
-      for (let k = 0; k < r.length; k += 2) {
-        if (onRing(r[k], r[k + 1], rs[b], 1e-6)) continue;
-        if (inRing(r[k], r[k + 1], rs[b])) cin++; else cout++;
+      for (let v = 0; v < nv; v += step) {
+        const x = r[2 * v], y = r[2 * v + 1];
+        if (onRing(x, y, rs[b], 1e-6)) continue;
+        if (inRing(x, y, rs[b])) cin++; else cout++;
       }
+      // a reaching past b's box yet partly inside b: they cross
+      if (!within) { if (cin > 0) return null; continue; }
       if (cin === 0 && cout === 0) return null; // the same ring twice (even-odd cancels it)
       if (cin === 0) continue;
       if (cout !== 0) return null; // crossing rings
@@ -151,23 +163,35 @@ export function ringNesting(rs: number[][], evenodd: boolean): { depth: number[]
   return { depth: depth, parent: parent };
 }
 
+// Each list's ring nesting per filled record, computed once (eligibility and
+// the mesh build share it). undefined: not computed; null: complex.
+const nestCache = new WeakMap<DisplayList, Map<number, { depth: number[]; parent: number[] } | null>>();
+function recordNesting(dl: DisplayList, i: number, rs: number[][]): { depth: number[]; parent: number[] } | null {
+  let m = nestCache.get(dl);
+  if (!m) { m = new Map(); nestCache.set(dl, m); }
+  if (m.has(i)) return m.get(i)!;
+  const nest = ringNesting(rs, dl.evenodd[dl.row[i]] === 1);
+  m.set(i, nest);
+  return nest;
+}
+
 // Can path record i be meshed as the canvas paints it? (Only a fill's rings
 // matter: strokes have no rule.)
 export function pathMeshable(dl: DisplayList, i: number): boolean {
   const j = dl.row[i], pt = dl.paints[dl.paint[i]];
   if (dl.closed[j] !== 1 || pt.fill == null) return true;
-  return ringNesting(rings(dl, i), dl.evenodd[j] === 1) !== null;
+  return recordNesting(dl, i, rings(dl, i)) !== null;
 }
 
 // Triangles (flat xy, and indices into it) filling the rings: each ring at
 // an even nesting depth is an outer ring, with the rings directly inside it
 // as its holes. Rings that don't nest cleanly (ringNesting null) give none;
 // eligibility keeps such lists on the canvas.
-export function fillTriangles(rs: number[][], evenodd = true): { xy: number[]; idx: number[] } {
+export function fillTriangles(rs: number[][], evenodd = true, nesting?: { depth: number[]; parent: number[] } | null): { xy: number[]; idx: number[] } {
   const xy: number[] = [], idx: number[] = [];
   const n = rs.length;
   if (!n) return { xy: xy, idx: idx };
-  const nest = ringNesting(rs, evenodd);
+  const nest = nesting !== undefined ? nesting : ringNesting(rs, evenodd);
   if (!nest) return { xy: xy, idx: idx };
   const depth = nest.depth, parent = nest.parent;
   for (let o = 0; o < n; o++) {
@@ -222,7 +246,7 @@ export function glMesh(dl: DisplayList): GLMesh {
     const first = I.length;
     const closed = dl.closed[j] === 1;
     if (closed && pt.fill != null) {
-      const t = fillTriangles(rs, dl.evenodd[j] === 1);
+      const t = fillTriangles(rs, dl.evenodd[j] === 1, recordNesting(dl, i, rs));
       const base = R.length;
       for (let k = 0; k < t.xy.length; k += 2) vert(t.xy[k], t.xy[k + 1], t.xy[k], t.xy[k + 1], t.xy[k], t.xy[k + 1], 0, 0, 0, 0, panel, clip, i, 0);
       for (let k = 0; k < t.idx.length; k++) I.push(base + t.idx[k]);

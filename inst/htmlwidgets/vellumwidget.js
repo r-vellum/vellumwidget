@@ -7681,6 +7681,7 @@
     for (let k = 0, m = r.length - 2; k < r.length; m = k, k += 2) a += (r[m] - r[k]) * (r[m + 1] + r[k + 1]);
     return a / 2;
   }
+  var NEST_SAMPLES = 8;
   function ringNesting(rs, evenodd) {
     const n = rs.length;
     const depth = new Array(n).fill(0), parent = new Array(n).fill(-1);
@@ -7699,16 +7700,23 @@
     const inside = [];
     for (let a = 0; a < n; a++) {
       inside.push(new Array(n).fill(false));
+      const A = bb[a], r = rs[a], nv = r.length / 2;
+      const step = Math.max(1, Math.floor(nv / NEST_SAMPLES));
       for (let b = 0; b < n; b++) {
         if (a === b) continue;
-        const A = bb[a], B = bb[b];
+        const B = bb[b];
         if (A[2] < B[0] || A[0] > B[2] || A[3] < B[1] || A[1] > B[3]) continue;
+        const within = A[0] >= B[0] && A[1] >= B[1] && A[2] <= B[2] && A[3] <= B[3];
         let cin = 0, cout = 0;
-        const r = rs[a];
-        for (let k = 0; k < r.length; k += 2) {
-          if (onRing(r[k], r[k + 1], rs[b], 1e-6)) continue;
-          if (inRing(r[k], r[k + 1], rs[b])) cin++;
+        for (let v = 0; v < nv; v += step) {
+          const x = r[2 * v], y = r[2 * v + 1];
+          if (onRing(x, y, rs[b], 1e-6)) continue;
+          if (inRing(x, y, rs[b])) cin++;
           else cout++;
+        }
+        if (!within) {
+          if (cin > 0) return null;
+          continue;
         }
         if (cin === 0 && cout === 0) return null;
         if (cin === 0) continue;
@@ -7734,16 +7742,28 @@
     }
     return { depth, parent };
   }
+  var nestCache = /* @__PURE__ */ new WeakMap();
+  function recordNesting(dl, i, rs) {
+    let m = nestCache.get(dl);
+    if (!m) {
+      m = /* @__PURE__ */ new Map();
+      nestCache.set(dl, m);
+    }
+    if (m.has(i)) return m.get(i);
+    const nest = ringNesting(rs, dl.evenodd[dl.row[i]] === 1);
+    m.set(i, nest);
+    return nest;
+  }
   function pathMeshable(dl, i) {
     const j = dl.row[i], pt = dl.paints[dl.paint[i]];
     if (dl.closed[j] !== 1 || pt.fill == null) return true;
-    return ringNesting(rings(dl, i), dl.evenodd[j] === 1) !== null;
+    return recordNesting(dl, i, rings(dl, i)) !== null;
   }
-  function fillTriangles(rs, evenodd = true) {
+  function fillTriangles(rs, evenodd = true, nesting) {
     const xy = [], idx = [];
     const n = rs.length;
     if (!n) return { xy, idx };
-    const nest = ringNesting(rs, evenodd);
+    const nest = nesting !== void 0 ? nesting : ringNesting(rs, evenodd);
     if (!nest) return { xy, idx };
     const depth = nest.depth, parent = nest.parent;
     for (let o = 0; o < n; o++) {
@@ -7792,7 +7812,7 @@
       const first = I.length;
       const closed = dl.closed[j] === 1;
       if (closed && pt.fill != null) {
-        const t = fillTriangles(rs, dl.evenodd[j] === 1);
+        const t = fillTriangles(rs, dl.evenodd[j] === 1, recordNesting(dl, i, rs));
         const base = R.length;
         for (let k = 0; k < t.xy.length; k += 2) vert(t.xy[k], t.xy[k + 1], t.xy[k], t.xy[k + 1], t.xy[k], t.xy[k + 1], 0, 0, 0, 0, panel, clip, i, 0);
         for (let k = 0; k < t.idx.length; k++) I.push(base + t.idx[k]);
@@ -8397,6 +8417,7 @@ void main() {
       return { aff: U("u_aff"), pclip: U("u_pclip"), clip: U("u_clip"), gs: U("u_gs"), base: U("u_base"), vp: U("u_vp"), zn: U("u_zn") };
     };
     const uI = uniforms(prog), uM = uniforms(mprog);
+    const depthSlots = Math.pow(2, Number(g.getParameter(g.DEPTH_BITS)) || 16) / 4;
     const vao = g.createVertexArray();
     g.bindVertexArray(vao);
     const corner = g.createBuffer();
@@ -8550,9 +8571,13 @@ void main() {
       g.clear(g.COLOR_BUFFER_BIT | g.DEPTH_BUFFER_BIT);
       g.enable(g.BLEND);
       g.blendFunc(g.ONE, g.ONE_MINUS_SRC_ALPHA);
-      g.enable(g.DEPTH_TEST);
-      g.depthFunc(g.LESS);
-      g.depthMask(true);
+      if (2 * dl.n + 2 <= depthSlots) {
+        g.enable(g.DEPTH_TEST);
+        g.depthFunc(g.LESS);
+        g.depthMask(true);
+      } else {
+        g.disable(g.DEPTH_TEST);
+      }
       let cur = -1;
       for (const bt of batches) {
         if (bt.mesh) {
@@ -8860,8 +8885,11 @@ void main() {
     let glStyleRev = -1, glStyleOk = true;
     let glFail = null;
     function glUsable(dl) {
-      let why = glReason(dl);
-      if (!why && glFail && glFail.dl === dl && glFail.ord === ws.fx.raiseOrder(dl) && glFail.rev === ws.msRev) why = "draw failed";
+      const why = glReason(dl);
+      if (!why && glFail && glFail.dl === dl && glFail.ord === ws.fx.raiseOrder(dl)) {
+        glLast = "draw failed";
+        return false;
+      }
       if (why) {
         if (glp) glp.release();
         glLast = why;
@@ -8970,7 +8998,7 @@ void main() {
       }
       if (glp) glp.canvas.style.display = "none";
       if (useGL) {
-        glFail = { dl, ord: ws.fx.raiseOrder(dl), rev: ws.msRev };
+        glFail = { dl, ord: ws.fx.raiseOrder(dl) };
         drawList(dl, settled, stateOnly);
         return;
       }

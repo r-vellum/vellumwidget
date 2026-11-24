@@ -668,6 +668,10 @@ export function createGLPainter(onLost: () => void, msaa = true): GLPainter | nu
     return { aff: U("u_aff"), pclip: U("u_pclip"), clip: U("u_clip"), gs: U("u_gs"), base: U("u_base"), vp: U("u_vp"), zn: U("u_zn") };
   };
   const uI = uniforms(prog), uM = uniforms(mprog);
+  // Depth slots the depth buffer resolves (WebGL guarantees only 16 bits):
+  // a list with more records draws without the depth test (a translucent
+  // stroke crossing itself then darkens there, but nothing is dropped).
+  const depthSlots = Math.pow(2, Number(g.getParameter(g.DEPTH_BITS)) || 16) / 4;
 
   // instanced marks
   const vao = g.createVertexArray();
@@ -803,9 +807,13 @@ export function createGLPainter(onLost: () => void, msaa = true): GLPainter | nu
     g.clear(g.COLOR_BUFFER_BIT | g.DEPTH_BUFFER_BIT);
     g.enable(g.BLEND);
     g.blendFunc(g.ONE, g.ONE_MINUS_SRC_ALPHA);
-    g.enable(g.DEPTH_TEST);
-    g.depthFunc(g.LESS);
-    g.depthMask(true);
+    if (2 * dl.n + 2 <= depthSlots) {
+      g.enable(g.DEPTH_TEST);
+      g.depthFunc(g.LESS);
+      g.depthMask(true);
+    } else {
+      g.disable(g.DEPTH_TEST);
+    }
     let cur = -1;
     for (const bt of batches) {
       if (bt.mesh) {
