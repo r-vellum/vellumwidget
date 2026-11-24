@@ -1,5 +1,21 @@
 # vellumwidget (development version)
 
+## New features
+
+* Raster mode draws the zoomed-in marks with WebGL2 (F-25, phase A). A
+  display list of 50,000 marks or more is drawn on the GPU as one instanced
+  draw, in paint order, through each panel's axis-zoom transform and clip:
+  a million points redraw in about 10 ms where the 2D canvas took about
+  1.3 s, so pan and zoom stay live instead of showing the scaled image until
+  the view settles, and `condition()`, selection, filter and legend styling
+  restyle at once. Points (every marker shape, with fill and stroke) and
+  rectangles with solid paints are drawn this way; a list with other marks
+  (lines, polygons, gradients, dashed strokes, grouped marks or run images)
+  stays on the canvas, as it does without WebGL2 or if the browser drops the
+  context. `render_options(webgl = )` picks `"auto"` (default), `"always"` or
+  `"never"`. Picking, the selection rings, the detail tier and the overview
+  image are unchanged.
+
 # vellumwidget 0.19.1
 
 ## Bug fixes

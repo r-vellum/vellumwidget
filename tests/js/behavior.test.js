@@ -7001,6 +7001,75 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   }
 }
 
+// --- F-25: the WebGL painter's pure parts (jsdom has no WebGL2) ---
+{
+  const t = inst._test;
+  // A hand-made display list: a red point, a hollow blue-stroked square, a
+  // half-transparent rect, and a flagged point the image draws.
+  const mkDl = function () {
+    return {
+      n: 4,
+      kind: Uint8Array.from([0, 0, 1, 0]), row: Uint32Array.from([0, 1, 0, 2]),
+      flags: Uint8Array.from([0, 0, 0, 16]), paint: Uint32Array.from([0, 1, 2, 0]),
+      key: Uint32Array.from([0, 1, 2, 3]), clip: Uint32Array.from([0, 1, 0, 0]),
+      panel: Uint32Array.from([1, 1, 1, 1]), group: new Uint32Array(4), run: new Uint32Array(4),
+      cx: Float32Array.from([10, 20, 30]), cy: Float32Array.from([11, 21, 31]), r: Float32Array.from([2, 3, 4]),
+      shape: Uint8Array.from([0, 1, 0]),
+      rx: Float32Array.from([5]), ry: Float32Array.from([6]), rw: Float32Array.from([7]), rh: Float32Array.from([8]),
+      paints: [
+        { fill: "#ff0000", stroke: null, width: 0, dash: null, grad: 0 },
+        { fill: null, stroke: "#0000ff", width: 1.5, dash: null, grad: 0 },
+        { fill: "#00ff0080", stroke: "#000000", width: 1, dash: null, grad: 0 }
+      ],
+      clips: [{ x0: 0, y0: 0, x1: 100, y1: 100, ps: 0, pn: 0 }],
+      panels: ["panel-1-1"], keys: ["a", "b", "c", "d"], runImgs: null
+    };
+  };
+  const dl = mkDl();
+  ok(t.glUnsupported(dl) === null, "F-25: points and rects with solid paints are drawable by WebGL");
+  const inst4 = t.glInstances(dl, null);
+  ok(inst4.n === 3 && Array.from(inst4.rec).join() === "0,1,2", "F-25: the flagged record is skipped, the rest kept in paint order");
+  ok(inst4.meta[4 * 1 + 1] === 1 && inst4.meta[4 * 1 + 3] === 1 && inst4.meta[4 * 2] === 1,
+    "F-25: an instance carries its shape, clip slot and kind");
+  ok(inst4.pos[4] === 5 && inst4.size[4] === 7 && inst4.size[5] === 8, "F-25: a rect instance is its corner and size");
+  ok(inst4.width[0] === 0 && inst4.width[1] === 1.5, "F-25: the stroke width only where there is a stroke");
+  const ord = t.glInstances(dl, Uint32Array.from([1, 2, 0, 3]));
+  ok(Array.from(ord.rec).join() === "1,2,0", "F-25: instances follow the raise order");
+  let c = t.glColors(dl, inst4, null);
+  ok(Array.from(c.fill.slice(0, 4)).join() === "255,0,0,255" && c.stroke[3] === 0, "F-25: a filled point: its fill, no stroke");
+  ok(c.fill[7] === 0 && Array.from(c.stroke.slice(4, 8)).join() === "0,0,255,255", "F-25: a hollow marker: no fill, its stroke");
+  ok(c.fill[11] === 128, "F-25: a paint's own alpha is kept");
+  // style state: key 0 dimmed, key 1 recoloured, key 2 hidden
+  const st = {
+    flags: Uint8Array.from([1, 0, 2, 0]), color: Uint32Array.from([0, 1, 0, 0]), palette: ["#00aa00"],
+    dimAlpha: 0.25, alpha: null, alphaPal: []
+  };
+  c = t.glColors(dl, inst4, st);
+  ok(c.fill[3] === 64, "F-25: a dimmed key is drawn at the dim alpha (" + c.fill[3] + ")");
+  ok(Array.from(c.stroke.slice(4, 8)).join() === "0,170,0,255" && c.fill[7] === 0,
+    "F-25: a condition colour replaces the stroke, and a hollow marker stays hollow");
+  ok(c.fill[11] === 0 && c.stroke[11] === 0, "F-25: a hidden key is not drawn");
+  const stM = { flags: Uint8Array.from([4, 0, 0, 0]), color: new Uint32Array(4), palette: [], dimAlpha: 0.25, alpha: null, alphaPal: [] };
+  ok(t.glColors(dl, inst4, stM).fill[3] < 255 && t.glColors(dl, inst4, stM).fill[3] > 0, "F-25: a legend-muted key is drawn at the muted alpha");
+  // a condition colour without alpha keeps the paint's (as the canvas does)
+  const st2 = { flags: new Uint8Array(4), color: Uint32Array.from([0, 0, 1, 0]), palette: ["#112233"], dimAlpha: 0.25, alpha: null, alphaPal: [] };
+  c = t.glColors(dl, inst4, st2);
+  ok(Array.from(c.fill.slice(8, 12)).join() === "17,34,51,128", "F-25: a condition colour keeps the paint's alpha");
+  // what keeps a list on the canvas
+  const why = function (f) { const d = mkDl(); f(d); return t.glUnsupported(d); };
+  ok(why((d) => { d.kind[0] = 2; }) === "paths", "F-25: a path keeps the list on the canvas");
+  ok(why((d) => { d.paints[0].grad = 1; }) === "gradients", "F-25: a gradient keeps the list on the canvas");
+  ok(why((d) => { d.paints[1].dash = [2, 2]; }) === "dashes", "F-25: a dashed stroke keeps the list on the canvas");
+  ok(why((d) => { d.group[0] = 1; }) === "groups", "F-25: an opacity group keeps the list on the canvas");
+  ok(why((d) => { d.clips[0].pn = 1; }) === "clip paths", "F-25: a clip path keeps the list on the canvas");
+  ok(why((d) => { d.runImgs = []; d.run[3] = 1; }) === "runs", "F-25: a run image keeps the list on the canvas");
+  ok(why((d) => { d.paints[0].fill = "not-a-colour"; }) === "colours", "F-25: an unreadable colour keeps the list on the canvas");
+  ok(why((d) => { d.panels = new Array(60).fill("p"); }) === "panels", "F-25: too many panels keep the list on the canvas");
+  // no WebGL2 here: the painter is unavailable and the canvas path is used
+  const gs = t.glState();
+  ok(gs.on === false, "F-25: without WebGL2 no GL layer is shown");
+}
+
 // Checks that need the MutationObserver (removal watcher) to have run.
 setTimeout(function () {
   asyncChecks[0]();
