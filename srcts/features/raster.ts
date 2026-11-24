@@ -11,7 +11,7 @@ import type { WidgetFns, WidgetState } from "../state";
 import type { MarkColors } from "../types";
 import type { RunPatch, RunSplit } from "./runStyle";
 import { isZoomedIn, userToCanvas } from "../viewbox";
-import { createGLPainter, glLastError, glUnsupported, GL_AUTO_MIN } from "./webgl";
+import { createGLPainter, glLastError, glStyleReadable, glUnsupported, GL_AUTO_MIN } from "./webgl";
 import type { GLPainter } from "./webgl";
 
 // Ids of the rings' panel clips (VW-48), unique across the page's widgets.
@@ -325,8 +325,14 @@ export function rasterFeature(
     if (glForDl !== dl || glForRuns !== dl.runImgs) {
       glForDl = dl; glForRuns = dl.runImgs; glWhy = glUnsupported(dl);
     }
-    return glWhy;
+    if (glWhy) return glWhy;
+    if (ws.msActive && ws.msColor) {
+      if (glStyleRev !== ws.msRev) { glStyleRev = ws.msRev; glStyleOk = glStyleReadable(ws.msColor, ws.msPalette); }
+      if (!glStyleOk) return "condition colours";
+    }
+    return null;
   }
+  let glStyleRev = -1, glStyleOk = true;
   function glUsable(dl: DisplayList): boolean {
     const why = glReason(dl);
     if (why) {
@@ -372,6 +378,7 @@ export function rasterFeature(
     // reorder its pixels) at the overview zoom too.
     const raising = dl.exact && !!ws.fx.raiseOrder(dl);
     if (!(zoomed || (styled && dl.exact) || blending || raising) || !dl.n) {
+      glLast = "image shown";
       hideCanvas();
       showMarksLayer(true);
       return;
@@ -380,6 +387,7 @@ export function rasterFeature(
     const [W, H] = fitCanvas();
     const L = listLayout(dl, W, H);
     const useGL = !blending && glUsable(dl);
+    if (blending) glLast = "blend runs";
     // Too many marks in view to redraw within a frame: keep the scaled image
     // up while the view is moving and draw once it settles. (The GL painter
     // draws them all within a frame.)

@@ -7060,6 +7060,9 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(t.glColors(dl, inst4, st3).fill[11] === 64, "F-25: a condition colour with its own alpha keeps it");
   const st4 = { flags: new Uint8Array(4), color: Uint32Array.from([0, 0, 1, 0]), palette: ["no-such-colour"], dimAlpha: 0.25, alpha: null, alphaPal: [] };
   ok(t.glColors(dl, inst4, st4) === null, "F-25: an unreadable condition colour leaves the state to the canvas");
+  ok(t.glStyleReadable(Uint32Array.from([0, 0, 1, 0]), ["no-such-colour"]) === false &&
+    t.glStyleReadable(Uint32Array.from([0, 0, 2, 0]), ["no-such-colour", "#123456"]) === true,
+    "F-25: only a condition colour some key uses decides for the canvas");
   const dlc = mkDl(); dlc.paints[1].cap = "round"; dlc.paints[2].cap = "square";
   const ic = t.glInstances(dlc, null);
   ok((ic.meta[4] >> 4) === 1 && (ic.meta[8] >> 4) === 2 && (ic.meta[8] & 15) === 1 && (ic.meta[0] >> 4) === 0,

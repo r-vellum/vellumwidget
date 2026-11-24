@@ -117,6 +117,15 @@ export function glUnsupported(dl: DisplayList): string | null {
   return null;
 }
 
+// Can every condition colour a key uses be read? (When not, the canvas
+// paints the state: decided before drawList's LIVE_DRAW_MAX deferral.)
+export function glStyleReadable(color: Uint32Array, palette: string[]): boolean {
+  const bad: boolean[] = palette.map((c) => !parseColor(c));
+  if (!bad.some((b) => b)) return true;
+  for (let k = 0; k < color.length; k++) if (color[k] && bad[color[k] - 1]) return false;
+  return true;
+}
+
 // --- instances -------------------------------------------------------------
 
 // One GPU instance per drawn record, in paint order (or the raise order).
@@ -182,8 +191,6 @@ export function glColors(dl: DisplayList, inst: GLInstances, st: GLStyle | null)
   const pf: (number[] | null)[] = dl.paints.map((p) => parseColor(p.fill));
   const ps: (number[] | null)[] = dl.paints.map((p) => parseColor(p.stroke));
   const pal: (number[] | null)[] = st ? st.palette.map((c) => parseColor(c)) : [];
-  // A condition colour we can't read: the canvas paints this state.
-  if (pal.some((c) => !c)) return null;
   // A condition colour written #rrggbb takes the alpha of a paint written
   // #rrggbbaa; any other keeps its own (raster.ts withAlphaOf).
   const hex6: boolean[] = st ? st.palette.map((c) => /^#[0-9a-fA-F]{6}$/.test(c)) : [];
@@ -199,6 +206,9 @@ export function glColors(dl: DisplayList, inst: GLInstances, st: GLStyle | null)
       else if (fl & MS_MUTED) mult = MUTED_ALPHA;
       const ov = st.color[k];
       const oc = ov ? pal[ov - 1] : null;
+      // a condition colour we can't read: the canvas paints this state
+      // (raster.ts checks for it first, glStyleReadable)
+      if (ov && !oc) return null;
       if (oc) {
         const h6 = hex6[ov - 1];
         if (f) f = [oc[0], oc[1], oc[2], h6 && fHex8[pi] ? f[3] : oc[3]];

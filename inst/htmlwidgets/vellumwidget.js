@@ -7288,6 +7288,12 @@
     }
     return null;
   }
+  function glStyleReadable(color, palette) {
+    const bad = palette.map((c) => !parseColor(c));
+    if (!bad.some((b) => b)) return true;
+    for (let k = 0; k < color.length; k++) if (color[k] && bad[color[k] - 1]) return false;
+    return true;
+  }
   function glInstances(dl, ord) {
     let n = 0;
     for (let i = 0; i < dl.n; i++) if (!dl.flags[i]) n++;
@@ -7330,7 +7336,6 @@
     const pf = dl.paints.map((p) => parseColor(p.fill));
     const ps = dl.paints.map((p) => parseColor(p.stroke));
     const pal = st ? st.palette.map((c) => parseColor(c)) : [];
-    if (pal.some((c) => !c)) return null;
     const hex6 = st ? st.palette.map((c) => /^#[0-9a-fA-F]{6}$/.test(c)) : [];
     const fHex8 = dl.paints.map((p) => p.fill != null && /^#[0-9a-fA-F]{8}$/.test(p.fill));
     const sHex8 = dl.paints.map((p) => p.stroke != null && /^#[0-9a-fA-F]{8}$/.test(p.stroke));
@@ -7344,6 +7349,7 @@
         else if (fl & MS_MUTED) mult = MUTED_ALPHA;
         const ov = st.color[k];
         const oc = ov ? pal[ov - 1] : null;
+        if (ov && !oc) return null;
         if (oc) {
           const h6 = hex6[ov - 1];
           if (f) f = [oc[0], oc[1], oc[2], h6 && fHex8[pi] ? f[3] : oc[3]];
@@ -7921,8 +7927,17 @@ void main() {
         glForRuns = dl.runImgs;
         glWhy = glUnsupported(dl);
       }
-      return glWhy;
+      if (glWhy) return glWhy;
+      if (ws.msActive && ws.msColor) {
+        if (glStyleRev !== ws.msRev) {
+          glStyleRev = ws.msRev;
+          glStyleOk = glStyleReadable(ws.msColor, ws.msPalette);
+        }
+        if (!glStyleOk) return "condition colours";
+      }
+      return null;
     }
+    let glStyleRev = -1, glStyleOk = true;
     function glUsable(dl) {
       const why = glReason(dl);
       if (why) {
@@ -7970,6 +7985,7 @@ void main() {
       const blending = dl.exact && !!dl.runImgs && dl.blendRuns;
       const raising = dl.exact && !!ws.fx.raiseOrder(dl);
       if (!(zoomed || styled && dl.exact || blending || raising) || !dl.n) {
+        glLast = "image shown";
         hideCanvas();
         showMarksLayer(true);
         return;
@@ -7978,6 +7994,7 @@ void main() {
       const [W, H] = fitCanvas();
       const L = listLayout(dl, W, H);
       const useGL = !blending && glUsable(dl);
+      if (blending) glLast = "blend runs";
       if (!settled && !useGL && dl.n > LIVE_DRAW_MAX) {
         let vis = 0;
         const np = dl.panels.length;
@@ -10014,6 +10031,7 @@ void main() {
           glUnsupported,
           glInstances,
           glColors,
+          glStyleReadable,
           listExact: function() {
             return ws.dl ? ws.dl.exact : null;
           },
