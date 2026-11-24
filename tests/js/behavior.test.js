@@ -1387,8 +1387,11 @@ function mountShiny(id, calls) {
   );
 
   // --- double-click isolates; double-click again restores ---
+  // A real double-click arrives as click (detail 1), click (detail 2), dblclick.
   function fireDbl(svg, target) {
-    fireOn(svg, "dblclick", target);
+    fireOn(svg, "click", target, { detail: 1 });
+    fireOn(svg, "click", target, { detail: 2 });
+    fireOn(svg, "dblclick", target, { detail: 2 });
   }
   const elIso = mount(legOpts("hide"));
   fireDbl(elIso.querySelector("svg"), elIso.querySelector('[data-key="legend:color:s"]'));
