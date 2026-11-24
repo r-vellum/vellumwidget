@@ -1482,13 +1482,13 @@
       });
     }
     const closed = g.kind === "polygon" || g.kind === "path" || g.kind === "hexagon" || g.kind === "sector";
-    const rings = g.rings || [n];
+    const rings2 = g.rings || [n];
     let best = Infinity;
     let cross = 0;
     let wind = 0;
     let ra = at;
-    for (let r = 0; r < rings.length; r++) {
-      const rn = rings[r] | 0;
+    for (let r = 0; r < rings2.length; r++) {
+      const rn = rings2[r] | 0;
       if (rn <= 0) continue;
       if (closed && rn >= 3) {
         for (let i = 0, j = rn - 1; i < rn; j = i++) {
@@ -7219,6 +7219,562 @@
     return { proxyCall };
   }
 
+  // node_modules/earcut/src/earcut.js
+  function earcut(data, holeIndices, dim = 2) {
+    const hasHoles = holeIndices && holeIndices.length;
+    const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
+    let outerNode = linkedList(data, 0, outerLen, dim, true);
+    const triangles = [];
+    if (!outerNode || outerNode.next === outerNode.prev) return triangles;
+    let minX, minY, invSize;
+    if (hasHoles) outerNode = eliminateHoles(data, holeIndices, outerNode, dim);
+    if (data.length > 80 * dim) {
+      minX = data[0];
+      minY = data[1];
+      let maxX = minX;
+      let maxY = minY;
+      for (let i = dim; i < outerLen; i += dim) {
+        const x = data[i];
+        const y = data[i + 1];
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+      invSize = Math.max(maxX - minX, maxY - minY);
+      invSize = invSize !== 0 ? 32767 / invSize : 0;
+    }
+    earcutLinked(outerNode, triangles, dim, minX, minY, invSize, 0);
+    return triangles;
+  }
+  function linkedList(data, start, end, dim, clockwise) {
+    let last;
+    if (clockwise === signedArea(data, start, end, dim) > 0) {
+      for (let i = start; i < end; i += dim) last = insertNode(i / dim | 0, data[i], data[i + 1], last);
+    } else {
+      for (let i = end - dim; i >= start; i -= dim) last = insertNode(i / dim | 0, data[i], data[i + 1], last);
+    }
+    if (last && equals(last, last.next)) {
+      removeNode(last);
+      last = last.next;
+    }
+    return last;
+  }
+  function filterPoints(start, end) {
+    if (!start) return start;
+    if (!end) end = start;
+    let p = start, again;
+    do {
+      again = false;
+      if (!p.steiner && (equals(p, p.next) || area(p.prev, p, p.next) === 0)) {
+        removeNode(p);
+        p = end = p.prev;
+        if (p === p.next) break;
+        again = true;
+      } else {
+        p = p.next;
+      }
+    } while (again || p !== end);
+    return end;
+  }
+  function earcutLinked(ear, triangles, dim, minX, minY, invSize, pass) {
+    if (!ear) return;
+    if (!pass && invSize) indexCurve(ear, minX, minY, invSize);
+    let stop = ear;
+    while (ear.prev !== ear.next) {
+      const prev = ear.prev;
+      const next = ear.next;
+      if (invSize ? isEarHashed(ear, minX, minY, invSize) : isEar(ear)) {
+        triangles.push(prev.i, ear.i, next.i);
+        removeNode(ear);
+        ear = next.next;
+        stop = next.next;
+        continue;
+      }
+      ear = next;
+      if (ear === stop) {
+        if (!pass) {
+          earcutLinked(filterPoints(ear), triangles, dim, minX, minY, invSize, 1);
+        } else if (pass === 1) {
+          ear = cureLocalIntersections(filterPoints(ear), triangles);
+          earcutLinked(ear, triangles, dim, minX, minY, invSize, 2);
+        } else if (pass === 2) {
+          splitEarcut(ear, triangles, dim, minX, minY, invSize);
+        }
+        break;
+      }
+    }
+  }
+  function isEar(ear) {
+    const a = ear.prev, b = ear, c = ear.next;
+    if (area(a, b, c) >= 0) return false;
+    const ax = a.x, bx = b.x, cx = c.x, ay = a.y, by = b.y, cy = c.y;
+    const x0 = Math.min(ax, bx, cx), y0 = Math.min(ay, by, cy), x1 = Math.max(ax, bx, cx), y1 = Math.max(ay, by, cy);
+    let p = c.next;
+    while (p !== a) {
+      if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0) return false;
+      p = p.next;
+    }
+    return true;
+  }
+  function isEarHashed(ear, minX, minY, invSize) {
+    const a = ear.prev, b = ear, c = ear.next;
+    if (area(a, b, c) >= 0) return false;
+    const ax = a.x, bx = b.x, cx = c.x, ay = a.y, by = b.y, cy = c.y;
+    const x0 = Math.min(ax, bx, cx), y0 = Math.min(ay, by, cy), x1 = Math.max(ax, bx, cx), y1 = Math.max(ay, by, cy);
+    const minZ = zOrder(x0, y0, minX, minY, invSize), maxZ = zOrder(x1, y1, minX, minY, invSize);
+    let p = ear.prevZ, n = ear.nextZ;
+    while (p && p.z >= minZ && n && n.z <= maxZ) {
+      if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && p !== a && p !== c && pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0) return false;
+      p = p.prevZ;
+      if (n.x >= x0 && n.x <= x1 && n.y >= y0 && n.y <= y1 && n !== a && n !== c && pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, n.x, n.y) && area(n.prev, n, n.next) >= 0) return false;
+      n = n.nextZ;
+    }
+    while (p && p.z >= minZ) {
+      if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && p !== a && p !== c && pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0) return false;
+      p = p.prevZ;
+    }
+    while (n && n.z <= maxZ) {
+      if (n.x >= x0 && n.x <= x1 && n.y >= y0 && n.y <= y1 && n !== a && n !== c && pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, n.x, n.y) && area(n.prev, n, n.next) >= 0) return false;
+      n = n.nextZ;
+    }
+    return true;
+  }
+  function cureLocalIntersections(start, triangles) {
+    let p = start;
+    do {
+      const a = p.prev, b = p.next.next;
+      if (!equals(a, b) && intersects(a, p, p.next, b) && locallyInside(a, b) && locallyInside(b, a)) {
+        triangles.push(a.i, p.i, b.i);
+        removeNode(p);
+        removeNode(p.next);
+        p = start = b;
+      }
+      p = p.next;
+    } while (p !== start);
+    return filterPoints(p);
+  }
+  function splitEarcut(start, triangles, dim, minX, minY, invSize) {
+    let a = start;
+    do {
+      let b = a.next.next;
+      while (b !== a.prev) {
+        if (a.i !== b.i && isValidDiagonal(a, b)) {
+          let c = splitPolygon(a, b);
+          a = filterPoints(a, a.next);
+          c = filterPoints(c, c.next);
+          earcutLinked(a, triangles, dim, minX, minY, invSize, 0);
+          earcutLinked(c, triangles, dim, minX, minY, invSize, 0);
+          return;
+        }
+        b = b.next;
+      }
+      a = a.next;
+    } while (a !== start);
+  }
+  function eliminateHoles(data, holeIndices, outerNode, dim) {
+    const queue = [];
+    for (let i = 0, len = holeIndices.length; i < len; i++) {
+      const start = holeIndices[i] * dim;
+      const end = i < len - 1 ? holeIndices[i + 1] * dim : data.length;
+      const list = linkedList(data, start, end, dim, false);
+      if (list === list.next) list.steiner = true;
+      queue.push(getLeftmost(list));
+    }
+    queue.sort(compareXYSlope);
+    for (let i = 0; i < queue.length; i++) {
+      outerNode = eliminateHole(queue[i], outerNode);
+    }
+    return outerNode;
+  }
+  function compareXYSlope(a, b) {
+    let result = a.x - b.x;
+    if (result === 0) {
+      result = a.y - b.y;
+      if (result === 0) {
+        const aSlope = (a.next.y - a.y) / (a.next.x - a.x);
+        const bSlope = (b.next.y - b.y) / (b.next.x - b.x);
+        result = aSlope - bSlope;
+      }
+    }
+    return result;
+  }
+  function eliminateHole(hole, outerNode) {
+    const bridge = findHoleBridge(hole, outerNode);
+    if (!bridge) {
+      return outerNode;
+    }
+    const bridgeReverse = splitPolygon(bridge, hole);
+    filterPoints(bridgeReverse, bridgeReverse.next);
+    return filterPoints(bridge, bridge.next);
+  }
+  function findHoleBridge(hole, outerNode) {
+    let p = outerNode;
+    const hx = hole.x;
+    const hy = hole.y;
+    let qx = -Infinity;
+    let m;
+    if (equals(hole, p)) return p;
+    do {
+      if (equals(hole, p.next)) return p.next;
+      else if (hy <= p.y && hy >= p.next.y && p.next.y !== p.y) {
+        const x = p.x + (hy - p.y) * (p.next.x - p.x) / (p.next.y - p.y);
+        if (x <= hx && x > qx) {
+          qx = x;
+          m = p.x < p.next.x ? p : p.next;
+          if (x === hx) return m;
+        }
+      }
+      p = p.next;
+    } while (p !== outerNode);
+    if (!m) return null;
+    const stop = m;
+    const mx = m.x;
+    const my = m.y;
+    let tanMin = Infinity;
+    p = m;
+    do {
+      if (hx >= p.x && p.x >= mx && hx !== p.x && pointInTriangle(hy < my ? hx : qx, hy, mx, my, hy < my ? qx : hx, hy, p.x, p.y)) {
+        const tan = Math.abs(hy - p.y) / (hx - p.x);
+        if (locallyInside(p, hole) && (tan < tanMin || tan === tanMin && (p.x > m.x || p.x === m.x && sectorContainsSector(m, p)))) {
+          m = p;
+          tanMin = tan;
+        }
+      }
+      p = p.next;
+    } while (p !== stop);
+    return m;
+  }
+  function sectorContainsSector(m, p) {
+    return area(m.prev, m, p.prev) < 0 && area(p.next, m, m.next) < 0;
+  }
+  function indexCurve(start, minX, minY, invSize) {
+    let p = start;
+    do {
+      if (p.z === 0) p.z = zOrder(p.x, p.y, minX, minY, invSize);
+      p.prevZ = p.prev;
+      p.nextZ = p.next;
+      p = p.next;
+    } while (p !== start);
+    p.prevZ.nextZ = null;
+    p.prevZ = null;
+    sortLinked(p);
+  }
+  function sortLinked(list) {
+    let numMerges;
+    let inSize = 1;
+    do {
+      let p = list;
+      let e;
+      list = null;
+      let tail = null;
+      numMerges = 0;
+      while (p) {
+        numMerges++;
+        let q = p;
+        let pSize = 0;
+        for (let i = 0; i < inSize; i++) {
+          pSize++;
+          q = q.nextZ;
+          if (!q) break;
+        }
+        let qSize = inSize;
+        while (pSize > 0 || qSize > 0 && q) {
+          if (pSize !== 0 && (qSize === 0 || !q || p.z <= q.z)) {
+            e = p;
+            p = p.nextZ;
+            pSize--;
+          } else {
+            e = q;
+            q = q.nextZ;
+            qSize--;
+          }
+          if (tail) tail.nextZ = e;
+          else list = e;
+          e.prevZ = tail;
+          tail = e;
+        }
+        p = q;
+      }
+      tail.nextZ = null;
+      inSize *= 2;
+    } while (numMerges > 1);
+    return list;
+  }
+  function zOrder(x, y, minX, minY, invSize) {
+    x = (x - minX) * invSize | 0;
+    y = (y - minY) * invSize | 0;
+    x = (x | x << 8) & 16711935;
+    x = (x | x << 4) & 252645135;
+    x = (x | x << 2) & 858993459;
+    x = (x | x << 1) & 1431655765;
+    y = (y | y << 8) & 16711935;
+    y = (y | y << 4) & 252645135;
+    y = (y | y << 2) & 858993459;
+    y = (y | y << 1) & 1431655765;
+    return x | y << 1;
+  }
+  function getLeftmost(start) {
+    let p = start, leftmost = start;
+    do {
+      if (p.x < leftmost.x || p.x === leftmost.x && p.y < leftmost.y) leftmost = p;
+      p = p.next;
+    } while (p !== start);
+    return leftmost;
+  }
+  function pointInTriangle(ax, ay, bx, by, cx, cy, px, py) {
+    return (cx - px) * (ay - py) >= (ax - px) * (cy - py) && (ax - px) * (by - py) >= (bx - px) * (ay - py) && (bx - px) * (cy - py) >= (cx - px) * (by - py);
+  }
+  function pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, px, py) {
+    return !(ax === px && ay === py) && pointInTriangle(ax, ay, bx, by, cx, cy, px, py);
+  }
+  function isValidDiagonal(a, b) {
+    return a.next.i !== b.i && a.prev.i !== b.i && !intersectsPolygon(a, b) && // doesn't intersect other edges
+    (locallyInside(a, b) && locallyInside(b, a) && middleInside(a, b) && // locally visible
+    (area(a.prev, a, b.prev) || area(a, b.prev, b)) || // does not create opposite-facing sectors
+    equals(a, b) && area(a.prev, a, a.next) > 0 && area(b.prev, b, b.next) > 0);
+  }
+  function area(p, q, r) {
+    return (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+  }
+  function equals(p1, p2) {
+    return p1.x === p2.x && p1.y === p2.y;
+  }
+  function intersects(p1, q1, p2, q2) {
+    const o1 = sign(area(p1, q1, p2));
+    const o2 = sign(area(p1, q1, q2));
+    const o3 = sign(area(p2, q2, p1));
+    const o4 = sign(area(p2, q2, q1));
+    if (o1 !== o2 && o3 !== o4) return true;
+    if (o1 === 0 && onSegment(p1, p2, q1)) return true;
+    if (o2 === 0 && onSegment(p1, q2, q1)) return true;
+    if (o3 === 0 && onSegment(p2, p1, q2)) return true;
+    if (o4 === 0 && onSegment(p2, q1, q2)) return true;
+    return false;
+  }
+  function onSegment(p, q, r) {
+    return q.x <= Math.max(p.x, r.x) && q.x >= Math.min(p.x, r.x) && q.y <= Math.max(p.y, r.y) && q.y >= Math.min(p.y, r.y);
+  }
+  function sign(num) {
+    return num > 0 ? 1 : num < 0 ? -1 : 0;
+  }
+  function intersectsPolygon(a, b) {
+    let p = a;
+    do {
+      if (p.i !== a.i && p.next.i !== a.i && p.i !== b.i && p.next.i !== b.i && intersects(p, p.next, a, b)) return true;
+      p = p.next;
+    } while (p !== a);
+    return false;
+  }
+  function locallyInside(a, b) {
+    return area(a.prev, a, a.next) < 0 ? area(a, b, a.next) >= 0 && area(a, a.prev, b) >= 0 : area(a, b, a.prev) < 0 || area(a, a.next, b) < 0;
+  }
+  function middleInside(a, b) {
+    let p = a;
+    let inside = false;
+    const px = (a.x + b.x) / 2;
+    const py = (a.y + b.y) / 2;
+    do {
+      if (p.y > py !== p.next.y > py && p.next.y !== p.y && px < (p.next.x - p.x) * (py - p.y) / (p.next.y - p.y) + p.x)
+        inside = !inside;
+      p = p.next;
+    } while (p !== a);
+    return inside;
+  }
+  function splitPolygon(a, b) {
+    const a2 = createNode(a.i, a.x, a.y), b2 = createNode(b.i, b.x, b.y), an = a.next, bp = b.prev;
+    a.next = b;
+    b.prev = a;
+    a2.next = an;
+    an.prev = a2;
+    b2.next = a2;
+    a2.prev = b2;
+    bp.next = b2;
+    b2.prev = bp;
+    return b2;
+  }
+  function insertNode(i, x, y, last) {
+    const p = createNode(i, x, y);
+    if (!last) {
+      p.prev = p;
+      p.next = p;
+    } else {
+      p.next = last.next;
+      p.prev = last;
+      last.next.prev = p;
+      last.next = p;
+    }
+    return p;
+  }
+  function removeNode(p) {
+    p.next.prev = p.prev;
+    p.prev.next = p.next;
+    if (p.prevZ) p.prevZ.nextZ = p.nextZ;
+    if (p.nextZ) p.nextZ.prevZ = p.prevZ;
+  }
+  function createNode(i, x, y) {
+    return {
+      i,
+      // vertex index in coordinates array
+      x,
+      y,
+      // vertex coordinates
+      prev: null,
+      // previous and next vertex nodes in a polygon ring
+      next: null,
+      z: 0,
+      // z-order curve value
+      prevZ: null,
+      // previous and next nodes in z-order
+      nextZ: null,
+      steiner: false
+      // indicates whether this is a steiner point
+    };
+  }
+  function signedArea(data, start, end, dim) {
+    let sum = 0;
+    for (let i = start, j = end - dim; i < end; i += dim) {
+      sum += (data[j] - data[i]) * (data[i + 1] + data[j + 1]);
+      j = i;
+    }
+    return sum;
+  }
+
+  // srcts/features/glmesh.ts
+  var MESH_F = 8;
+  var GL_MAX_MESH_VERTS = 4e6;
+  function rings(dl, i) {
+    const j = dl.row[i], out = [];
+    for (let run = dl.pathOff[j]; run < dl.pathOff[j + 1]; run++) {
+      const r = [];
+      for (let v = dl.runOff[run]; v < dl.runOff[run + 1]; v++) {
+        const x = dl.xy[2 * v], y = dl.xy[2 * v + 1];
+        const n = r.length;
+        if (n && r[n - 2] === x && r[n - 1] === y) continue;
+        r.push(x, y);
+      }
+      if (r.length >= 4) out.push(r);
+    }
+    return out;
+  }
+  function inRing(x, y, r) {
+    let inside = false;
+    for (let a = 0, b = r.length - 2; a < r.length; b = a, a += 2) {
+      const xa = r[a], ya = r[a + 1], xb = r[b], yb = r[b + 1];
+      if (ya > y !== yb > y && x < (xb - xa) * (y - ya) / (yb - ya) + xa) inside = !inside;
+    }
+    return inside;
+  }
+  function fillTriangles(rs) {
+    const xy = [], idx = [];
+    const n = rs.length;
+    if (!n) return { xy, idx };
+    const depth = new Array(n).fill(0), parent = new Array(n).fill(-1);
+    if (n > 1 && n <= 200) {
+      for (let a = 0; a < n; a++) {
+        let best = -1;
+        for (let b = 0; b < n; b++) {
+          if (a === b || !inRing(rs[a][0], rs[a][1], rs[b])) continue;
+          depth[a]++;
+          if (best < 0 || inRing(rs[b][0], rs[b][1], rs[best])) best = b;
+        }
+        parent[a] = best;
+      }
+    }
+    for (let o = 0; o < n; o++) {
+      if (depth[o] % 2) continue;
+      const data = rs[o].slice(), holes = [];
+      for (let h = 0; h < n; h++) {
+        if (parent[h] !== o || depth[h] % 2 === 0) continue;
+        holes.push(data.length / 2);
+        for (let k = 0; k < rs[h].length; k++) data.push(rs[h][k]);
+      }
+      const tri = earcut(data, holes.length ? holes : void 0, 2);
+      const base = xy.length / 2;
+      for (let k = 0; k < data.length; k++) xy.push(data[k]);
+      for (let k = 0; k < tri.length; k++) idx.push(base + tri[k]);
+    }
+    return { xy, idx };
+  }
+  function meshVerts(dl, i) {
+    const j = dl.row[i], pt = dl.paints[dl.paint[i]];
+    let n = 0, segs = 0;
+    for (let run = dl.pathOff[j]; run < dl.pathOff[j + 1]; run++) {
+      const k = dl.runOff[run + 1] - dl.runOff[run];
+      n += k;
+      segs += dl.closed[j] === 1 ? k : Math.max(0, k - 1);
+    }
+    const fill = dl.closed[j] === 1 && pt.fill != null ? n : 0;
+    const stroke = pt.stroke != null && pt.width > 0 ? 4 * segs : 0;
+    return fill + stroke;
+  }
+  function glMesh(dl, order) {
+    const V = [], M = [], I = [], R = [], S = [];
+    const recRange = /* @__PURE__ */ new Map();
+    const np = dl.panels.length;
+    const vert = function(ax, ay, qx, qy, nx, ny, side, w, mode, end, panel, clip, rec, isStroke) {
+      V.push(ax, ay, qx, qy, nx, ny, side, w);
+      M.push(mode, end, panel, clip);
+      R.push(rec);
+      S.push(isStroke);
+      return R.length - 1;
+    };
+    for (let q = 0; q < order.length; q++) {
+      const i = order[q];
+      if (dl.flags[i] || dl.kind[i] !== DL_PATH) continue;
+      const j = dl.row[i], pt = dl.paints[dl.paint[i]];
+      const panel = dl.panel[i] <= np ? dl.panel[i] : 0, clip = dl.clip[i];
+      const rs = rings(dl, i);
+      const first = I.length;
+      const closed = dl.closed[j] === 1;
+      if (closed && pt.fill != null) {
+        const t = fillTriangles(rs);
+        const base = R.length;
+        for (let k = 0; k < t.xy.length; k += 2) vert(t.xy[k], t.xy[k + 1], t.xy[k], t.xy[k + 1], t.xy[k], t.xy[k + 1], 0, 0, 0, 0, panel, clip, i, 0);
+        for (let k = 0; k < t.idx.length; k++) I.push(base + t.idx[k]);
+      }
+      if (pt.stroke == null || !(pt.width > 0)) {
+        recRange.set(i, [first, I.length]);
+        continue;
+      }
+      const capF = pt.cap === "round" ? 1 : pt.cap === "square" ? 4 : 0;
+      for (const r of rs) {
+        const nPts = r.length / 2;
+        let m = nPts;
+        if (closed && m > 2 && r[0] === r[2 * (m - 1)] && r[1] === r[2 * (m - 1) + 1]) m--;
+        const nSeg = closed ? m : m - 1;
+        for (let s = 0; s < nSeg; s++) {
+          const a = s, b = (s + 1) % m;
+          const ax = r[2 * a], ay = r[2 * a + 1], bx = r[2 * b], by = r[2 * b + 1];
+          const hasPrev = closed || s > 0, hasNext = closed || s < nSeg - 1;
+          const pa = hasPrev ? (a - 1 + m) % m : a, nb = hasNext ? (b + 1) % m : b;
+          const px = r[2 * pa], py = r[2 * pa + 1], nx = r[2 * nb], ny = r[2 * nb + 1];
+          let flags = 0;
+          if (!hasPrev) flags |= capF;
+          if (!hasNext) flags |= capF << 1;
+          const mode = 1 | flags << 1;
+          const w = pt.width;
+          const v0 = vert(ax, ay, bx, by, px, py, -1, w, mode, 0, panel, clip, i, 1);
+          const v1 = vert(ax, ay, bx, by, px, py, 1, w, mode, 0, panel, clip, i, 1);
+          const v2 = vert(bx, by, ax, ay, nx, ny, -1, w, mode, 1, panel, clip, i, 1);
+          const v3 = vert(bx, by, ax, ay, nx, ny, 1, w, mode, 1, panel, clip, i, 1);
+          I.push(v0, v1, v2, v1, v3, v2);
+        }
+      }
+      recRange.set(i, [first, I.length]);
+    }
+    return {
+      nv: R.length,
+      ni: I.length,
+      v: Float32Array.from(V),
+      meta: Uint8Array.from(M),
+      idx: Uint32Array.from(I),
+      rec: Uint32Array.from(R),
+      stroke: Uint8Array.from(S),
+      recRange
+    };
+  }
+
   // srcts/features/webgl.ts
   var GL_MAX_SLOTS = 48;
   var GL_AUTO_MIN = 5e4;
@@ -7277,16 +7833,43 @@
       if (pt.fill != null && !parseColor(pt.fill)) return "colours";
       if (pt.stroke != null && !parseColor(pt.stroke)) return "colours";
     }
+    let verts = 0;
     for (let i = 0; i < dl.n; i++) {
       if (dl.flags[i]) {
         if (dl.runImgs && dl.run[i] > 0) return "runs";
         continue;
       }
       const k = dl.kind[i];
-      if (k !== DL_POINT && k !== DL_RECT) return "paths";
+      if (k !== DL_POINT && k !== DL_RECT && k !== DL_PATH) return "kinds";
       if (dl.group[i] > 0) return "groups";
+      if (k === DL_PATH) {
+        verts += meshVerts(dl, i);
+        if (verts > GL_MAX_MESH_VERTS) return "large paths";
+      }
     }
     return null;
+  }
+  var GL_MAX_BATCHES = 512;
+  function glBatches(dl, ord, mesh) {
+    const out = [];
+    let k = 0;
+    for (let q = 0; q < dl.n; q++) {
+      const i = ord ? ord[q] : q;
+      if (dl.flags[i]) continue;
+      const last = out.length ? out[out.length - 1] : null;
+      if (dl.kind[i] === DL_PATH) {
+        const r = mesh.recRange.get(i);
+        if (!r || r[1] <= r[0]) continue;
+        if (last && last.mesh && last.b === r[0]) last.b = r[1];
+        else out.push({ mesh: true, a: r[0], b: r[1] });
+      } else {
+        if (last && !last.mesh && last.b === k) last.b = k + 1;
+        else out.push({ mesh: false, a: k, b: k + 1 });
+        k++;
+      }
+      if (out.length > GL_MAX_BATCHES) return null;
+    }
+    return out;
   }
   function glStyleReadable(color, palette) {
     const bad = palette.map((c) => !parseColor(c));
@@ -7296,14 +7879,14 @@
   }
   function glInstances(dl, ord) {
     let n = 0;
-    for (let i = 0; i < dl.n; i++) if (!dl.flags[i]) n++;
+    for (let i = 0; i < dl.n; i++) if (!dl.flags[i] && dl.kind[i] !== DL_PATH) n++;
     const pos = new Float32Array(2 * n), size = new Float32Array(2 * n);
     const meta = new Uint8Array(4 * n), width = new Float32Array(n), rec = new Uint32Array(n);
     const np = dl.panels.length;
     let m = 0;
     for (let q = 0; q < dl.n; q++) {
       const i = ord ? ord[q] : q;
-      if (dl.flags[i]) continue;
+      if (dl.flags[i] || dl.kind[i] === DL_PATH) continue;
       const j = dl.row[i];
       if (dl.kind[i] === DL_POINT) {
         pos[2 * m] = dl.cx[j];
@@ -7330,8 +7913,8 @@
     }
     return { n, pos, size, meta, width, rec };
   }
-  function glColors(dl, inst, st) {
-    const n = inst.n;
+  function glRecordColors(dl, st) {
+    const n = dl.n;
     const fill = new Uint8Array(4 * n), stroke = new Uint8Array(4 * n);
     const pf = dl.paints.map((p) => parseColor(p.fill));
     const ps = dl.paints.map((p) => parseColor(p.stroke));
@@ -7339,8 +7922,9 @@
     const hex6 = st ? st.palette.map((c) => /^#[0-9a-fA-F]{6}$/.test(c)) : [];
     const fHex8 = dl.paints.map((p) => p.fill != null && /^#[0-9a-fA-F]{8}$/.test(p.fill));
     const sHex8 = dl.paints.map((p) => p.stroke != null && /^#[0-9a-fA-F]{8}$/.test(p.stroke));
-    for (let m = 0; m < n; m++) {
-      const i = inst.rec[m], pi = dl.paint[i];
+    for (let i = 0; i < n; i++) {
+      if (dl.flags[i]) continue;
+      const pi = dl.paint[i];
       let f = pf[pi], s = ps[pi], mult = 1;
       if (st) {
         const k = dl.key[i], fl = st.flags[k];
@@ -7357,19 +7941,51 @@
         }
       }
       if (f) {
-        fill[4 * m] = f[0];
-        fill[4 * m + 1] = f[1];
-        fill[4 * m + 2] = f[2];
-        fill[4 * m + 3] = Math.round(f[3] * mult);
+        fill[4 * i] = f[0];
+        fill[4 * i + 1] = f[1];
+        fill[4 * i + 2] = f[2];
+        fill[4 * i + 3] = Math.round(f[3] * mult);
       }
       if (s) {
-        stroke[4 * m] = s[0];
-        stroke[4 * m + 1] = s[1];
-        stroke[4 * m + 2] = s[2];
-        stroke[4 * m + 3] = Math.round(s[3] * mult);
+        stroke[4 * i] = s[0];
+        stroke[4 * i + 1] = s[1];
+        stroke[4 * i + 2] = s[2];
+        stroke[4 * i + 3] = Math.round(s[3] * mult);
       }
     }
     return { fill, stroke };
+  }
+  function glColors(dl, inst, st) {
+    const rc = glRecordColors(dl, st);
+    return rc ? gatherColors(rc, inst.rec, null) : null;
+  }
+  function gatherColors(rc, rec, isStroke) {
+    const n = rec.length;
+    const fill = new Uint8Array(4 * n), stroke = isStroke ? fill : new Uint8Array(4 * n);
+    for (let m = 0; m < n; m++) {
+      const i = rec[m];
+      if (isStroke) {
+        const src = isStroke[m] ? rc.stroke : rc.fill;
+        fill[4 * m] = src[4 * i];
+        fill[4 * m + 1] = src[4 * i + 1];
+        fill[4 * m + 2] = src[4 * i + 2];
+        fill[4 * m + 3] = src[4 * i + 3];
+      } else {
+        fill[4 * m] = rc.fill[4 * i];
+        fill[4 * m + 1] = rc.fill[4 * i + 1];
+        fill[4 * m + 2] = rc.fill[4 * i + 2];
+        fill[4 * m + 3] = rc.fill[4 * i + 3];
+        stroke[4 * m] = rc.stroke[4 * i];
+        stroke[4 * m + 1] = rc.stroke[4 * i + 1];
+        stroke[4 * m + 2] = rc.stroke[4 * i + 2];
+        stroke[4 * m + 3] = rc.stroke[4 * i + 3];
+      }
+    }
+    return { fill, stroke };
+  }
+  function glMeshColors(dl, mesh, st) {
+    const rc = glRecordColors(dl, st);
+    return rc ? gatherColors(rc, mesh.rec, mesh.stroke).fill : null;
   }
   var VS = `#version 300 es
 precision highp float;
@@ -7528,6 +8144,105 @@ void main() {
   o = col;
 }`;
   var glLastError = "";
+  var MESH_VS = `#version 300 es
+precision highp float;
+precision highp int;
+layout(location = 0) in vec2 a_a;
+layout(location = 1) in vec2 a_q;
+layout(location = 2) in vec2 a_n;
+layout(location = 3) in vec2 a_sw;
+layout(location = 4) in uvec4 a_meta;
+layout(location = 5) in vec4 a_col;
+uniform vec4 u_aff[${GL_MAX_SLOTS}];
+uniform vec4 u_pclip[${GL_MAX_SLOTS}];
+uniform vec4 u_clip[${GL_MAX_SLOTS}];
+uniform float u_base;
+uniform vec2 u_vp;
+flat out vec4 v_col;
+flat out uint v_mode;
+flat out uint v_flags;
+flat out float v_hw;
+out vec3 v_cap;
+flat out vec4 v_pc;
+flat out vec4 v_rc;
+vec2 tf(vec4 A, vec2 p) { return vec2(A.x * p.x + A.z, A.y * p.y + A.w); }
+void main() {
+  uint p = a_meta.z;
+  vec4 A = u_aff[p];
+  vec2 P = tf(A, a_a);
+  uint mode = a_meta.x & 1u;
+  uint flags = a_meta.x >> 1u;
+  vec2 pos = P;
+  float hw = 0.5 * a_sw.y * u_base;
+  v_cap = vec3(0.0);
+  if (mode == 1u) {
+    vec2 Q = tf(A, a_q), N = tf(A, a_n);
+    bool atEnd = a_meta.y == 1u;
+    vec2 d = atEnd ? P - Q : Q - P;
+    float L = length(d);
+    if (L < 1e-6) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+    vec2 t = d / L, nrm = vec2(-t.y, t.x);
+    vec2 dn = atEnd ? N - P : P - N;
+    float side = a_sw.x;
+    vec2 off;
+    if (length(dn) < 1e-6) {
+      // an open end: the cap (square and round reach hw past the end)
+      off = nrm * side * hw;
+      bool ext = atEnd ? (flags & 10u) != 0u : (flags & 5u) != 0u;
+      if (ext) off += (atEnd ? t : -t) * hw;
+    } else {
+      // a miter with the neighbouring segment; at a sharp turn (a miter
+      // over twice the half width) the plain square end instead, reaching
+      // hw past the joint so the outer corner is covered
+      vec2 t2 = normalize(dn), n2 = vec2(-t2.y, t2.x);
+      vec2 m = nrm + n2;
+      float ml = length(m);
+      float k = ml < 1e-3 ? 0.0 : dot(m / ml, nrm);
+      if (k < 0.5) off = nrm * side * hw + (atEnd ? t : -t) * hw;
+      else off = (m / ml) * side * hw / k;
+    }
+    pos = P + off;
+    vec2 S = atEnd ? Q : P, E = atEnd ? P : Q;
+    v_cap = vec3(dot(pos - S, -t), dot(pos - E, t), dot(pos - P, nrm));
+  }
+  gl_Position = vec4(pos.x / u_vp.x * 2.0 - 1.0, 1.0 - pos.y / u_vp.y * 2.0, 0.0, 1.0);
+  v_col = a_col;
+  v_mode = mode;
+  v_flags = flags;
+  v_hw = hw;
+  v_pc = u_pclip[p];
+  if (a_meta.w == 0u) {
+    v_rc = vec4(-1e9, -1e9, 1e9, 1e9);
+  } else {
+    vec4 cr = u_clip[a_meta.w];
+    vec2 r0 = tf(A, cr.xy), r1 = tf(A, cr.zw);
+    v_rc = vec4(min(r0, r1), max(r0, r1));
+  }
+  if (a_col.a == 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+}`;
+  var MESH_FS = `#version 300 es
+precision highp float;
+precision highp int;
+flat in vec4 v_col;
+flat in uint v_mode;
+flat in uint v_flags;
+flat in float v_hw;
+in vec3 v_cap;
+flat in vec4 v_pc;
+flat in vec4 v_rc;
+uniform vec2 u_vp;
+out vec4 o;
+void main() {
+  vec2 fc = vec2(gl_FragCoord.x, u_vp.y - gl_FragCoord.y);
+  if (fc.x < v_pc.x || fc.x > v_pc.z || fc.y < v_pc.y || fc.y > v_pc.w) discard;
+  if (fc.x < v_rc.x || fc.x > v_rc.z || fc.y < v_rc.y || fc.y > v_rc.w) discard;
+  if (v_mode == 1u) {
+    // round caps: cut the square past each capped end to a circle
+    if ((v_flags & 1u) != 0u && v_cap.x > 0.0 && length(v_cap.xz) > v_hw) discard;
+    if ((v_flags & 2u) != 0u && v_cap.y > 0.0 && length(v_cap.yz) > v_hw) discard;
+  }
+  o = vec4(v_col.rgb * v_col.a, v_col.a);
+}`;
   function createGLPainter(onLost) {
     glLastError = "";
     const canvas = document.createElement("canvas");
@@ -7535,7 +8250,7 @@ void main() {
     canvas.setAttribute("aria-hidden", "true");
     let gl = null;
     try {
-      gl = typeof canvas.getContext === "function" ? canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: false, alpha: true, preserveDrawingBuffer: false }) : null;
+      gl = typeof canvas.getContext === "function" ? canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: true, alpha: true, preserveDrawingBuffer: false }) : null;
     } catch (e) {
       gl = null;
     }
@@ -7559,19 +8274,27 @@ void main() {
       glLastError = "shader: " + (g.getShaderInfoLog(s) || "").slice(0, 300);
       return null;
     };
-    const vs = compile(g.VERTEX_SHADER, VS), fs = compile(g.FRAGMENT_SHADER, FS);
-    if (!vs || !fs) return null;
-    const prog = g.createProgram();
-    if (!prog) return null;
-    g.attachShader(prog, vs);
-    g.attachShader(prog, fs);
-    g.linkProgram(prog);
-    if (!g.getProgramParameter(prog, g.LINK_STATUS)) {
-      glLastError = "link: " + (g.getProgramInfoLog(prog) || "").slice(0, 300);
-      return null;
-    }
-    const U = (nm) => g.getUniformLocation(prog, nm);
-    const uAff = U("u_aff"), uPclip = U("u_pclip"), uClip = U("u_clip"), uGs = U("u_gs"), uBase = U("u_base"), uVp = U("u_vp");
+    const link = function(vsrc, fsrc) {
+      const vs = compile(g.VERTEX_SHADER, vsrc), fs = compile(g.FRAGMENT_SHADER, fsrc);
+      if (!vs || !fs) return null;
+      const pr = g.createProgram();
+      if (!pr) return null;
+      g.attachShader(pr, vs);
+      g.attachShader(pr, fs);
+      g.linkProgram(pr);
+      if (!g.getProgramParameter(pr, g.LINK_STATUS)) {
+        glLastError = "link: " + (g.getProgramInfoLog(pr) || "").slice(0, 300);
+        return null;
+      }
+      return pr;
+    };
+    const prog = link(VS, FS), mprog = link(MESH_VS, MESH_FS);
+    if (!prog || !mprog) return null;
+    const uniforms = function(pr) {
+      const U = (nm) => g.getUniformLocation(pr, nm);
+      return { aff: U("u_aff"), pclip: U("u_pclip"), clip: U("u_clip"), gs: U("u_gs"), base: U("u_base"), vp: U("u_vp") };
+    };
+    const uI = uniforms(prog), uM = uniforms(mprog);
     const vao = g.createVertexArray();
     g.bindVertexArray(vao);
     const corner = g.createBuffer();
@@ -7579,26 +8302,53 @@ void main() {
     g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), g.STATIC_DRAW);
     g.enableVertexAttribArray(0);
     g.vertexAttribPointer(0, 2, g.FLOAT, false, 0, 0);
-    const mk = function(loc, size, type, norm, int) {
-      const b = g.createBuffer();
-      g.bindBuffer(g.ARRAY_BUFFER, b);
-      g.enableVertexAttribArray(loc);
-      if (int) g.vertexAttribIPointer(loc, size, type, 0, 0);
-      else g.vertexAttribPointer(loc, size, type, norm, 0, 0);
-      g.vertexAttribDivisor(loc, 1);
-      return b;
+    const IATTR = [
+      [1, 2, g.FLOAT, false, false, 8],
+      [2, 2, g.FLOAT, false, false, 8],
+      [3, 4, g.UNSIGNED_BYTE, false, true, 4],
+      [4, 1, g.FLOAT, false, false, 4],
+      [5, 4, g.UNSIGNED_BYTE, true, false, 4],
+      [6, 4, g.UNSIGNED_BYTE, true, false, 4]
+    ];
+    const ibuf = IATTR.map(function() {
+      return g.createBuffer();
+    });
+    const pointInstances = function(first) {
+      for (let k = 0; k < IATTR.length; k++) {
+        const [loc, size, type, norm, int, bytes] = IATTR[k];
+        g.bindBuffer(g.ARRAY_BUFFER, ibuf[k]);
+        g.enableVertexAttribArray(loc);
+        if (int) g.vertexAttribIPointer(loc, size, type, 0, first * bytes);
+        else g.vertexAttribPointer(loc, size, type, norm, 0, first * bytes);
+        g.vertexAttribDivisor(loc, 1);
+      }
     };
-    const bPos = mk(1, 2, g.FLOAT, false, false), bSize = mk(2, 2, g.FLOAT, false, false);
-    const bMeta = mk(3, 4, g.UNSIGNED_BYTE, false, true), bWidth = mk(4, 1, g.FLOAT, false, false);
-    const bFill = mk(5, 4, g.UNSIGNED_BYTE, true, false), bStroke = mk(6, 4, g.UNSIGNED_BYTE, true, false);
+    pointInstances(0);
     g.bindVertexArray(null);
-    let instDl = null, instOrd, inst = null;
+    const mvao = g.createVertexArray();
+    g.bindVertexArray(mvao);
+    const mV = g.createBuffer(), mMeta = g.createBuffer(), mCol = g.createBuffer(), mIdx = g.createBuffer();
+    g.bindBuffer(g.ARRAY_BUFFER, mV);
+    for (let k = 0; k < 4; k++) {
+      g.enableVertexAttribArray(k);
+      g.vertexAttribPointer(k, 2, g.FLOAT, false, MESH_F * 4, k * 8);
+    }
+    g.bindBuffer(g.ARRAY_BUFFER, mMeta);
+    g.enableVertexAttribArray(4);
+    g.vertexAttribIPointer(4, 4, g.UNSIGNED_BYTE, 0, 0);
+    g.bindBuffer(g.ARRAY_BUFFER, mCol);
+    g.enableVertexAttribArray(5);
+    g.vertexAttribPointer(5, 4, g.UNSIGNED_BYTE, true, 0, 0);
+    g.bindBuffer(g.ELEMENT_ARRAY_BUFFER, mIdx);
+    g.bindVertexArray(null);
+    let geoDl = null, geoOrd;
+    let inst = null, mesh = null, batches = null;
     let colKey = "";
     const affU = new Float32Array(4 * GL_MAX_SLOTS), pclipU = new Float32Array(4 * GL_MAX_SLOTS);
     const clipU = new Float32Array(4 * GL_MAX_SLOTS), gsU = new Float32Array(GL_MAX_SLOTS);
-    const upload = function(b, data) {
-      g.bindBuffer(g.ARRAY_BUFFER, b);
-      g.bufferData(g.ARRAY_BUFFER, data, g.STATIC_DRAW);
+    const upload = function(target, b, data) {
+      g.bindBuffer(target, b);
+      g.bufferData(target, data, g.STATIC_DRAW);
     };
     function draw(dl, frame, W, H, ord, style, styleRev) {
       if (lost || g.isContextLost()) return false;
@@ -7606,26 +8356,38 @@ void main() {
         canvas.width = W;
         canvas.height = H;
       }
-      g.bindVertexArray(vao);
-      if (instDl !== dl || instOrd !== ord || !inst) {
+      if (geoDl !== dl || geoOrd !== ord || !inst || !mesh) {
         inst = glInstances(dl, ord);
-        instDl = dl;
-        instOrd = ord;
-        upload(bPos, inst.pos);
-        upload(bSize, inst.size);
-        upload(bMeta, inst.meta);
-        upload(bWidth, inst.width);
+        const order = ord || function() {
+          const o = new Uint32Array(dl.n);
+          for (let i = 0; i < dl.n; i++) o[i] = i;
+          return o;
+        }();
+        mesh = glMesh(dl, order);
+        batches = glBatches(dl, ord, mesh);
+        geoDl = dl;
+        geoOrd = ord;
+        g.bindVertexArray(null);
+        upload(g.ARRAY_BUFFER, ibuf[0], inst.pos);
+        upload(g.ARRAY_BUFFER, ibuf[1], inst.size);
+        upload(g.ARRAY_BUFFER, ibuf[2], inst.meta);
+        upload(g.ARRAY_BUFFER, ibuf[3], inst.width);
+        upload(g.ARRAY_BUFFER, mV, mesh.v);
+        upload(g.ARRAY_BUFFER, mMeta, mesh.meta);
+        g.bindVertexArray(mvao);
+        upload(g.ELEMENT_ARRAY_BUFFER, mIdx, mesh.idx);
+        g.bindVertexArray(null);
         colKey = "";
       }
+      if (!batches) return false;
       const key = style ? "s" + styleRev : "u";
       if (key !== colKey) {
-        const c = glColors(dl, inst, style);
-        if (!c) {
-          g.bindVertexArray(null);
-          return false;
-        }
-        upload(bFill, c.fill);
-        upload(bStroke, c.stroke);
+        const rc = glColors(dl, inst, style), mc = mesh.nv ? glMeshColors(dl, mesh, style) : new Uint8Array(0);
+        if (!rc || !mc) return false;
+        g.bindVertexArray(null);
+        upload(g.ARRAY_BUFFER, ibuf[4], rc.fill);
+        upload(g.ARRAY_BUFFER, ibuf[5], rc.stroke);
+        upload(g.ARRAY_BUFFER, mCol, mc);
         colKey = key;
       }
       const np = Math.min(frame.aff.length, GL_MAX_SLOTS);
@@ -7656,33 +8418,62 @@ void main() {
         clipU[4 * (c + 1) + 2] = cr.x1;
         clipU[4 * (c + 1) + 3] = cr.y1;
       }
-      g.useProgram(prog);
-      g.uniform4fv(uAff, affU);
-      g.uniform4fv(uPclip, pclipU);
-      g.uniform4fv(uClip, clipU);
-      g.uniform1fv(uGs, gsU);
-      g.uniform1f(uBase, frame.base);
-      g.uniform2f(uVp, W, H);
+      const setU = function(pr, u) {
+        g.useProgram(pr);
+        g.uniform4fv(u.aff, affU);
+        g.uniform4fv(u.pclip, pclipU);
+        g.uniform4fv(u.clip, clipU);
+        if (u.gs) g.uniform1fv(u.gs, gsU);
+        g.uniform1f(u.base, frame.base);
+        g.uniform2f(u.vp, W, H);
+      };
+      setU(mprog, uM);
+      setU(prog, uI);
       g.viewport(0, 0, W, H);
       g.clearColor(0, 0, 0, 0);
       g.clear(g.COLOR_BUFFER_BIT);
       g.enable(g.BLEND);
       g.blendFunc(g.ONE, g.ONE_MINUS_SRC_ALPHA);
-      if (inst.n) g.drawArraysInstanced(g.TRIANGLE_STRIP, 0, 4, inst.n);
+      let cur = -1;
+      for (const bt of batches) {
+        if (bt.mesh) {
+          if (cur !== 1) {
+            g.useProgram(mprog);
+            g.bindVertexArray(mvao);
+            cur = 1;
+          }
+          g.drawElements(g.TRIANGLES, bt.b - bt.a, g.UNSIGNED_INT, bt.a * 4);
+        } else {
+          if (cur !== 0) {
+            g.useProgram(prog);
+            g.bindVertexArray(vao);
+            cur = 0;
+          }
+          pointInstances(bt.a);
+          g.drawArraysInstanced(g.TRIANGLE_STRIP, 0, 4, bt.b - bt.a);
+        }
+      }
       g.bindVertexArray(null);
       return !g.isContextLost();
     }
     function release() {
-      if (!inst) return;
+      if (!inst && !mesh) return;
       inst = null;
-      instDl = null;
-      instOrd = void 0;
+      mesh = null;
+      batches = null;
+      geoDl = null;
+      geoOrd = void 0;
       colKey = "";
       if (lost || g.isContextLost()) return;
-      for (const b of [bPos, bSize, bMeta, bWidth, bFill, bStroke]) {
+      g.bindVertexArray(null);
+      for (const b of ibuf.concat([mV, mMeta, mCol])) {
         g.bindBuffer(g.ARRAY_BUFFER, b);
         g.bufferData(g.ARRAY_BUFFER, 0, g.STATIC_DRAW);
       }
+      g.bindVertexArray(mvao);
+      g.bindBuffer(g.ELEMENT_ARRAY_BUFFER, mIdx);
+      g.bufferData(g.ELEMENT_ARRAY_BUFFER, 0, g.STATIC_DRAW);
+      g.bindVertexArray(null);
     }
     return { canvas, draw, alive: function() {
       return !lost && !g.isContextLost();
@@ -10032,6 +10823,10 @@ void main() {
           glInstances,
           glColors,
           glStyleReadable,
+          glMesh,
+          glMeshColors,
+          glBatches,
+          fillTriangles,
           listExact: function() {
             return ws.dl ? ws.dl.exact : null;
           },

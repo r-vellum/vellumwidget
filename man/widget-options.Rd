@@ -121,10 +121,12 @@ or more with WebGL2 where the browser has it: a million points redraw in a
 few milliseconds, so pan, zoom and \code{condition()}, selection and filter
 styling stay live, where the 2D canvas redraws in about a second and waits
 for the view to settle. \code{"always"} uses WebGL2 for any size of list,
-\code{"never"} keeps the 2D canvas. WebGL2 draws point and rectangle marks with
-solid fills and strokes; a list holding other marks (lines, polygons,
-gradients, dashed strokes, grouped marks) is drawn on the canvas, as it is
-without WebGL2 or when the browser drops the context.}
+\code{"never"} keeps the 2D canvas. WebGL2 draws points, rectangles, lines and
+polygons with solid fills and strokes (lines join with a miter, which at
+sharp turns of thick lines differs a little from a round join); a list
+holding gradients, dashed strokes, grouped marks or very large paths is
+drawn on the canvas, as it is without WebGL2 or when the browser drops the
+context.}
 
 \item{precision}{How the display list ships its marks' coordinates (see
 \code{max_marks}). \code{"compact"} (default), with a vellum that supports it,

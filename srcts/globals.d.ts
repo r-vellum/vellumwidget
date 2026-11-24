@@ -7,3 +7,9 @@ declare const HTMLWidgets: {
   // selector; used by the server->client proxy to find the widget to drive.
   find?: (selector: string) => import("./types").WidgetInstance | null;
 };
+
+// earcut (bundled; ships no types): polygon triangulation for the WebGL
+// painter's fills (F-29).
+declare module "earcut" {
+  export default function earcut(data: ArrayLike<number>, holeIndices?: ArrayLike<number>, dim?: number): number[];
+}

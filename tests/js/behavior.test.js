@@ -7069,7 +7069,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     "F-25: an instance carries its paint's line cap above its kind");
   // what keeps a list on the canvas
   const why = function (f) { const d = mkDl(); f(d); return t.glUnsupported(d); };
-  ok(why((d) => { d.kind[0] = 2; }) === "paths", "F-25: a path keeps the list on the canvas");
+  ok(why((d) => { d.kind[0] = 7; }) === "kinds", "F-25: a record kind it doesn't know keeps the list on the canvas");
   ok(why((d) => { d.paints[0].grad = 1; }) === "gradients", "F-25: a gradient keeps the list on the canvas");
   ok(why((d) => { d.paints[1].dash = [2, 2]; }) === "dashes", "F-25: a dashed stroke keeps the list on the canvas");
   ok(why((d) => { d.group[0] = 1; }) === "groups", "F-25: an opacity group keeps the list on the canvas");
@@ -7080,6 +7080,72 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   // no WebGL2 here: the painter is unavailable and the canvas path is used
   const gs = t.glState();
   ok(gs.on === false, "F-25: without WebGL2 no GL layer is shown");
+}
+
+// --- F-29: paths as a mesh for the WebGL painter ---
+{
+  const t = inst._test;
+  // records: point, closed square path with a square hole (fill + stroke),
+  // point, open 3-vertex line (stroke, round cap)
+  const sq = function (c, r) { return [c - r, c - r, c + r, c - r, c + r, c + r, c - r, c + r]; };
+  const xy = sq(10, 4).concat(sq(10, 2)).concat([0, 0, 5, 0, 5, 5]);
+  const dl = {
+    n: 4,
+    kind: Uint8Array.from([0, 2, 0, 2]), row: Uint32Array.from([0, 0, 1, 1]),
+    flags: new Uint8Array(4), paint: Uint32Array.from([0, 1, 0, 2]),
+    key: Uint32Array.from([0, 1, 2, 3]), clip: new Uint32Array(4), panel: Uint32Array.from([1, 1, 1, 1]),
+    group: new Uint32Array(4), run: new Uint32Array(4),
+    cx: Float32Array.from([1, 2]), cy: Float32Array.from([1, 2]), r: Float32Array.from([1, 1]), shape: new Uint8Array(2),
+    rx: new Float32Array(0), ry: new Float32Array(0), rw: new Float32Array(0), rh: new Float32Array(0),
+    xy: Float32Array.from(xy), runOff: Uint32Array.from([0, 4, 8, 11]), pathOff: Uint32Array.from([0, 2, 3]),
+    closed: Uint8Array.from([1, 0]), evenodd: Uint8Array.from([1, 0]),
+    paints: [
+      { fill: "#ff0000", stroke: null, width: 0, dash: null, grad: 0, cap: "round" },
+      { fill: "#00ff00", stroke: "#000000", width: 1, dash: null, grad: 0, cap: "butt" },
+      { fill: null, stroke: "#0000ff", width: 2, dash: null, grad: 0, cap: "round" }
+    ],
+    clips: [], panels: ["panel-1-1"], keys: ["a", "b", "c", "d"], runImgs: null
+  };
+  ok(t.glUnsupported(dl) === null, "F-29: points and paths together are drawable by WebGL");
+  const order = Uint32Array.from([0, 1, 2, 3]);
+  const m = t.glMesh(dl, order);
+  // square with a hole: 8 triangles of fill; 4 + 4 stroke segments on the two
+  // rings; the open line: 2 segments
+  const r1 = m.recRange.get(1), r3 = m.recRange.get(3);
+  ok(r1 && (r1[1] - r1[0]) === 3 * 8 + 6 * 8, "F-29: a square with a hole meshes as 8 fill triangles and 8 stroke quads (" + (r1 && r1[1] - r1[0]) + ")");
+  ok(r3 && (r3[1] - r3[0]) === 6 * 2 && r3[0] === r1[1], "F-29: the open line is 2 stroke quads, after the polygon");
+  // the stroke corners of the open line carry round caps at its two ends
+  const metaOf = function (v) { return m.meta[4 * v]; };
+  const lineV = Array.from(m.idx.slice(r3[0], r3[1]));
+  const firstSegMode = metaOf(lineV[0]), lastSegMode = metaOf(lineV[lineV.length - 1]);
+  ok((firstSegMode & 1) === 1 && ((firstSegMode >> 1) & 1) === 1 && ((firstSegMode >> 1) & 2) === 0,
+    "F-29: the first segment of an open line has a round cap at its start only");
+  ok(((lastSegMode >> 1) & 2) === 2 && ((lastSegMode >> 1) & 1) === 0, "F-29: the last segment has a round cap at its end only");
+  ok(Array.from(m.stroke).filter(function (x) { return x === 0; }).length === 8, "F-29: the fill's 8 vertices (outer + hole ring) are fill vertices");
+  // fill triangles cover the ring minus the hole: area 64 - 16 = 48
+  const tri = t.fillTriangles([sq(10, 4), sq(10, 2)]);
+  let area = 0;
+  for (let k = 0; k < tri.idx.length; k += 3) {
+    const a = tri.idx[k], b = tri.idx[k + 1], c = tri.idx[k + 2];
+    area += Math.abs((tri.xy[2 * b] - tri.xy[2 * a]) * (tri.xy[2 * c + 1] - tri.xy[2 * a + 1]) - (tri.xy[2 * c] - tri.xy[2 * a]) * (tri.xy[2 * b + 1] - tri.xy[2 * a + 1])) / 2;
+  }
+  ok(Math.abs(area - 48) < 1e-9, "F-29: a ring inside a ring is a hole (filled area " + area + ")");
+  const two = t.fillTriangles([sq(0, 1), sq(10, 1)]);
+  ok(two.idx.length === 12, "F-29: two disjoint rings are both filled");
+  // batches alternate in paint order
+  const bt = t.glBatches(dl, null, m);
+  ok(bt.length === 4 && !bt[0].mesh && bt[1].mesh && !bt[2].mesh && bt[3].mesh && bt[2].a === 1 && bt[2].b === 2,
+    "F-29: marks and paths draw as alternating batches in paint order");
+  const btR = t.glBatches(dl, Uint32Array.from([0, 2, 1, 3]), m);
+  ok(btR.length === 2 && !btR[0].mesh && btR[0].b - btR[0].a === 2, "F-29: consecutive records of one kind share a batch");
+  // vertex colours: the fill's vertices green, the strokes black / blue; a hidden key paints nothing
+  const mc = t.glMeshColors(dl, m, null);
+  const fv = Array.from(m.stroke).indexOf(0);
+  ok(mc[4 * fv + 1] === 255 && mc[4 * fv] === 0, "F-29: a fill vertex takes its record's fill");
+  const sv = m.idx[r3[0]];
+  ok(mc[4 * sv + 2] === 255 && mc[4 * sv + 3] === 255, "F-29: a stroke corner takes its record's stroke");
+  const mcH = t.glMeshColors(dl, m, { flags: Uint8Array.from([0, 2, 0, 0]), color: new Uint32Array(4), palette: [], dimAlpha: 0.3, alpha: null, alphaPal: [] });
+  ok(mcH[4 * fv + 3] === 0, "F-29: a hidden key's path is not drawn");
 }
 
 // Checks that need the MutationObserver (removal watcher) to have run.

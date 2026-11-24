@@ -831,15 +831,25 @@ test_that("F-25: WebGL draws a big display list live, and falls back to the canv
   differ <- mean(apply(abs(a$img[, , 1:3] - c$img[, , 1:3]), c(1, 2), max) > 0.12)
   expect_lt(differ, 0.03)
 
-  # a list with a (keyed) path stays on the canvas, and says why; an
-  # unkeyed line is furniture, not in the list
-  small <- data.frame(x = runif(200), y = runif(200), id = seq_len(200), grp = rep(c("p", "q"), 100))
-  w2 <- vellumplot::vplot(small) |>
+  # keyed lines (paths, F-29) are drawn by WebGL too, matching the canvas
+  small <- data.frame(x = sort(runif(400)), y = runif(400), id = seq_len(400), grp = rep(c("p", "q"), 200))
+  lp <- vellumplot::vplot(small) |>
     vellumplot::mark_point(x = x, y = y, data_id = id) |>
-    vellumplot::mark_line(x = x, y = y, data_id = grp) |>
+    vellumplot::mark_line(x = x, y = y, data_id = grp, group = grp, linewidth = 1.2)
+  r2 <- run(as_widget(lp, elementId = "w1", render = render_options(mode = "raster", webgl = "always", detail_marks = 0)), filter = FALSE)
+  expect_true(r2$gl$on)
+  expect_null(r2$gl$why)
+  r2c <- run(as_widget(lp, elementId = "w1", render = render_options(mode = "raster", webgl = "never", detail_marks = 0)), filter = FALSE)
+  differ2 <- mean(apply(abs(r2$img[, , 1:3] - r2c$img[, , 1:3]), c(1, 2), max) > 0.12)
+  expect_lt(differ2, 0.05)
+  # a dashed (keyed) line stays on the canvas, and says why; an unkeyed line
+  # is furniture, not in the list
+  w3 <- vellumplot::vplot(small) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id) |>
+    vellumplot::mark_line(x = x, y = y, data_id = grp, group = grp, linetype = "dashed") |>
     as_widget(elementId = "w1", render = render_options(mode = "raster", webgl = "always", detail_marks = 0))
-  r2 <- run(w2, filter = FALSE)
-  expect_identical(r2$gl$why, "paths")
-  expect_false(r2$gl$on)
-  expect_identical(r2$canvas, "block")
+  r3 <- run(w3, filter = FALSE)
+  expect_identical(r3$gl$why, "dashes")
+  expect_false(r3$gl$on)
+  expect_identical(r3$canvas, "block")
 })
