@@ -7,7 +7,7 @@
 ## Citation
 
 Source:
-[`DESCRIPTION`](https://github.com/r-vellum/vellumwidget/blob/main/DESCRIPTION)
+[`DESCRIPTION`](https://github.com/r-vellum/vellumwidget/blob/v0.20.1/DESCRIPTION)
 
 Schoch D (2026). *vellumwidget: Interactive Web Widgets for Vellum
 Scenes*. R package version 0.20.1,
