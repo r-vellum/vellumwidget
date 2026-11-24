@@ -13,7 +13,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.19.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.19.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -49,9 +49,9 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="0.19.0.9000" id="vellumwidget-01909000">vellumwidget 0.19.0.9000<a class="anchor" aria-label="anchor" href="#vellumwidget-01909000"></a></h2>
+<h2 class="pkg-version" data-toc-text="0.19.1" id="vellumwidget-0191">vellumwidget 0.19.1<a class="anchor" aria-label="anchor" href="#vellumwidget-0191"></a></h2>
 <div class="section level3">
-<h3 id="bug-fixes-0-19-0-9000">Bug fixes<a class="anchor" aria-label="anchor" href="#bug-fixes-0-19-0-9000"></a></h3>
+<h3 id="bug-fixes-0-19-1">Bug fixes<a class="anchor" aria-label="anchor" href="#bug-fixes-0-19-1"></a></h3>
 <ul><li><p>Axis-aware zoom draws each panel’s own gridlines (VW-66). A composition cell themed with <code>panel.grid = element_blank()</code> no longer gets gridlines in the widget, minor gridlines are re-drawn with the major ones, and each set keeps the stroke the static panel drew it with (they all took the first gridline’s look). The panel descriptor carries vellumplot’s per-axis <code>grid</code> flags; a payload without them keeps the earlier behaviour.</p></li>
 <li><p>At the unzoomed view the re-ticked axes show the static render’s own breaks and labels, so a widget opens identical to the static plot (VW-66). Nice breaks over the expanded range could add one the static axis left out, such as 400 on an axis whose data stop at 398. Re-ticking starts with the first zoom.</p></li>
 </ul></div>
