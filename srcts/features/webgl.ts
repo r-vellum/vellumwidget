@@ -22,6 +22,10 @@
 //
 // Picking, the selection rings, the detail tier and the overview image are
 // untouched: this module only paints.
+//
+// Each widget that draws with GL holds one context, created on its first GL
+// draw. Browsers keep about 16 per page and drop the oldest beyond that; a
+// widget whose context is lost goes back to the canvas for good.
 
 import { DL_POINT, DL_RECT } from "../dlist";
 import type { DisplayList } from "../dlist";
@@ -117,7 +121,8 @@ export function glUnsupported(dl: DisplayList): string | null {
 
 // One GPU instance per drawn record, in paint order (or the raise order).
 // `pos`/`size`: a point's centre and (radius, 0); a rect's corner and
-// (width, height), all scene px. `meta`: kind, shape, panel slot, clip slot.
+// (width, height), all scene px. `meta`: kind (low 4 bits; the paint's line
+// cap above them: 0 butt, 1 round, 2 square), shape, panel slot, clip slot.
 // `width`: stroke width (scene px). `rec`: the record each instance draws.
 export interface GLInstances {
   n: number;
@@ -151,6 +156,7 @@ export function glInstances(dl: DisplayList, ord: Uint32Array | null): GLInstanc
     meta[4 * m + 2] = dl.panel[i] <= np ? dl.panel[i] : 0;
     meta[4 * m + 3] = dl.clip[i];
     const pt = dl.paints[dl.paint[i]];
+    meta[4 * m] |= (pt.cap === "round" ? 1 : pt.cap === "square" ? 2 : 0) << 4;
     width[m] = pt.stroke != null ? pt.width : 0;
     rec[m] = i;
     m++;
@@ -170,15 +176,19 @@ export interface GLStyle {
 
 // Each instance's fill and stroke as RGBA bytes (straight alpha), with the
 // style state folded in by the canvas's rules (raster.ts paintList).
-export function glColors(dl: DisplayList, inst: GLInstances, st: GLStyle | null): { fill: Uint8Array; stroke: Uint8Array } {
+export function glColors(dl: DisplayList, inst: GLInstances, st: GLStyle | null): { fill: Uint8Array; stroke: Uint8Array } | null {
   const n = inst.n;
   const fill = new Uint8Array(4 * n), stroke = new Uint8Array(4 * n);
   const pf: (number[] | null)[] = dl.paints.map((p) => parseColor(p.fill));
   const ps: (number[] | null)[] = dl.paints.map((p) => parseColor(p.stroke));
   const pal: (number[] | null)[] = st ? st.palette.map((c) => parseColor(c)) : [];
-  // A condition colour keeps the alpha of the paint it replaces when it has
-  // none of its own (raster.ts withAlphaOf).
-  const palOwnAlpha: boolean[] = st ? st.palette.map((c) => /^#[0-9a-fA-F]{8}$/.test(c)) : [];
+  // A condition colour we can't read: the canvas paints this state.
+  if (pal.some((c) => !c)) return null;
+  // A condition colour written #rrggbb takes the alpha of a paint written
+  // #rrggbbaa; any other keeps its own (raster.ts withAlphaOf).
+  const hex6: boolean[] = st ? st.palette.map((c) => /^#[0-9a-fA-F]{6}$/.test(c)) : [];
+  const fHex8: boolean[] = dl.paints.map((p) => p.fill != null && /^#[0-9a-fA-F]{8}$/.test(p.fill));
+  const sHex8: boolean[] = dl.paints.map((p) => p.stroke != null && /^#[0-9a-fA-F]{8}$/.test(p.stroke));
   for (let m = 0; m < n; m++) {
     const i = inst.rec[m], pi = dl.paint[i];
     let f = pf[pi], s = ps[pi], mult = 1;
@@ -190,9 +200,9 @@ export function glColors(dl: DisplayList, inst: GLInstances, st: GLStyle | null)
       const ov = st.color[k];
       const oc = ov ? pal[ov - 1] : null;
       if (oc) {
-        const own = palOwnAlpha[ov - 1];
-        if (f) f = [oc[0], oc[1], oc[2], own ? oc[3] : f[3]];
-        if (s) s = [oc[0], oc[1], oc[2], own ? oc[3] : s[3]];
+        const h6 = hex6[ov - 1];
+        if (f) f = [oc[0], oc[1], oc[2], h6 && fHex8[pi] ? f[3] : oc[3]];
+        if (s) s = [oc[0], oc[1], oc[2], h6 && sHex8[pi] ? s[3] : oc[3]];
       }
     }
     if (f) { fill[4 * m] = f[0]; fill[4 * m + 1] = f[1]; fill[4 * m + 2] = f[2]; fill[4 * m + 3] = Math.round(f[3] * mult); }
@@ -222,6 +232,7 @@ uniform vec2 u_vp;
 out vec2 v_p;
 flat out vec2 v_half;
 flat out uint v_kind;
+flat out uint v_cap;
 flat out uint v_shape;
 flat out float v_hw;
 flat out vec4 v_fill;
@@ -232,7 +243,8 @@ void main() {
   uint p = a_meta.z;
   vec4 A = u_aff[p];
   vec2 c, hext;
-  if (a_meta.x == 0u) {
+  uint kind = a_meta.x & 15u;
+  if (kind == 0u) {
     c = vec2(A.x * a_pos.x + A.z, A.y * a_pos.y + A.w);
     hext = vec2(a_size.x * u_gs[p]);
   } else {
@@ -247,7 +259,8 @@ void main() {
   vec2 q = c + v_p;
   gl_Position = vec4(q.x / u_vp.x * 2.0 - 1.0, 1.0 - q.y / u_vp.y * 2.0, 0.0, 1.0);
   v_half = hext;
-  v_kind = a_meta.x;
+  v_kind = kind;
+  v_cap = a_meta.x >> 4u;
   v_shape = a_meta.y;
   v_hw = hw;
   v_fill = a_fill;
@@ -271,6 +284,7 @@ precision highp int;
 in vec2 v_p;
 flat in vec2 v_half;
 flat in uint v_kind;
+flat in uint v_cap;
 flat in uint v_shape;
 flat in float v_hw;
 flat in vec4 v_fill;
@@ -326,9 +340,15 @@ void main() {
   } else {
     float r = v_half.x;
     if (v_shape == 4u || v_shape == 5u) {
-      // plus / cross: two butt-capped strokes of the paint's width
+      // plus / cross: two strokes of the paint's width and line cap
+      if (v_hw <= 0.0) discard;
       vec2 p = v_shape == 5u ? mat2(0.7071067811865476, 0.7071067811865476, -0.7071067811865476, 0.7071067811865476) * v_p : v_p;
-      d = min(sdBox(p, vec2(v_hw, r)), sdBox(p, vec2(r, v_hw)));
+      if (v_cap == 1u) {
+        d = min(length(vec2(p.x, max(abs(p.y) - r, 0.0))), length(vec2(max(abs(p.x) - r, 0.0), p.y))) - v_hw;
+      } else {
+        float L = v_cap == 2u ? r + v_hw : r;
+        d = min(sdBox(p, vec2(v_hw, L)), sdBox(p, vec2(L, v_hw)));
+      }
       line = true;
     } else if (v_shape == 1u) {
       d = sdBox(v_p, vec2(r));
@@ -366,6 +386,8 @@ export interface GLPainter {
   canvas: HTMLCanvasElement;
   draw(dl: DisplayList, frame: GLFrame, W: number, H: number, ord: Uint32Array | null, style: GLStyle | null, styleRev: number): boolean;
   alive(): boolean;
+  // Drop the instance buffers (a list this painter can't draw replaced it).
+  release(): void;
 }
 
 // Why the last createGLPainter() returned null (for glState / debugging).
@@ -454,6 +476,7 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
     const key = style ? "s" + styleRev : "u";
     if (key !== colKey) {
       const c = glColors(dl, inst, style);
+      if (!c) { g.bindVertexArray(null); return false; }
       upload(bFill, c.fill); upload(bStroke, c.stroke);
       colKey = key;
     }
@@ -487,5 +510,15 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
     return !g.isContextLost();
   }
 
-  return { canvas: canvas, draw: draw, alive: function () { return !lost && !g.isContextLost(); } };
+  function release(): void {
+    if (!inst) return;
+    inst = null; instDl = null; instOrd = undefined; colKey = "";
+    if (lost || g.isContextLost()) return;
+    for (const b of [bPos, bSize, bMeta, bWidth, bFill, bStroke]) {
+      g.bindBuffer(g.ARRAY_BUFFER, b);
+      g.bufferData(g.ARRAY_BUFFER, 0, g.STATIC_DRAW);
+    }
+  }
+
+  return { canvas: canvas, draw: draw, alive: function () { return !lost && !g.isContextLost(); }, release: release };
 }

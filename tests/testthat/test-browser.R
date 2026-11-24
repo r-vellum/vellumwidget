@@ -790,30 +790,46 @@ test_that("F-25: WebGL draws a big display list live, and falls back to the canv
   set.seed(5)
   n <- 80000L
   df <- data.frame(x = runif(n), y = runif(n), g = sample(letters[1:3], n, TRUE), id = seq_len(n))
-  w <- vellumplot::vplot(df) |>
-    vellumplot::mark_point(x = x, y = y, color = g, data_id = id) |>
-    as_widget(elementId = "w1")
-  expect_identical(w$x$options$webgl, "auto")
-  b <- open_widget(w)
-  ev <- function(js) b$Runtime$evaluate(js)$result$value
-  gl <- function() jsonlite::fromJSON(ev("JSON.stringify(HTMLWidgets.find('#w1')._test.glState())"))
-  if (!ev("!!document.createElement('canvas').getContext('webgl2')")) skip("no WebGL2 in this browser")
-  pn <- w$x$panels[[1]]
-  # the shallow zoom that makes the 2D canvas wait (VW-15) is drawn at once
-  st <- ev(sprintf(
-    "(function(){ HTMLWidgets.find('#w1')._test.setView({x:%f,y:%f,w:%f,h:%f});
-      return getComputedStyle(document.querySelector('.vellumwidget-gl')).display; })()",
-    pn$px0 + 0.05 * (pn$px1 - pn$px0), pn$py0 + 0.05 * (pn$py1 - pn$py0),
-    0.9 * (pn$px1 - pn$px0), 0.9 * (pn$py1 - pn$py0)
-  ))
-  expect_identical(st, "block")
-  expect_true(gl()$on)
-  expect_identical(ev("getComputedStyle(document.querySelector('.vellumwidget-canvas')).display"), "none")
-  expect_true(ev("!!document.querySelector('svg.vellumwidget-marks-off')"))
-  # a filter restyles through the GL layer, which stays up
-  ev("HTMLWidgets.find('#w1')._call('filter', ['1', '2', '3'])")
-  expect_true(gl()$on)
-  b$close()
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, color = g, data_id = id, alpha = 0.6)
+  # one widget per mode, zoomed to the same shallow view and filtered alike;
+  # returns its GL state, the marks canvas display and a screenshot of the panel
+  run <- function(w, filter = TRUE) {
+    b <- open_widget(w)
+    on.exit(b$close())
+    ev <- function(js) b$Runtime$evaluate(js)$result$value
+    if (!ev("!!document.createElement('canvas').getContext('webgl2')")) skip("no WebGL2 in this browser")
+    pn <- w$x$panels[[1]]
+    view <- sprintf("{x:%f,y:%f,w:%f,h:%f}",
+      pn$px0 + 0.05 * (pn$px1 - pn$px0), pn$py0 + 0.05 * (pn$py1 - pn$py0),
+      0.9 * (pn$px1 - pn$px0), 0.9 * (pn$py1 - pn$py0))
+    # the gl layer's display straight after the view change (no settle)
+    now <- ev(sprintf("(function(){ HTMLWidgets.find('#w1')._test.setView(%s);
+      var g = document.querySelector('.vellumwidget-gl'); return g ? getComputedStyle(g).display : 'absent'; })()", view))
+    if (filter) {
+      keys <- paste0("['", paste(seq(1, n, by = 3), collapse = "','"), "']")
+      ev(sprintf("HTMLWidgets.find('#w1')._call('filter', %s)", keys))
+    }
+    Sys.sleep(0.8)
+    st <- jsonlite::fromJSON(ev("JSON.stringify(HTMLWidgets.find('#w1')._test.glState())"))
+    r <- jsonlite::fromJSON(ev("JSON.stringify((function(){var r=document.querySelector('.vellumwidget svg').getBoundingClientRect(); return [r.left, r.top, r.width, r.height];})())"))
+    shot <- b$Page$captureScreenshot(format = "png", clip = list(x = r[1], y = r[2], width = r[3], height = r[4], scale = 1))
+    list(now = now, gl = st, canvas = ev("getComputedStyle(document.querySelector('.vellumwidget-canvas')).display"),
+      img = png::readPNG(jsonlite::base64_dec(shot$data)))
+  }
+  a <- run(as_widget(p, elementId = "w1"))
+  # GL draws the shallow zoom at once, where the canvas waits (VW-15) ...
+  expect_identical(a$now, "block")
+  expect_true(a$gl$on)
+  expect_null(a$gl$why)
+  expect_identical(a$canvas, "none")
+  # ... and after a filter its pixels match the 2D canvas's
+  c <- run(as_widget(p, elementId = "w1", render = render_options(webgl = "never")))
+  expect_identical(c$gl$why, "never")
+  expect_identical(c$canvas, "block")
+  expect_identical(dim(a$img), dim(c$img))
+  differ <- mean(apply(abs(a$img[, , 1:3] - c$img[, , 1:3]), c(1, 2), max) > 0.12)
+  expect_lt(differ, 0.03)
 
   # a list with a (keyed) path stays on the canvas, and says why; an
   # unkeyed line is furniture, not in the list
@@ -821,14 +837,9 @@ test_that("F-25: WebGL draws a big display list live, and falls back to the canv
   w2 <- vellumplot::vplot(small) |>
     vellumplot::mark_point(x = x, y = y, data_id = id) |>
     vellumplot::mark_line(x = x, y = y, data_id = grp) |>
-    as_widget(elementId = "w1", render = render_options(mode = "raster", webgl = "always"))
-  b <- open_widget(w2)
-  expect_identical(gl()$why, "paths")
-  b$close()
-  w3 <- vellumplot::vplot(small) |>
-    vellumplot::mark_point(x = x, y = y, data_id = id) |>
-    as_widget(elementId = "w1", render = render_options(mode = "raster", webgl = "never"))
-  b <- open_widget(w3)
-  expect_identical(gl()$why, "never")
-  b$close()
+    as_widget(elementId = "w1", render = render_options(mode = "raster", webgl = "always", detail_marks = 0))
+  r2 <- run(w2, filter = FALSE)
+  expect_identical(r2$gl$why, "paths")
+  expect_false(r2$gl$on)
+  expect_identical(r2$canvas, "block")
 })

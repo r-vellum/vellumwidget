@@ -7029,7 +7029,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   ok(t.glUnsupported(dl) === null, "F-25: points and rects with solid paints are drawable by WebGL");
   const inst4 = t.glInstances(dl, null);
   ok(inst4.n === 3 && Array.from(inst4.rec).join() === "0,1,2", "F-25: the flagged record is skipped, the rest kept in paint order");
-  ok(inst4.meta[4 * 1 + 1] === 1 && inst4.meta[4 * 1 + 3] === 1 && inst4.meta[4 * 2] === 1,
+  ok(inst4.meta[4 * 1 + 1] === 1 && inst4.meta[4 * 1 + 3] === 1 && (inst4.meta[4 * 2] & 15) === 1,
     "F-25: an instance carries its shape, clip slot and kind");
   ok(inst4.pos[4] === 5 && inst4.size[4] === 7 && inst4.size[5] === 8, "F-25: a rect instance is its corner and size");
   ok(inst4.width[0] === 0 && inst4.width[1] === 1.5, "F-25: the stroke width only where there is a stroke");
@@ -7050,11 +7050,20 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     "F-25: a condition colour replaces the stroke, and a hollow marker stays hollow");
   ok(c.fill[11] === 0 && c.stroke[11] === 0, "F-25: a hidden key is not drawn");
   const stM = { flags: Uint8Array.from([4, 0, 0, 0]), color: new Uint32Array(4), palette: [], dimAlpha: 0.25, alpha: null, alphaPal: [] };
-  ok(t.glColors(dl, inst4, stM).fill[3] < 255 && t.glColors(dl, inst4, stM).fill[3] > 0, "F-25: a legend-muted key is drawn at the muted alpha");
+  const mutedA = t.glColors(dl, inst4, stM).fill[3];
+  ok(mutedA === Math.round(255 * 0.12), "F-25: a legend-muted key is drawn at the muted alpha, 0.12 (" + mutedA + ")");
   // a condition colour without alpha keeps the paint's (as the canvas does)
   const st2 = { flags: new Uint8Array(4), color: Uint32Array.from([0, 0, 1, 0]), palette: ["#112233"], dimAlpha: 0.25, alpha: null, alphaPal: [] };
   c = t.glColors(dl, inst4, st2);
-  ok(Array.from(c.fill.slice(8, 12)).join() === "17,34,51,128", "F-25: a condition colour keeps the paint's alpha");
+  ok(Array.from(c.fill.slice(8, 12)).join() === "17,34,51,128", "F-25: a #rrggbb condition colour keeps the paint's alpha");
+  const st3 = { flags: new Uint8Array(4), color: Uint32Array.from([0, 0, 1, 0]), palette: ["#11223340"], dimAlpha: 0.25, alpha: null, alphaPal: [] };
+  ok(t.glColors(dl, inst4, st3).fill[11] === 64, "F-25: a condition colour with its own alpha keeps it");
+  const st4 = { flags: new Uint8Array(4), color: Uint32Array.from([0, 0, 1, 0]), palette: ["no-such-colour"], dimAlpha: 0.25, alpha: null, alphaPal: [] };
+  ok(t.glColors(dl, inst4, st4) === null, "F-25: an unreadable condition colour leaves the state to the canvas");
+  const dlc = mkDl(); dlc.paints[1].cap = "round"; dlc.paints[2].cap = "square";
+  const ic = t.glInstances(dlc, null);
+  ok((ic.meta[4] >> 4) === 1 && (ic.meta[8] >> 4) === 2 && (ic.meta[8] & 15) === 1 && (ic.meta[0] >> 4) === 0,
+    "F-25: an instance carries its paint's line cap above its kind");
   // what keeps a list on the canvas
   const why = function (f) { const d = mkDl(); f(d); return t.glUnsupported(d); };
   ok(why((d) => { d.kind[0] = 2; }) === "paths", "F-25: a path keeps the list on the canvas");

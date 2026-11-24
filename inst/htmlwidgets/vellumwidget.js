@@ -7317,6 +7317,7 @@
       meta[4 * m + 2] = dl.panel[i] <= np ? dl.panel[i] : 0;
       meta[4 * m + 3] = dl.clip[i];
       const pt = dl.paints[dl.paint[i]];
+      meta[4 * m] |= (pt.cap === "round" ? 1 : pt.cap === "square" ? 2 : 0) << 4;
       width[m] = pt.stroke != null ? pt.width : 0;
       rec[m] = i;
       m++;
@@ -7329,7 +7330,10 @@
     const pf = dl.paints.map((p) => parseColor(p.fill));
     const ps = dl.paints.map((p) => parseColor(p.stroke));
     const pal = st ? st.palette.map((c) => parseColor(c)) : [];
-    const palOwnAlpha = st ? st.palette.map((c) => /^#[0-9a-fA-F]{8}$/.test(c)) : [];
+    if (pal.some((c) => !c)) return null;
+    const hex6 = st ? st.palette.map((c) => /^#[0-9a-fA-F]{6}$/.test(c)) : [];
+    const fHex8 = dl.paints.map((p) => p.fill != null && /^#[0-9a-fA-F]{8}$/.test(p.fill));
+    const sHex8 = dl.paints.map((p) => p.stroke != null && /^#[0-9a-fA-F]{8}$/.test(p.stroke));
     for (let m = 0; m < n; m++) {
       const i = inst.rec[m], pi = dl.paint[i];
       let f = pf[pi], s = ps[pi], mult = 1;
@@ -7341,9 +7345,9 @@
         const ov = st.color[k];
         const oc = ov ? pal[ov - 1] : null;
         if (oc) {
-          const own = palOwnAlpha[ov - 1];
-          if (f) f = [oc[0], oc[1], oc[2], own ? oc[3] : f[3]];
-          if (s) s = [oc[0], oc[1], oc[2], own ? oc[3] : s[3]];
+          const h6 = hex6[ov - 1];
+          if (f) f = [oc[0], oc[1], oc[2], h6 && fHex8[pi] ? f[3] : oc[3]];
+          if (s) s = [oc[0], oc[1], oc[2], h6 && sHex8[pi] ? s[3] : oc[3]];
         }
       }
       if (f) {
@@ -7380,6 +7384,7 @@ uniform vec2 u_vp;
 out vec2 v_p;
 flat out vec2 v_half;
 flat out uint v_kind;
+flat out uint v_cap;
 flat out uint v_shape;
 flat out float v_hw;
 flat out vec4 v_fill;
@@ -7390,7 +7395,8 @@ void main() {
   uint p = a_meta.z;
   vec4 A = u_aff[p];
   vec2 c, hext;
-  if (a_meta.x == 0u) {
+  uint kind = a_meta.x & 15u;
+  if (kind == 0u) {
     c = vec2(A.x * a_pos.x + A.z, A.y * a_pos.y + A.w);
     hext = vec2(a_size.x * u_gs[p]);
   } else {
@@ -7405,7 +7411,8 @@ void main() {
   vec2 q = c + v_p;
   gl_Position = vec4(q.x / u_vp.x * 2.0 - 1.0, 1.0 - q.y / u_vp.y * 2.0, 0.0, 1.0);
   v_half = hext;
-  v_kind = a_meta.x;
+  v_kind = kind;
+  v_cap = a_meta.x >> 4u;
   v_shape = a_meta.y;
   v_hw = hw;
   v_fill = a_fill;
@@ -7428,6 +7435,7 @@ precision highp int;
 in vec2 v_p;
 flat in vec2 v_half;
 flat in uint v_kind;
+flat in uint v_cap;
 flat in uint v_shape;
 flat in float v_hw;
 flat in vec4 v_fill;
@@ -7483,9 +7491,15 @@ void main() {
   } else {
     float r = v_half.x;
     if (v_shape == 4u || v_shape == 5u) {
-      // plus / cross: two butt-capped strokes of the paint's width
+      // plus / cross: two strokes of the paint's width and line cap
+      if (v_hw <= 0.0) discard;
       vec2 p = v_shape == 5u ? mat2(0.7071067811865476, 0.7071067811865476, -0.7071067811865476, 0.7071067811865476) * v_p : v_p;
-      d = min(sdBox(p, vec2(v_hw, r)), sdBox(p, vec2(r, v_hw)));
+      if (v_cap == 1u) {
+        d = min(length(vec2(p.x, max(abs(p.y) - r, 0.0))), length(vec2(max(abs(p.x) - r, 0.0), p.y))) - v_hw;
+      } else {
+        float L = v_cap == 2u ? r + v_hw : r;
+        d = min(sdBox(p, vec2(v_hw, L)), sdBox(p, vec2(L, v_hw)));
+      }
       line = true;
     } else if (v_shape == 1u) {
       d = sdBox(v_p, vec2(r));
@@ -7600,6 +7614,10 @@ void main() {
       const key = style ? "s" + styleRev : "u";
       if (key !== colKey) {
         const c = glColors(dl, inst, style);
+        if (!c) {
+          g.bindVertexArray(null);
+          return false;
+        }
         upload(bFill, c.fill);
         upload(bStroke, c.stroke);
         colKey = key;
@@ -7648,9 +7666,21 @@ void main() {
       g.bindVertexArray(null);
       return !g.isContextLost();
     }
+    function release() {
+      if (!inst) return;
+      inst = null;
+      instDl = null;
+      instOrd = void 0;
+      colKey = "";
+      if (lost || g.isContextLost()) return;
+      for (const b of [bPos, bSize, bMeta, bWidth, bFill, bStroke]) {
+        g.bindBuffer(g.ARRAY_BUFFER, b);
+        g.bufferData(g.ARRAY_BUFFER, 0, g.STATIC_DRAW);
+      }
+    }
     return { canvas, draw, alive: function() {
       return !lost && !g.isContextLost();
-    } };
+    }, release };
   }
 
   // srcts/features/raster.ts
@@ -7879,15 +7909,27 @@ void main() {
       return [c.width, c.height];
     }
     let glp = null, glOff = false;
-    let glForDl = null, glWhy = null;
-    function glUsable(dl) {
+    let glForDl = null, glForRuns = null, glWhy = null;
+    let glLast = "not drawn yet";
+    function glReason(dl) {
       const mode = ws.opts.webgl || "auto";
-      if (glOff || mode === "never" || mode === "auto" && dl.n < GL_AUTO_MIN) return false;
-      if (glForDl !== dl) {
+      if (glOff) return "unavailable" + (glLastError ? ": " + glLastError : "");
+      if (mode === "never") return "never";
+      if (mode === "auto" && dl.n < GL_AUTO_MIN) return "small";
+      if (glForDl !== dl || glForRuns !== dl.runImgs) {
         glForDl = dl;
+        glForRuns = dl.runImgs;
         glWhy = glUnsupported(dl);
       }
-      if (glWhy) return false;
+      return glWhy;
+    }
+    function glUsable(dl) {
+      const why = glReason(dl);
+      if (why) {
+        if (glp) glp.release();
+        glLast = why;
+        return false;
+      }
       if (!glp) {
         const base = ws.canvasEl;
         glp = base && base.parentNode ? createGLPainter(function() {
@@ -7897,21 +7939,20 @@ void main() {
         }) : null;
         if (!glp) {
           glOff = true;
+          glLast = glReason(dl) || "unavailable";
           return false;
         }
         base.parentNode.insertBefore(glp.canvas, base.nextSibling);
       }
-      return glp.alive();
+      if (!glp.alive()) {
+        glOff = true;
+        glLast = glReason(dl) || "unavailable";
+        return false;
+      }
+      return true;
     }
     function glState() {
-      const dl = ws.dl;
-      const on = !!(glp && glp.canvas.style.display === "block");
-      if (!dl) return { on, why: "no list" };
-      if (glOff) return { on, why: "unavailable" + (glLastError ? ": " + glLastError : "") };
-      const mode = ws.opts.webgl || "auto";
-      if (mode === "never") return { on, why: "never" };
-      if (mode === "auto" && dl.n < GL_AUTO_MIN) return { on, why: "small" };
-      return { on, why: glUnsupported(dl) };
+      return { on: !!(glp && glp.canvas.style.display === "block"), why: glLast };
     }
     let settleTimer = 0;
     function drawList(dl, settled, stateOnly) {
@@ -7973,6 +8014,7 @@ void main() {
           alphaPal: ws.msAlphaPal
         } : null;
         if (glp.draw(dl, L, W, H, ws.fx.raiseOrder(dl), st, ws.msRev)) {
+          glLast = null;
           const c = glp.canvas;
           c.style.width = ws.canvasEl.style.width;
           c.style.height = ws.canvasEl.style.height;
@@ -7983,6 +8025,7 @@ void main() {
         }
       }
       if (glp) glp.canvas.style.display = "none";
+      if (useGL) glLast = "draw failed";
       let used = 0;
       const sink = blending ? {
         next: function(mode) {

@@ -311,12 +311,30 @@ export function rasterFeature(
   // The WebGL painter (F-25), created on the first list it can draw; `glOff`
   // once WebGL2 is missing or its context was lost (the canvas then paints).
   let glp: GLPainter | null = null, glOff = false;
-  let glForDl: DisplayList | null = null, glWhy: string | null = null;
-  function glUsable(dl: DisplayList): boolean {
+  // The eligibility of the list last asked about. Keyed on the run images
+  // too: attachRuns() sets them on the same list object once they load, and
+  // a list with run images is not the GL painter's (review of #124).
+  let glForDl: DisplayList | null = null, glForRuns: CanvasImageSource[] | null = null, glWhy: string | null = null;
+  // Why the last drawList() did not draw with GL (null when it did).
+  let glLast: string | null = "not drawn yet";
+  function glReason(dl: DisplayList): string | null {
     const mode = ws.opts.webgl || "auto";
-    if (glOff || mode === "never" || (mode === "auto" && dl.n < GL_AUTO_MIN)) return false;
-    if (glForDl !== dl) { glForDl = dl; glWhy = glUnsupported(dl); }
-    if (glWhy) return false;
+    if (glOff) return "unavailable" + (glLastError ? ": " + glLastError : "");
+    if (mode === "never") return "never";
+    if (mode === "auto" && dl.n < GL_AUTO_MIN) return "small";
+    if (glForDl !== dl || glForRuns !== dl.runImgs) {
+      glForDl = dl; glForRuns = dl.runImgs; glWhy = glUnsupported(dl);
+    }
+    return glWhy;
+  }
+  function glUsable(dl: DisplayList): boolean {
+    const why = glReason(dl);
+    if (why) {
+      // a list the painter can't draw: let go of the last one's buffers
+      if (glp) glp.release();
+      glLast = why;
+      return false;
+    }
     if (!glp) {
       const base = ws.canvasEl;
       glp = base && base.parentNode ? createGLPainter(function () {
@@ -324,21 +342,16 @@ export function rasterFeature(
         if (glp) glp.canvas.style.display = "none";
         drawPoints();
       }) : null;
-      if (!glp) { glOff = true; return false; }
+      if (!glp) { glOff = true; glLast = glReason(dl) || "unavailable"; return false; }
       base!.parentNode!.insertBefore(glp.canvas, base!.nextSibling);
     }
-    return glp.alive();
+    if (!glp.alive()) { glOff = true; glLast = glReason(dl) || "unavailable"; return false; }
+    return true;
   }
-  // Why the GL painter isn't drawing the current list (null when it is), for tests.
+  // For tests: whether the GL layer shows, and why the last drawList() did
+  // not draw with it (null when it did).
   function glState(): { on: boolean; why: string | null } {
-    const dl = ws.dl;
-    const on = !!(glp && glp.canvas.style.display === "block");
-    if (!dl) return { on: on, why: "no list" };
-    if (glOff) return { on: on, why: "unavailable" + (glLastError ? ": " + glLastError : "") };
-    const mode = ws.opts.webgl || "auto";
-    if (mode === "never") return { on: on, why: "never" };
-    if (mode === "auto" && dl.n < GL_AUTO_MIN) return { on: on, why: "small" };
-    return { on: on, why: glUnsupported(dl) };
+    return { on: !!(glp && glp.canvas.style.display === "block"), why: glLast };
   }
 
   let settleTimer = 0;
@@ -400,6 +413,7 @@ export function rasterFeature(
         alpha: ws.msAlpha, alphaPal: ws.msAlphaPal
       } : null;
       if (glp.draw(dl, L, W, H, ws.fx.raiseOrder(dl), st, ws.msRev)) {
+        glLast = null;
         const c = glp.canvas;
         c.style.width = ws.canvasEl!.style.width;
         c.style.height = ws.canvasEl!.style.height;
@@ -410,6 +424,7 @@ export function rasterFeature(
       }
     }
     if (glp) glp.canvas.style.display = "none";
+    if (useGL) glLast = "draw failed";
     // Blend runs (VW-32): each is drawn on a canvas of its own stacked over
     // the marks before it, with the run's CSS mix-blend-mode, so it blends
     // with the furniture and the marks beneath as in SVG mode; the marks
