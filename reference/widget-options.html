@@ -67,6 +67,7 @@
 <span>  text <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"native"</span>, <span class="st">"outline"</span><span class="op">)</span>,</span>
 <span>  max_marks <span class="op">=</span> <span class="fl">2000000L</span>,</span>
 <span>  detail_marks <span class="op">=</span> <span class="fl">3000L</span>,</span>
+<span>  webgl <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"auto"</span>, <span class="st">"always"</span>, <span class="st">"never"</span><span class="op">)</span>,</span>
 <span>  precision <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"compact"</span>, <span class="st">"f32"</span><span class="op">)</span>,</span>
 <span>  max_zoom <span class="op">=</span> <span class="fl">100</span>,</span>
 <span>  autoplay <span class="op">=</span> <span class="cn">TRUE</span>,</span>
@@ -189,6 +190,19 @@ them as in SVG mode. Zooming back out past 1.5 times this many returns to
 the canvas. <code>0</code> turns the detail tier off.</p></dd>
 
 
+<dt id="arg-webgl">webgl<a class="anchor" aria-label="anchor" href="#arg-webgl"></a></dt>
+<dd><p>In raster mode with the display list, how the zoomed-in (and
+restyled) marks are drawn. <code>"auto"</code> (default) draws a list of 50,000 marks
+or more with WebGL2 where the browser has it: a million points redraw in a
+few milliseconds, so pan, zoom and <code><a href="https://r-vellum.github.io/vellumplot/reference/condition.html" class="external-link">condition()</a></code>, selection and filter
+styling stay live, where the 2D canvas redraws in about a second and waits
+for the view to settle. <code>"always"</code> uses WebGL2 for any size of list,
+<code>"never"</code> keeps the 2D canvas. WebGL2 draws point and rectangle marks with
+solid fills and strokes; a list holding other marks (lines, polygons,
+gradients, dashed strokes, grouped marks) is drawn on the canvas, as it is
+without WebGL2 or when the browser drops the context.</p></dd>
+
+
 <dt id="arg-precision">precision<a class="anchor" aria-label="anchor" href="#arg-precision"></a></dt>
 <dd><p>How the display list ships its marks' coordinates (see
 <code>max_marks</code>). <code>"compact"</code> (default), with a vellum that supports it,
@@ -263,6 +277,7 @@ Calling a helper with no arguments gives the defaults.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   text: native</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   max_marks: 2e+06</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   detail_marks: 3000</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   webgl: auto</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   precision: compact</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   max_zoom: 100</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   autoplay: TRUE</span>

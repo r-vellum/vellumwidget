@@ -19,6 +19,7 @@ render_options(
   text = c("native", "outline"),
   max_marks = 2000000L,
   detail_marks = 3000L,
+  webgl = c("auto", "always", "never"),
   precision = c("compact", "f32"),
   max_zoom = 100,
   autoplay = TRUE,
@@ -152,6 +153,21 @@ render_options(
   back out past 1.5 times this many returns to the canvas. `0` turns the
   detail tier off.
 
+- webgl:
+
+  In raster mode with the display list, how the zoomed-in (and restyled)
+  marks are drawn. `"auto"` (default) draws a list of 50,000 marks or
+  more with WebGL2 where the browser has it: a million points redraw in
+  a few milliseconds, so pan, zoom and
+  [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html),
+  selection and filter styling stay live, where the 2D canvas redraws in
+  about a second and waits for the view to settle. `"always"` uses
+  WebGL2 for any size of list, `"never"` keeps the 2D canvas. WebGL2
+  draws point and rectangle marks with solid fills and strokes; a list
+  holding other marks (lines, polygons, gradients, dashed strokes,
+  grouped marks) is drawn on the canvas, as it is without WebGL2 or when
+  the browser drops the context.
+
 - precision:
 
   How the display list ships its marks' coordinates (see `max_marks`).
@@ -239,6 +255,7 @@ render_options(mode = "raster")
 #>   text: native
 #>   max_marks: 2e+06
 #>   detail_marks: 3000
+#>   webgl: auto
 #>   precision: compact
 #>   max_zoom: 100
 #>   autoplay: TRUE
