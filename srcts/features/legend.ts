@@ -49,11 +49,13 @@ export function legendFeature(
   }
 
   // Double click: isolate this series (turn every other off); if it is already
-  // the only one on, restore all — the plotly/echarts legend convention.
+  // isolated, restore all — the plotly/echarts legend convention. The first
+  // click of a double-click has already toggled `series` itself, so only the
+  // other series tell whether it was isolated.
   function legendIsolate(series: string): void {
     const all = Object.keys(ws.legendIndex);
     const others = all.filter((s) => s !== series);
-    const isolated = !ws.legendOff[series] && others.every((s) => ws.legendOff[s]);
+    const isolated = others.length > 0 && others.every((s) => ws.legendOff[s]);
     ws.legendOff = {};
     if (!isolated) for (let i = 0; i < others.length; i++) ws.legendOff[others[i]] = true;
     applyLegend();

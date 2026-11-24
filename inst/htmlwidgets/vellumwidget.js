@@ -13,7 +13,7 @@
    every ring (down if the root is taller, sideways if it is wider). */
 .vellumwidget-root .vellumwidget-stage { position: relative; display: inline-block; }
 .vellumwidget-root .vellumwidget-svg-holder svg { max-width: 100%; height: auto; display: block; }
-.vellumwidget-gesture .vellumwidget-svg-holder svg { touch-action: none; }
+.vellumwidget-gesture .vellumwidget-svg-holder svg { touch-action: none; -webkit-user-select: none; user-select: none; }
 .vellumwidget-root.vellumwidget-mode-pan .vellumwidget-svg-holder svg { cursor: grab; }
 .vellumwidget-root.vellumwidget-panning .vellumwidget-svg-holder svg { cursor: grabbing; }
 .vellumwidget-root [data-key] { cursor: pointer; }
@@ -59,9 +59,11 @@
   position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 2; overflow: hidden;
 }
+/* Clipped like the base svg, so a hover ring or clone of a mark just outside
+   the zoomed view does not paint past the plot. */
 .vellumwidget-dim-layer {
   position: absolute; inset: 0; width: 100%; height: 100%;
-  pointer-events: none; z-index: 5; overflow: visible;
+  pointer-events: none; z-index: 5; overflow: hidden;
 }
 /* Continuous colorbar filter: an overlay on the gradient bar. The dim rects cover
    the out-of-range ends; the handles are draggable. Out-of-range marks fade. */
@@ -5769,7 +5771,7 @@
     function legendIsolate(series) {
       const all = Object.keys(ws.legendIndex);
       const others = all.filter((s) => s !== series);
-      const isolated = !ws.legendOff[series] && others.every((s) => ws.legendOff[s]);
+      const isolated = others.length > 0 && others.every((s) => ws.legendOff[s]);
       ws.legendOff = {};
       if (!isolated) for (let i = 0; i < others.length; i++) ws.legendOff[others[i]] = true;
       applyLegend();
