@@ -1,4 +1,4 @@
-# vellumwidget (development version)
+# vellumwidget 0.20.0
 
 ## New features
 
