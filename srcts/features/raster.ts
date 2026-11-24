@@ -11,7 +11,7 @@ import type { WidgetFns, WidgetState } from "../state";
 import type { MarkColors } from "../types";
 import type { RunPatch, RunSplit } from "./runStyle";
 import { isZoomedIn, userToCanvas } from "../viewbox";
-import { createGLPainter, glLastError, glStyleReadable, glUnsupported, GL_AUTO_MIN } from "./webgl";
+import { createGLPainter, glHasPaths, glLastError, glStyleReadable, glUnsupported, GL_AUTO_MIN } from "./webgl";
 import type { GLPainter } from "./webgl";
 
 // Ids of the rings' panel clips (VW-48), unique across the page's widgets.
@@ -315,6 +315,7 @@ export function rasterFeature(
   // too: attachRuns() sets them on the same list object once they load, and
   // a list with run images is not the GL painter's (review of #124).
   let glForDl: DisplayList | null = null, glForRuns: CanvasImageSource[] | null = null, glWhy: string | null = null;
+  let glPaths = false; // the list has paths: its painter needs MSAA
   // Why the last drawList() did not draw with GL (null when it did).
   let glLast: string | null = "not drawn yet";
   function glReason(dl: DisplayList): string | null {
@@ -324,6 +325,7 @@ export function rasterFeature(
     if (mode === "auto" && dl.n < GL_AUTO_MIN) return "small";
     if (glForDl !== dl || glForRuns !== dl.runImgs) {
       glForDl = dl; glForRuns = dl.runImgs; glWhy = glUnsupported(dl);
+      glPaths = !glWhy && glHasPaths(dl);
     }
     if (glWhy) return glWhy;
     if (ws.msActive && ws.msColor) {
@@ -333,21 +335,28 @@ export function rasterFeature(
     return null;
   }
   let glStyleRev = -1, glStyleOk = true;
+  // The list, draw order and style the GL painter last failed to draw (e.g.
+  // a raise order interleaving marks and paths too finely): the canvas paints
+  // that state, through the LIVE_DRAW_MAX deferral like any canvas draw.
+  let glFail: { dl: DisplayList; ord: Uint32Array | null; rev: number } | null = null;
   function glUsable(dl: DisplayList): boolean {
-    const why = glReason(dl);
+    let why = glReason(dl);
+    if (!why && glFail && glFail.dl === dl && glFail.ord === ws.fx.raiseOrder(dl) && glFail.rev === ws.msRev) why = "draw failed";
     if (why) {
       // a list the painter can't draw: let go of the last one's buffers
       if (glp) glp.release();
       glLast = why;
       return false;
     }
+    // a painter with the wrong MSAA setting for this list: replace it
+    if (glp && glp.msaa !== glPaths) { glp.dispose(); glp = null; }
     if (!glp) {
       const base = ws.canvasEl;
       glp = base && base.parentNode ? createGLPainter(function () {
         glOff = true;
         if (glp) glp.canvas.style.display = "none";
         drawPoints();
-      }) : null;
+      }, glPaths) : null;
       if (!glp) { glOff = true; glLast = glReason(dl) || "unavailable"; return false; }
       base!.parentNode!.insertBefore(glp.canvas, base!.nextSibling);
     }
@@ -420,7 +429,8 @@ export function rasterFeature(
         flags: ws.msFlags!, color: ws.msColor!, palette: ws.msPalette, dimAlpha: ws.msDimAlpha,
         alpha: ws.msAlpha, alphaPal: ws.msAlphaPal
       } : null;
-      if (glp.draw(dl, L, W, H, ws.fx.raiseOrder(dl), st, ws.msRev)) {
+      const ord = ws.fx.raiseOrder(dl);
+      if (glp.draw(dl, L, W, H, ord, st, ws.msRev)) {
         glLast = null;
         const c = glp.canvas;
         c.style.width = ws.canvasEl!.style.width;
@@ -432,7 +442,12 @@ export function rasterFeature(
       }
     }
     if (glp) glp.canvas.style.display = "none";
-    if (useGL) glLast = "draw failed";
+    if (useGL) {
+      // GL couldn't draw this state: redraw it the canvas way (deferral included)
+      glFail = { dl: dl, ord: ws.fx.raiseOrder(dl), rev: ws.msRev };
+      drawList(dl, settled, stateOnly);
+      return;
+    }
     // Blend runs (VW-32): each is drawn on a canvas of its own stacked over
     // the marks before it, with the run's CSS mix-blend-mode, so it blends
     // with the furniture and the marks beneath as in SVG mode; the marks

@@ -7107,8 +7107,7 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
     clips: [], panels: ["panel-1-1"], keys: ["a", "b", "c", "d"], runImgs: null
   };
   ok(t.glUnsupported(dl) === null, "F-29: points and paths together are drawable by WebGL");
-  const order = Uint32Array.from([0, 1, 2, 3]);
-  const m = t.glMesh(dl, order);
+  const m = t.glMesh(dl);
   // square with a hole: 8 triangles of fill; 4 + 4 stroke segments on the two
   // rings; the open line: 2 segments
   const r1 = m.recRange.get(1), r3 = m.recRange.get(3);
@@ -7133,11 +7132,43 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   const two = t.fillTriangles([sq(0, 1), sq(10, 1)]);
   ok(two.idx.length === 12, "F-29: two disjoint rings are both filled");
   // batches alternate in paint order
-  const bt = t.glBatches(dl, null, m);
+  const bt = t.glBatches(dl, null, m.recRange);
   ok(bt.length === 4 && !bt[0].mesh && bt[1].mesh && !bt[2].mesh && bt[3].mesh && bt[2].a === 1 && bt[2].b === 2,
     "F-29: marks and paths draw as alternating batches in paint order");
-  const btR = t.glBatches(dl, Uint32Array.from([0, 2, 1, 3]), m);
+  const ordR = Uint32Array.from([0, 2, 1, 3]);
+  const moR = t.glMeshOrder(m, ordR);
+  const btR = t.glBatches(dl, ordR, moR.recRange);
   ok(btR.length === 2 && !btR[0].mesh && btR[0].b - btR[0].a === 2, "F-29: consecutive records of one kind share a batch");
+  // the raise order reorders the index ranges only (no re-triangulation)
+  const ordS = Uint32Array.from([0, 2, 3, 1]);
+  const moS = t.glMeshOrder(m, ordS);
+  const rS3 = moS.recRange.get(3), rS1 = moS.recRange.get(1);
+  ok(rS3[0] === 0 && rS1[0] === rS3[1] && moS.idx.length === m.idx.length &&
+    Array.from(moS.idx.slice(rS1[0], rS1[1])).join() === Array.from(m.idx.slice(m.recRange.get(1)[0], m.recRange.get(1)[1])).join(),
+    "F-29: a draw order moves each record's index range whole");
+  const z = t.zOf(dl, ordS);
+  ok(z[0] === 0 && z[2] === 2 && z[3] === 4 && z[1] === 6, "F-29: depth slots follow the draw order (2 per record)");
+  ok(t.meshVerts(dl, 1) >= Array.from(m.rec).filter((r) => r === 1).length &&
+    t.meshVerts(dl, 3) >= Array.from(m.rec).filter((r) => r === 3).length, "F-29: meshVerts bounds the vertices glMesh emits");
+  // ring nesting (review of #125)
+  const many = [sq(100, 40), sq(100, 20)];
+  for (let k = 0; k < 200; k++) many.push(sq(300 + 3 * k, 1));
+  const triMany = t.fillTriangles(many);
+  let areaMany = 0;
+  for (let k = 0; k < triMany.idx.length; k += 3) {
+    const a = triMany.idx[k], b = triMany.idx[k + 1], c = triMany.idx[k + 2];
+    areaMany += Math.abs((triMany.xy[2 * b] - triMany.xy[2 * a]) * (triMany.xy[2 * c + 1] - triMany.xy[2 * a + 1]) - (triMany.xy[2 * c] - triMany.xy[2 * a]) * (triMany.xy[2 * b + 1] - triMany.xy[2 * a + 1])) / 2;
+  }
+  ok(Math.abs(areaMany - (6400 - 1600 + 200 * 4)) < 1e-6, "F-29: with over 200 rings the hole is still a hole (area " + areaMany + ")");
+  const A = [0, 0, 10, 0, 10, 10, 0, 10], B = [5, 5, -5, 5, -5, -5, 5, -5];
+  ok(t.ringNesting([A, B], true) === null, "F-29: rings that cross don't nest (the canvas paints them)");
+  ok(t.ringNesting([sq(0, 2), sq(0, 2)], true) === null, "F-29: two identical rings don't nest");
+  const cw = sq(0, 4), inner = sq(0, 2), innerRev = inner.slice(0, 2).concat([inner[6], inner[7], inner[4], inner[5], inner[2], inner[3]]);
+  ok(t.ringNesting([cw, inner], false) === null && t.ringNesting([cw, innerRev], false) !== null,
+    "F-29: non-zero: a nested ring wound like its parent is filled by the canvas (not meshed); wound against it, a hole");
+  ok(t.ringNesting([cw, inner], true) !== null, "F-29: even-odd: a nested ring is a hole whatever its winding");
+  const crossDl = Object.assign({}, dl, { xy: Float32Array.from(A.concat(B).concat([0, 0, 5, 0, 5, 5])) });
+  ok(t.glUnsupported(crossDl) === "complex paths", "F-29: a filled record with crossing rings keeps the list on the canvas");
   // vertex colours: the fill's vertices green, the strokes black / blue; a hidden key paints nothing
   const mc = t.glMeshColors(dl, m, null);
   const fv = Array.from(m.stroke).indexOf(0);

@@ -842,6 +842,22 @@ test_that("F-25: WebGL draws a big display list live, and falls back to the canv
   r2c <- run(as_widget(lp, elementId = "w1", render = render_options(mode = "raster", webgl = "never", detail_marks = 0)), filter = FALSE)
   differ2 <- mean(apply(abs(r2$img[, , 1:3] - r2c$img[, , 1:3]), c(1, 2), max) > 0.12)
   expect_lt(differ2, 0.05)
+  # filled polygons with holes and a translucent path crossing itself: holes
+  # stay empty, and the crossing is covered once (review of #125)
+  sq <- function(cx, cy, r) data.frame(x = cx + c(-r, r, r, -r), y = cy + c(-r, -r, r, r))
+  holes <- do.call(rbind, lapply(1:12, function(k) {
+    rbind(cbind(sq(k %% 4, k %/% 4, 0.4), id = k, sub = 1), cbind(sq(k %% 4, k %/% 4, 0.2), id = k, sub = 2))
+  }))
+  tt <- seq(0, 4 * pi, length.out = 300)
+  loop <- data.frame(x = 1.5 + sin(tt) + tt / 6 - 1, y = 1 + cos(tt))
+  hp <- vellumplot::vplot(holes) |>
+    vellumplot::mark_polygon(x = x, y = y, group = id, subgroup = sub, data_id = id, fill = "steelblue", color = "black", alpha = 0.7) |>
+    vellumplot::mark_path(data = loop, x = x, y = y, data_id = "loop", linewidth = 5, alpha = 0.5, color = "black")
+  r4 <- run(as_widget(hp, elementId = "w1", render = render_options(mode = "raster", webgl = "always", detail_marks = 0)), filter = FALSE)
+  expect_true(r4$gl$on)
+  r4c <- run(as_widget(hp, elementId = "w1", render = render_options(mode = "raster", webgl = "never", detail_marks = 0)), filter = FALSE)
+  differ4 <- mean(apply(abs(r4$img[, , 1:3] - r4c$img[, , 1:3]), c(1, 2), max) > 0.12)
+  expect_lt(differ4, 0.02)
   # a dashed (keyed) line stays on the canvas, and says why; an unkeyed line
   # is furniture, not in the list
   w3 <- vellumplot::vplot(small) |>

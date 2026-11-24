@@ -16,6 +16,10 @@
 // anything else (gradients, dashes, opacity groups, run images, clip paths)
 // stays on the canvas: `glUnsupported` says why. Flagged records are skipped,
 // as the canvas skips them (the mark image, left showing, draws them).
+// Paint order is also a depth (zOf): each record covers a pixel once, as the
+// canvas's single fill() / stroke() per record does (a translucent line
+// crossing itself does not darken there), its stroke just above its fill,
+// and later records above earlier ones. With MSAA the test is per sample.
 // Strokes join with a miter whatever the paint's join, and at turns sharper
 // than 120 degrees with overlapping square ends; at sharp turns of thick lines
 // that differs from a round join.
@@ -35,7 +39,7 @@
 
 import { DL_PATH, DL_POINT, DL_RECT } from "../dlist";
 import type { DisplayList } from "../dlist";
-import { GL_MAX_MESH_VERTS, MESH_F, glMesh, meshVerts } from "./glmesh";
+import { GL_MAX_MESH_VERTS, MESH_F, glMesh, glMeshOrder, meshVerts, pathMeshable } from "./glmesh";
 import type { GLMesh } from "./glmesh";
 import { MS_DIM, MS_HIDDEN, MS_MUTED, MUTED_ALPHA } from "./markState";
 
@@ -113,7 +117,7 @@ export function glUnsupported(dl: DisplayList): string | null {
     if (pt.fill != null && !parseColor(pt.fill)) return "colours";
     if (pt.stroke != null && !parseColor(pt.stroke)) return "colours";
   }
-  let verts = 0;
+  let verts = 0, switches = 0, last = -1;
   for (let i = 0; i < dl.n; i++) {
     if (dl.flags[i]) {
       if (dl.runImgs && dl.run[i] > 0) return "runs";
@@ -125,7 +129,12 @@ export function glUnsupported(dl: DisplayList): string | null {
     if (k === DL_PATH) {
       verts += meshVerts(dl, i);
       if (verts > GL_MAX_MESH_VERTS) return "large paths";
+      if (!pathMeshable(dl, i)) return "complex paths";
     }
+    // marks and paths interleaved record by record: too many batches
+    const m = k === DL_PATH ? 1 : 0;
+    if (m !== last) { switches++; last = m; }
+    if (switches > GL_MAX_BATCHES) return "interleaved";
   }
   return null;
 }
@@ -135,7 +144,7 @@ export function glUnsupported(dl: DisplayList): string | null {
 // (marks and paths interleaved record by record: the canvas paints it).
 export const GL_MAX_BATCHES = 512;
 export interface GLBatch { mesh: boolean; a: number; b: number }
-export function glBatches(dl: DisplayList, ord: ArrayLike<number> | null, mesh: GLMesh): GLBatch[] | null {
+export function glBatches(dl: DisplayList, ord: ArrayLike<number> | null, recRange: Map<number, [number, number]>): GLBatch[] | null {
   const out: GLBatch[] = [];
   let k = 0;
   for (let q = 0; q < dl.n; q++) {
@@ -143,7 +152,7 @@ export function glBatches(dl: DisplayList, ord: ArrayLike<number> | null, mesh: 
     if (dl.flags[i]) continue;
     const last = out.length ? out[out.length - 1] : null;
     if (dl.kind[i] === DL_PATH) {
-      const r = mesh.recRange.get(i);
+      const r = recRange.get(i);
       if (!r || r[1] <= r[0]) continue;
       if (last && last.mesh && last.b === r[0]) last.b = r[1];
       else out.push({ mesh: true, a: r[0], b: r[1] });
@@ -305,12 +314,14 @@ layout(location = 3) in uvec4 a_meta;
 layout(location = 4) in float a_width;
 layout(location = 5) in vec4 a_fill;
 layout(location = 6) in vec4 a_stroke;
+layout(location = 7) in float a_z;
 uniform vec4 u_aff[${GL_MAX_SLOTS}];
 uniform vec4 u_pclip[${GL_MAX_SLOTS}];
 uniform vec4 u_clip[${GL_MAX_SLOTS}];
 uniform float u_gs[${GL_MAX_SLOTS}];
 uniform float u_base;
 uniform vec2 u_vp;
+uniform float u_zn;
 out vec2 v_p;
 flat out vec2 v_half;
 flat out uint v_kind;
@@ -339,7 +350,8 @@ void main() {
   vec2 ext = hext + vec2(hw + 1.0);
   v_p = a_corner * ext;
   vec2 q = c + v_p;
-  gl_Position = vec4(q.x / u_vp.x * 2.0 - 1.0, 1.0 - q.y / u_vp.y * 2.0, 0.0, 1.0);
+  // depth by paint order (see zOf): later records nearer
+  gl_Position = vec4(q.x / u_vp.x * 2.0 - 1.0, 1.0 - q.y / u_vp.y * 2.0, 1.0 - 2.0 * (a_z + 1.0) / u_zn, 1.0);
   v_half = hext;
   v_kind = kind;
   v_cap = a_meta.x >> 4u;
@@ -468,6 +480,10 @@ export interface GLPainter {
   canvas: HTMLCanvasElement;
   draw(dl: DisplayList, frame: GLFrame, W: number, H: number, ord: Uint32Array | null, style: GLStyle | null, styleRev: number): boolean;
   alive(): boolean;
+  // Whether the context was created with MSAA (for lists with paths).
+  msaa: boolean;
+  // Give the context back (a painter with the other MSAA setting replaces it).
+  dispose(): void;
   // Drop the instance buffers (a list this painter can't draw replaced it).
   release(): void;
 }
@@ -486,11 +502,13 @@ layout(location = 2) in vec2 a_n;
 layout(location = 3) in vec2 a_sw;
 layout(location = 4) in uvec4 a_meta;
 layout(location = 5) in vec4 a_col;
+layout(location = 6) in float a_z;
 uniform vec4 u_aff[${GL_MAX_SLOTS}];
 uniform vec4 u_pclip[${GL_MAX_SLOTS}];
 uniform vec4 u_clip[${GL_MAX_SLOTS}];
 uniform float u_base;
 uniform vec2 u_vp;
+uniform float u_zn;
 flat out vec4 v_col;
 flat out uint v_mode;
 flat out uint v_flags;
@@ -538,7 +556,7 @@ void main() {
     vec2 S = atEnd ? Q : P, E = atEnd ? P : Q;
     v_cap = vec3(dot(pos - S, -t), dot(pos - E, t), dot(pos - P, nrm));
   }
-  gl_Position = vec4(pos.x / u_vp.x * 2.0 - 1.0, 1.0 - pos.y / u_vp.y * 2.0, 0.0, 1.0);
+  gl_Position = vec4(pos.x / u_vp.x * 2.0 - 1.0, 1.0 - pos.y / u_vp.y * 2.0, 1.0 - 2.0 * (a_z + 1.0) / u_zn, 1.0);
   v_col = a_col;
   v_mode = mode;
   v_flags = flags;
@@ -570,15 +588,37 @@ void main() {
   vec2 fc = vec2(gl_FragCoord.x, u_vp.y - gl_FragCoord.y);
   if (fc.x < v_pc.x || fc.x > v_pc.z || fc.y < v_pc.y || fc.y > v_pc.w) discard;
   if (fc.x < v_rc.x || fc.x > v_rc.z || fc.y < v_rc.y || fc.y > v_rc.w) discard;
+  float cov = 1.0;
   if (v_mode == 1u) {
-    // round caps: cut the square past each capped end to a circle
-    if ((v_flags & 1u) != 0u && v_cap.x > 0.0 && length(v_cap.xz) > v_hw) discard;
-    if ((v_flags & 2u) != 0u && v_cap.y > 0.0 && length(v_cap.yz) > v_hw) discard;
+    // round caps: the square past each capped end cut to a circle (smoothed)
+    if ((v_flags & 1u) != 0u && v_cap.x > 0.0) cov = min(cov, clamp(v_hw + 0.5 - length(v_cap.xz), 0.0, 1.0));
+    if ((v_flags & 2u) != 0u && v_cap.y > 0.0) cov = min(cov, clamp(v_hw + 0.5 - length(v_cap.yz), 0.0, 1.0));
+    if (cov <= 0.0) discard;
   }
-  o = vec4(v_col.rgb * v_col.a, v_col.a);
+  float a = v_col.a * cov;
+  o = vec4(v_col.rgb * a, a);
 }`;
 
-export function createGLPainter(onLost: () => void): GLPainter | null {
+// Each record's depth slot by its place in the draw order: 2 x rank (its
+// fill, or a mark), +1 for its stroke. The shaders map slot z to depth
+// 1 - (z + 1) / (2n + 2), so later records are nearer and pass LESS over
+// earlier ones, while a record's own overlapping pieces (a stroke crossing
+// itself) fail against its first and are drawn once.
+export function zOf(dl: DisplayList, ord: ArrayLike<number> | null): Float32Array {
+  const z = new Float32Array(dl.n);
+  for (let q = 0; q < dl.n; q++) z[ord ? ord[q] : q] = 2 * q;
+  return z;
+}
+
+// Does the list hold a path the GL painter draws? (Then its context needs
+// MSAA for the mesh's edges; without paths MSAA only costs fill rate: about
+// 3x the frame time for a million points.)
+export function glHasPaths(dl: DisplayList): boolean {
+  for (let i = 0; i < dl.n; i++) if (!dl.flags[i] && dl.kind[i] === DL_PATH) return true;
+  return false;
+}
+
+export function createGLPainter(onLost: () => void, msaa = true): GLPainter | null {
   glLastError = "";
   const canvas = document.createElement("canvas");
   canvas.className = "vellumwidget-gl";
@@ -586,19 +626,19 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
   let gl: WebGL2RenderingContext | null = null;
   try {
     // MSAA smooths the mesh's polygon and line edges (the marks' shapes are
-    // smoothed in the shader).
+    // smoothed in the shader), so only a list with paths asks for it.
     gl = typeof canvas.getContext === "function"
-      ? (canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: true, alpha: true, preserveDrawingBuffer: false }) as WebGL2RenderingContext | null)
+      ? (canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: msaa, alpha: true, depth: true, preserveDrawingBuffer: false }) as WebGL2RenderingContext | null)
       : null;
   } catch (e) {
     gl = null;
   }
   if (!gl) { glLastError = "no webgl2"; return null; }
-  let lost = false;
+  let lost = false, disposed = false;
   canvas.addEventListener("webglcontextlost", function (e) {
     e.preventDefault();
     lost = true;
-    onLost();
+    if (!disposed) onLost();
   });
   const g = gl;
   const compile = function (type: number, src: string): WebGLShader | null {
@@ -625,7 +665,7 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
   if (!prog || !mprog) return null;
   const uniforms = function (pr: WebGLProgram) {
     const U = (nm: string): WebGLUniformLocation | null => g.getUniformLocation(pr, nm);
-    return { aff: U("u_aff"), pclip: U("u_pclip"), clip: U("u_clip"), gs: U("u_gs"), base: U("u_base"), vp: U("u_vp") };
+    return { aff: U("u_aff"), pclip: U("u_pclip"), clip: U("u_clip"), gs: U("u_gs"), base: U("u_base"), vp: U("u_vp"), zn: U("u_zn") };
   };
   const uI = uniforms(prog), uM = uniforms(mprog);
 
@@ -640,7 +680,8 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
   // per-instance attributes: [location, size, type, normalised, integer, bytes per instance]
   const IATTR: [number, number, number, boolean, boolean, number][] = [
     [1, 2, g.FLOAT, false, false, 8], [2, 2, g.FLOAT, false, false, 8], [3, 4, g.UNSIGNED_BYTE, false, true, 4],
-    [4, 1, g.FLOAT, false, false, 4], [5, 4, g.UNSIGNED_BYTE, true, false, 4], [6, 4, g.UNSIGNED_BYTE, true, false, 4]
+    [4, 1, g.FLOAT, false, false, 4], [5, 4, g.UNSIGNED_BYTE, true, false, 4], [6, 4, g.UNSIGNED_BYTE, true, false, 4],
+    [7, 1, g.FLOAT, false, false, 4]
   ];
   const ibuf: (WebGLBuffer | null)[] = IATTR.map(function () { return g.createBuffer(); });
   // Point the instance attributes at instance `first` (WebGL2 has no base
@@ -661,7 +702,7 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
   // path mesh
   const mvao = g.createVertexArray();
   g.bindVertexArray(mvao);
-  const mV = g.createBuffer(), mMeta = g.createBuffer(), mCol = g.createBuffer(), mIdx = g.createBuffer();
+  const mV = g.createBuffer(), mMeta = g.createBuffer(), mCol = g.createBuffer(), mZ = g.createBuffer(), mIdx = g.createBuffer();
   g.bindBuffer(g.ARRAY_BUFFER, mV);
   for (let k = 0; k < 4; k++) {
     g.enableVertexAttribArray(k);
@@ -673,11 +714,17 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
   g.bindBuffer(g.ARRAY_BUFFER, mCol);
   g.enableVertexAttribArray(5);
   g.vertexAttribPointer(5, 4, g.UNSIGNED_BYTE, true, 0, 0);
+  g.bindBuffer(g.ARRAY_BUFFER, mZ);
+  g.enableVertexAttribArray(6);
+  g.vertexAttribPointer(6, 1, g.FLOAT, false, 0, 0);
   g.bindBuffer(g.ELEMENT_ARRAY_BUFFER, mIdx);
   g.bindVertexArray(null);
 
+  // The mesh is built once per list; the instances, the mesh's index order,
+  // the depths and the batches once per (list, draw order).
+  let meshDl: DisplayList | null = null, mesh: GLMesh | null = null;
   let geoDl: DisplayList | null = null, geoOrd: Uint32Array | null | undefined;
-  let inst: GLInstances | null = null, mesh: GLMesh | null = null, batches: GLBatch[] | null = null;
+  let inst: GLInstances | null = null, batches: GLBatch[] | null = null;
   let colKey = "";
   const affU = new Float32Array(4 * GL_MAX_SLOTS), pclipU = new Float32Array(4 * GL_MAX_SLOTS);
   const clipU = new Float32Array(4 * GL_MAX_SLOTS), gsU = new Float32Array(GL_MAX_SLOTS);
@@ -689,18 +736,28 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
   function draw(dl: DisplayList, frame: GLFrame, W: number, H: number, ord: Uint32Array | null, style: GLStyle | null, styleRev: number): boolean {
     if (lost || g.isContextLost()) return false;
     if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
-    if (geoDl !== dl || geoOrd !== ord || !inst || !mesh) {
+    g.bindVertexArray(null);
+    if (meshDl !== dl || !mesh) {
+      mesh = glMesh(dl);
+      meshDl = dl;
+      upload(g.ARRAY_BUFFER, mV, mesh.v); upload(g.ARRAY_BUFFER, mMeta, mesh.meta);
+      geoDl = null;
+    }
+    if (geoDl !== dl || geoOrd !== ord || !inst) {
       inst = glInstances(dl, ord);
-      const order = ord || (function () { const o = new Uint32Array(dl.n); for (let i = 0; i < dl.n; i++) o[i] = i; return o; })();
-      mesh = glMesh(dl, order);
-      batches = glBatches(dl, ord, mesh);
+      const mo = glMeshOrder(mesh, ord);
+      batches = glBatches(dl, ord, mo.recRange);
       geoDl = dl; geoOrd = ord;
-      g.bindVertexArray(null);
+      const z = zOf(dl, ord);
+      const iz = new Float32Array(inst.n);
+      for (let m = 0; m < inst.n; m++) iz[m] = z[inst.rec[m]];
+      const mz = new Float32Array(mesh.nv);
+      for (let v = 0; v < mesh.nv; v++) mz[v] = z[mesh.rec[v]] + mesh.stroke[v];
       upload(g.ARRAY_BUFFER, ibuf[0], inst.pos); upload(g.ARRAY_BUFFER, ibuf[1], inst.size);
       upload(g.ARRAY_BUFFER, ibuf[2], inst.meta); upload(g.ARRAY_BUFFER, ibuf[3], inst.width);
-      upload(g.ARRAY_BUFFER, mV, mesh.v); upload(g.ARRAY_BUFFER, mMeta, mesh.meta);
+      upload(g.ARRAY_BUFFER, ibuf[6], iz); upload(g.ARRAY_BUFFER, mZ, mz);
       g.bindVertexArray(mvao);
-      upload(g.ELEMENT_ARRAY_BUFFER, mIdx, mesh.idx);
+      upload(g.ELEMENT_ARRAY_BUFFER, mIdx, mo.idx);
       g.bindVertexArray(null);
       colKey = "";
     }
@@ -708,7 +765,7 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
     if (!batches) return false;
     const key = style ? "s" + styleRev : "u";
     if (key !== colKey) {
-      const rc = glColors(dl, inst, style), mc = mesh.nv ? glMeshColors(dl, mesh, style) : new Uint8Array(0);
+      const rc = glColors(dl, inst, style), mc = mesh!.nv ? glMeshColors(dl, mesh!, style) : new Uint8Array(0);
       if (!rc || !mc) return false;
       g.bindVertexArray(null);
       upload(g.ARRAY_BUFFER, ibuf[4], rc.fill); upload(g.ARRAY_BUFFER, ibuf[5], rc.stroke);
@@ -736,14 +793,19 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
       if (u.gs) g.uniform1fv(u.gs, gsU);
       g.uniform1f(u.base, frame.base);
       g.uniform2f(u.vp, W, H);
+      g.uniform1f(u.zn, 2 * dl.n + 2);
     };
     setU(mprog!, uM);
     setU(prog!, uI);
     g.viewport(0, 0, W, H);
     g.clearColor(0, 0, 0, 0);
-    g.clear(g.COLOR_BUFFER_BIT);
+    g.clearDepth(1);
+    g.clear(g.COLOR_BUFFER_BIT | g.DEPTH_BUFFER_BIT);
     g.enable(g.BLEND);
     g.blendFunc(g.ONE, g.ONE_MINUS_SRC_ALPHA);
+    g.enable(g.DEPTH_TEST);
+    g.depthFunc(g.LESS);
+    g.depthMask(true);
     let cur = -1;
     for (const bt of batches) {
       if (bt.mesh) {
@@ -761,10 +823,10 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
 
   function release(): void {
     if (!inst && !mesh) return;
-    inst = null; mesh = null; batches = null; geoDl = null; geoOrd = undefined; colKey = "";
+    inst = null; mesh = null; meshDl = null; batches = null; geoDl = null; geoOrd = undefined; colKey = "";
     if (lost || g.isContextLost()) return;
     g.bindVertexArray(null);
-    for (const b of ibuf.concat([mV, mMeta, mCol])) {
+    for (const b of ibuf.concat([mV, mMeta, mCol, mZ])) {
       g.bindBuffer(g.ARRAY_BUFFER, b);
       g.bufferData(g.ARRAY_BUFFER, 0, g.STATIC_DRAW);
     }
@@ -774,5 +836,13 @@ export function createGLPainter(onLost: () => void): GLPainter | null {
     g.bindVertexArray(null);
   }
 
-  return { canvas: canvas, draw: draw, alive: function () { return !lost && !g.isContextLost(); }, release: release };
+  function dispose(): void {
+    release();
+    disposed = true;
+    const ext = g.getExtension("WEBGL_lose_context");
+    if (ext) ext.loseContext();
+    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+  }
+
+  return { canvas: canvas, draw: draw, alive: function () { return !lost && !g.isContextLost(); }, release: release, msaa: msaa, dispose: dispose };
 }

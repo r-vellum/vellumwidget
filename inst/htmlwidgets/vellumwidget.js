@@ -7665,22 +7665,87 @@
     }
     return inside;
   }
-  function fillTriangles(rs) {
+  var GL_MAX_RINGS = 1e3;
+  function onRing(x, y, r, eps) {
+    for (let a = 0, b = r.length - 2; a < r.length; b = a, a += 2) {
+      const xa = r[a], ya = r[a + 1], dx = r[b] - xa, dy = r[b + 1] - ya;
+      const L = dx * dx + dy * dy;
+      const t = L > 0 ? Math.max(0, Math.min(1, ((x - xa) * dx + (y - ya) * dy) / L)) : 0;
+      const ex = xa + t * dx - x, ey = ya + t * dy - y;
+      if (ex * ex + ey * ey <= eps * eps) return true;
+    }
+    return false;
+  }
+  function signedArea2(r) {
+    let a = 0;
+    for (let k = 0, m = r.length - 2; k < r.length; m = k, k += 2) a += (r[m] - r[k]) * (r[m + 1] + r[k + 1]);
+    return a / 2;
+  }
+  function ringNesting(rs, evenodd) {
+    const n = rs.length;
+    const depth = new Array(n).fill(0), parent = new Array(n).fill(-1);
+    if (n <= 1) return { depth, parent };
+    if (n > GL_MAX_RINGS) return null;
+    const bb = rs.map(function(r) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let k = 0; k < r.length; k += 2) {
+        if (r[k] < x0) x0 = r[k];
+        if (r[k] > x1) x1 = r[k];
+        if (r[k + 1] < y0) y0 = r[k + 1];
+        if (r[k + 1] > y1) y1 = r[k + 1];
+      }
+      return [x0, y0, x1, y1];
+    });
+    const inside = [];
+    for (let a = 0; a < n; a++) {
+      inside.push(new Array(n).fill(false));
+      for (let b = 0; b < n; b++) {
+        if (a === b) continue;
+        const A = bb[a], B = bb[b];
+        if (A[2] < B[0] || A[0] > B[2] || A[3] < B[1] || A[1] > B[3]) continue;
+        let cin = 0, cout = 0;
+        const r = rs[a];
+        for (let k = 0; k < r.length; k += 2) {
+          if (onRing(r[k], r[k + 1], rs[b], 1e-6)) continue;
+          if (inRing(r[k], r[k + 1], rs[b])) cin++;
+          else cout++;
+        }
+        if (cin === 0 && cout === 0) return null;
+        if (cin === 0) continue;
+        if (cout !== 0) return null;
+        inside[a][b] = true;
+      }
+    }
+    for (let a = 0; a < n; a++) {
+      let best = -1;
+      for (let b = 0; b < n; b++) {
+        if (!inside[a][b]) continue;
+        if (inside[b][a]) return null;
+        depth[a]++;
+        if (best < 0 || inside[b][best]) best = b;
+      }
+      parent[a] = best;
+    }
+    if (!evenodd) {
+      for (let a = 0; a < n; a++) {
+        const p = parent[a];
+        if (p >= 0 && Math.sign(signedArea2(rs[a])) === Math.sign(signedArea2(rs[p]))) return null;
+      }
+    }
+    return { depth, parent };
+  }
+  function pathMeshable(dl, i) {
+    const j = dl.row[i], pt = dl.paints[dl.paint[i]];
+    if (dl.closed[j] !== 1 || pt.fill == null) return true;
+    return ringNesting(rings(dl, i), dl.evenodd[j] === 1) !== null;
+  }
+  function fillTriangles(rs, evenodd = true) {
     const xy = [], idx = [];
     const n = rs.length;
     if (!n) return { xy, idx };
-    const depth = new Array(n).fill(0), parent = new Array(n).fill(-1);
-    if (n > 1 && n <= 200) {
-      for (let a = 0; a < n; a++) {
-        let best = -1;
-        for (let b = 0; b < n; b++) {
-          if (a === b || !inRing(rs[a][0], rs[a][1], rs[b])) continue;
-          depth[a]++;
-          if (best < 0 || inRing(rs[b][0], rs[b][1], rs[best])) best = b;
-        }
-        parent[a] = best;
-      }
-    }
+    const nest = ringNesting(rs, evenodd);
+    if (!nest) return { xy, idx };
+    const depth = nest.depth, parent = nest.parent;
     for (let o = 0; o < n; o++) {
       if (depth[o] % 2) continue;
       const data = rs[o].slice(), holes = [];
@@ -7708,7 +7773,7 @@
     const stroke = pt.stroke != null && pt.width > 0 ? 4 * segs : 0;
     return fill + stroke;
   }
-  function glMesh(dl, order) {
+  function glMesh(dl) {
     const V = [], M = [], I = [], R = [], S = [];
     const recRange = /* @__PURE__ */ new Map();
     const np = dl.panels.length;
@@ -7719,8 +7784,7 @@
       S.push(isStroke);
       return R.length - 1;
     };
-    for (let q = 0; q < order.length; q++) {
-      const i = order[q];
+    for (let i = 0; i < dl.n; i++) {
       if (dl.flags[i] || dl.kind[i] !== DL_PATH) continue;
       const j = dl.row[i], pt = dl.paints[dl.paint[i]];
       const panel = dl.panel[i] <= np ? dl.panel[i] : 0, clip = dl.clip[i];
@@ -7728,7 +7792,7 @@
       const first = I.length;
       const closed = dl.closed[j] === 1;
       if (closed && pt.fill != null) {
-        const t = fillTriangles(rs);
+        const t = fillTriangles(rs, dl.evenodd[j] === 1);
         const base = R.length;
         for (let k = 0; k < t.xy.length; k += 2) vert(t.xy[k], t.xy[k + 1], t.xy[k], t.xy[k + 1], t.xy[k], t.xy[k + 1], 0, 0, 0, 0, panel, clip, i, 0);
         for (let k = 0; k < t.idx.length; k++) I.push(base + t.idx[k]);
@@ -7773,6 +7837,20 @@
       stroke: Uint8Array.from(S),
       recRange
     };
+  }
+  function glMeshOrder(mesh, order) {
+    if (!order) return { idx: mesh.idx, recRange: mesh.recRange };
+    const idx = new Uint32Array(mesh.ni);
+    const recRange = /* @__PURE__ */ new Map();
+    let at = 0;
+    for (let q = 0; q < order.length; q++) {
+      const i = order[q], r = mesh.recRange.get(i);
+      if (!r) continue;
+      idx.set(mesh.idx.subarray(r[0], r[1]), at);
+      recRange.set(i, [at, at + r[1] - r[0]]);
+      at += r[1] - r[0];
+    }
+    return { idx, recRange };
   }
 
   // srcts/features/webgl.ts
@@ -7833,7 +7911,7 @@
       if (pt.fill != null && !parseColor(pt.fill)) return "colours";
       if (pt.stroke != null && !parseColor(pt.stroke)) return "colours";
     }
-    let verts = 0;
+    let verts = 0, switches = 0, last = -1;
     for (let i = 0; i < dl.n; i++) {
       if (dl.flags[i]) {
         if (dl.runImgs && dl.run[i] > 0) return "runs";
@@ -7845,12 +7923,19 @@
       if (k === DL_PATH) {
         verts += meshVerts(dl, i);
         if (verts > GL_MAX_MESH_VERTS) return "large paths";
+        if (!pathMeshable(dl, i)) return "complex paths";
       }
+      const m = k === DL_PATH ? 1 : 0;
+      if (m !== last) {
+        switches++;
+        last = m;
+      }
+      if (switches > GL_MAX_BATCHES) return "interleaved";
     }
     return null;
   }
   var GL_MAX_BATCHES = 512;
-  function glBatches(dl, ord, mesh) {
+  function glBatches(dl, ord, recRange) {
     const out = [];
     let k = 0;
     for (let q = 0; q < dl.n; q++) {
@@ -7858,7 +7943,7 @@
       if (dl.flags[i]) continue;
       const last = out.length ? out[out.length - 1] : null;
       if (dl.kind[i] === DL_PATH) {
-        const r = mesh.recRange.get(i);
+        const r = recRange.get(i);
         if (!r || r[1] <= r[0]) continue;
         if (last && last.mesh && last.b === r[0]) last.b = r[1];
         else out.push({ mesh: true, a: r[0], b: r[1] });
@@ -7997,12 +8082,14 @@ layout(location = 3) in uvec4 a_meta;
 layout(location = 4) in float a_width;
 layout(location = 5) in vec4 a_fill;
 layout(location = 6) in vec4 a_stroke;
+layout(location = 7) in float a_z;
 uniform vec4 u_aff[${GL_MAX_SLOTS}];
 uniform vec4 u_pclip[${GL_MAX_SLOTS}];
 uniform vec4 u_clip[${GL_MAX_SLOTS}];
 uniform float u_gs[${GL_MAX_SLOTS}];
 uniform float u_base;
 uniform vec2 u_vp;
+uniform float u_zn;
 out vec2 v_p;
 flat out vec2 v_half;
 flat out uint v_kind;
@@ -8031,7 +8118,8 @@ void main() {
   vec2 ext = hext + vec2(hw + 1.0);
   v_p = a_corner * ext;
   vec2 q = c + v_p;
-  gl_Position = vec4(q.x / u_vp.x * 2.0 - 1.0, 1.0 - q.y / u_vp.y * 2.0, 0.0, 1.0);
+  // depth by paint order (see zOf): later records nearer
+  gl_Position = vec4(q.x / u_vp.x * 2.0 - 1.0, 1.0 - q.y / u_vp.y * 2.0, 1.0 - 2.0 * (a_z + 1.0) / u_zn, 1.0);
   v_half = hext;
   v_kind = kind;
   v_cap = a_meta.x >> 4u;
@@ -8153,11 +8241,13 @@ layout(location = 2) in vec2 a_n;
 layout(location = 3) in vec2 a_sw;
 layout(location = 4) in uvec4 a_meta;
 layout(location = 5) in vec4 a_col;
+layout(location = 6) in float a_z;
 uniform vec4 u_aff[${GL_MAX_SLOTS}];
 uniform vec4 u_pclip[${GL_MAX_SLOTS}];
 uniform vec4 u_clip[${GL_MAX_SLOTS}];
 uniform float u_base;
 uniform vec2 u_vp;
+uniform float u_zn;
 flat out vec4 v_col;
 flat out uint v_mode;
 flat out uint v_flags;
@@ -8205,7 +8295,7 @@ void main() {
     vec2 S = atEnd ? Q : P, E = atEnd ? P : Q;
     v_cap = vec3(dot(pos - S, -t), dot(pos - E, t), dot(pos - P, nrm));
   }
-  gl_Position = vec4(pos.x / u_vp.x * 2.0 - 1.0, 1.0 - pos.y / u_vp.y * 2.0, 0.0, 1.0);
+  gl_Position = vec4(pos.x / u_vp.x * 2.0 - 1.0, 1.0 - pos.y / u_vp.y * 2.0, 1.0 - 2.0 * (a_z + 1.0) / u_zn, 1.0);
   v_col = a_col;
   v_mode = mode;
   v_flags = flags;
@@ -8236,21 +8326,33 @@ void main() {
   vec2 fc = vec2(gl_FragCoord.x, u_vp.y - gl_FragCoord.y);
   if (fc.x < v_pc.x || fc.x > v_pc.z || fc.y < v_pc.y || fc.y > v_pc.w) discard;
   if (fc.x < v_rc.x || fc.x > v_rc.z || fc.y < v_rc.y || fc.y > v_rc.w) discard;
+  float cov = 1.0;
   if (v_mode == 1u) {
-    // round caps: cut the square past each capped end to a circle
-    if ((v_flags & 1u) != 0u && v_cap.x > 0.0 && length(v_cap.xz) > v_hw) discard;
-    if ((v_flags & 2u) != 0u && v_cap.y > 0.0 && length(v_cap.yz) > v_hw) discard;
+    // round caps: the square past each capped end cut to a circle (smoothed)
+    if ((v_flags & 1u) != 0u && v_cap.x > 0.0) cov = min(cov, clamp(v_hw + 0.5 - length(v_cap.xz), 0.0, 1.0));
+    if ((v_flags & 2u) != 0u && v_cap.y > 0.0) cov = min(cov, clamp(v_hw + 0.5 - length(v_cap.yz), 0.0, 1.0));
+    if (cov <= 0.0) discard;
   }
-  o = vec4(v_col.rgb * v_col.a, v_col.a);
+  float a = v_col.a * cov;
+  o = vec4(v_col.rgb * a, a);
 }`;
-  function createGLPainter(onLost) {
+  function zOf(dl, ord) {
+    const z = new Float32Array(dl.n);
+    for (let q = 0; q < dl.n; q++) z[ord ? ord[q] : q] = 2 * q;
+    return z;
+  }
+  function glHasPaths(dl) {
+    for (let i = 0; i < dl.n; i++) if (!dl.flags[i] && dl.kind[i] === DL_PATH) return true;
+    return false;
+  }
+  function createGLPainter(onLost, msaa = true) {
     glLastError = "";
     const canvas = document.createElement("canvas");
     canvas.className = "vellumwidget-gl";
     canvas.setAttribute("aria-hidden", "true");
     let gl = null;
     try {
-      gl = typeof canvas.getContext === "function" ? canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: true, alpha: true, preserveDrawingBuffer: false }) : null;
+      gl = typeof canvas.getContext === "function" ? canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: msaa, alpha: true, depth: true, preserveDrawingBuffer: false }) : null;
     } catch (e) {
       gl = null;
     }
@@ -8258,11 +8360,11 @@ void main() {
       glLastError = "no webgl2";
       return null;
     }
-    let lost = false;
+    let lost = false, disposed = false;
     canvas.addEventListener("webglcontextlost", function(e) {
       e.preventDefault();
       lost = true;
-      onLost();
+      if (!disposed) onLost();
     });
     const g = gl;
     const compile = function(type, src) {
@@ -8292,7 +8394,7 @@ void main() {
     if (!prog || !mprog) return null;
     const uniforms = function(pr) {
       const U = (nm) => g.getUniformLocation(pr, nm);
-      return { aff: U("u_aff"), pclip: U("u_pclip"), clip: U("u_clip"), gs: U("u_gs"), base: U("u_base"), vp: U("u_vp") };
+      return { aff: U("u_aff"), pclip: U("u_pclip"), clip: U("u_clip"), gs: U("u_gs"), base: U("u_base"), vp: U("u_vp"), zn: U("u_zn") };
     };
     const uI = uniforms(prog), uM = uniforms(mprog);
     const vao = g.createVertexArray();
@@ -8308,7 +8410,8 @@ void main() {
       [3, 4, g.UNSIGNED_BYTE, false, true, 4],
       [4, 1, g.FLOAT, false, false, 4],
       [5, 4, g.UNSIGNED_BYTE, true, false, 4],
-      [6, 4, g.UNSIGNED_BYTE, true, false, 4]
+      [6, 4, g.UNSIGNED_BYTE, true, false, 4],
+      [7, 1, g.FLOAT, false, false, 4]
     ];
     const ibuf = IATTR.map(function() {
       return g.createBuffer();
@@ -8327,7 +8430,7 @@ void main() {
     g.bindVertexArray(null);
     const mvao = g.createVertexArray();
     g.bindVertexArray(mvao);
-    const mV = g.createBuffer(), mMeta = g.createBuffer(), mCol = g.createBuffer(), mIdx = g.createBuffer();
+    const mV = g.createBuffer(), mMeta = g.createBuffer(), mCol = g.createBuffer(), mZ = g.createBuffer(), mIdx = g.createBuffer();
     g.bindBuffer(g.ARRAY_BUFFER, mV);
     for (let k = 0; k < 4; k++) {
       g.enableVertexAttribArray(k);
@@ -8339,10 +8442,14 @@ void main() {
     g.bindBuffer(g.ARRAY_BUFFER, mCol);
     g.enableVertexAttribArray(5);
     g.vertexAttribPointer(5, 4, g.UNSIGNED_BYTE, true, 0, 0);
+    g.bindBuffer(g.ARRAY_BUFFER, mZ);
+    g.enableVertexAttribArray(6);
+    g.vertexAttribPointer(6, 1, g.FLOAT, false, 0, 0);
     g.bindBuffer(g.ELEMENT_ARRAY_BUFFER, mIdx);
     g.bindVertexArray(null);
+    let meshDl = null, mesh = null;
     let geoDl = null, geoOrd;
-    let inst = null, mesh = null, batches = null;
+    let inst = null, batches = null;
     let colKey = "";
     const affU = new Float32Array(4 * GL_MAX_SLOTS), pclipU = new Float32Array(4 * GL_MAX_SLOTS);
     const clipU = new Float32Array(4 * GL_MAX_SLOTS), gsU = new Float32Array(GL_MAX_SLOTS);
@@ -8356,26 +8463,33 @@ void main() {
         canvas.width = W;
         canvas.height = H;
       }
-      if (geoDl !== dl || geoOrd !== ord || !inst || !mesh) {
+      g.bindVertexArray(null);
+      if (meshDl !== dl || !mesh) {
+        mesh = glMesh(dl);
+        meshDl = dl;
+        upload(g.ARRAY_BUFFER, mV, mesh.v);
+        upload(g.ARRAY_BUFFER, mMeta, mesh.meta);
+        geoDl = null;
+      }
+      if (geoDl !== dl || geoOrd !== ord || !inst) {
         inst = glInstances(dl, ord);
-        const order = ord || function() {
-          const o = new Uint32Array(dl.n);
-          for (let i = 0; i < dl.n; i++) o[i] = i;
-          return o;
-        }();
-        mesh = glMesh(dl, order);
-        batches = glBatches(dl, ord, mesh);
+        const mo = glMeshOrder(mesh, ord);
+        batches = glBatches(dl, ord, mo.recRange);
         geoDl = dl;
         geoOrd = ord;
-        g.bindVertexArray(null);
+        const z = zOf(dl, ord);
+        const iz = new Float32Array(inst.n);
+        for (let m = 0; m < inst.n; m++) iz[m] = z[inst.rec[m]];
+        const mz = new Float32Array(mesh.nv);
+        for (let v = 0; v < mesh.nv; v++) mz[v] = z[mesh.rec[v]] + mesh.stroke[v];
         upload(g.ARRAY_BUFFER, ibuf[0], inst.pos);
         upload(g.ARRAY_BUFFER, ibuf[1], inst.size);
         upload(g.ARRAY_BUFFER, ibuf[2], inst.meta);
         upload(g.ARRAY_BUFFER, ibuf[3], inst.width);
-        upload(g.ARRAY_BUFFER, mV, mesh.v);
-        upload(g.ARRAY_BUFFER, mMeta, mesh.meta);
+        upload(g.ARRAY_BUFFER, ibuf[6], iz);
+        upload(g.ARRAY_BUFFER, mZ, mz);
         g.bindVertexArray(mvao);
-        upload(g.ELEMENT_ARRAY_BUFFER, mIdx, mesh.idx);
+        upload(g.ELEMENT_ARRAY_BUFFER, mIdx, mo.idx);
         g.bindVertexArray(null);
         colKey = "";
       }
@@ -8426,14 +8540,19 @@ void main() {
         if (u.gs) g.uniform1fv(u.gs, gsU);
         g.uniform1f(u.base, frame.base);
         g.uniform2f(u.vp, W, H);
+        g.uniform1f(u.zn, 2 * dl.n + 2);
       };
       setU(mprog, uM);
       setU(prog, uI);
       g.viewport(0, 0, W, H);
       g.clearColor(0, 0, 0, 0);
-      g.clear(g.COLOR_BUFFER_BIT);
+      g.clearDepth(1);
+      g.clear(g.COLOR_BUFFER_BIT | g.DEPTH_BUFFER_BIT);
       g.enable(g.BLEND);
       g.blendFunc(g.ONE, g.ONE_MINUS_SRC_ALPHA);
+      g.enable(g.DEPTH_TEST);
+      g.depthFunc(g.LESS);
+      g.depthMask(true);
       let cur = -1;
       for (const bt of batches) {
         if (bt.mesh) {
@@ -8460,13 +8579,14 @@ void main() {
       if (!inst && !mesh) return;
       inst = null;
       mesh = null;
+      meshDl = null;
       batches = null;
       geoDl = null;
       geoOrd = void 0;
       colKey = "";
       if (lost || g.isContextLost()) return;
       g.bindVertexArray(null);
-      for (const b of ibuf.concat([mV, mMeta, mCol])) {
+      for (const b of ibuf.concat([mV, mMeta, mCol, mZ])) {
         g.bindBuffer(g.ARRAY_BUFFER, b);
         g.bufferData(g.ARRAY_BUFFER, 0, g.STATIC_DRAW);
       }
@@ -8475,9 +8595,16 @@ void main() {
       g.bufferData(g.ELEMENT_ARRAY_BUFFER, 0, g.STATIC_DRAW);
       g.bindVertexArray(null);
     }
+    function dispose() {
+      release();
+      disposed = true;
+      const ext = g.getExtension("WEBGL_lose_context");
+      if (ext) ext.loseContext();
+      if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    }
     return { canvas, draw, alive: function() {
       return !lost && !g.isContextLost();
-    }, release };
+    }, release, msaa, dispose };
   }
 
   // srcts/features/raster.ts
@@ -8707,6 +8834,7 @@ void main() {
     }
     let glp = null, glOff = false;
     let glForDl = null, glForRuns = null, glWhy = null;
+    let glPaths = false;
     let glLast = "not drawn yet";
     function glReason(dl) {
       const mode = ws.opts.webgl || "auto";
@@ -8717,6 +8845,7 @@ void main() {
         glForDl = dl;
         glForRuns = dl.runImgs;
         glWhy = glUnsupported(dl);
+        glPaths = !glWhy && glHasPaths(dl);
       }
       if (glWhy) return glWhy;
       if (ws.msActive && ws.msColor) {
@@ -8729,12 +8858,18 @@ void main() {
       return null;
     }
     let glStyleRev = -1, glStyleOk = true;
+    let glFail = null;
     function glUsable(dl) {
-      const why = glReason(dl);
+      let why = glReason(dl);
+      if (!why && glFail && glFail.dl === dl && glFail.ord === ws.fx.raiseOrder(dl) && glFail.rev === ws.msRev) why = "draw failed";
       if (why) {
         if (glp) glp.release();
         glLast = why;
         return false;
+      }
+      if (glp && glp.msaa !== glPaths) {
+        glp.dispose();
+        glp = null;
       }
       if (!glp) {
         const base = ws.canvasEl;
@@ -8742,7 +8877,7 @@ void main() {
           glOff = true;
           if (glp) glp.canvas.style.display = "none";
           drawPoints();
-        }) : null;
+        }, glPaths) : null;
         if (!glp) {
           glOff = true;
           glLast = glReason(dl) || "unavailable";
@@ -8821,7 +8956,8 @@ void main() {
           alpha: ws.msAlpha,
           alphaPal: ws.msAlphaPal
         } : null;
-        if (glp.draw(dl, L, W, H, ws.fx.raiseOrder(dl), st, ws.msRev)) {
+        const ord = ws.fx.raiseOrder(dl);
+        if (glp.draw(dl, L, W, H, ord, st, ws.msRev)) {
           glLast = null;
           const c = glp.canvas;
           c.style.width = ws.canvasEl.style.width;
@@ -8833,7 +8969,11 @@ void main() {
         }
       }
       if (glp) glp.canvas.style.display = "none";
-      if (useGL) glLast = "draw failed";
+      if (useGL) {
+        glFail = { dl, ord: ws.fx.raiseOrder(dl), rev: ws.msRev };
+        drawList(dl, settled, stateOnly);
+        return;
+      }
       let used = 0;
       const sink = blending ? {
         next: function(mode) {
@@ -10827,6 +10967,10 @@ void main() {
           glMeshColors,
           glBatches,
           fillTriangles,
+          glMeshOrder,
+          meshVerts,
+          ringNesting,
+          zOf,
           listExact: function() {
             return ws.dl ? ws.dl.exact : null;
           },

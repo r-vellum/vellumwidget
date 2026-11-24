@@ -68,25 +68,108 @@ function inRing(x: number, y: number, r: number[]): boolean {
   return inside;
 }
 
+// Rings a fill can nest at most (above, the record is too complex here).
+export const GL_MAX_RINGS = 1000;
+
+// Is (x, y) on ring r's boundary (within eps scene px)?
+function onRing(x: number, y: number, r: number[], eps: number): boolean {
+  for (let a = 0, b = r.length - 2; a < r.length; b = a, a += 2) {
+    const xa = r[a], ya = r[a + 1], dx = r[b] - xa, dy = r[b + 1] - ya;
+    const L = dx * dx + dy * dy;
+    const t = L > 0 ? Math.max(0, Math.min(1, ((x - xa) * dx + (y - ya) * dy) / L)) : 0;
+    const ex = xa + t * dx - x, ey = ya + t * dy - y;
+    if (ex * ex + ey * ey <= eps * eps) return true;
+  }
+  return false;
+}
+
+function signedArea(r: number[]): number {
+  let a = 0;
+  for (let k = 0, m = r.length - 2; k < r.length; m = k, k += 2) a += (r[m] - r[k]) * (r[m + 1] + r[k + 1]);
+  return a / 2;
+}
+
+// Each ring's nesting depth and the ring directly around it (-1: none), or
+// null when the rings don't nest cleanly, so earcut's outer-ring-plus-holes
+// model can't stand for the canvas's fill rule: two rings that cross (some
+// of a ring's vertices inside the other, some not), contain each other, more
+// than GL_MAX_RINGS rings, or (non-zero rule) a ring inside another wound the
+// same way, which the canvas fills rather than cuts out.
+export function ringNesting(rs: number[][], evenodd: boolean): { depth: number[]; parent: number[] } | null {
+  const n = rs.length;
+  const depth = new Array(n).fill(0), parent = new Array(n).fill(-1);
+  if (n <= 1) return { depth: depth, parent: parent };
+  if (n > GL_MAX_RINGS) return null;
+  const bb = rs.map(function (r) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let k = 0; k < r.length; k += 2) {
+      if (r[k] < x0) x0 = r[k];
+      if (r[k] > x1) x1 = r[k];
+      if (r[k + 1] < y0) y0 = r[k + 1];
+      if (r[k + 1] > y1) y1 = r[k + 1];
+    }
+    return [x0, y0, x1, y1];
+  });
+  const inside: boolean[][] = [];
+  for (let a = 0; a < n; a++) {
+    inside.push(new Array(n).fill(false));
+    for (let b = 0; b < n; b++) {
+      if (a === b) continue;
+      const A = bb[a], B = bb[b];
+      if (A[2] < B[0] || A[0] > B[2] || A[3] < B[1] || A[1] > B[3]) continue; // apart
+      // a's vertices strictly inside / outside b (those on b's boundary --
+      // rings that touch, as neighbouring parts of a multipolygon do -- don't
+      // decide)
+      let cin = 0, cout = 0;
+      const r = rs[a];
+      for (let k = 0; k < r.length; k += 2) {
+        if (onRing(r[k], r[k + 1], rs[b], 1e-6)) continue;
+        if (inRing(r[k], r[k + 1], rs[b])) cin++; else cout++;
+      }
+      if (cin === 0 && cout === 0) return null; // the same ring twice (even-odd cancels it)
+      if (cin === 0) continue;
+      if (cout !== 0) return null; // crossing rings
+      inside[a][b] = true;
+    }
+  }
+  for (let a = 0; a < n; a++) {
+    let best = -1;
+    for (let b = 0; b < n; b++) {
+      if (!inside[a][b]) continue;
+      if (inside[b][a]) return null; // each inside the other
+      depth[a]++;
+      if (best < 0 || inside[b][best]) best = b;
+    }
+    parent[a] = best;
+  }
+  if (!evenodd) {
+    for (let a = 0; a < n; a++) {
+      const p = parent[a];
+      if (p >= 0 && Math.sign(signedArea(rs[a])) === Math.sign(signedArea(rs[p]))) return null;
+    }
+  }
+  return { depth: depth, parent: parent };
+}
+
+// Can path record i be meshed as the canvas paints it? (Only a fill's rings
+// matter: strokes have no rule.)
+export function pathMeshable(dl: DisplayList, i: number): boolean {
+  const j = dl.row[i], pt = dl.paints[dl.paint[i]];
+  if (dl.closed[j] !== 1 || pt.fill == null) return true;
+  return ringNesting(rings(dl, i), dl.evenodd[j] === 1) !== null;
+}
+
 // Triangles (flat xy, and indices into it) filling the rings: each ring at
 // an even nesting depth is an outer ring, with the rings directly inside it
-// as its holes.
-export function fillTriangles(rs: number[][]): { xy: number[]; idx: number[] } {
+// as its holes. Rings that don't nest cleanly (ringNesting null) give none;
+// eligibility keeps such lists on the canvas.
+export function fillTriangles(rs: number[][], evenodd = true): { xy: number[]; idx: number[] } {
   const xy: number[] = [], idx: number[] = [];
   const n = rs.length;
   if (!n) return { xy: xy, idx: idx };
-  const depth = new Array(n).fill(0), parent = new Array(n).fill(-1);
-  if (n > 1 && n <= 200) {
-    for (let a = 0; a < n; a++) {
-      let best = -1;
-      for (let b = 0; b < n; b++) {
-        if (a === b || !inRing(rs[a][0], rs[a][1], rs[b])) continue;
-        depth[a]++;
-        if (best < 0 || inRing(rs[b][0], rs[b][1], rs[best])) best = b;
-      }
-      parent[a] = best;
-    }
-  }
+  const nest = ringNesting(rs, evenodd);
+  if (!nest) return { xy: xy, idx: idx };
+  const depth = nest.depth, parent = nest.parent;
   for (let o = 0; o < n; o++) {
     if (depth[o] % 2) continue;
     const data = rs[o].slice(), holes: number[] = [];
@@ -117,9 +200,10 @@ export function meshVerts(dl: DisplayList, i: number): number {
   return fill + stroke;
 }
 
-// The mesh of the path records among `order` (record indices in draw order),
-// skipping flagged records.
-export function glMesh(dl: DisplayList, order: ArrayLike<number>): GLMesh {
+// The mesh of the list's path records, in record order (flagged records
+// skipped). Built once per list: a draw order (the raise order) only reorders
+// the records' index ranges (glMeshOrder).
+export function glMesh(dl: DisplayList): GLMesh {
   const V: number[] = [], M: number[] = [], I: number[] = [], R: number[] = [], S: number[] = [];
   const recRange = new Map<number, [number, number]>();
   const np = dl.panels.length;
@@ -130,8 +214,7 @@ export function glMesh(dl: DisplayList, order: ArrayLike<number>): GLMesh {
     R.push(rec); S.push(isStroke);
     return R.length - 1;
   };
-  for (let q = 0; q < order.length; q++) {
-    const i = order[q];
+  for (let i = 0; i < dl.n; i++) {
     if (dl.flags[i] || dl.kind[i] !== DL_PATH) continue;
     const j = dl.row[i], pt = dl.paints[dl.paint[i]];
     const panel = dl.panel[i] <= np ? dl.panel[i] : 0, clip = dl.clip[i];
@@ -139,7 +222,7 @@ export function glMesh(dl: DisplayList, order: ArrayLike<number>): GLMesh {
     const first = I.length;
     const closed = dl.closed[j] === 1;
     if (closed && pt.fill != null) {
-      const t = fillTriangles(rs);
+      const t = fillTriangles(rs, dl.evenodd[j] === 1);
       const base = R.length;
       for (let k = 0; k < t.xy.length; k += 2) vert(t.xy[k], t.xy[k + 1], t.xy[k], t.xy[k + 1], t.xy[k], t.xy[k + 1], 0, 0, 0, 0, panel, clip, i, 0);
       for (let k = 0; k < t.idx.length; k++) I.push(base + t.idx[k]);
@@ -179,4 +262,21 @@ export function glMesh(dl: DisplayList, order: ArrayLike<number>): GLMesh {
     v: Float32Array.from(V), meta: Uint8Array.from(M), idx: Uint32Array.from(I),
     rec: Uint32Array.from(R), stroke: Uint8Array.from(S), recRange: recRange
   };
+}
+
+// The mesh's indices with its records' ranges in draw order `order`, and
+// each record's range in that index buffer. Record order needs no copy.
+export function glMeshOrder(mesh: GLMesh, order: ArrayLike<number> | null): { idx: Uint32Array; recRange: Map<number, [number, number]> } {
+  if (!order) return { idx: mesh.idx, recRange: mesh.recRange };
+  const idx = new Uint32Array(mesh.ni);
+  const recRange = new Map<number, [number, number]>();
+  let at = 0;
+  for (let q = 0; q < order.length; q++) {
+    const i = order[q], r = mesh.recRange.get(i);
+    if (!r) continue;
+    idx.set(mesh.idx.subarray(r[0], r[1]), at);
+    recRange.set(i, [at, at + r[1] - r[0]]);
+    at += r[1] - r[0];
+  }
+  return { idx: idx, recRange: recRange };
 }
