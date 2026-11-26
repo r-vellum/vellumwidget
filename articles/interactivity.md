@@ -23,8 +23,12 @@ rectangle, zooming to a region, stepping between marks with the arrow
 keys — are table lookups rather than new drawing code.
 
 Everything here scales to a few thousand marks on the per-element SVG
-path. Past that, the widget switches to a raster strategy so a
-100k-point scatter stays navigable; see [Very large
+path. Past that, the widget switches to raster mode so a 100k-point
+scatter stays navigable. Hover, selection, brushing, zoom, legends and
+the declarative interactions below keep working there. Accessibility is
+reduced: marks are focusable from the keyboard only once you zoom in far
+enough for them to become SVG nodes, and there is no hidden data table.
+See [Very large
 scenes](https://r-vellum.github.io/vellumwidget/articles/big-data.md).
 
 ``` r
@@ -118,6 +122,12 @@ cycles brush → lasso → pan) and drag a loop; every mark whose centre
 falls inside is selected. Hover, click-select, brush, and lasso are all
 on by default.
 
+While a selection is active, its marks are drawn above the unselected
+marks of their own layer, so a later neighbour can’t cover part of a
+selected point. They never rise above another layer (a line or text
+drawn after the points), and clearing the selection puts the original
+order back.
+
 ``` r
 
 vplot(df) |>
@@ -151,10 +161,11 @@ A discrete `color` or `shape` scale draws an interactive legend
 automatically: hover a swatch to highlight its series, click to select
 it. Set `legend_click = "hide"` to make the legend a **visibility
 toggle** instead — a single click hides or shows a series, and a
-double-click **isolates** it (hides every other series; double-click
-again to bring them all back). This is the reflexive legend interaction
-from plotly and friends. `"mute"` dims the series rather than removing
-it, keeping the layout steady.
+double-click **isolates** it (hides every other series). Double-click
+the isolated series’ swatch again to bring every series back. This is
+the reflexive legend interaction from plotly and friends. `"mute"` dims
+the series rather than removing it, keeping the layout steady;
+double-click isolates and restores in the same way.
 
 ``` r
 
@@ -192,6 +203,23 @@ pinch zooms; with the widget focused, the arrow keys pan, `+`/`-` zoom,
 and `0` resets. The on-hover toolbar adds zoom-to-selection, reset,
 SVG/PNG download, copy-to-clipboard (where supported), and fullscreen.
 
+Zoom stops at `render_options(max_zoom =)` times the full view, per axis
+(default `100`). Every way of zooming respects it: the wheel, pinch,
+keys, box zoom, zoom-to-selection,
+[`vw_zoom()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md),
+linked views and
+[`bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html).
+Past about 100x the marks would start to drift off their gridlines,
+because vellum writes SVG coordinates on a 0.01 px grid. Lower it to
+keep readers near the data’s scale:
+
+``` r
+
+vplot(df) |>
+  mark_point(x = wt, y = mpg, tooltip = model) |>
+  as_widget(render = render_options(max_zoom = 4))
+```
+
 ### Axis-aware zoom
 
 Zoom scales only the plot’s data region and **re-ticks the axes** for
@@ -224,10 +252,14 @@ Each axis type re-ticks in its own way:
 
 Faceted plots zoom every panel together: a zoom in one panel zooms the
 others about the matching point, and each panel re-ticks its own axes
-(with free scales, each for its own range). Raster mode, and a scene
-with a panel the widget can’t re-tick (a polar panel in a composition,
-an axis with a custom transform and no breaks), silently fall back to
-the whole-scene zoom, so it is always safe.
+(with free scales, each for its own range). Raster mode zooms by axis in
+the same way: its axes are real SVG, and the marks are redrawn for the
+zoomed view (see [Very large
+scenes](https://r-vellum.github.io/vellumwidget/articles/big-data.md)).
+A scene with a panel the widget can’t re-tick (a polar panel in a
+composition, a void panel such as a graph, an axis with a custom
+transform and no breaks) silently falls back to the whole-scene zoom, so
+it is always safe.
 
 Glyph marks (points, circles, hexagons) keep a **constant pixel size**
 as you zoom — only their positions re-map, so points stay round and
@@ -281,6 +313,11 @@ and **Escape** to leave traversal mode. A visually-hidden data table
 lists every mark for screen-reader users. The chart’s accessible name
 and description come from the plot’s title and alt text (which
 `vellumplot` sets automatically) or an explicit `as_widget(alt =)`.
+
+Selecting a mark with Enter keeps keyboard focus on it, even though the
+selected mark is moved above its layer: the focus ring stays, the arrow
+keys carry on from that mark, and the live region announces it as
+selected.
 
 See the [vellumplot *Accessibility*
 article](https://r-vellum.github.io/vellumplot/articles/accessibility.html)
@@ -374,6 +411,51 @@ hconcat(
   as_widget()
 ```
 
+### Overview + detail
+
+[`bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html)
+ties a view’s scale to an interval selection made in another view. Brush
+the small overview below and the detail above zooms to the brushed
+x-range, re-ticking its axes; clear the brush (click empty space or
+press `Escape`) and it zooms back out. The view the brush is drawn in
+never zooms itself.
+
+``` r
+
+series <- data.frame(t = 1:300, y = cumsum(rnorm(300)))
+brush <- select_interval("brush", encodings = "x")
+detail <- vplot(series) |>
+  mark_line(x = t, y = y) |>
+  bind_scale(brush, aes = "x")
+overview <- vplot(series) |>
+  mark_area(x = t, y = y, alpha = 0.5) |>
+  add_selection(brush) |>
+  labs(x = NULL, y = NULL)
+concat(detail, overview, ncol = 1, heights = c(3, 1)) |>
+  as_widget()
+```
+
+`select_interval(bind = "scales")` is the other half: no brush is drawn,
+and the selection is the view’s own pan/zoom range. Zoom or pan the left
+view and the right one follows, through its
+[`bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html).
+In such a view the default drag pans instead of brushing, and resetting
+the zoom empties the selection.
+
+``` r
+
+zoom <- select_interval("zoom", encodings = "x", bind = "scales")
+series$z <- cumsum(rnorm(300))
+hconcat(
+  vplot(series) |> mark_line(x = t, y = y) |> add_selection(zoom),
+  vplot(series) |> mark_line(x = t, y = z) |> bind_scale(zoom)
+) |>
+  as_widget()
+```
+
+Both work in SVG and raster mode, and Shiny receives the bound range in
+`input$<id>_zoom$panels`.
+
 This is the intended long-term home for interaction: it is declared
 once, in the plot, and any capable host enacts it. See the `vellumplot`
 reference for
@@ -383,7 +465,42 @@ reference for
 /
 [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html)
 /
-[`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html).
+[`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)
+/
+[`bind_scale()`](https://r-vellum.github.io/vellumplot/reference/bind_scale.html).
+
+## Animated widgets
+
+[`as_widget()`](https://r-vellum.github.io/vellumwidget/reference/as_widget.md)
+also takes a `vellumplot` animation (from
+[`animate()`](https://r-vellum.github.io/vellumplot/reference/animate.html))
+and embeds it as a self-contained animated SVG. The widget adds playback
+controls in a row of their own below the plot, so they never cover it: a
+play/pause button and a frame scrubber. Dragging the scrubber pauses on
+that frame, and play resumes from it. Both are real form controls,
+reachable with Tab and labelled for screen readers. An animation has no
+hover or selection: its marks move every frame.
+
+``` r
+
+frames <- data.frame(
+  x = rep(1:5, 3),
+  y = c(1, 3, 2, 5, 4, 2, 2, 4, 3, 5, 5, 1, 3, 2, 4),
+  step = rep(c("a", "b", "c"), each = 5)
+)
+vplot(frames) |>
+  mark_point(x = x, y = y, size = 4) |>
+  transition_states(step) |>
+  animate(nframes = 30, fps = 10) |>
+  as_widget(render = render_options(autoplay = FALSE))
+```
+
+By default it starts playing as soon as it is shown and loops.
+`render_options(autoplay = FALSE)`, as above, starts it paused on the
+first frame for the reader to press play, and `loop = FALSE` plays it
+once and stops on the last frame (pressing play there starts it over). A
+reader whose system asks for reduced motion always gets it paused. The
+animated SVG on its own, without JavaScript, always plays and loops.
 
 ## Styling
 

@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">vellumwidget</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.20.1</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.20.1.9000</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -85,7 +85,7 @@
       <img src="../logo.png" class="logo" alt=""><h1>Linking views with crosstalk</h1>
             
       
-      <small class="dont-index">Source: <a href="https://github.com/r-vellum/vellumwidget/blob/v0.20.1/vignettes/articles/crosstalk.Rmd" class="external-link"><code>vignettes/articles/crosstalk.Rmd</code></a></small>
+      <small class="dont-index">Source: <a href="https://github.com/r-vellum/vellumwidget/blob/main/vignettes/articles/crosstalk.Rmd" class="external-link"><code>vignettes/articles/crosstalk.Rmd</code></a></small>
       <div class="d-none name"><code>crosstalk.Rmd</code></div>
     </div>
 
@@ -223,10 +223,13 @@ actually pass a <code>SharedData</code> (or a group name) to
 <code>crosstalk =</code>; a plain widget carries no crosstalk code. A
 <code>group</code>-linked widget and a crosstalk-linked widget can
 coexist in the same document — they use separate buses.</p>
-<p>One caveat for raster-mode widgets (see <a href="big-data.html">Very
-large scenes</a>): crosstalk selection still round-trips by key, but the
-display-tier <em>filter</em> has no per-element nodes to hide, so
-<code>filter_*</code> inputs do not cull a raster plot.</p>
+<p>Raster-mode widgets (see <a href="big-data.html">Very large
+scenes</a>) link the same way: selection round-trips by key, and a
+<code>filter_*</code> input leaves filtered-out marks undrawn at every
+zoom. The one exception is a plot with more marks than
+<code>render_options(max_marks =)</code> (2 million by default), which
+ships no display list: there the filtered-out marks stay visible in the
+image, although they no longer respond to hover, click or brush.</p>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside>
