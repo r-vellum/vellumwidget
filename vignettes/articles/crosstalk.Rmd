@@ -156,7 +156,9 @@ pass a `SharedData` (or a group name) to `crosstalk =`; a plain widget carries n
 crosstalk code. A `group`-linked widget and a crosstalk-linked widget can coexist
 in the same document — they use separate buses.
 
-One caveat for raster-mode widgets (see [Very large
-scenes](big-data.html)): crosstalk selection still round-trips by key, but the
-display-tier *filter* has no per-element nodes to hide, so `filter_*` inputs do
-not cull a raster plot.
+Raster-mode widgets (see [Very large scenes](big-data.html)) link the same
+way: selection round-trips by key, and a `filter_*` input leaves filtered-out
+marks undrawn at every zoom. The one exception is a plot with more marks than
+`render_options(max_marks =)` (2 million by default), which ships no display
+list: there the filtered-out marks stay visible in the image, although they no
+longer respond to hover, click or brush.
