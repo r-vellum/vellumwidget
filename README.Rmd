@@ -54,6 +54,10 @@ filter (drag a value range to fade out-of-range marks) · linked views across a
 `group` (selection, hover, and pan/zoom) · a toolbar (drag mode,
 zoom-to-selection, reset, save or copy SVG/PNG, fullscreen).
 
+The toolbar saves what is on screen as SVG or PNG. For a static file, render
+the plot itself: `vellumplot::render_plot(p, "plot.pptx")` writes PNG, SVG, PDF
+or an editable PowerPoint slide (`.pptx`), chosen by the file extension.
+
 The `as_widget()` arguments that remain are appearance and mode, not on/off
 switches: `hover_mode = "x"`/`"y"` for a unified tooltip listing every series at
 the hovered position, `crosshair`, `legend_click = "hide"` to toggle series
@@ -150,11 +154,17 @@ declarations above are the supported API.
 ## Large scenes
 
 Above `raster_threshold` keyed elements (20,000 by default), the default
-`render = render_options(mode = "auto")` stops shipping one DOM node per mark
-and draws the scene once as a single embedded image, at 2× for HiDPI screens. Interaction is unaffected — it runs off
-the element index rather than the DOM — so hover, click, brush and pan/zoom keep
-working on a scatter well past 100,000 points. At 30,000 keyed points the base
-image is a few hundred KB where the per-element SVG would have been ~15 MB.
+`render = render_options(mode = "auto")` stops shipping one DOM node per mark.
+The axes, gridlines, legend and text stay SVG, and only the keyed marks are an
+image (at 2× for HiDPI screens), so axis-aware zoom, the navigator and linked
+views work as before. Zoomed in, the marks are redrawn exactly from vellum's
+display list (with WebGL2 for 50,000 marks or more), and on deep zoom the marks
+in view become real SVG nodes again. Hover, click, brush, `condition()`,
+`filter_by()` and legend hide/mute work at every zoom, up to `max_marks`
+(2 million marks by default). `render_options(max_marks =, detail_marks =, webgl =,
+max_zoom =)` tune the tiers; see the [Very large
+scenes](https://r-vellum.github.io/vellumwidget/articles/big-data.html)
+article.
 
 Picking stays exact either way: a Flatbush R-tree over the bounding boxes
 shortlists candidates, and the true geometry ranks them.
@@ -162,9 +172,11 @@ shortlists candidates, and the true geometry ranks them.
 ## Also here
 
 - **Animation.** `as_widget(animate(plot))` embeds a `vellumplot` keyframe
-  animation as a self-contained animated SVG — resolution-independent, and
-  honouring `prefers-reduced-motion`. The marks move every frame, so there is no
-  per-element interaction index.
+  animation as a self-contained animated SVG, resolution-independent and
+  honouring `prefers-reduced-motion`. A row below the plot holds a play/pause
+  button and a frame scrubber; `render_options(autoplay = FALSE)` starts it
+  paused and `loop = FALSE` plays it once. The marks move every frame, so there
+  is no hover or selection on an animation.
 - **Click to source.** `inspect_source()` in the plot makes a click report the
   data rows behind the mark — as a DOM event, as `input$<id>_source` under Shiny,
   and as a small popover. Opt-in rides the spec, so it costs a plain widget
@@ -242,9 +254,9 @@ links across views and into crosstalk, exactly like selecting a mark.
 vellumwidget ──depends──▶ vellum ◀──depends── vellumplot
 ```
 
-`vellumwidget` reads a built scene through six read-only `vellum` entry points —
+`vellumwidget` reads a built scene through seven read-only `vellum` entry points —
 `as_vellum_scene()`, `scene_model()`, `element_geometry()`, `scene_svg()`,
-`scene_png()` and `vl_convert()` — and never calls back into the engine
+`scene_png()`, `scene_display_list()` and `vl_convert()` — and never calls back into the engine
 after the build, so every gesture is answered locally. That contract is all it
 needs, so it wraps *any* vellum scene, whoever produced it. `vellumplot` is a
 Suggests (for the examples/tests).
@@ -266,7 +278,7 @@ vellumwidget is the interactivity layer of a small ecosystem of packages that sh
 vellum scene model:
 
 - **[vellum](https://github.com/r-vellum/vellum)** — the parchment: the
-  low-level graphics backend (Rust scene graph, PNG/SVG/PDF renderer).
+  low-level graphics backend (Rust scene graph, PNG/SVG/PDF/PPTX renderer).
 - **[vellumplot](https://github.com/r-vellum/vellumplot)** — the pen: a pipe-first
   grammar of graphics that compiles a plot spec into a vellum scene.
 - **[vellumwidget](https://github.com/r-vellum/vellumwidget)** — the annotation: this package.
