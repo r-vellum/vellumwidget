@@ -37,8 +37,11 @@ the arrow keys — are table lookups rather than new drawing code.
 
 Everything here scales to a few thousand marks on the per-element SVG path. Past
 that, the widget switches to raster mode so a 100k-point scatter stays
-navigable, and the interactions on this page keep working there; see [Very
-large scenes](big-data.html).
+navigable. Hover, selection, brushing, zoom, legends and the declarative
+interactions below keep working there. Accessibility is reduced: marks are
+focusable from the keyboard only once you zoom in far enough for them to
+become SVG nodes, and there is no hidden data table. See [Very large
+scenes](big-data.html).
 
 ```{r}
 #| label: setup
@@ -440,8 +443,8 @@ it as a self-contained animated SVG. The widget adds playback controls in a row
 of their own below the plot, so they never cover it: a play/pause button and a
 frame scrubber. Dragging the scrubber pauses on that frame, and play resumes
 from it. Both are real form controls, reachable with Tab and labelled for
-screen readers. An animation has no hover, selection or zoom: its marks move
-every frame.
+screen readers. An animation has no hover or selection: its marks move every
+frame.
 
 ```{r}
 #| label: animated

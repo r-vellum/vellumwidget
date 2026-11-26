@@ -25,8 +25,8 @@ scatter: 150,000 keyed points as per-element SVG come to roughly 75 MB and
 Above a threshold, the widget switches to *raster mode*. It keeps the plot's
 chrome as SVG, draws the marks as an image, and then swaps in sharper and more
 interactive drawings of the marks as you zoom in. Everything on this page is
-automatic. The last section lists the settings, in
-`render_options()`, that change it.
+automatic. [Settings and fallbacks](#settings-and-fallbacks) lists the
+settings, in `render_options()`, that change it.
 
 ## Raster mode
 
@@ -63,7 +63,7 @@ reaches the browser is:
   (a `mark_rule()` or `annotate()` added after the points) goes in its own SVG
   layer on top of them.
 - **The keyed marks as one PNG.** vellum renders only the keyed marks onto a
-  transparent image, at two pixels per device pixel so that it stays sharp on
+  transparent image, at twice the plot's pixel resolution, so it stays sharp on
   HiDPI screens. Each panel shows it inside its own clipped, zoomable group.
 - **An element index.** Keys, boxes and exact geometry for every mark, sent as
   compact columns. Hover, click, brush and lasso hit-test against it, so they
@@ -73,8 +73,8 @@ reaches the browser is:
   alpha) in paint order. The zoomed-in tiers below draw from it.
 
 Because the chrome is real SVG, zoom works as it does in SVG mode. The data
-region zooms and the axes re-tick for the visible range. Facets zoom per panel,
-and the [navigator](interactivity.html#overview-navigator), linked views and
+region zooms and the axes re-tick for the visible range. Facet panels zoom
+together, each re-ticking its own axes, and the [navigator](interactivity.html#overview-navigator), linked views and
 `vellumplot::bind_scale()` overview + detail all work on a raster plot.
 
 ## Tiers as you zoom
@@ -91,9 +91,9 @@ The marks are drawn by one of three tiers, chosen when the view changes:
 
    A list of 50,000 marks or more is drawn with **WebGL2**, where the browser
    has it. A million points redraw in about 10 ms, so pan and zoom stay live.
-   Smaller lists, and lists WebGL2 cannot draw (gradients, dashed strokes,
-   grouped marks, very large paths), are drawn on a 2D canvas instead. On the
-   canvas, a view with more than 50,000 marks redraws once the gesture
+   Smaller lists, and lists WebGL2 cannot draw (such as gradients, dashed
+   strokes, grouped marks, masks or text, and very large paths), are drawn on
+   a 2D canvas instead. On the canvas, a view with more than 50,000 marks redraws once the gesture
    settles, with the scaled image standing in until then.
 3. **Detail tier: real SVG nodes.** Zoom in until fewer than `detail_marks`
    marks (default `3000`) are in view and, once the view settles, those marks
@@ -126,14 +126,15 @@ it in whichever tier is drawing:
 Selected marks are drawn above the other marks of their layer. While any of
 this state is active, the drawn list replaces the mark PNG even at the full
 view, so nothing waits for a zoom. Click a swatch in this legend to hide a
-series, or hover a point to dim the other groups:
+series, or click a point to grey out the groups it is not in (click empty
+space to clear):
 
 ```{r}
 #| label: raster-state
 vplot(big) |>
   mark_point(x = x, y = y, data_id = id, size = 1,
              color = condition("hi", g, "grey85")) |>
-  select_point("hi", on = "hover", fields = "g") |>
+  select_point("hi", on = "click", fields = "g") |>
   as_widget(legend_click = "hide")
 ```
 
@@ -161,7 +162,7 @@ as_widget(p, render = render_options(max_zoom = 20))    # zoom in at most 20x
 
 - **`max_marks`** (default 2 million) caps the marks whose exact geometry
   ships. With the default `precision = "compact"` a scatter's widget takes
-  about 6 MB per million points and about 5 s per million to build. Above the
+  about 6 MB per million points and several seconds per million to build. Above the
   cap, the widget ships only a bounding-box index and says so with a message.
   Zoomed-in marks are then drawn as plain dots in each mark's own colour and
   marker shape, and there is no detail tier. A plot that big usually reads
@@ -178,12 +179,12 @@ as_widget(p, render = render_options(max_zoom = 20))    # zoom in at most 20x
   alike. At 100x vellum's coordinate grid is still within half a screen pixel,
   so marks stay on their gridlines; past it they drift. It takes 1 to 10000.
 
-Each tier falls back to the one before it when it can't run:
+When a tier can't run, you get:
 
 | When | What you get |
 |---|---|
 | WebGL2 unavailable, lost, or the list holds what it can't draw | the 2D canvas mid tier |
-| More marks than `max_marks` | the mark PNG, plain dots on zoom, no detail tier; conditions, filters and legend hide/mute are not drawn (hidden marks still stop answering hover and clicks) |
+| More marks than `max_marks` | the mark PNG, plain dots on zoom, no detail tier; conditions, filters and legend hide/mute are not drawn; marks hidden by the legend, crosstalk or `vw_filter()` stop answering hover and clicks, but `filter_by()` leaves its marks pickable |
 | A panel the axis zoom can't follow (polar, `theme_void()` graphs) | the whole scene zooms as one, like an image |
 
 Use `mode = "svg"` when you want per-element nodes at every zoom (for example,

@@ -160,8 +160,8 @@ image (at 2× for HiDPI screens), so axis-aware zoom, the navigator and linked
 views work as before. Zoomed in, the marks are redrawn exactly from vellum's
 display list (with WebGL2 for 50,000 marks or more), and on deep zoom the marks
 in view become real SVG nodes again. Hover, click, brush, `condition()`,
-`filter_by()` and legend hide/mute work at every zoom, on a scatter of a
-million points or more. `render_options(max_marks =, detail_marks =, webgl =,
+`filter_by()` and legend hide/mute work at every zoom, up to `max_marks`
+(2 million marks by default). `render_options(max_marks =, detail_marks =, webgl =,
 max_zoom =)` tune the tiers; see the [Very large
 scenes](https://r-vellum.github.io/vellumwidget/articles/big-data.html)
 article.
