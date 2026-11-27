@@ -102,7 +102,10 @@ export function selectionFeature(
   }
 
   // Cross-filter (display tier): hide keyed elements whose key is not in the
-  // shown set. `null` clears the filter (show everything).
+  // shown set. `null` clears the filter (show everything). Legend swatches
+  // (`legend_for`) are not data: their keys are never in a crosstalk or
+  // vw_filter() set, so they stay put (VW-67). Legend hide/mute keeps working
+  // on them through its own sets.
   function applyFilter(showKeys: string[] | null): void {
     ws.calib = null; // the set of measurable (non-inert) marks changed
     ws.fx.clearClass("vellumwidget-filtered");
@@ -111,7 +114,9 @@ export function selectionFeature(
       const show: Record<string, boolean> = {};
       for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
       for (let i = 0; i < ws.elements.length; i++) {
-        const key = ws.elements[i].key;
+        const e = ws.elements[i];
+        if (e.legend_for != null) continue;
+        const key = e.key;
         if (!show[key]) {
           ws.fx.addClassForKeys([key], "vellumwidget-filtered");
           ws.filteredKeySet[key] = true;

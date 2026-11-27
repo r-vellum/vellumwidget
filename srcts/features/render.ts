@@ -264,6 +264,14 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
       { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false, navigator: false, axisZoom: true, zoomMarks: "fixed", maxZoom: DEFAULT_MAX_ZOOM },
       x.options || {}
     );
+    // An animated SVG has no interaction index, so wheel/pinch zoom, pan and the
+    // brush/lasso drags only magnify or box a moving picture, and with no toolbar
+    // there was no way back (VW-70). They are off; the page scrolls over it.
+    if (ws.opts.animated) { ws.opts.zoom = false; ws.opts.brush = false; ws.opts.lasso = false; }
+    // A widget sized from its scene follows the svg's height (VW-69). Not in
+    // Shiny, where the output's own height (vellumwidgetOutput()) is the layout.
+    const hw = HTMLWidgets as unknown as { shinyMode?: boolean };
+    ws.el.classList.toggle("vellumwidget-fit", !!ws.opts.fitHeight && !hw.shinyMode);
     ws.elements = normalizeElements(x.elements);
     // The marks-only display list (raster mode, VW-15): the covered marks ship
     // without bboxes, which are derived here from their exact geometry.

@@ -5,6 +5,14 @@
   var STYLE_ID = "vellumwidget-style";
   var VELLUMWIDGET_CSS = `
 .vellumwidget-root { position: relative; display: inline-block; max-width: 100%; }
+/* The svg scales to the width (max-width + height: auto), so a root narrower
+   than the scene would keep the height htmlwidgets stamped from the scene and
+   leave a blank band under the plot. A widget sized from its scene (no explicit
+   height) takes its content's height instead (VW-69); !important beats the
+   inline style htmlwidgets writes. */
+/* vertical-align: no descender gap under the inline-block stage. */
+.vellumwidget-root.vellumwidget-fit { height: auto !important; }
+.vellumwidget-root.vellumwidget-fit .vellumwidget-stage { vertical-align: top; }
 /* The stage shrink-wraps the base svg in BOTH dimensions (inline-block sizes to
    content), so its box equals the svg's rendered box. The absolute overlays below
    fill THIS box, not the root's \u2014 the root can be taller AND wider than the svg
@@ -9920,6 +9928,13 @@ void main() {
         { tooltip: true, hover: true, select: true, brush: true, lasso: true, zoom: true, toolbar: true, nearest: true, a11y: true, selectMode: "multiple", hoverMode: "closest", crosshair: false, navigator: false, axisZoom: true, zoomMarks: "fixed", maxZoom: DEFAULT_MAX_ZOOM },
         x.options || {}
       );
+      if (ws.opts.animated) {
+        ws.opts.zoom = false;
+        ws.opts.brush = false;
+        ws.opts.lasso = false;
+      }
+      const hw = HTMLWidgets;
+      ws.el.classList.toggle("vellumwidget-fit", !!ws.opts.fitHeight && !hw.shinyMode);
       ws.elements = normalizeElements(x.elements);
       ws.dl = x.options && x.options.raster && x.displayList ? decodeDisplayList(x.displayList, ws.elements.map((e) => e.key)) : null;
       ws.runSvg = null;
@@ -10236,7 +10251,9 @@ void main() {
         const show = {};
         for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
         for (let i = 0; i < ws.elements.length; i++) {
-          const key = ws.elements[i].key;
+          const e = ws.elements[i];
+          if (e.legend_for != null) continue;
+          const key = e.key;
           if (!show[key]) {
             ws.fx.addClassForKeys([key], "vellumwidget-filtered");
             ws.filteredKeySet[key] = true;

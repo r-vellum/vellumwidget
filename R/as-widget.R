@@ -30,7 +30,8 @@
 #' @param x A `vellumplot` plot (a `PlotSpec` / `PlotComposition`) or a `vellum`
 #'   scene --- anything [vellum::as_vellum_scene()] accepts. Also a keyframe
 #'   animation from `vellumplot::animate()`, embedded as a self-contained animated
-#'   SVG (no per-element interaction). It autoplays and loops (set
+#'   SVG (no per-element interaction, and no zoom, pan or brush: the wheel
+#'   scrolls the page over it). It autoplays and loops (set
 #'   `render = render_options(autoplay = FALSE, loop = FALSE)` to change
 #'   either), with playback controls in a row below the plot, where they never
 #'   cover it: a play/pause button and a frame scrubber. Dragging the scrubber
@@ -39,7 +40,9 @@
 #'   still frame; the button still plays it. Without JavaScript (the SVG on
 #'   its own) it loops as before.
 #' @param width,height Widget size (any valid CSS size, or `NULL` to size from the
-#'   scene). Passed to [htmlwidgets::createWidget()].
+#'   scene). Passed to [htmlwidgets::createWidget()]. The plot scales down to
+#'   fit a narrower page; with `height = NULL` the widget's height then follows
+#'   the plot's, so no blank band is left under it.
 #' @param toolbar Show the on-hover toolbar (default `TRUE`). Hover tooltip,
 #'   highlight, click-select, brush, lasso, pan/zoom, and axis-aware zoom are
 #'   **on by default** (interactive-by-default) and no longer have per-widget
@@ -380,6 +383,9 @@ as_widget <- function(
       webgl = render$webgl %||% "auto",
       # The most a view zooms in, per axis (VW-44).
       maxZoom = render$max_zoom %||% 100,
+      # Sized from the scene (no explicit height): the root follows the svg's
+      # height when the page is narrower than the scene (VW-69).
+      fitHeight = is.null(height),
       # Hover tooltip, highlight, click-select, brush, lasso, pan/zoom, and
       # axis-aware zoom are on by default (interactive-by-default): the runtime
       # supplies the defaults, so they no longer need per-widget flags. Per-mark
@@ -494,6 +500,12 @@ as_widget <- function(
       loop = !isFALSE(render$loop),
       raster = FALSE,
       toolbar = FALSE,
+      # No wheel/pinch zoom, pan or brush on a moving picture: there is
+      # nothing to inspect and no toolbar to reset it (VW-70).
+      zoom = FALSE,
+      brush = FALSE,
+      lasso = FALSE,
+      fitHeight = is.null(height),
       a11y = isTRUE(a11y),
       alt = if (is.null(alt)) NULL else as.character(alt)
     )

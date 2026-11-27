@@ -186,6 +186,7 @@ export interface Options {
   tooltipDelay?: number; // ms to wait before showing the tooltip on hover (default 0)
   tooltipFollow?: boolean; // true (default): tip tracks the cursor; false: anchor above the mark
   tooltipSticky?: boolean; // true: tip accepts pointer events + lingers so links are clickable
+  fitHeight?: boolean; // size the root's height from its content (the svg scales to the width), not the stamped height (VW-69)
   animated?: boolean; // an anim_save() animated SVG: play/pause + scrubber controls, no interaction index (VW-55)
   autoplay?: boolean; // animated: start playing (default true), else start paused on the first frame (VW-61)
   loop?: boolean; // animated: loop forever (default true), else stop on the last frame (VW-61)

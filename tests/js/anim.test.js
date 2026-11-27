@@ -271,6 +271,35 @@ const T = window.__vellumwidgetTest;
   window.setTimeout = realSet;
 }
 
+// --- VW-70: no wheel zoom, pan or brush on an animation (no reset exists) ---
+{
+  reduce = false;
+  // The payload as an older R built it (no zoom/brush flags): the runtime turns
+  // them off for any animated widget.
+  const w = mount(animPayload(6, 0));
+  const svg = w.el.querySelector("svg");
+  const vb0 = svg.getAttribute("viewBox");
+  let prevented = 0;
+  for (let i = 0; i < 6; i++) {
+    const ev = new window.WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true, clientX: 50, clientY: 50 });
+    svg.dispatchEvent(ev);
+    if (ev.defaultPrevented) prevented++;
+  }
+  ok(svg.getAttribute("viewBox") === vb0, "VW-70: six wheel ticks leave the animation's viewBox alone (" + svg.getAttribute("viewBox") + ")");
+  ok(prevented === 0, "VW-70: the wheel is not swallowed, so the page scrolls over an animation");
+  ok(!w.el.classList.contains("vellumwidget-gesture"), "VW-70: touch scrolling is not blocked over an animation");
+  // A static widget still zooms on the wheel (control).
+  const s = mount({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><path data-key="k" d="M1 1h2v2z"/></svg>',
+    elements: [{ key: "k", x0: 1, y0: 1, x1: 3, y1: 3 }],
+    options: { tooltip: true, hover: true, select: true, selectMode: "multiple" }
+  });
+  const ssvg = s.el.querySelector("svg");
+  const sev = new window.WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true, clientX: 50, clientY: 50 });
+  ssvg.dispatchEvent(sev);
+  ok(sev.defaultPrevented, "VW-70: a static widget still takes the wheel");
+}
+
 // --- pure helpers ---
 {
   const info = { frames: [0, 1, 2, 3], delays: [0, 0.9, 0.6, 0.3], dur: 1.2, dt: 0.3 };

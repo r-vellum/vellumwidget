@@ -80,6 +80,20 @@ test_that("elements carry a device-px bbox for brush/nearest hit-testing", {
   expect_true(abs(cx - 50) < 5)
 })
 
+test_that("a widget sized from its scene follows the plot's height (VW-69)", {
+  scene <- vellum::vl_scene(2, 1, dpi = 100) |>
+    vellum::draw(vellum::points_grob(
+      0.5,
+      0.5,
+      gp = vellum::vl_gpar(fill = "red"),
+      key = "a"
+    ))
+  expect_true(as_widget(scene)$x$options$fitHeight)
+  expect_true(as_widget(scene, width = 300)$x$options$fitHeight)
+  expect_false(as_widget(scene, height = 300)$x$options$fitHeight)
+  expect_false(as_widget(scene, height = "50vh")$x$options$fitHeight)
+})
+
 test_that("the toolbar toggle round-trips; interaction is on by default (no flags)", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
     vellum::draw(vellum::points_grob(
