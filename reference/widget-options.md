@@ -103,9 +103,18 @@ render_options(
   colours and dimming,
   [`vellumplot::filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html),
   cross-filters and legend hide/mute show at every zoom: the marks are
-  then drawn on a canvas from the list. Without it (an older vellum, or
-  more marks than `max_marks`), and for marks the list cannot reproduce
-  (gradients, grouped marks), these show only in the detail tier.
+  then drawn on a canvas from the list. With a current vellum this
+  includes gradient fills, clip paths and grouped (opacity) marks, which
+  the list draws itself, and the marks it flags (masks, effects,
+  hatches, patterns, text, gradient strokes), which are restyled from
+  their own SVG. If that SVG would exceed 4 MB, the flagged marks keep
+  their own look under these states while the other marks follow them.
+  If the flagged marks are interleaved with the rest more than 8 times,
+  or use a blend mode the browser can't composite on its own, all the
+  marks stay one image: these states show on none of them, at any zoom,
+  and there is no detail tier (the widget says so with a message). The
+  same holds without the list (an older vellum, or more marks than
+  `max_marks`).
 
 - raster_threshold:
 
@@ -131,12 +140,13 @@ render_options(
   most marks whose exact geometry and paint ship with the widget
   (default `2000000`). Zoomed-in marks are then redrawn exactly, with
   their own shape, colour, stroke and alpha. With
-  `precision = "compact"` a scatter's widget takes about 6 MB per
-  million points (1 million: 6.2 MB, 2 million: 12.2 MB, keys included)
-  and about 5 s per million to build. Above it, the widget ships only a
-  bounding-box index, about as big (6.3 MB per million), draws zoomed-in
-  marks as plain dots (each in its own mark's colour), and says so with
-  a message: a plot that big is better drawn as density, with
+  `precision = "compact"` a scatter's widget takes about 5.4 MB per
+  million points (1 million: 5.4 MB, 2 million: 10.7 MB, keys included)
+  and about 10 to 15 s per million to build. Above it, the widget ships
+  only a bounding-box index, about as big (5.6 MB per million), draws
+  zoomed-in marks as plain dots (each in its own mark's colour), and
+  says so with a message: a plot that big is better drawn as density,
+  with
   [`vellumplot::mark_datashade()`](https://r-vellum.github.io/vellumplot/reference/mark_datashade.html)
   or
   [`vellumplot::mark_hex()`](https://r-vellum.github.io/vellumplot/reference/mark_tile.html).
@@ -158,7 +168,7 @@ render_options(
   In raster mode with the display list, how the zoomed-in (and restyled)
   marks are drawn. `"auto"` (default) draws a list of 50,000 marks or
   more with WebGL2 where the browser has it: a million points redraw in
-  a few milliseconds, so pan, zoom and
+  one or two frames (about 10 to 30 ms), so pan, zoom and
   [`condition()`](https://r-vellum.github.io/vellumplot/reference/condition.html),
   selection and filter styling stay live, where the 2D canvas redraws in
   about a second and waits for the view to settle. `"always"` uses
@@ -177,9 +187,9 @@ render_options(
   more than 0.005 px, the precision of the SVG vellum writes (SVG mode,
   and raster mode's axes and gridlines): 16 bits per value for a plot up
   to 655 px across, 24 above, instead of a 32-bit float. That halves the
-  coordinates in the payload (a 200k-point scatter: 2.7 to 1.7 MB) and
-  keeps the error under half a pixel up to 100x zoom. `"f32"` ships
-  32-bit floats, as an older vellum always does.
+  coordinates in the payload (a 200k-point scatter's whole widget: 2.2
+  to 1.1 MB) and keeps the error under half a pixel up to 100x zoom.
+  `"f32"` ships 32-bit floats, as an older vellum always does.
 
 - max_zoom:
 

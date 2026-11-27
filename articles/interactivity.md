@@ -479,7 +479,8 @@ controls in a row of their own below the plot, so they never cover it: a
 play/pause button and a frame scrubber. Dragging the scrubber pauses on
 that frame, and play resumes from it. Both are real form controls,
 reachable with Tab and labelled for screen readers. An animation has no
-hover or selection: its marks move every frame.
+hover or selection: its marks move every frame. It does not zoom, pan or
+brush either, so the mouse wheel scrolls the page over it.
 
 ``` r
 

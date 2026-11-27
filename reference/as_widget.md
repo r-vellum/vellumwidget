@@ -49,8 +49,9 @@ as_widget(
   [`vellum::as_vellum_scene()`](https://r-vellum.github.io/vellum/reference/as_vellum_scene.html)
   accepts. Also a keyframe animation from
   [`vellumplot::animate()`](https://r-vellum.github.io/vellumplot/reference/animate.html),
-  embedded as a self-contained animated SVG (no per-element
-  interaction). It autoplays and loops (set
+  embedded as a self-contained animated SVG (no per-element interaction,
+  and no zoom, pan or brush: the wheel scrolls the page over it). It
+  autoplays and loops (set
   `render = render_options(autoplay = FALSE, loop = FALSE)` to change
   either), with playback controls in a row below the plot, where they
   never cover it: a play/pause button and a frame scrubber. Dragging the
@@ -64,6 +65,9 @@ as_widget(
   Widget size (any valid CSS size, or `NULL` to size from the scene).
   Passed to
   [`htmlwidgets::createWidget()`](https://rdrr.io/pkg/htmlwidgets/man/createWidget.html).
+  The plot scales down to fit a narrower page; with `height = NULL` the
+  widget's height then follows the plot's, so no blank band is left
+  under it.
 
 - toolbar:
 

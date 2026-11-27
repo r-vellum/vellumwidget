@@ -112,7 +112,8 @@ focused — see the <code>a11y</code> argument.</p>
 <dd><p>A <code>vellumplot</code> plot (a <code>PlotSpec</code> / <code>PlotComposition</code>) or a <code>vellum</code>
 scene — anything <code><a href="https://r-vellum.github.io/vellum/reference/as_vellum_scene.html" class="external-link">vellum::as_vellum_scene()</a></code> accepts. Also a keyframe
 animation from <code><a href="https://r-vellum.github.io/vellumplot/reference/animate.html" class="external-link">vellumplot::animate()</a></code>, embedded as a self-contained animated
-SVG (no per-element interaction). It autoplays and loops (set
+SVG (no per-element interaction, and no zoom, pan or brush: the wheel
+scrolls the page over it). It autoplays and loops (set
 <code>render = render_options(autoplay = FALSE, loop = FALSE)</code> to change
 either), with playback controls in a row below the plot, where they never
 cover it: a play/pause button and a frame scrubber. Dragging the scrubber
@@ -124,7 +125,9 @@ its own) it loops as before.</p></dd>
 
 <dt id="arg-width-height">width, height<a class="anchor" aria-label="anchor" href="#arg-width-height"></a></dt>
 <dd><p>Widget size (any valid CSS size, or <code>NULL</code> to size from the
-scene). Passed to <code><a href="https://rdrr.io/pkg/htmlwidgets/man/createWidget.html" class="external-link">htmlwidgets::createWidget()</a></code>.</p></dd>
+scene). Passed to <code><a href="https://rdrr.io/pkg/htmlwidgets/man/createWidget.html" class="external-link">htmlwidgets::createWidget()</a></code>. The plot scales down to
+fit a narrower page; with <code>height = NULL</code> the widget's height then follows
+the plot's, so no blank band is left under it.</p></dd>
 
 
 <dt id="arg-toolbar">toolbar<a class="anchor" aria-label="anchor" href="#arg-toolbar"></a></dt>
