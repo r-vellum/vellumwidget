@@ -178,7 +178,19 @@ as_widget(
   crosstalk ecosystem (plotly, leaflet, DT, and crosstalk's `filter_*`
   inputs). The widget's `data_id`s must match the SharedData's keys. A
   crosstalk filter hides the non-matching elements (display-tier
-  cross-filter). Requires the crosstalk package.
+  cross-filter). A line, path or polygon series drawn from several rows
+  stays while any of its rows is kept; a selection of any of its rows
+  selects it, and selecting it (a click, or an interval brush over any
+  part of it) sends all its rows to the linked views and to
+  `input$<id>_selected`. This needs a vellumplot that lists each series'
+  rows (`row_keys`), which it does up to 1000 runs of keys (`r1` to
+  `r20000`, in any order, is one run); a series beyond that cap is
+  matched by its first row only. A legend swatch's own key is never
+  sent. In raster mode without the display list (an older vellum, or
+  more marks than `render_options(max_marks)`), the image can't hide
+  marks, so a filter leaves them all visible and pickable, as
+  [`vellumplot::filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)
+  does. Requires the crosstalk package.
 
 - select_mode:
 

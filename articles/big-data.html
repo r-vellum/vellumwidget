@@ -291,9 +291,10 @@ their gridlines; past it they drift. It takes 1 to 10000.</li>
 <td>More marks than <code>max_marks</code>
 </td>
 <td>the mark PNG, plain dots on zoom, no detail tier; conditions,
-filters and legend hide/mute are not drawn; marks hidden by the legend,
-crosstalk or <code><a href="../reference/vellumwidget-proxy-verbs.html">vw_filter()</a></code> stop answering hover and clicks,
-but <code><a href="https://r-vellum.github.io/vellumplot/reference/filter_by.html" class="external-link">filter_by()</a></code> leaves its marks pickable</td>
+filters and legend hide/mute are not drawn; crosstalk,
+<code><a href="../reference/vellumwidget-proxy-verbs.html">vw_filter()</a></code> and <code><a href="https://r-vellum.github.io/vellumplot/reference/filter_by.html" class="external-link">filter_by()</a></code> leave every mark
+visible and pickable; marks hidden by the legend stop answering hover
+and clicks</td>
 </tr>
 <tr class="odd">
 <td>A panel the axis zoom can’t follow (polar, <code><a href="https://r-vellum.github.io/vellumplot/reference/theme_gray.html" class="external-link">theme_void()</a></code>

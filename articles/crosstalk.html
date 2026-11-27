@@ -142,6 +142,15 @@ in the table; select rows in the table and the points light up.</p>
 <span>  <span class="va">scatter</span>,</span>
 <span>  <span class="fu">DT</span><span class="fu">::</span><span class="fu">datatable</span><span class="op">(</span><span class="va">sd</span>, rownames <span class="op">=</span> <span class="cn">FALSE</span>, options <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>pageLength <span class="op">=</span> <span class="fl">6</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
+<p>A line (or path, or area) series is drawn from many rows, and it
+links through all of them. A filter keeps the line while any of its rows
+is kept, a selection of any of its rows in the table selects it, and
+clicking it, or brushing over any part of it, selects all its rows in
+the table, in <code>input$&lt;id&gt;_selected</code> too. That needs a
+vellumplot that lists each series’ rows; it does so up to 1000 runs of
+keys (<code>r1</code> to <code>r20000</code>, in any order, is one run).
+A series whose ids follow no such pattern beyond that cap is matched by
+its first row only.</p>
 <p>Nothing in that snippet wires the two together explicitly. They agree
 because they share <code>sd</code>, and <code>sd</code> carries the
 keys. Under the hood vellumwidget keeps its own selection engine and
@@ -228,8 +237,10 @@ scenes</a>) link the same way: selection round-trips by key, and a
 <code>filter_*</code> input leaves filtered-out marks undrawn at every
 zoom. The one exception is a plot with more marks than
 <code>render_options(max_marks =)</code> (2 million by default), which
-ships no display list: there the filtered-out marks stay visible in the
-image, although they no longer respond to hover, click or brush.</p>
+ships no display list: the image can’t hide marks, so a
+<code>filter_*</code> input changes nothing there. Every mark stays
+visible and keeps responding to hover, click and brush, as
+<code><a href="https://r-vellum.github.io/vellumplot/reference/filter_by.html" class="external-link">vellumplot::filter_by()</a></code> leaves them.</p>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside>

@@ -318,6 +318,11 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
   var DRAG_THRESHOLD = 3;
+  function shownKey(k) {
+    if (k == null) return k;
+    const i = k.indexOf("\u241F");
+    return i < 0 ? k : k.slice(0, i);
+  }
 
   // srcts/elements.ts
   function asColumn(v) {
@@ -564,6 +569,29 @@
     }
     return { x0, y0, x1, y1 };
   }
+  function decodeRowKeys(v, n) {
+    if (v == null || typeof v !== "object" || Array.isArray(v)) return null;
+    const o = v;
+    if (o.at == null || o.v == null) return null;
+    const at = asColumn(o.at);
+    const vals = Array.isArray(o.v) ? o.v : [o.v];
+    const out = new Array(n).fill(null);
+    for (let i = 0; i < at.length && i < vals.length; i++) {
+      const idx = at[i];
+      if (!(idx >= 0 && idx < n)) continue;
+      const toks = Array.isArray(vals[i]) ? vals[i] : [vals[i]];
+      const keys = [];
+      for (let t = 0; t < toks.length; t++) {
+        const tk = toks[t];
+        if (Array.isArray(tk) && tk.length === 3) {
+          const pre = String(tk[0]), first = Number(tk[1]), count = Number(tk[2]);
+          for (let m = 0; m < count; m++) keys.push(pre + String(first + m));
+        } else if (tk != null) keys.push(String(tk));
+      }
+      if (keys.length) out[idx] = keys;
+    }
+    return out;
+  }
   function normalizeElements(raw) {
     if (raw == null) return [];
     if (Array.isArray(raw)) return raw;
@@ -602,6 +630,8 @@
     );
     const ixd = col("ixd");
     const iyd = col("iyd");
+    const rowKeys = decodeRowKeys(c.row_keys, n);
+    const rowJoins = decodeRowKeys(c.row_joins, n);
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       const e = { key: String(key[i]) };
@@ -645,6 +675,8 @@
       }
       if (ixd && ixd[i] != null) e.ixd = String(ixd[i]);
       if (iyd && iyd[i] != null) e.iyd = String(iyd[i]);
+      if (rowKeys && rowKeys[i]) e.row_keys = rowKeys[i];
+      if (rowJoins && rowJoins[i]) e.row_joins = rowJoins[i];
       out[i] = e;
     }
     return out;
@@ -1018,7 +1050,7 @@
   function a11yFeature(ws) {
     function a11yLabel(k) {
       const m = ws.meta[k];
-      return m && m.tooltip ? stripTags(m.tooltip) : k;
+      return m && m.tooltip ? stripTags(m.tooltip) : shownKey(k);
     }
     function focusLabel(k) {
       return a11yLabel(k) + (ws.selected[k] ? ", selected" : "");
@@ -5291,8 +5323,16 @@
     }
     function memberJoins(members) {
       const js = {};
-      for (const k in members) js[ws.joinOf[k] != null ? ws.joinOf[k] : k] = true;
+      for (const k in members) {
+        if (!members[k]) continue;
+        js[ws.joinOf[k] != null ? ws.joinOf[k] : k] = true;
+        const rows = rowIds(k);
+        if (rows) for (let r = 0; r < rows.length; r++) js[rows[r]] = true;
+      }
       return js;
+    }
+    function rowIds(k) {
+      return ws.rowJoinsOf[k] || ws.rowKeysOf[k];
     }
     function applyFilters() {
       const ix = ws.interactions;
@@ -5315,7 +5355,16 @@
         for (let t = 0; t < targets.length; t++) {
           const k = targets[t];
           const j = ws.joinOf[k] != null ? ws.joinOf[k] : k;
-          if (!keep[j]) hide[k] = true;
+          if (keep[j]) continue;
+          const rows = rowIds(k);
+          let any = false;
+          if (rows) {
+            for (let r = 0; r < rows.length; r++) if (keep[rows[r]]) {
+              any = true;
+              break;
+            }
+          }
+          if (!any) hide[k] = true;
         }
       }
       if (!restrict) {
@@ -5326,7 +5375,7 @@
       for (let i = 0; i < ws.elements.length; i++) {
         if (!hide[ws.elements[i].key]) show.push(ws.elements[i].key);
       }
-      ws.fx.applyFilter(show);
+      ws.fx.applyFilter(show, true);
       return true;
     }
     function reevaluateInteractions() {
@@ -5573,7 +5622,7 @@
     function showTip(clientX, clientY, k) {
       const m = ws.meta[k];
       revealTip(() => {
-        ws.tip.innerHTML = sanitizeTip(m && m.tooltip || k);
+        ws.tip.innerHTML = sanitizeTip(m && m.tooltip || shownKey(k));
       }, clientX, clientY, k);
     }
     function showTipMulti(clientX, clientY, keys) {
@@ -5581,7 +5630,7 @@
         const rows = [];
         for (let i = 0; i < keys.length && rows.length < TIP_MULTI_CAP; i++) {
           const m = ws.meta[keys[i]];
-          rows.push(sanitizeTip(m && m.tooltip || keys[i]));
+          rows.push(sanitizeTip(m && m.tooltip || shownKey(keys[i])));
         }
         if (keys.length > TIP_MULTI_CAP) rows.push("\u2026");
         ws.tip.innerHTML = rows.join("<br>");
@@ -6905,7 +6954,7 @@
         if (ws.opts.tooltip) ws.fx.moveTip(clientX, clientY, k);
         return;
       }
-      ws.fx.shinyInput("hover", k);
+      ws.fx.shinyInput("hover", shownKey(k));
       ws.hovering = true;
       ws.fx.setHoverKeys(keys);
       if (ws.opts.crosshair) ws.fx.drawCrosshair(k, unified ? hm : "closest");
@@ -7087,7 +7136,7 @@
         if (k != null && ws.fx.inert(k)) k = null;
       }
       if (k != null && ws.emptySwatchSet[k]) return;
-      ws.fx.shinyInput("click", { key: k }, { priority: "event" });
+      ws.fx.shinyInput("click", { key: shownKey(k) }, { priority: "event" });
       if (ws.provenance && ws.provenance.on === "click") ws.fx.emitSource(ev.target);
       const series = ws.fx.swatchSeries(k);
       if (series != null && ws.fx.legendPolicy() !== "select") {
@@ -9936,6 +9985,19 @@ void main() {
         im.src = hrefs[k];
       }
     }
+    function unionInto(into, key, vals) {
+      const cur = into[key];
+      if (!cur) {
+        into[key] = vals.slice();
+        return;
+      }
+      const seen = {};
+      for (let i = 0; i < cur.length; i++) seen[cur[i]] = true;
+      for (let i = 0; i < vals.length; i++) if (!seen[vals[i]]) {
+        seen[vals[i]] = true;
+        cur.push(vals[i]);
+      }
+    }
     function renderValue(x) {
       ws.opts = Object.assign(
         // Interactive-by-default: hover/select/brush/lasso/zoom and axis-aware
@@ -9963,6 +10025,9 @@ void main() {
       ws.condTagVals = {};
       ws.filtSelElems = {};
       ws.joinOf = {};
+      ws.rowOwners = {};
+      ws.rowKeysOf = {};
+      ws.rowJoinsOf = {};
       ws.lastHoverKeys = [];
       ws.hoverSig = "";
       ws.calib = null;
@@ -10003,6 +10068,15 @@ void main() {
           }
         }
         if (e.legend_for != null) (ws.legendSwatch[e.legend_for] = ws.legendSwatch[e.legend_for] || []).push(e.key);
+        if (e.row_keys) {
+          for (let r = 0; r < e.row_keys.length; r++) {
+            const rk = e.row_keys[r];
+            const own = ws.rowOwners[rk] || (ws.rowOwners[rk] = []);
+            if (own.indexOf(e.key) < 0) own.push(e.key);
+          }
+          unionInto(ws.rowKeysOf, e.key, e.row_keys);
+        }
+        if (e.row_joins) unionInto(ws.rowJoinsOf, e.key, e.row_joins);
       }
       const sels = ws.interactions && ws.interactions.selections || [];
       for (let i = 0; i < sels.length; i++) {
@@ -10222,8 +10296,53 @@ void main() {
     function selectedKeys() {
       return Object.keys(ws.selected).filter((k) => ws.selected[k]);
     }
+    function isSwatch(k) {
+      const m = ws.meta[k];
+      return m != null && m.legend_for != null || k.lastIndexOf("legend:", 0) === 0;
+    }
+    function dataKeys(keys) {
+      const out = [];
+      const seen = {};
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (isSwatch(k)) continue;
+        const rk = ws.rowKeysOf[k];
+        if (!rk) {
+          if (!seen[k]) {
+            seen[k] = true;
+            out.push(k);
+          }
+          continue;
+        }
+        for (let r = 0; r < rk.length; r++) if (!seen[rk[r]]) {
+          seen[rk[r]] = true;
+          out.push(rk[r]);
+        }
+      }
+      return out;
+    }
+    function markKeys(keys) {
+      let any = false;
+      for (const _ in ws.rowOwners) {
+        any = true;
+        break;
+      }
+      if (!any) return keys;
+      const out = keys.slice();
+      const seen = {};
+      for (let i = 0; i < keys.length; i++) seen[keys[i]] = true;
+      for (let i = 0; i < keys.length; i++) {
+        const own = ws.rowOwners[keys[i]];
+        if (!own) continue;
+        for (let j = 0; j < own.length; j++) if (!seen[own[j]]) {
+          seen[own[j]] = true;
+          out.push(own[j]);
+        }
+      }
+      return out;
+    }
     function broadcast() {
-      const keys = selectedKeys();
+      const keys = dataKeys(selectedKeys());
       if (ws.group) busPublish(ws.group, ws.selfToken, keys);
       if (ws.ctSel) ws.ctSel.set(keys);
       shinyInput("selected", keys);
@@ -10242,6 +10361,7 @@ void main() {
       broadcast();
     }
     function setSelection(keys) {
+      keys = markKeys(keys);
       ws.selected = {};
       for (let i = 0; i < keys.length; i++) ws.selected[keys[i]] = true;
       refreshSelected();
@@ -10254,26 +10374,37 @@ void main() {
       broadcast();
       if (hadInterval) shinyInput("brush", null, { priority: "event" });
     }
-    function applyLinkedSelection(keys) {
+    function applyLinkedSelection(incoming) {
+      const keys = markKeys(incoming);
       ws.selected = {};
       for (let i = 0; i < keys.length; i++) ws.selected[keys[i]] = true;
       refreshSelected();
-      shinyInput("selected", selectedKeys());
+      shinyInput("selected", dataKeys(incoming));
     }
-    function applyFilter(showKeys) {
+    function applyFilter(showKeys, byKey) {
       ws.calib = null;
       ws.fx.clearClass("vellumwidget-filtered");
       ws.fx.clearClass("vellumwidget-legend-empty");
       ws.filteredKeySet = {};
       ws.emptySwatchSet = {};
-      if (showKeys != null) {
+      if (showKeys != null && !(ws.rasterMode && !ws.dl)) {
         const show = {};
         for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
+        const anyShown = function(rk) {
+          for (let r = 0; r < rk.length; r++) if (show[rk[r]]) return true;
+          return false;
+        };
+        const kept = {};
+        for (let i = 0; i < ws.elements.length; i++) {
+          const e = ws.elements[i];
+          const rk = ws.rowKeysOf[e.key];
+          if (show[e.key] || !byKey && rk && anyShown(rk)) kept[e.key] = true;
+        }
         for (let i = 0; i < ws.elements.length; i++) {
           const e = ws.elements[i];
           if (e.legend_for != null) continue;
           const key = e.key;
-          if (!show[key]) {
+          if (!kept[key] && !ws.filteredKeySet[key]) {
             ws.fx.addClassForKeys([key], "vellumwidget-filtered");
             ws.filteredKeySet[key] = true;
           }
@@ -10803,6 +10934,9 @@ void main() {
       condTagVals: {},
       filtSelElems: {},
       joinOf: {},
+      rowOwners: {},
+      rowKeysOf: {},
+      rowJoinsOf: {},
       lastHoverKeys: [],
       hoverSig: "",
       hovering: false,
@@ -11244,6 +11378,7 @@ void main() {
     idSelector,
     findWidgetById,
     normalizeElements,
+    decodeRowKeys,
     decodeBbox,
     isZoomedIn,
     userToCanvas,

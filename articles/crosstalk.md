@@ -59,6 +59,15 @@ crosstalk::bscols(
 )
 ```
 
+A line (or path, or area) series is drawn from many rows, and it links
+through all of them. A filter keeps the line while any of its rows is
+kept, a selection of any of its rows in the table selects it, and
+clicking it, or brushing over any part of it, selects all its rows in
+the table, in `input$<id>_selected` too. That needs a vellumplot that
+lists each series’ rows; it does so up to 1000 runs of keys (`r1` to
+`r20000`, in any order, is one run). A series whose ids follow no such
+pattern beyond that cap is matched by its first row only.
+
 Nothing in that snippet wires the two together explicitly. They agree
 because they share `sd`, and `sd` carries the keys. Under the hood
 vellumwidget keeps its own selection engine and registers a crosstalk
@@ -154,6 +163,8 @@ scenes](https://r-vellum.github.io/vellumwidget/articles/big-data.md))
 link the same way: selection round-trips by key, and a `filter_*` input
 leaves filtered-out marks undrawn at every zoom. The one exception is a
 plot with more marks than `render_options(max_marks =)` (2 million by
-default), which ships no display list: there the filtered-out marks stay
-visible in the image, although they no longer respond to hover, click or
-brush.
+default), which ships no display list: the image can’t hide marks, so a
+`filter_*` input changes nothing there. Every mark stays visible and
+keeps responding to hover, click and brush, as
+[`vellumplot::filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)
+leaves them.

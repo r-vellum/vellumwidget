@@ -102,17 +102,24 @@ gave <code><a href="vellumwidget-shiny.html">vellumwidgetOutput()</a></code>, th
 below. Each verb sends a single custom message to the browser and returns the
 proxy invisibly, so calls chain with the pipe.</p>
 <dl><dt><code><a href="vellumwidget-proxy-verbs.html">vw_select()</a></code></dt>
-<dd><p>Replace the widget's selection with <code>keys</code> (the element
-<code>data_id</code>s). Selecting projects across a mark's <code>hover_group</code> and
+<dd><p>Replace the widget's selection with <code>keys</code> (the
+element <code>data_id</code>s; a key of any row of a line series selects that
+series). Selecting projects across a mark's <code>hover_group</code> and
 propagates to any linked / crosstalk widgets, exactly as a user click
-would, and updates <code>input$&lt;id&gt;_selected</code>.</p></dd>
+would, and updates <code>input$&lt;id&gt;_selected</code>, which reports the same keys
+crosstalk gets: a selected line series as all its rows, never a legend
+swatch.</p></dd>
 
 <dt><code><a href="vellumwidget-proxy-verbs.html">vw_clear_selection()</a></code></dt>
 <dd><p>Clear the selection.</p></dd>
 
 <dt><code><a href="vellumwidget-proxy-verbs.html">vw_filter()</a></code></dt>
 <dd><p>Cross-filter: show only the elements whose key is in
-<code>keys</code> and dim/hide the rest (display tier — the data is untouched).</p></dd>
+<code>keys</code> and dim/hide the rest (display tier — the data is untouched).
+A line, path or polygon series stays while any of its rows is in
+<code>keys</code>. In raster mode without the display list (see
+<code><a href="widget-options.html">render_options()</a></code>) the filter changes nothing: the marks stay visible
+and pickable.</p></dd>
 
 <dt><code><a href="vellumwidget-proxy-verbs.html">vw_clear_filter()</a></code></dt>
 <dd><p>Remove the filter (show everything).</p></dd>

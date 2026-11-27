@@ -97,8 +97,10 @@ your data by that key.</p>
 <dl><dt><code>input$plot_selected</code></dt>
 <dd><p>Character vector of the currently selected keys
 (click / brush / keyboard, and any selection arriving from a linked widget).
-Updates as state — re-selecting the same set is a no-op. <code>character(0)</code> when
-nothing is selected.</p></dd>
+A selected line, path or polygon series reports all its rows' keys, as
+crosstalk and linked widgets get them; a legend swatch's key is never
+reported. Updates as state — re-selecting the same set is a no-op.
+<code>character(0)</code> when nothing is selected.</p></dd>
 
 <dt><code>input$plot_click</code></dt>
 <dd><p>A list <code>list(key=)</code> for each click; <code>key</code> is <code>NULL</code>

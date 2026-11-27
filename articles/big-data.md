@@ -191,7 +191,7 @@ When a tier can’t run, you get:
 | When | What you get |
 |----|----|
 | WebGL2 unavailable, lost, or the list holds what it can’t draw | the 2D canvas mid tier |
-| More marks than `max_marks` | the mark PNG, plain dots on zoom, no detail tier; conditions, filters and legend hide/mute are not drawn; marks hidden by the legend, crosstalk or [`vw_filter()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md) stop answering hover and clicks, but [`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html) leaves its marks pickable |
+| More marks than `max_marks` | the mark PNG, plain dots on zoom, no detail tier; conditions, filters and legend hide/mute are not drawn; crosstalk, [`vw_filter()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md) and [`filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html) leave every mark visible and pickable; marks hidden by the legend stop answering hover and clicks |
 | A panel the axis zoom can’t follow (polar, [`theme_void()`](https://r-vellum.github.io/vellumplot/reference/theme_gray.html) graphs) | the whole scene zooms as one, like an image |
 
 Use `mode = "svg"` when you want per-element nodes at every zoom (for

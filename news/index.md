@@ -4,6 +4,37 @@
 
 ### Bug fixes
 
+- A crosstalk filter or
+  [`vw_filter()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md)
+  no longer hides a whole line series because its first row was filtered
+  out, nor keeps one whose first row alone was kept. A line, path or
+  polygon drawn from several rows now stays while any of its rows is
+  kept, and a cross-view
+  [`vellumplot::filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)
+  keeps it while any of its rows is selected. A linked selection of any
+  of its rows selects it, and selecting it (a click, or a brush over any
+  part of it) sends all its rows to crosstalk, linked widgets and
+  `input$<id>_selected`, so a linked table or scatter shows the whole
+  series. A point layer keyed by the same `data_id` no longer shares the
+  line’s key: filtering out or selecting its first point leaves the line
+  alone. This needs a vellumplot that ships each series’ row keys, up to
+  1000 runs of keys per series (`r1` to `r20000`, in any order, is one
+  run); a series beyond that cap, or an older vellumplot, is matched by
+  its first row as before (X-15).
+- `input$<id>_selected` now reports the same keys as crosstalk and
+  linked widgets get: a selected line series as all its rows (X-15).
+- Clicking a legend swatch no longer sends the swatch’s own key
+  (`"legend:color:s"`) to crosstalk, linked widgets or
+  `input$<id>_selected`. Only the series’ data keys go out; the swatch
+  still shows as selected (VW-73).
+- In raster mode without the display list (more marks than
+  `render_options(max_marks)`, or an older vellum), a crosstalk filter
+  or
+  [`vw_filter()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md)
+  now leaves the marks visible and pickable, as
+  [`vellumplot::filter_by()`](https://r-vellum.github.io/vellumplot/reference/filter_by.html)
+  already did. The image can’t hide them, and they used to stay drawn
+  but ignore hover, tooltips and clicks (VW-71).
 - A crosstalk filter (or
   [`vw_filter()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md),
   or a

@@ -223,7 +223,18 @@ links correctly even across differently-sized plots (e.g. small multiples).</p><
 string) to link this widget with the crosstalk ecosystem (plotly, leaflet,
 DT, and crosstalk's <code>filter_*</code> inputs). The widget's <code>data_id</code>s must match the
 SharedData's keys. A crosstalk filter hides the non-matching elements
-(display-tier cross-filter). Requires the crosstalk package.</p></dd>
+(display-tier cross-filter). A line, path or polygon series drawn from
+several rows stays while any of its rows is kept; a selection of any of
+its rows selects it, and selecting it (a click, or an interval brush over
+any part of it) sends all its rows to the linked views and to
+<code>input$&lt;id&gt;_selected</code>. This needs a vellumplot that lists each series'
+rows (<code>row_keys</code>), which it does up to 1000 runs of keys (<code>r1</code> to
+<code>r20000</code>, in any order, is one run); a series beyond that cap is matched
+by its first row only. A legend swatch's own key is never sent. In raster mode without
+the display list (an older vellum, or more marks than
+<code>render_options(max_marks)</code>), the image can't hide marks, so a filter
+leaves them all visible and pickable, as <code><a href="https://r-vellum.github.io/vellumplot/reference/filter_by.html" class="external-link">vellumplot::filter_by()</a></code> does.
+Requires the crosstalk package.</p></dd>
 
 
 <dt id="arg-select-mode">select_mode<a class="anchor" aria-label="anchor" href="#arg-select-mode"></a></dt>

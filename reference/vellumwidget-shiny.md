@@ -46,9 +46,11 @@ id. All values are the element **data keys** (the `data_id` a
 - `input$plot_selected`:
 
   Character vector of the currently selected keys (click / brush /
-  keyboard, and any selection arriving from a linked widget). Updates as
-  state — re-selecting the same set is a no-op. `character(0)` when
-  nothing is selected.
+  keyboard, and any selection arriving from a linked widget). A selected
+  line, path or polygon series reports all its rows' keys, as crosstalk
+  and linked widgets get them; a legend swatch's key is never reported.
+  Updates as state — re-selecting the same set is a no-op.
+  `character(0)` when nothing is selected.
 
 - `input$plot_click`:
 

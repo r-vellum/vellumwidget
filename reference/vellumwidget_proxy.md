@@ -52,10 +52,12 @@ invisibly, so calls chain with the pipe.
 
 - [`vw_select()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md):
 
-  Replace the widget's selection with `keys` (the element `data_id`s).
-  Selecting projects across a mark's `hover_group` and propagates to any
-  linked / crosstalk widgets, exactly as a user click would, and updates
-  `input$<id>_selected`.
+  Replace the widget's selection with `keys` (the element `data_id`s; a
+  key of any row of a line series selects that series). Selecting
+  projects across a mark's `hover_group` and propagates to any linked /
+  crosstalk widgets, exactly as a user click would, and updates
+  `input$<id>_selected`, which reports the same keys crosstalk gets: a
+  selected line series as all its rows, never a legend swatch.
 
 - [`vw_clear_selection()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md):
 
@@ -64,7 +66,11 @@ invisibly, so calls chain with the pipe.
 - [`vw_filter()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md):
 
   Cross-filter: show only the elements whose key is in `keys` and
-  dim/hide the rest (display tier — the data is untouched).
+  dim/hide the rest (display tier — the data is untouched). A line, path
+  or polygon series stays while any of its rows is in `keys`. In raster
+  mode without the display list (see
+  [`render_options()`](https://r-vellum.github.io/vellumwidget/reference/widget-options.md))
+  the filter changes nothing: the marks stay visible and pickable.
 
 - [`vw_clear_filter()`](https://r-vellum.github.io/vellumwidget/reference/vellumwidget-proxy-verbs.md):
 
