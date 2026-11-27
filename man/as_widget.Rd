@@ -29,7 +29,8 @@ as_widget(
 \item{x}{A \code{vellumplot} plot (a \code{PlotSpec} / \code{PlotComposition}) or a \code{vellum}
 scene --- anything \code{\link[vellum:as_vellum_scene]{vellum::as_vellum_scene()}} accepts. Also a keyframe
 animation from \code{vellumplot::animate()}, embedded as a self-contained animated
-SVG (no per-element interaction). It autoplays and loops (set
+SVG (no per-element interaction, and no zoom, pan or brush: the wheel
+scrolls the page over it). It autoplays and loops (set
 \code{render = render_options(autoplay = FALSE, loop = FALSE)} to change
 either), with playback controls in a row below the plot, where they never
 cover it: a play/pause button and a frame scrubber. Dragging the scrubber
@@ -39,7 +40,9 @@ still frame; the button still plays it. Without JavaScript (the SVG on
 its own) it loops as before.}
 
 \item{width, height}{Widget size (any valid CSS size, or \code{NULL} to size from the
-scene). Passed to \code{\link[htmlwidgets:createWidget]{htmlwidgets::createWidget()}}.}
+scene). Passed to \code{\link[htmlwidgets:createWidget]{htmlwidgets::createWidget()}}. The plot scales down to
+fit a narrower page; with \code{height = NULL} the widget's height then follows
+the plot's, so no blank band is left under it.}
 
 \item{toolbar}{Show the on-hover toolbar (default \code{TRUE}). Hover tooltip,
 highlight, click-select, brush, lasso, pan/zoom, and axis-aware zoom are

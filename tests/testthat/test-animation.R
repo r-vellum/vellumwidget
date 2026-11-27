@@ -32,6 +32,19 @@ test_that("an animation widget carries no interaction index (marks move each fra
   expect_false(isTRUE(w$x$options$raster))
 })
 
+test_that("an animation widget turns off wheel zoom, pan and brush (VW-70)", {
+  skip_if_not_installed("vellumplot")
+  a <- vellumplot::vplot(mtcars) |>
+    vellumplot::mark_point(x = wt, y = mpg) |>
+    vellumplot::transition_states(cyl) |>
+    vellumplot::animate(nframes = 8)
+  o <- as_widget(a)$x$options
+  expect_false(o$zoom)
+  expect_false(o$brush)
+  expect_false(o$lasso)
+  expect_false(o$toolbar)
+})
+
 test_that(".is_animation() is false for an ordinary plot or scene", {
   skip_if_not_installed("vellumplot")
   p <- vellumplot::vplot(mtcars) |> vellumplot::mark_point(x = wt, y = mpg)

@@ -102,20 +102,35 @@ export function selectionFeature(
   }
 
   // Cross-filter (display tier): hide keyed elements whose key is not in the
-  // shown set. `null` clears the filter (show everything).
+  // shown set. `null` clears the filter (show everything). Legend swatches
+  // (`legend_for`) are not data: their keys are never in a crosstalk or
+  // vw_filter() set, so they stay put (VW-67). Legend hide/mute keeps working
+  // on them through its own sets. A swatch whose whole series is filtered out
+  // is dimmed and inert (`emptySwatchSet`): hovering or clicking it is a no-op.
   function applyFilter(showKeys: string[] | null): void {
     ws.calib = null; // the set of measurable (non-inert) marks changed
     ws.fx.clearClass("vellumwidget-filtered");
+    ws.fx.clearClass("vellumwidget-legend-empty");
     ws.filteredKeySet = {};
+    ws.emptySwatchSet = {};
     if (showKeys != null) {
       const show: Record<string, boolean> = {};
       for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
       for (let i = 0; i < ws.elements.length; i++) {
-        const key = ws.elements[i].key;
+        const e = ws.elements[i];
+        if (e.legend_for != null) continue;
+        const key = e.key;
         if (!show[key]) {
           ws.fx.addClassForKeys([key], "vellumwidget-filtered");
           ws.filteredKeySet[key] = true;
         }
+      }
+      for (const s in ws.legendSwatch) {
+        const members = ws.legendIndex[s] || [];
+        if (!members.length || !members.every((k) => ws.filteredKeySet[k])) continue;
+        const sw = ws.legendSwatch[s];
+        for (let i = 0; i < sw.length; i++) ws.emptySwatchSet[sw[i]] = true;
+        ws.fx.addClassForKeys(sw, "vellumwidget-legend-empty");
       }
     }
     if (ws.rasterMode) ws.fx.updateMarkStates(); // the node-less tiers hide them on the canvas
@@ -128,7 +143,7 @@ export function selectionFeature(
   // hidden datum can be hovered, tooltipped, or (re-)selected. Muted legend marks
   // stay visible and are NOT inert.
   function inert(k: string): boolean {
-    return !!ws.hiddenKeySet[k] || !!ws.filteredKeySet[k] || !!ws.colorHiddenSet[k];
+    return !!ws.hiddenKeySet[k] || !!ws.filteredKeySet[k] || !!ws.colorHiddenSet[k] || !!ws.emptySwatchSet[k];
   }
 
   function dropInert(keys: string[]): string[] {

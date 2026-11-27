@@ -544,6 +544,125 @@ ok(
 );
 ok(!elL.querySelector('[data-key="q1"]').classList.contains("vellumwidget-selected"), "other series is not selected");
 
+// ===================== VW-67: a cross-filter leaves the legend alone =====================
+{
+  const el67 = mount({
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
+      '<path data-key="p1" d="M1 1h5v5z"/><path data-key="p2" d="M10 1h5v5z"/>' +
+      '<path data-key="q1" d="M20 1h5v5z"/>' +
+      '<path data-key="legend:color:s" d="M70 1h5v5z"/>' +
+      '<path data-key="legend:color:t" d="M70 12h5v5z"/></svg>',
+    elements: [
+      { key: "p1", legend: ["color:s"], x0: 1, y0: 1, x1: 6, y1: 6 },
+      { key: "p2", legend: ["color:s"], x0: 10, y0: 1, x1: 15, y1: 6 },
+      { key: "q1", legend: ["color:t"], x0: 20, y0: 1, x1: 25, y1: 6 },
+      { key: "legend:color:s", legend_for: "color:s", tooltip: "s", x0: 70, y0: 1, x1: 75, y1: 6 },
+      { key: "legend:color:t", legend_for: "color:t", tooltip: "t", x0: 70, y0: 12, x1: 75, y1: 17 }
+    ],
+    options: { tooltip: true, hover: true, select: true, nearest: false, selectMode: "multiple", legendClick: "hide", crosstalk: "VW67" }
+  });
+  const q = (k) => el67.querySelector('[data-key="' + k + '"]');
+  const filt = new window.crosstalk.FilterHandle("VW67");
+  filt.set(["p1", "p2"]); // a crosstalk filter keeping series s
+  ok(q("q1").classList.contains("vellumwidget-filtered"), "VW-67: the filter hides the dropped series' mark");
+  ok(!q("p1").classList.contains("vellumwidget-filtered"), "VW-67: the filter keeps the kept series' marks");
+  ok(!q("legend:color:s").classList.contains("vellumwidget-filtered") && !q("legend:color:t").classList.contains("vellumwidget-filtered"),
+    "VW-67: no legend swatch is hidden by the filter (kept or dropped series)");
+  // Legend hide still works under the filter: clicking the s swatch hides p1/p2
+  // and dims (not hides) the swatch.
+  fireOn(el67.querySelector("svg"), "click", q("legend:color:s"));
+  ok(q("p1").classList.contains("vellumwidget-legend-hidden") && q("legend:color:s").classList.contains("vellumwidget-legend-off") &&
+    !q("legend:color:s").classList.contains("vellumwidget-filtered"),
+    "VW-67: a legend click under a filter hides its series and dims its swatch");
+  fireOn(el67.querySelector("svg"), "click", q("legend:color:s"));
+  filt.set(null);
+  ok(!q("legend:color:t").classList.contains("vellumwidget-legend-empty"), "VW-67: clearing the filter un-dims every swatch");
+  ok(!q("q1").classList.contains("vellumwidget-filtered") && !q("p1").classList.contains("vellumwidget-legend-hidden"),
+    "VW-67: clearing the filter and the legend toggle restores every mark");
+}
+
+// ===================== VW-67: a swatch whose whole series is filtered out is inert =====================
+{
+  function setup67(policy, group) {
+    return mount({
+      svg:
+        '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
+        '<path data-key="p1" d="M1 1h5v5z"/><path data-key="p2" d="M10 1h5v5z"/>' +
+        '<path data-key="q1" d="M20 1h5v5z"/>' +
+        '<path data-key="legend:color:s" d="M70 1h5v5z"/>' +
+        '<path data-key="legend:color:t" d="M70 12h5v5z"/></svg>',
+      elements: [
+        { key: "p1", legend: ["color:s"], x0: 1, y0: 1, x1: 6, y1: 6 },
+        { key: "p2", legend: ["color:s"], x0: 10, y0: 1, x1: 15, y1: 6 },
+        { key: "q1", legend: ["color:t"], x0: 20, y0: 1, x1: 25, y1: 6 },
+        { key: "legend:color:s", legend_for: "color:s", tooltip: "s", x0: 70, y0: 1, x1: 75, y1: 6 },
+        { key: "legend:color:t", legend_for: "color:t", tooltip: "t", x0: 70, y0: 12, x1: 75, y1: 17 }
+      ],
+      options: Object.assign({ tooltip: true, hover: true, select: true, nearest: false, selectMode: "multiple", crosstalk: group }, policy ? { legendClick: policy } : {})
+    });
+  }
+  // select policy: the t series (q1) is filtered out entirely
+  const el = setup67(null, "VW67b");
+  const q = (k) => el.querySelector('[data-key="' + k + '"]');
+  const svgE = el.querySelector("svg");
+  let sent = null;
+  const peer = new window.crosstalk.SelectionHandle("VW67b");
+  peer.on("change", (e) => { if (e.sender !== peer) sent = e.value; });
+  const filt = new window.crosstalk.FilterHandle("VW67b");
+  filt.set(["p1", "p2"]);
+  ok(q("legend:color:t").classList.contains("vellumwidget-legend-empty") && !q("legend:color:s").classList.contains("vellumwidget-legend-empty"),
+    "VW-67: only the swatch of a fully filtered series is dimmed");
+  fireOn(svgE, "pointermove", q("legend:color:t"), { clientX: 72, clientY: 14 });
+  ok(!el.classList.contains("vellumwidget-hovering"), "VW-67: hovering an emptied swatch dims nothing");
+  fireOn(svgE, "click", q("legend:color:t"), { clientX: 72, clientY: 14 });
+  ok(!q("q1").classList.contains("vellumwidget-selected") && sent === null,
+    "VW-67: clicking an emptied swatch selects no hidden rows and broadcasts nothing");
+  // a partly filtered series: hover and select touch only its visible marks
+  filt.set(["p1", "q1"]);
+  ok(!q("legend:color:s").classList.contains("vellumwidget-legend-empty") && !q("legend:color:t").classList.contains("vellumwidget-legend-empty"),
+    "VW-67: a partly filtered series keeps its swatch live");
+  fireOn(svgE, "pointermove", q("legend:color:s"), { clientX: 72, clientY: 3 });
+  ok(q("p1").classList.contains("vellumwidget-hl") && !q("p2").classList.contains("vellumwidget-hl"),
+    "VW-67: hovering a partly filtered series' swatch highlights only its visible marks");
+  fireOn(svgE, "pointerleave", svgE);
+  fireOn(svgE, "click", q("legend:color:s"), { clientX: 72, clientY: 3 });
+  ok(q("p1").classList.contains("vellumwidget-selected") && sent && sent.indexOf("p1") >= 0 && sent.indexOf("p2") < 0,
+    "VW-67: clicking it selects and broadcasts only the visible rows (" + JSON.stringify(sent) + ")");
+  filt.set(null);
+  // hide policy: an emptied swatch's click does not toggle its series
+  const elH = setup67("hide", "VW67c");
+  const qh = (k) => elH.querySelector('[data-key="' + k + '"]');
+  new window.crosstalk.FilterHandle("VW67c").set(["p1", "p2"]);
+  fireOn(elH.querySelector("svg"), "click", qh("legend:color:t"), { clientX: 72, clientY: 14 });
+  ok(!qh("legend:color:t").classList.contains("vellumwidget-legend-off"), "VW-67: under legend_click = 'hide' an emptied swatch's click is a no-op");
+}
+
+// ===================== VW-69: a scene-sized widget follows the svg's height =====================
+{
+  const svg69 = '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300" viewBox="0 0 900 300"><path data-key="k" d="M1 1h5v5z"/></svg>';
+  const fit = mount({ svg: svg69, elements: [{ key: "k", x0: 1, y0: 1, x1: 6, y1: 6 }], options: { fitHeight: true } });
+  ok(fit.classList.contains("vellumwidget-fit"), "VW-69: fitHeight tags the root vellumwidget-fit");
+  const fixed = mount({ svg: svg69, elements: [{ key: "k", x0: 1, y0: 1, x1: 6, y1: 6 }], options: {} });
+  ok(!fixed.classList.contains("vellumwidget-fit"), "VW-69: an explicit height (no fitHeight) keeps the stamped height");
+  const css = document.getElementById("vellumwidget-style");
+  ok(css && /\.vellumwidget-root\.vellumwidget-fit\s*\{\s*height:\s*auto\s*!important/.test(css.textContent),
+    "VW-69: the fit class overrides htmlwidgets' inline height");
+  // A static widget on a Shiny page (or in a shiny Rmd) still fits; only a real
+  // Shiny output keeps its own height.
+  window.HTMLWidgets.shinyMode = true;
+  const st = mount({ svg: svg69, elements: [{ key: "k", x0: 1, y0: 1, x1: 6, y1: 6 }], options: { fitHeight: true } });
+  ok(st.classList.contains("vellumwidget-fit"), "VW-69: a static widget on a Shiny page still fits");
+  for (const cls of ["html-widget-output", "shiny-bound-output"]) {
+    const e = document.createElement("div");
+    e.className = cls;
+    document.body.appendChild(e);
+    widgetDef.factory(e, 100, 100).renderValue({ svg: svg69, elements: [{ key: "k", x0: 1, y0: 1, x1: 6, y1: 6 }], options: { fitHeight: true } });
+    ok(!e.classList.contains("vellumwidget-fit"), "VW-69: a Shiny output (" + cls + ") keeps its own height");
+  }
+  delete window.HTMLWidgets.shinyMode;
+}
+
 // ===================== accessibility (a11y): SR + keyboard =====================
 {
   const elA11y = mount({

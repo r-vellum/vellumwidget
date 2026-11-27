@@ -78,6 +78,7 @@ export interface WidgetState {
   legendOff: Record<string, boolean>; // series toggled off via a legend-click (hide/mute)
   hiddenKeySet: Record<string, boolean>; // member keys currently hidden (legendClick="hide")
   filteredKeySet: Record<string, boolean>; // keys hidden by a cross-filter (crosstalk / vw_filter)
+  emptySwatchSet: Record<string, boolean>; // legend swatches whose whole series a cross-filter hides (VW-67): dimmed and inert
   elements: ElemMeta[];
   panels: PanelInfo[]; // cartesian data panels with scale descriptors (data-space mapping)
   selected: Record<string, boolean>;
@@ -414,6 +415,7 @@ export function createState(el: HTMLElement): WidgetState {
     legendOff: {},
     hiddenKeySet: {},
     filteredKeySet: {},
+    emptySwatchSet: {},
     elements: [],
     panels: [],
     selected: {},

@@ -127,19 +127,27 @@ navigator_options <- function(height = 56) {
 #'   `max_marks`), or as plain dots with an older vellum. With the display
 #'   list, `vellumplot::condition()` colours and dimming, `vellumplot::filter_by()`,
 #'   cross-filters and legend hide/mute show at every zoom: the marks are then
-#'   drawn on a canvas from the list. Without it (an older vellum, or more marks
-#'   than `max_marks`), and for marks the list cannot reproduce (gradients,
-#'   grouped marks), these show only in the detail tier.
+#'   drawn on a canvas from the list. With a current vellum this includes
+#'   gradient fills, clip paths and grouped (opacity) marks, which the list
+#'   draws itself, and the marks it flags (masks, effects, hatches, patterns,
+#'   text, gradient strokes), which are restyled from their own SVG. If that
+#'   SVG would exceed 4 MB, the flagged marks keep their own look under these
+#'   states while the other marks follow them. If the flagged marks are
+#'   interleaved with the rest more than 8 times, or use a blend mode the
+#'   browser can't composite on its own, all the marks stay one image: these
+#'   states show on none of them, at any zoom, and there is no detail tier
+#'   (the widget says so with a message). The same holds without the list (an
+#'   older vellum, or more marks than `max_marks`).
 #' @param raster_threshold Keyed-element count above which `mode = "auto"`
 #'   switches to the raster image (default `20000`).
 #' @param max_marks In raster mode with a vellum that has the marks-only display
 #'   list, the most marks whose exact geometry and paint ship with the widget
 #'   (default `2000000`). Zoomed-in marks are then redrawn exactly, with their
 #'   own shape, colour, stroke and alpha. With `precision = "compact"` a
-#'   scatter's widget takes about 6 MB per million points (1 million: 6.2 MB,
-#'   2 million: 12.2 MB, keys included) and about 5 s per million to build.
-#'   Above it, the widget ships only a bounding-box index,
-#'   about as big (6.3 MB per million), draws zoomed-in marks as plain dots
+#'   scatter's widget takes about 5.4 MB per million points (1 million:
+#'   5.4 MB, 2 million: 10.7 MB, keys included) and about 10 to 15 s per
+#'   million to build. Above it, the widget ships only a bounding-box index, about as big
+#'   (5.6 MB per million), draws zoomed-in marks as plain dots
 #'   (each in its own mark's colour), and says so with a message: a plot that big is better drawn as density,
 #'   with `vellumplot::mark_datashade()` or `vellumplot::mark_hex()`.
 #' @param detail_marks In raster mode with the display list, once a zoom
@@ -150,8 +158,8 @@ navigator_options <- function(height = 56) {
 #'   the canvas. `0` turns the detail tier off.
 #' @param webgl In raster mode with the display list, how the zoomed-in (and
 #'   restyled) marks are drawn. `"auto"` (default) draws a list of 50,000 marks
-#'   or more with WebGL2 where the browser has it: a million points redraw in a
-#'   few milliseconds, so pan, zoom and `condition()`, selection and filter
+#'   or more with WebGL2 where the browser has it: a million points redraw in
+#'   one or two frames (about 10 to 30 ms), so pan, zoom and `condition()`, selection and filter
 #'   styling stay live, where the 2D canvas redraws in about a second and waits
 #'   for the view to settle. `"always"` uses WebGL2 for any size of list,
 #'   `"never"` keeps the 2D canvas. WebGL2 draws points, rectangles, lines and
@@ -166,8 +174,9 @@ navigator_options <- function(height = 56) {
 #'   is off by more than 0.005 px, the precision of the SVG vellum writes
 #'   (SVG mode, and raster mode's axes and gridlines): 16 bits per value for a
 #'   plot up to 655 px across, 24 above, instead of a 32-bit float. That
-#'   halves the coordinates in the payload (a 200k-point scatter: 2.7 to
-#'   1.7 MB) and keeps the error under half a pixel up to 100x zoom. `"f32"`
+#'   halves the coordinates in the payload (a 200k-point scatter's whole
+#'   widget: 2.2 to 1.1 MB) and keeps the error under half a pixel up to 100x
+#'   zoom. `"f32"`
 #'   ships 32-bit floats, as an older vellum always does.
 #' @param max_zoom The most the view zooms in, per axis, over the full view
 #'   (default `100`), in SVG and raster mode alike: the wheel, pinch, keys,

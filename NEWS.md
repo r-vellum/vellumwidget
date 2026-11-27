@@ -1,5 +1,38 @@
 # vellumwidget (development version)
 
+## Bug fixes
+
+* A crosstalk filter (or `vw_filter()`, or a `vellumplot::filter_by()`
+  cross-filter) no longer hides the legend swatches. It used to hide every
+  swatch, the kept series' included, in SVG and raster mode, because swatch
+  keys are never in the filter set. Legend hide and mute still work on the
+  swatches under a filter. A swatch whose whole series the filter hides is
+  dimmed and does nothing on hover or click, and hovering or clicking a partly
+  filtered series' swatch touches only its visible marks: it no longer selects
+  and broadcasts the hidden rows (VW-67).
+* A widget sized from its scene (no `height =`) now takes the height of the
+  plot when the page is narrower than the scene. An `hconcat()` widget in a
+  documentation column used to keep its full stamped height and leave a blank
+  band of 80 px or more under the plot. An explicit `height =` and Shiny
+  outputs (`vellumwidgetOutput()`) keep their height; a static widget on a
+  Shiny page fits like any other (VW-69).
+* The mouse wheel no longer zooms an animated widget. An animation has no
+  toolbar and nothing to inspect up close, so a zoom could not be undone, and
+  the wheel was taken from the page. Wheel and pinch zoom, pan and the brush
+  are now off for animations: the page scrolls over them, as it does over an
+  image or a video (VW-70).
+
+## Documentation
+
+* `render_options()`: the `mode =` notes no longer say that gradients and
+  grouped marks show conditions and filters only in the detail tier (the
+  display list and the restyled flagged runs cover them), and say what happens
+  without a display list or with more than 8 flagged runs. The `precision`,
+  `max_marks` and `webgl` figures are re-measured. A raster widget now says
+  with a message when its flagged marks (more than 8 runs, or a blend mode the
+  browser can't composite) keep every mark one image, so that conditions,
+  filters and legend hide/mute won't show on them (VW-68).
+
 # vellumwidget 0.20.1
 
 ## Bug fixes

@@ -6,6 +6,14 @@ export const STYLE_ID = "vellumwidget-style";
 
 export const VELLUMWIDGET_CSS = `
 .vellumwidget-root { position: relative; display: inline-block; max-width: 100%; }
+/* The svg scales to the width (max-width + height: auto), so a root narrower
+   than the scene would keep the height htmlwidgets stamped from the scene and
+   leave a blank band under the plot. A widget sized from its scene (no explicit
+   height) takes its content's height instead (VW-69); !important beats the
+   inline style htmlwidgets writes. */
+/* vertical-align: no descender gap under the inline-block stage. */
+.vellumwidget-root.vellumwidget-fit { height: auto !important; }
+.vellumwidget-root.vellumwidget-fit .vellumwidget-stage { vertical-align: top; }
 /* The stage shrink-wraps the base svg in BOTH dimensions (inline-block sizes to
    content), so its box equals the svg's rendered box. The absolute overlays below
    fill THIS box, not the root's — the root can be taller AND wider than the svg
@@ -26,6 +34,8 @@ export const VELLUMWIDGET_CSS = `
 [data-key].vellumwidget-legend-hidden { display: none; }
 [data-key].vellumwidget-legend-muted { opacity: 0.12; }
 [data-key].vellumwidget-legend.vellumwidget-legend-off { opacity: 0.4; }
+/* A swatch whose whole series a cross-filter hides (VW-67): dimmed, and inert. */
+[data-key].vellumwidget-legend.vellumwidget-legend-empty { opacity: 0.4; cursor: default; }
 .vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
 .vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
 /* Conditional encoding (condition()): a non-member of an active selection with no
