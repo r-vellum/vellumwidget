@@ -653,54 +653,138 @@ ok(!elL.querySelector('[data-key="q1"]').classList.contains("vellumwidget-select
     const one = dec({ at: 1, v: [[["r", 11, 2]]] }, 2);
     ok(one && one[0] === null && JSON.stringify(one[1]) === '["r11","r12"]', "X-15: a lone entry (unboxed at) decodes");
   }
-  function mountLines(group, extra) {
-    return mount({
-      svg:
-        '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
-        '<path data-key="r1" d="M1 1L30 1" class="la"/><path data-key="r11" d="M1 10L30 10"/><path data-key="r21" d="M1 20L30 20"/>' +
-        (extra ? '<circle data-key="r1" cx="1" cy="1" r="1" class="pa"/><circle data-key="r5" cx="12" cy="1" r="1"/>' : "") +
-        "</svg>",
-      elements: {
-        key: ["r1", "r11", "r21"].concat(extra ? ["r1", "r5"] : []),
-        mark: ["line", "line", "line"].concat(extra ? ["point", "point"] : []),
-        x0: [1, 1, 1].concat(extra ? [0, 11] : []), y0: [0, 9, 19].concat(extra ? [0, 0] : []),
-        x1: [30, 30, 30].concat(extra ? [2, 13] : []), y1: [2, 11, 21].concat(extra ? [2, 2] : []),
-        row_keys: { at: [0, 1, 2], v: [[["r", 1, 10]], [["r", 11, 10]], [["r", 21, 10]]] }
-      },
+  // vellumplot keys each series apart from its rows: "<first row>␟s<layer>"
+  const S = (k, l) => k + "␟s" + (l || 1);
+  const ar = (lo, hi) => { const o = []; for (let i = lo; i <= hi; i++) o.push("r" + i); return o; };
+  // lines (layer 1) and, with `pts`, a point per row 1..30 (layer 2); `pointsFirst` puts the points first
+  function mountLines(group, pts, pointsFirst, shiny) {
+    const lk = [S("r1"), S("r11"), S("r21")].map((k) => pts && pointsFirst ? k.replace("s1", "s2") : k);
+    const lines = { key: lk, mark: ["line", "line", "line"], x0: [1, 1, 1], y0: [0, 9, 19], x1: [30, 30, 30], y1: [2, 11, 21],
+      rk: [[["r", 1, 10]], [["r", 11, 10]], [["r", 21, 10]]] };
+    const pk = pts ? ar(1, 30) : [];
+    const points = { key: pk, mark: pk.map(() => "point"), x0: pk.map((_, i) => (i % 10) * 3), y0: pk.map((_, i) => Math.floor(i / 10) * 10),
+      x1: pk.map((_, i) => (i % 10) * 3 + 2), y1: pk.map((_, i) => Math.floor(i / 10) * 10 + 2) };
+    const first = pointsFirst ? points : lines, second = pointsFirst ? lines : points;
+    const cat = (f) => first[f].concat(second[f]);
+    const lineAt = pointsFirst ? [pk.length, pk.length + 1, pk.length + 2] : [0, 1, 2];
+    const node = (k, m) => m === "line" ? '<path data-key="' + k + '" d="M1 1L30 1"/>' : '<circle data-key="' + k + '" cx="1" cy="1" r="1"/>';
+    const keys = cat("key"), marks = cat("mark");
+    if (shiny) { window.Shiny = { setInputValue: (iid, v) => shiny.push({ id: iid, v: v }) }; HTMLWidgets.shinyMode = true; }
+    const e = document.createElement("div");
+    e.id = group;
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 100, 100);
+    inst.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' + keys.map((k, i) => node(k, marks[i])).join("") + "</svg>",
+      elements: { key: keys, mark: marks, x0: cat("x0"), y0: cat("y0"), x1: cat("x1"), y1: cat("y1"),
+        row_keys: { at: lineAt, v: lines.rk } },
       options: { tooltip: true, hover: true, select: true, nearest: false, selectMode: "multiple", crosstalk: group }
     });
+    if (shiny) { HTMLWidgets.shinyMode = false; }
+    return { el: e, inst: inst, lk: lk };
   }
-  const el = mountLines("X15");
+  const L = mountLines("X15");
+  const el = L.el;
   const q = (k) => el.querySelector('[data-key="' + k + '"]');
   const filt = new window.crosstalk.FilterHandle("X15");
   filt.set(["r2", "r3", "r4", "r5", "r11", "r12", "r13"]);
-  ok(!q("r1").classList.contains("vellumwidget-filtered"), "X-15: a filter keeping r2-r5 keeps the a line (keyed by its dropped first row)");
-  ok(!q("r11").classList.contains("vellumwidget-filtered"), "X-15: a filter keeping r11-r13 keeps the b line");
-  ok(q("r21").classList.contains("vellumwidget-filtered"), "X-15: a line none of whose rows is kept is hidden");
+  ok(!q(S("r1")).classList.contains("vellumwidget-filtered"), "X-15: a filter keeping r2-r5 keeps the a line (its first row dropped)");
+  ok(!q(S("r11")).classList.contains("vellumwidget-filtered"), "X-15: a filter keeping r11-r13 keeps the b line");
+  ok(q(S("r21")).classList.contains("vellumwidget-filtered"), "X-15: a line none of whose rows is kept is hidden");
   filt.set(["r21", "r22"]);
-  ok(q("r1").classList.contains("vellumwidget-filtered") && q("r11").classList.contains("vellumwidget-filtered") &&
-     !q("r21").classList.contains("vellumwidget-filtered"), "X-15: a filter keeping r21-r22 keeps only the c line");
+  ok(q(S("r1")).classList.contains("vellumwidget-filtered") && q(S("r11")).classList.contains("vellumwidget-filtered") &&
+     !q(S("r21")).classList.contains("vellumwidget-filtered"), "X-15: a filter keeping r21-r22 keeps only the c line");
   filt.set(["r30"]);
-  ok(!q("r21").classList.contains("vellumwidget-filtered"), "X-15: a filter keeping only a series' last row keeps it");
+  ok(!q(S("r21")).classList.contains("vellumwidget-filtered"), "X-15: a filter keeping only a series' last row keeps it");
   filt.set(null);
   // linked selection: a row in a peer selects the line through it; a selected
-  // line goes out as all its rows
+  // line goes out as all its rows, never its series key
   const peer = new window.crosstalk.SelectionHandle("X15");
   let sent = null;
   peer.on("change", (e) => { if (e.sender !== peer) sent = e.value; });
   peer.set(["r13"]);
-  ok(q("r11").classList.contains("vellumwidget-selected") && !q("r1").classList.contains("vellumwidget-selected"),
+  ok(q(S("r11")).classList.contains("vellumwidget-selected") && !q(S("r1")).classList.contains("vellumwidget-selected"),
     "X-15: an incoming selection of row r13 selects the b line");
-  fireOn(el.querySelector("svg"), "click", q("r21"));
-  ok(sent && sent.length === 20 && sent.indexOf("r11") >= 0 && sent.indexOf("r30") >= 0 && sent.indexOf("r12") >= 0,
-    "X-15: a selected line is broadcast as every row it draws (" + (sent && sent.length) + " keys)");
-  // a point layer sharing the data_id: hiding r1's point never takes the a line with it
-  const elP = mountLines("X15b", true);
-  const qp = (k) => elP.querySelectorAll('[data-key="' + k + '"]');
-  new window.crosstalk.FilterHandle("X15b").set(["r5"]);
-  ok(!qp("r1")[0].classList.contains("vellumwidget-filtered"), "X-15: a kept line keeps its key even when its first-row point is filtered out");
-  ok(qp("r11")[0].classList.contains("vellumwidget-filtered") && !qp("r5")[0].classList.contains("vellumwidget-filtered"),
-    "X-15: the other series and kept points behave as before");
+  L.inst._call("clearSelection");
+  fireOn(el.querySelector("svg"), "click", q(S("r21")));
+  ok(sent && sent.length === 10 && sent.indexOf("r21") >= 0 && sent.indexOf("r30") >= 0 && !sent.some((k) => /␟/.test(k)),
+    "X-15: a selected line is broadcast as every row it draws, without its series key (" + JSON.stringify(sent) + ")");
+  // a point layer sharing the data_id, in both layer orders: no key collides
+  for (const pf of [false, true]) {
+    const tag = pf ? "points then line" : "line then points";
+    const calls = [];
+    const M = mountLines("X15p" + (pf ? "b" : "a"), true, pf, calls);
+    const qq = (k) => M.el.querySelector('[data-key="' + k + '"]');
+    const ctf = new window.crosstalk.FilterHandle("X15p" + (pf ? "b" : "a"));
+    ctf.set(["r2", "r3", "r4", "r5"]);
+    ok(!qq(M.lk[0]).classList.contains("vellumwidget-filtered") && qq("r1").classList.contains("vellumwidget-filtered") &&
+       !qq("r3").classList.contains("vellumwidget-filtered") && qq(M.lk[1]).classList.contains("vellumwidget-filtered"),
+      "X-15 (" + tag + "): keeping r2-r5 keeps line a and points r2-r5 and hides point r1 and line b");
+    ctf.set(null);
+    const pp = new window.crosstalk.SelectionHandle("X15p" + (pf ? "b" : "a"));
+    let got = null;
+    pp.on("change", (e) => { if (e.sender !== pp) got = e.value; });
+    window.Shiny = { setInputValue: (iid, v) => calls.push({ id: iid, v: v }) }; HTMLWidgets.shinyMode = true;
+    pp.set(["r3"]);
+    const lastSel = () => calls.filter((c) => c.id === M.el.id + "_selected").pop();
+    ok(qq("r3").classList.contains("vellumwidget-selected") && qq(M.lk[0]).classList.contains("vellumwidget-selected") &&
+       !qq("r1").classList.contains("vellumwidget-selected"),
+      "X-15 (" + tag + "): a peer selecting r3 selects point r3 and line a, not point r1");
+    ok(lastSel() && JSON.stringify(lastSel().v) === '["r3"]', "X-15 (" + tag + "): Shiny hears the incoming r3 (" + JSON.stringify(lastSel() && lastSel().v) + ")");
+    M.inst._call("clearSelection");
+    fireOn(M.el.querySelector("svg"), "click", qq(M.lk[1]));
+    ok(got && JSON.stringify(got.slice().sort()) === JSON.stringify(ar(11, 20).sort()),
+      "X-15 (" + tag + "): clicking line b broadcasts all its rows (" + JSON.stringify(got) + ")");
+    ok(lastSel() && JSON.stringify(lastSel().v) === JSON.stringify(got), "X-15 (" + tag + "): input$<id>_selected matches crosstalk (F4)");
+    HTMLWidgets.shinyMode = false; delete window.Shiny;
+  }
+  // row keys are a per-key union: a later element with the same key (and no
+  // row keys, as an old first-row-keyed point would be) doesn't drop them
+  {
+    const e = document.createElement("div");
+    e.id = "X15u"; document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 100, 100);
+    inst.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30"><path data-key="r11" d="M1 1L30 1"/><circle data-key="r11" cx="1" cy="1" r="1"/></svg>',
+      elements: { key: ["r11", "r11"], mark: ["line", "point"], x0: [1, 0], y0: [0, 0], x1: [30, 2], y1: [2, 2],
+        row_keys: { at: 0, v: [[["r", 11, 3]]] } },
+      options: { select: true, nearest: false, selectMode: "multiple", crosstalk: "X15u" }
+    });
+    let got = null;
+    const pu = new window.crosstalk.SelectionHandle("X15u");
+    pu.on("change", (ev) => { if (ev.sender !== pu) got = ev.value; });
+    fireOn(e.querySelector("svg"), "click", e.querySelector("path"));
+    ok(JSON.stringify(got) === '["r11","r12","r13"]', "X-15: row keys survive a later element sharing the key (" + JSON.stringify(got) + ")");
+  }
+  // F2: filter_by() across views keeps a line while any of its rows' joins is selected
+  {
+    const e = document.createElement("div");
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 100, 100);
+    const pk = ["subplot-1:r1", "subplot-1:r2", "subplot-1:r3", "subplot-1:r11"];
+    const lk = [S("subplot-2:r1"), S("subplot-2:r11")];
+    const keys = pk.concat(lk);
+    inst.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
+        keys.map((k) => '<path data-key="' + k + '" d="M1 1h2v2z"/>').join("") + "</svg>",
+      elements: {
+        key: keys, x0: [0, 3, 6, 9, 20, 20], y0: [0, 0, 0, 0, 0, 10], x1: [2, 5, 8, 11, 40, 40], y1: [2, 2, 2, 2, 2, 12],
+        join: ["r1", "r2", "r3", "r11", "r1", "r11"],
+        filt: [null, null, null, null, ["pick"], ["pick"]],
+        row_keys: { at: [4, 5], v: [[["subplot-2:r", 1, 10]], [["subplot-2:r", 11, 10]]] },
+        row_joins: { at: [4, 5], v: [[["r", 1, 10]], [["r", 11, 10]]] }
+      },
+      interactions: { selections: [{ name: "pick", kind: "point", on: "click", empty: true }], conditions: [], filters: [{ selection: "pick" }] },
+      options: { tooltip: true, hover: true, select: true, nearest: false, selectMode: "multiple" }
+    });
+    const qf = (k) => e.querySelector('[data-key="' + k + '"]');
+    inst._call("select", ["subplot-1:r3"]);
+    ok(!qf(lk[0]).classList.contains("vellumwidget-filtered") && qf(lk[1]).classList.contains("vellumwidget-filtered"),
+      "X-15 (F2): filter_by() keeps the line through the selected row r3 (joined across cells) and hides the other");
+    inst._call("select", ["subplot-1:r11"]);
+    ok(qf(lk[0]).classList.contains("vellumwidget-filtered") && !qf(lk[1]).classList.contains("vellumwidget-filtered"),
+      "X-15 (F2): selecting its first row keeps only line b");
+  }
 }
 
 // ===================== VW-73: a legend swatch key never leaves the widget =====================

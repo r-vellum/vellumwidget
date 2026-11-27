@@ -118,8 +118,12 @@ DT, and crosstalk's \verb{filter_*} inputs). The widget's \code{data_id}s must m
 SharedData's keys. A crosstalk filter hides the non-matching elements
 (display-tier cross-filter). A line, path or polygon series drawn from
 several rows stays while any of its rows is kept; a selection of any of
-its rows selects it, and selecting it sends all its rows to the linked
-views. A legend swatch's own key is never sent. In raster mode without
+its rows selects it, and selecting it (a click, or an interval brush over
+any part of it) sends all its rows to the linked views and to
+\verb{input$<id>_selected}. This needs a vellumplot that lists each series'
+rows (\code{row_keys}), which it does up to 1000 runs of keys (\code{r1} to
+\code{r20000}, in any order, is one run); a series beyond that cap is matched
+by its first row only. A legend swatch's own key is never sent. In raster mode without
 the display list (an older vellum, or more marks than
 \code{render_options(max_marks)}), the image can't hide marks, so a filter
 leaves them all visible and pickable, as \code{vellumplot::filter_by()} does.

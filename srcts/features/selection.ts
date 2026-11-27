@@ -60,19 +60,22 @@ export function selectionFeature(
   }
 
   // The data keys a selection stands for when it leaves the widget: the
-  // selected keys without legend swatches (VW-73), each multi-row mark (a line
-  // series) widened to every row it draws (X-15), so a linked table or scatter
-  // sees the whole series, not only its first row.
+  // selected keys without legend swatches (VW-73), and each multi-row mark (a
+  // line series) as the rows it draws (X-15), so a linked table or scatter
+  // sees the whole series, not only its first row. Such a mark's own key is a
+  // series key, not a row (vellumplot's "<first row>\u241fs<layer>"), so it
+  // never goes out itself.
   function dataKeys(keys: string[]): string[] {
     const out: string[] = [];
     const seen: Record<string, boolean> = {};
     for (let i = 0; i < keys.length; i++) {
       const k = keys[i];
       if (isSwatch(k)) continue;
-      if (!seen[k]) { seen[k] = true; out.push(k); }
-      const m = ws.meta[k];
-      const rk = m && m.row_keys;
-      if (!rk) continue;
+      const rk = ws.rowKeysOf[k];
+      if (!rk) {
+        if (!seen[k]) { seen[k] = true; out.push(k); }
+        continue;
+      }
       for (let r = 0; r < rk.length; r++) if (!seen[rk[r]]) { seen[rk[r]] = true; out.push(rk[r]); }
     }
     return out;
@@ -98,14 +101,13 @@ export function selectionFeature(
 
   // Publish the current selection to linked views (own bus + crosstalk). Called
   // only from local mutations; the incoming appliers below never broadcast, so
-  // there is no feedback loop. Shiny gets the selected marks' own keys, without
-  // legend swatches (VW-73); linked views get their rows (`dataKeys()`).
+  // there is no feedback loop. Shiny, the bus and crosstalk all get the same
+  // data keys (`dataKeys()`): no legend swatch (VW-73), a line as its rows.
   function broadcast(): void {
-    const own = selectedKeys().filter((k) => !isSwatch(k));
-    const keys = dataKeys(own);
+    const keys = dataKeys(selectedKeys());
     if (ws.group) busPublish(ws.group, ws.selfToken, keys);
     if (ws.ctSel) ws.ctSel.set(keys);
-    shinyInput("selected", own); // deduped state -> input$<id>_selected
+    shinyInput("selected", keys); // deduped state -> input$<id>_selected
   }
 
   function toggleSelect(k: string): void {
@@ -142,12 +144,14 @@ export function selectionFeature(
   // A selection arriving from a linked view — apply WITHOUT re-broadcasting to
   // the JS bus (feedback-loop guard), but still surface it to Shiny so the
   // server sees this widget's true current selection regardless of source.
-  function applyLinkedSelection(keys: string[]): void {
-    keys = markKeys(keys);
+  // Shiny hears the data keys that arrived (no swatch key, VW-73), not the
+  // series keys they selected here.
+  function applyLinkedSelection(incoming: string[]): void {
+    const keys = markKeys(incoming);
     ws.selected = {};
     for (let i = 0; i < keys.length; i++) ws.selected[keys[i]] = true;
     refreshSelected();
-    shinyInput("selected", selectedKeys());
+    shinyInput("selected", dataKeys(incoming));
   }
 
   // Cross-filter (display tier): hide keyed elements whose key is not in the
@@ -183,7 +187,8 @@ export function selectionFeature(
       const kept: Record<string, boolean> = {};
       for (let i = 0; i < ws.elements.length; i++) {
         const e = ws.elements[i];
-        if (show[e.key] || (!byKey && e.row_keys && anyShown(e.row_keys))) kept[e.key] = true;
+        const rk = ws.rowKeysOf[e.key];
+        if (show[e.key] || (!byKey && rk && anyShown(rk))) kept[e.key] = true;
       }
       for (let i = 0; i < ws.elements.length; i++) {
         const e = ws.elements[i];

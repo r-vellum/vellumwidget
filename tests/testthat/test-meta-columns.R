@@ -293,13 +293,24 @@ test_that("row keys compact into integer runs (X-15)", {
     "r1234567890"
   )
   toks <- .compact_row_keys(k)
-  expect_identical(expand(toks), k)
-  expect_identical(toks[[1]], list("r", 1, 10L))
-  expect_identical(toks[[2]], "x")
+  expect_setequal(expand(toks), k)
+  expect_length(expand(toks), length(unique(k)))
+  expect_true(any(vapply(toks, identical, NA, list("r", 1, 10L))))
+  expect_true("x" %in% unlist(toks))
   expect_identical(.compact_row_keys(character()), list())
   # each run is exact: no leading zeros, at most 9 digits
   odd <- c("a0", "a1", "a01", "a02", "b999999999", "b1000000000")
-  expect_identical(expand(.compact_row_keys(odd)), odd)
+  expect_setequal(expand(.compact_row_keys(odd)), odd)
+  # a set: shuffled ids pack into the same runs as ordered ones (F3)
+  set.seed(2)
+  expect_identical(
+    .compact_row_keys(sample(paste0("r", 1:500))),
+    list(list("r", 1, 500L))
+  )
+  expect_identical(
+    .compact_row_keys(c("b", "r2", "a", "r1")),
+    list(list("r", 1, 2L), "a", "b")
+  )
 
   # sparse over the elements: only multi-row marks carry it
   rk <- .meta_row_keys(list(NULL, paste0("r", 11:20), NULL, c("a", "b")))
@@ -338,7 +349,11 @@ test_that("a line series ships the keys of the rows it draws (X-15)", {
     expect_false(is.null(rk), info = mode)
     keys <- if (is.list(w$x$elements$key)) NULL else w$x$elements$key
     if (!is.null(keys)) {
-      expect_identical(keys[rk$at + 1L], c("r1", "r11", "r21"))
+      # each series has a key of its own (its first row's + "\u241fs1")
+      expect_identical(
+        keys[rk$at + 1L],
+        paste0(c("r1", "r11", "r21"), "\u241fs1")
+      )
     }
     expect_identical(
       rk$v,

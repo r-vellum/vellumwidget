@@ -1,7 +1,7 @@
 // Accessibility: screen-reader labels, announcements, roving keyboard focus
 // and the hidden data-table fallback.
 
-import { keyOf } from "../dom";
+import { keyOf, shownKey } from "../dom";
 import type { WidgetFns, WidgetState } from "../state";
 import { stripTags } from "../tooltip";
 
@@ -15,7 +15,7 @@ export function a11yFeature(
   // A stable, plain-text label for a mark: its tooltip (tags stripped) or key.
   function a11yLabel(k: string): string {
     const m = ws.meta[k];
-    return m && m.tooltip ? stripTags(m.tooltip) : k;
+    return m && m.tooltip ? stripTags(m.tooltip) : shownKey(k);
   }
 
   // The label plus current selection state, for a spoken announcement.

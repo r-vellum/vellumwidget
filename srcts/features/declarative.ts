@@ -182,10 +182,22 @@ export function declarativeFeature(
   // A selection's members as cross-view *join* ids (so a gesture in one cell
   // maps to matching rows in another). Falls back to the key itself when there
   // is no join (a single view), preserving single-view filtering.
+  // A selected line series (X-15) stands for its rows too: their joins in a
+  // composition or facet (`row_joins`), else their keys.
   function memberJoins(members: Record<string, boolean>): Record<string, boolean> {
     const js: Record<string, boolean> = {};
-    for (const k in members) js[ws.joinOf[k] != null ? ws.joinOf[k] : k] = true;
+    for (const k in members) {
+      if (!members[k]) continue;
+      js[ws.joinOf[k] != null ? ws.joinOf[k] : k] = true;
+      const rows = rowIds(k);
+      if (rows) for (let r = 0; r < rows.length; r++) js[rows[r]] = true;
+    }
     return js;
+  }
+
+  // The cross-view identities of the rows a multi-row mark draws (X-15).
+  function rowIds(k: string): string[] | undefined {
+    return ws.rowJoinsOf[k] || ws.rowKeysOf[k];
   }
 
   // Returns whether it applied (or cleared) a filter. In raster mode the
@@ -217,7 +229,12 @@ export function declarativeFeature(
       for (let t = 0; t < targets.length; t++) {
         const k = targets[t];
         const j = ws.joinOf[k] != null ? ws.joinOf[k] : k;
-        if (!keep[j]) hide[k] = true;
+        if (keep[j]) continue;
+        // a line series stays while any of its rows is selected (X-15)
+        const rows = rowIds(k);
+        let any = false;
+        if (rows) for (let r = 0; r < rows.length; r++) if (keep[rows[r]]) { any = true; break; }
+        if (!any) hide[k] = true;
       }
     }
     if (!restrict) {

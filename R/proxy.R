@@ -14,10 +14,13 @@
 #' proxy invisibly, so calls chain with the pipe.
 #'
 #' \describe{
-#'   \item{[vw_select()]}{Replace the widget's selection with `keys` (the element
-#'     `data_id`s; a key of any row of a line series selects that series). Selecting projects across a mark's `hover_group` and
+#'   \item{[vw_select()]}{Replace the widget's selection with `keys` (the
+#'     element `data_id`s; a key of any row of a line series selects that
+#'     series). Selecting projects across a mark's `hover_group` and
 #'     propagates to any linked / crosstalk widgets, exactly as a user click
-#'     would, and updates `input$<id>_selected`.}
+#'     would, and updates `input$<id>_selected`, which reports the same keys
+#'     crosstalk gets: a selected line series as all its rows, never a legend
+#'     swatch.}
 #'   \item{[vw_clear_selection()]}{Clear the selection.}
 #'   \item{[vw_filter()]}{Cross-filter: show only the elements whose key is in
 #'     `keys` and dim/hide the rest (display tier --- the data is untouched).

@@ -56,6 +56,9 @@ export interface ElemMeta extends Partial<Bbox> {
   // series) draws; its own `key` is its first row's. A cross-filter keeps it
   // while any of them is shown, and a linked selection reaches it through them.
   row_keys?: string[];
+  // X-15: their cross-view identities, in a composition or facet (the rows'
+  // `join`s), which a filter_by() in another view matches.
+  row_joins?: string[];
 }
 
 // The interactive colorbar descriptor (continuous colour scale): the gradient
@@ -259,6 +262,7 @@ export interface ColumnElements {
   iyd?: (string | null)[] | string;
   // X-15: sparse `{at, v}`, each entry runs of row keys (see decodeRowKeys).
   row_keys?: unknown;
+  row_joins?: unknown; // X-15: the same encoding, the rows' joins
 }
 
 // Per-axis scale descriptor (from vellumplot's `scales` panel meta): the data and

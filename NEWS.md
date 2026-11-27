@@ -4,12 +4,20 @@
 
 * A crosstalk filter or `vw_filter()` no longer hides a whole line series
   because its first row was filtered out, nor keeps one whose first row
-  alone was kept. A line, path or polygon drawn from several rows (keyed by
-  its first row) now stays while any of its rows is kept. A linked selection
-  of any of its rows selects it, and selecting it sends all its rows to
-  crosstalk and linked widgets, so a linked table or scatter shows the whole
-  series. This needs a vellumplot that ships each such mark's row keys
-  (X-15); with an older one the widget behaves as before.
+  alone was kept. A line, path or polygon drawn from several rows now stays
+  while any of its rows is kept, and a cross-view `vellumplot::filter_by()`
+  keeps it while any of its rows is selected. A linked selection of any of
+  its rows selects it, and selecting it (a click, or a brush over any part of
+  it) sends all its rows to crosstalk, linked widgets and
+  `input$<id>_selected`, so a linked table or scatter shows the whole series.
+  A point layer keyed by the same `data_id` no longer shares the line's key:
+  filtering out or selecting its first point leaves the line alone. This
+  needs a vellumplot that ships each series' row keys, up to 1000 runs of
+  keys per series (`r1` to `r20000`, in any order, is one run); a series
+  beyond that cap, or an older vellumplot, is matched by its first row as
+  before (X-15).
+* `input$<id>_selected` now reports the same keys as crosstalk and linked
+  widgets get: a selected line series as all its rows (X-15).
 * Clicking a legend swatch no longer sends the swatch's own key
   (`"legend:color:s"`) to crosstalk, linked widgets or
   `input$<id>_selected`. Only the series' data keys go out; the swatch still

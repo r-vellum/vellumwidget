@@ -399,6 +399,7 @@ export function normalizeElements(raw: ElemMeta[] | ColumnElements | null | unde
   const ixd = col<string>("ixd");
   const iyd = col<string>("iyd");
   const rowKeys = decodeRowKeys(c.row_keys, n);
+  const rowJoins = decodeRowKeys(c.row_joins, n);
   const out: ElemMeta[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const e: ElemMeta = { key: String(key[i]) };
@@ -445,6 +446,7 @@ export function normalizeElements(raw: ElemMeta[] | ColumnElements | null | unde
     if (ixd && ixd[i] != null) e.ixd = String(ixd[i]);
     if (iyd && iyd[i] != null) e.iyd = String(iyd[i]);
     if (rowKeys && rowKeys[i]) e.row_keys = rowKeys[i]!;
+    if (rowJoins && rowJoins[i]) e.row_joins = rowJoins[i]!;
     out[i] = e;
   }
   return out;

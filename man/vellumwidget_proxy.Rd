@@ -33,10 +33,13 @@ below. Each verb sends a single custom message to the browser and returns the
 proxy invisibly, so calls chain with the pipe.
 
 \describe{
-\item{\code{\link[=vw_select]{vw_select()}}}{Replace the widget's selection with \code{keys} (the element
-\code{data_id}s; a key of any row of a line series selects that series). Selecting projects across a mark's \code{hover_group} and
+\item{\code{\link[=vw_select]{vw_select()}}}{Replace the widget's selection with \code{keys} (the
+element \code{data_id}s; a key of any row of a line series selects that
+series). Selecting projects across a mark's \code{hover_group} and
 propagates to any linked / crosstalk widgets, exactly as a user click
-would, and updates \verb{input$<id>_selected}.}
+would, and updates \verb{input$<id>_selected}, which reports the same keys
+crosstalk gets: a selected line series as all its rows, never a legend
+swatch.}
 \item{\code{\link[=vw_clear_selection]{vw_clear_selection()}}}{Clear the selection.}
 \item{\code{\link[=vw_filter]{vw_filter()}}}{Cross-filter: show only the elements whose key is in
 \code{keys} and dim/hide the rest (display tier --- the data is untouched).
