@@ -107,7 +107,18 @@
 #'   string) to link this widget with the crosstalk ecosystem (plotly, leaflet,
 #'   DT, and crosstalk's `filter_*` inputs). The widget's `data_id`s must match the
 #'   SharedData's keys. A crosstalk filter hides the non-matching elements
-#'   (display-tier cross-filter). Requires the crosstalk package.
+#'   (display-tier cross-filter). A line, path or polygon series drawn from
+#'   several rows stays while any of its rows is kept; a selection of any of
+#'   its rows selects it, and selecting it (a click, or an interval brush over
+#'   any part of it) sends all its rows to the linked views and to
+#'   `input$<id>_selected`. This needs a vellumplot that lists each series'
+#'   rows (`row_keys`), which it does up to 1000 runs of keys (`r1` to
+#'   `r20000`, in any order, is one run); a series beyond that cap is matched
+#'   by its first row only. A legend swatch's own key is never sent. In raster mode without
+#'   the display list (an older vellum, or more marks than
+#'   `render_options(max_marks)`), the image can't hide marks, so a filter
+#'   leaves them all visible and pickable, as `vellumplot::filter_by()` does.
+#'   Requires the crosstalk package.
 #' @param render How the marks are drawn, from [render_options()]: per-element
 #'   SVG or a single raster image (`mode`), the element count at which `"auto"`
 #'   switches to the image (`raster_threshold`), and how SVG text is written
@@ -833,7 +844,15 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     join = meta_col("join"),
     # Continuous colorbar filter value, kept numeric so the runtime can
     # range-test it.
-    filter_value = .meta_num(field("filter_value"))
+    filter_value = .meta_num(field("filter_value")),
+    # The row keys a multi-row mark (a line, path or polygon series) draws
+    # (X-15): vellum keys it by its first row, so a crosstalk filter or
+    # selection matches its other rows through these. Sparse, each element's
+    # keys as integer runs (`.meta_row_keys()`).
+    row_keys = .meta_row_keys(field("row_keys")),
+    # ... and their cross-view joins (a composition or facet), which a
+    # filter_by() in another view matches.
+    row_joins = .meta_row_keys(field("row_joins"))
   )
   # Interval-selection data values (from a vellumplot `select_interval()`): the
   # element's value on each brushed position channel -- numeric `ix`/`iy` (with
@@ -904,7 +923,8 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   keys <- cols$key
   kpos <- .key_int_pos(keys)
   cols$key <- .encode_keys(keys, kpos)
-  for (f in setdiff(names(cols), c("key", "bbox"))) {
+  # `row_keys` / `row_joins` are already compact (`.meta_row_keys()`).
+  for (f in setdiff(names(cols), c("key", "bbox", "row_keys", "row_joins"))) {
     v <- cols[[f]]
     # `cond_value` (VW-46): one CSS colour (or opacity) column per tag, each
     # encoded as a column of its own (a tag on few elements goes sparse).
@@ -1443,6 +1463,68 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   out <- rep(NA_character_, length(v))
   out[set] <- as.character(transform(as.character(v[set])))
   out
+}
+
+# The `row_keys` meta field (X-15): for each multi-row mark, the keys of the
+# rows it draws. Few elements carry it (one per line series) but each can hold
+# many keys, so it ships sparse, `{at, v}` (0-based element indices and their
+# entries), and each entry compacts its keys into runs (`.compact_row_keys()`).
+# NULL when no element carries it.
+.meta_row_keys <- function(v) {
+  if (is.null(v) || !is.list(v)) {
+    return(NULL)
+  }
+  set <- which(lengths(v) > 0L)
+  if (!length(set)) {
+    return(NULL)
+  }
+  list(
+    at = set - 1L,
+    v = lapply(v[set], function(k) .compact_row_keys(as.character(k)))
+  )
+}
+
+# One element's row keys as a list of tokens: a run of keys that share a text
+# prefix and count up by one from an integer suffix is `list(prefix, first,
+# count)` ("r1".."r10" -> ["r", 1, 10]); any other key is itself, a string.
+# The runtime expands each run to `paste0(prefix, first + 0:(count - 1))`, so
+# a suffix is only taken when that gives back the key exactly (no leading
+# zero, at most 9 digits). The keys are a set (the runtime never reads their
+# order), so they are sorted by prefix and number first: shuffled ids pack
+# as well as ordered ones.
+.compact_row_keys <- function(k) {
+  k <- unique(k[!is.na(k)])
+  n <- length(k)
+  if (!n) {
+    return(list())
+  }
+  m <- regexpr("(0|[1-9][0-9]{0,8})$", k)
+  num <- rep(NA_real_, n)
+  pre <- rep(NA_character_, n)
+  hit <- m > 0L
+  num[hit] <- as.numeric(substring(k[hit], m[hit]))
+  pre[hit] <- substring(k[hit], 1L, m[hit] - 1L)
+  o <- order(!hit, pre, num, k, method = "radix")
+  k <- k[o]
+  num <- num[o]
+  pre <- pre[o]
+  hit <- hit[o]
+  # a new run starts wherever a key does not continue the previous one
+  cont <- c(
+    FALSE,
+    hit[-1L] &
+      hit[-n] &
+      pre[-1L] == pre[-n] &
+      num[-1L] == num[-n] + 1
+  )
+  cont[is.na(cont)] <- FALSE
+  start <- which(!cont)
+  len <- diff(c(start, n + 1L))
+  lapply(seq_along(start), function(r) {
+    i <- start[[r]]
+    # (a key without a suffix never continues a run, so its run is itself)
+    if (len[[r]] < 2L) k[[i]] else list(pre[[i]], num[[i]], len[[r]])
+  })
 }
 
 # One numeric meta field (`NA` where absent or empty), or NULL when no element
@@ -2216,7 +2298,7 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   }
   if (n > max_marks) {
     cli::cli_inform(c(
-      "i" = "This plot has {n} marks, more than {.code max_marks} ({max_marks}): the widget ships a bounding-box index instead of the exact marks, so zoomed-in marks are drawn as plain dots in their own colours.",
+      "i" = "This plot has {n} marks, more than {.code max_marks} ({max_marks}): the widget ships a bounding-box index instead of the exact marks, so zoomed-in marks are drawn as plain dots in their own colours, and conditions, filters and legend hide/mute are not shown on the marks.",
       "*" = "A plot this big reads better as density: try {.fn vellumplot::mark_datashade} or {.fn vellumplot::mark_hex}.",
       "*" = "Or raise the cap with {.code render_options(max_marks = )}."
     ))
@@ -2508,8 +2590,10 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #' \describe{
 #'   \item{`input$plot_selected`}{Character vector of the currently selected keys
 #'     (click / brush / keyboard, and any selection arriving from a linked widget).
-#'     Updates as state — re-selecting the same set is a no-op. `character(0)` when
-#'     nothing is selected.}
+#'     A selected line, path or polygon series reports all its rows' keys, as
+#'     crosstalk and linked widgets get them; a legend swatch's key is never
+#'     reported. Updates as state — re-selecting the same set is a no-op.
+#'     `character(0)` when nothing is selected.}
 #'   \item{`input$plot_click`}{A list `list(key=)` for each click; `key` is `NULL`
 #'     for a click on empty space. An event input — fires on every click, even the
 #'     same mark twice.}

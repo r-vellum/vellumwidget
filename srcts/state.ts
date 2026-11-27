@@ -46,6 +46,13 @@ export interface WidgetState {
   condTagVals: Record<string, (string | null)[] | null>;
   filtSelElems: Record<string, string[]>; // filter selection -> keys of its target view
   joinOf: Record<string, string>; // key -> cross-view join id (compositions)
+  // X-15: row key -> the keys of the multi-row marks (line, path, polygon
+  // series) that draw that row, from their `row_keys`. Empty without any.
+  rowOwners: Record<string, string[]>;
+  // X-15: key -> the row keys (and the rows' joins) of every element with
+  // that key that ships them, unioned, so element order never matters.
+  rowKeysOf: Record<string, string[]>;
+  rowJoinsOf: Record<string, string[]>;
   lastHoverKeys: string[];
   // What the last full pointer-hover pass drew: the hover mode, the primary key
   // and the highlighted set, joined. A move that resolves to the same signature
@@ -246,7 +253,7 @@ export interface WidgetFns {
   addClassForKeys: (keys: string[], cls: string) => void;
   announce: (msg: string) => void;
   applyAspect: () => void;
-  applyFilter: (showKeys: string[] | null) => void;
+  applyFilter: (showKeys: string[] | null, byKey?: boolean) => void;
   applyIntervalBrush: (rect: Bbox) => { keys: string[]; band: Bbox; fields: Record<string, unknown> } | null;
   applyLegend: () => void;
   applyScaleBinds: () => void;
@@ -398,6 +405,9 @@ export function createState(el: HTMLElement): WidgetState {
     condTagVals: {},
     filtSelElems: {},
     joinOf: {},
+    rowOwners: {},
+    rowKeysOf: {},
+    rowJoinsOf: {},
     lastHoverKeys: [],
     hoverSig: "",
     hovering: false,

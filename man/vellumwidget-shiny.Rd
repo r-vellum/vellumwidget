@@ -36,8 +36,10 @@ your data by that key.
 \describe{
 \item{\code{input$plot_selected}}{Character vector of the currently selected keys
 (click / brush / keyboard, and any selection arriving from a linked widget).
-Updates as state — re-selecting the same set is a no-op. \code{character(0)} when
-nothing is selected.}
+A selected line, path or polygon series reports all its rows' keys, as
+crosstalk and linked widgets get them; a legend swatch's key is never
+reported. Updates as state — re-selecting the same set is a no-op.
+\code{character(0)} when nothing is selected.}
 \item{\code{input$plot_click}}{A list \code{list(key=)} for each click; \code{key} is \code{NULL}
 for a click on empty space. An event input — fires on every click, even the
 same mark twice.}

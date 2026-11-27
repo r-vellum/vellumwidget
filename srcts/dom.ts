@@ -49,3 +49,15 @@ export function download(blob: Blob, name: string): void {
 }
 
 export const DRAG_THRESHOLD = 3; // px before a mousedown becomes a drag (vs a click)
+
+// A key as people see it (X-15): vellumplot keys a multi-row mark (a line
+// series) "<first row key>\u241fs<layer>", apart from its rows; a tooltip
+// fallback, a screen-reader label and the hover / click inputs show its first
+// row's key, as they did before series keys.
+export function shownKey(k: string): string;
+export function shownKey(k: string | null): string | null;
+export function shownKey(k: string | null): string | null {
+  if (k == null) return k;
+  const i = k.indexOf("\u241f");
+  return i < 0 ? k : k.slice(0, i);
+}

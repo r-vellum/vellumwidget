@@ -51,11 +51,60 @@ export function selectionFeature(
     return Object.keys(ws.selected).filter((k) => ws.selected[k]);
   }
 
+  // A legend swatch (`legend_for`, keys "legend:<aes>:<value>") is not data:
+  // clicking it selects its series and styles the swatch, but its own key
+  // never leaves the widget (VW-73).
+  function isSwatch(k: string): boolean {
+    const m = ws.meta[k];
+    return (m != null && m.legend_for != null) || k.lastIndexOf("legend:", 0) === 0;
+  }
+
+  // The data keys a selection stands for when it leaves the widget: the
+  // selected keys without legend swatches (VW-73), and each multi-row mark (a
+  // line series) as the rows it draws (X-15), so a linked table or scatter
+  // sees the whole series, not only its first row. Such a mark's own key is a
+  // series key, not a row (vellumplot's "<first row>\u241fs<layer>"), so it
+  // never goes out itself.
+  function dataKeys(keys: string[]): string[] {
+    const out: string[] = [];
+    const seen: Record<string, boolean> = {};
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      if (isSwatch(k)) continue;
+      const rk = ws.rowKeysOf[k];
+      if (!rk) {
+        if (!seen[k]) { seen[k] = true; out.push(k); }
+        continue;
+      }
+      for (let r = 0; r < rk.length; r++) if (!seen[rk[r]]) { seen[rk[r]] = true; out.push(rk[r]); }
+    }
+    return out;
+  }
+
+  // Incoming data keys (a linked view, crosstalk, vw_select()) as this
+  // widget's marks: each key, plus every multi-row mark that draws that row
+  // (X-15), so selecting row r3 elsewhere selects the line through it.
+  function markKeys(keys: string[]): string[] {
+    let any = false;
+    for (const _ in ws.rowOwners) { any = true; break; }
+    if (!any) return keys;
+    const out = keys.slice();
+    const seen: Record<string, boolean> = {};
+    for (let i = 0; i < keys.length; i++) seen[keys[i]] = true;
+    for (let i = 0; i < keys.length; i++) {
+      const own = ws.rowOwners[keys[i]];
+      if (!own) continue;
+      for (let j = 0; j < own.length; j++) if (!seen[own[j]]) { seen[own[j]] = true; out.push(own[j]); }
+    }
+    return out;
+  }
+
   // Publish the current selection to linked views (own bus + crosstalk). Called
   // only from local mutations; the incoming appliers below never broadcast, so
-  // there is no feedback loop.
+  // there is no feedback loop. Shiny, the bus and crosstalk all get the same
+  // data keys (`dataKeys()`): no legend swatch (VW-73), a line as its rows.
   function broadcast(): void {
-    const keys = selectedKeys();
+    const keys = dataKeys(selectedKeys());
     if (ws.group) busPublish(ws.group, ws.selfToken, keys);
     if (ws.ctSel) ws.ctSel.set(keys);
     shinyInput("selected", keys); // deduped state -> input$<id>_selected
@@ -76,6 +125,7 @@ export function selectionFeature(
   }
 
   function setSelection(keys: string[]): void {
+    keys = markKeys(keys);
     ws.selected = {};
     for (let i = 0; i < keys.length; i++) ws.selected[keys[i]] = true;
     refreshSelected();
@@ -94,11 +144,14 @@ export function selectionFeature(
   // A selection arriving from a linked view — apply WITHOUT re-broadcasting to
   // the JS bus (feedback-loop guard), but still surface it to Shiny so the
   // server sees this widget's true current selection regardless of source.
-  function applyLinkedSelection(keys: string[]): void {
+  // Shiny hears the data keys that arrived (no swatch key, VW-73), not the
+  // series keys they selected here.
+  function applyLinkedSelection(incoming: string[]): void {
+    const keys = markKeys(incoming);
     ws.selected = {};
     for (let i = 0; i < keys.length; i++) ws.selected[keys[i]] = true;
     refreshSelected();
-    shinyInput("selected", selectedKeys());
+    shinyInput("selected", dataKeys(incoming));
   }
 
   // Cross-filter (display tier): hide keyed elements whose key is not in the
@@ -107,20 +160,41 @@ export function selectionFeature(
   // vw_filter() set, so they stay put (VW-67). Legend hide/mute keeps working
   // on them through its own sets. A swatch whose whole series is filtered out
   // is dimmed and inert (`emptySwatchSet`): hovering or clicking it is a no-op.
-  function applyFilter(showKeys: string[] | null): void {
+  // A multi-row mark (a line series, keyed by its first row) stays while any
+  // row it draws is shown (X-15). `byKey` (filter_by(), whose show set lists
+  // element keys, not rows) turns that off.
+  //
+  // Raster mode without a display list (above `max_marks`, or an older vellum)
+  // can't take marks off its image, so a filter there changes nothing: the
+  // marks stay visible and pickable, as filter_by() leaves them (VW-71),
+  // rather than drawn but dead to the pointer.
+  function applyFilter(showKeys: string[] | null, byKey?: boolean): void {
     ws.calib = null; // the set of measurable (non-inert) marks changed
     ws.fx.clearClass("vellumwidget-filtered");
     ws.fx.clearClass("vellumwidget-legend-empty");
     ws.filteredKeySet = {};
     ws.emptySwatchSet = {};
-    if (showKeys != null) {
+    if (showKeys != null && !(ws.rasterMode && !ws.dl)) {
       const show: Record<string, boolean> = {};
       for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
+      const anyShown = function (rk: string[]): boolean {
+        for (let r = 0; r < rk.length; r++) if (show[rk[r]]) return true;
+        return false;
+      };
+      // Hiding goes by key, and a line shares its first row's key with a
+      // point layer keyed by the same `data_id`: a key stays while any of
+      // its elements is shown, so a kept series never vanishes with that row.
+      const kept: Record<string, boolean> = {};
+      for (let i = 0; i < ws.elements.length; i++) {
+        const e = ws.elements[i];
+        const rk = ws.rowKeysOf[e.key];
+        if (show[e.key] || (!byKey && rk && anyShown(rk))) kept[e.key] = true;
+      }
       for (let i = 0; i < ws.elements.length; i++) {
         const e = ws.elements[i];
         if (e.legend_for != null) continue;
         const key = e.key;
-        if (!show[key]) {
+        if (!kept[key] && !ws.filteredKeySet[key]) {
           ws.fx.addClassForKeys([key], "vellumwidget-filtered");
           ws.filteredKeySet[key] = true;
         }

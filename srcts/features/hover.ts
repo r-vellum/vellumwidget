@@ -2,6 +2,7 @@
 // tooltip (placement, delay, sticky).
 
 import { SVGNS, TIP_MULTI_CAP } from "./constants";
+import { shownKey } from "../dom";
 import { hasBbox } from "../geometry";
 import type { WidgetFns, WidgetState } from "../state";
 import { sanitizeTip } from "../tooltip";
@@ -217,7 +218,7 @@ export function hoverFeature(
 
   function showTip(clientX: number, clientY: number, k: string): void {
     const m = ws.meta[k];
-    revealTip(() => { ws.tip.innerHTML = sanitizeTip((m && m.tooltip) || k); }, clientX, clientY, k);
+    revealTip(() => { ws.tip.innerHTML = sanitizeTip((m && m.tooltip) || shownKey(k)); }, clientX, clientY, k);
   }
 
   function showTipMulti(clientX: number, clientY: number, keys: string[]): void {
@@ -225,7 +226,7 @@ export function hoverFeature(
       const rows: string[] = [];
       for (let i = 0; i < keys.length && rows.length < TIP_MULTI_CAP; i++) {
         const m = ws.meta[keys[i]];
-        rows.push(sanitizeTip((m && m.tooltip) || keys[i]));
+        rows.push(sanitizeTip((m && m.tooltip) || shownKey(keys[i])));
       }
       if (keys.length > TIP_MULTI_CAP) rows.push("…");
       ws.tip.innerHTML = rows.join("<br>");

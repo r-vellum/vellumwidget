@@ -256,6 +256,15 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     }
   }
 
+  // Add `vals` to `into[key]`, keeping each value once (X-15).
+  function unionInto(into: Record<string, string[]>, key: string, vals: string[]): void {
+    const cur = into[key];
+    if (!cur) { into[key] = vals.slice(); return; }
+    const seen: Record<string, boolean> = {};
+    for (let i = 0; i < cur.length; i++) seen[cur[i]] = true;
+    for (let i = 0; i < vals.length; i++) if (!seen[vals[i]]) { seen[vals[i]] = true; cur.push(vals[i]); }
+  }
+
   function renderValue(x: Payload) {
     ws.opts = Object.assign(
       // Interactive-by-default: hover/select/brush/lasso/zoom and axis-aware
@@ -290,6 +299,9 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     ws.condTagVals = {};
     ws.filtSelElems = {};
     ws.joinOf = {};
+    ws.rowOwners = {};
+    ws.rowKeysOf = {};
+    ws.rowJoinsOf = {};
     ws.lastHoverKeys = [];
     ws.hoverSig = "";
     ws.calib = null;
@@ -332,6 +344,15 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
         }
       }
       if (e.legend_for != null) (ws.legendSwatch[e.legend_for] = ws.legendSwatch[e.legend_for] || []).push(e.key);
+      if (e.row_keys) {
+        for (let r = 0; r < e.row_keys.length; r++) {
+          const rk = e.row_keys[r];
+          const own = ws.rowOwners[rk] || (ws.rowOwners[rk] = []);
+          if (own.indexOf(e.key) < 0) own.push(e.key);
+        }
+        unionInto(ws.rowKeysOf, e.key, e.row_keys);
+      }
+      if (e.row_joins) unionInto(ws.rowJoinsOf, e.key, e.row_joins);
     }
     // A declared select_neighbours() selection turns on graph-neighbourhood
     // projection in linkedKeys / selectionMembers.

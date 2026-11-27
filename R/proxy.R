@@ -14,13 +14,20 @@
 #' proxy invisibly, so calls chain with the pipe.
 #'
 #' \describe{
-#'   \item{[vw_select()]}{Replace the widget's selection with `keys` (the element
-#'     `data_id`s). Selecting projects across a mark's `hover_group` and
+#'   \item{[vw_select()]}{Replace the widget's selection with `keys` (the
+#'     element `data_id`s; a key of any row of a line series selects that
+#'     series). Selecting projects across a mark's `hover_group` and
 #'     propagates to any linked / crosstalk widgets, exactly as a user click
-#'     would, and updates `input$<id>_selected`.}
+#'     would, and updates `input$<id>_selected`, which reports the same keys
+#'     crosstalk gets: a selected line series as all its rows, never a legend
+#'     swatch.}
 #'   \item{[vw_clear_selection()]}{Clear the selection.}
 #'   \item{[vw_filter()]}{Cross-filter: show only the elements whose key is in
-#'     `keys` and dim/hide the rest (display tier --- the data is untouched).}
+#'     `keys` and dim/hide the rest (display tier --- the data is untouched).
+#'     A line, path or polygon series stays while any of its rows is in
+#'     `keys`. In raster mode without the display list (see
+#'     [render_options()]) the filter changes nothing: the marks stay visible
+#'     and pickable.}
 #'   \item{[vw_clear_filter()]}{Remove the filter (show everything).}
 #'   \item{[vw_zoom()]}{Zoom/pan the view to frame the elements in `keys`.}
 #'   \item{[vw_reset_zoom()]}{Restore the original (full) view.}

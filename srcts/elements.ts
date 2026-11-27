@@ -321,6 +321,35 @@ export function decodeBbox(b: NonNullable<ColumnElements["bbox"]>): {
   return { x0, y0, x1, y1 };
 }
 
+// The `row_keys` column (X-15, `.meta_row_keys()` in R): sparse `{at, v}`,
+// each entry the keys of the rows a multi-row mark (a line, path or polygon
+// series) draws, as tokens -- a key, or a run `[prefix, first, count]` that
+// stands for prefix + first, prefix + (first + 1), ... Returns one key array
+// per element (null where the element has none), or null when absent.
+export function decodeRowKeys(v: unknown, n: number): (string[] | null)[] | null {
+  if (v == null || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as { at?: number[] | number; v?: unknown };
+  if (o.at == null || o.v == null) return null;
+  const at = asColumn<number>(o.at);
+  const vals = Array.isArray(o.v) ? (o.v as unknown[]) : [o.v];
+  const out: (string[] | null)[] = new Array(n).fill(null);
+  for (let i = 0; i < at.length && i < vals.length; i++) {
+    const idx = at[i];
+    if (!(idx >= 0 && idx < n)) continue;
+    const toks = Array.isArray(vals[i]) ? (vals[i] as unknown[]) : [vals[i]];
+    const keys: string[] = [];
+    for (let t = 0; t < toks.length; t++) {
+      const tk = toks[t];
+      if (Array.isArray(tk) && tk.length === 3) {
+        const pre = String(tk[0]), first = Number(tk[1]), count = Number(tk[2]);
+        for (let m = 0; m < count; m++) keys.push(pre + String(first + m));
+      } else if (tk != null) keys.push(String(tk));
+    }
+    if (keys.length) out[idx] = keys;
+  }
+  return out;
+}
+
 // Reconstruct the per-element `ElemMeta[]` view the runtime uses from whichever
 // shape R sent: a columnar `ColumnElements` (the current wire format) or a legacy
 // `ElemMeta[]` (also what the empty case `[]` and the test harness use). Purely a
@@ -369,6 +398,8 @@ export function normalizeElements(raw: ElemMeta[] | ColumnElements | null | unde
   );
   const ixd = col<string>("ixd");
   const iyd = col<string>("iyd");
+  const rowKeys = decodeRowKeys(c.row_keys, n);
+  const rowJoins = decodeRowKeys(c.row_joins, n);
   const out: ElemMeta[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const e: ElemMeta = { key: String(key[i]) };
@@ -414,6 +445,8 @@ export function normalizeElements(raw: ElemMeta[] | ColumnElements | null | unde
     }
     if (ixd && ixd[i] != null) e.ixd = String(ixd[i]);
     if (iyd && iyd[i] != null) e.iyd = String(iyd[i]);
+    if (rowKeys && rowKeys[i]) e.row_keys = rowKeys[i]!;
+    if (rowJoins && rowJoins[i]) e.row_joins = rowJoins[i]!;
     out[i] = e;
   }
   return out;

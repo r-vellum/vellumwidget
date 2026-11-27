@@ -1,7 +1,7 @@
 // Pointer interaction: hover, brush / lasso / pan drags, touch pinch-zoom,
 // click, double click, wheel and keyboard.
 
-import { DRAG_THRESHOLD, keyOf } from "../dom";
+import { DRAG_THRESHOLD, keyOf, shownKey } from "../dom";
 import { SVGNS } from "./constants";
 import { polyBounds } from "../spatial";
 import type { WidgetFns, WidgetState } from "../state";
@@ -82,7 +82,7 @@ export function pointerFeature(
     }
     // The `hover` input reports the primary (nearest) mark in every mode, so the
     // Shiny read-back contract is unchanged; unified mode adds the shared box.
-    ws.fx.shinyInput("hover", k); // deduped -> re-fires only when the hovered key changes
+    ws.fx.shinyInput("hover", shownKey(k)); // deduped -> re-fires only when the hovered key changes
     ws.hovering = true;
     ws.fx.setHoverKeys(keys);
     if (ws.opts.crosshair) ws.fx.drawCrosshair(k, unified ? hm : "closest");
@@ -297,7 +297,7 @@ export function pointerFeature(
     if (k != null && ws.emptySwatchSet[k]) return;
     // A click is a discrete event (fires every time, even on the same mark);
     // `key` is null for an empty-space click.
-    ws.fx.shinyInput("click", { key: k }, { priority: "event" });
+    ws.fx.shinyInput("click", { key: shownKey(k) }, { priority: "event" });
     // Click-to-source: surface the data rows behind the clicked grob (keyed by
     // its data-vellum-id, which the SVG already carries). Opt-in via the plot's
     // inspect_source(); a no-op otherwise and on empty space / in raster mode
