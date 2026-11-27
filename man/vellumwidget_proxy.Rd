@@ -34,12 +34,16 @@ proxy invisibly, so calls chain with the pipe.
 
 \describe{
 \item{\code{\link[=vw_select]{vw_select()}}}{Replace the widget's selection with \code{keys} (the element
-\code{data_id}s). Selecting projects across a mark's \code{hover_group} and
+\code{data_id}s; a key of any row of a line series selects that series). Selecting projects across a mark's \code{hover_group} and
 propagates to any linked / crosstalk widgets, exactly as a user click
 would, and updates \verb{input$<id>_selected}.}
 \item{\code{\link[=vw_clear_selection]{vw_clear_selection()}}}{Clear the selection.}
 \item{\code{\link[=vw_filter]{vw_filter()}}}{Cross-filter: show only the elements whose key is in
-\code{keys} and dim/hide the rest (display tier --- the data is untouched).}
+\code{keys} and dim/hide the rest (display tier --- the data is untouched).
+A line, path or polygon series stays while any of its rows is in
+\code{keys}. In raster mode without the display list (see
+\code{\link[=render_options]{render_options()}}) the filter changes nothing: the marks stay visible
+and pickable.}
 \item{\code{\link[=vw_clear_filter]{vw_clear_filter()}}}{Remove the filter (show everything).}
 \item{\code{\link[=vw_zoom]{vw_zoom()}}}{Zoom/pan the view to frame the elements in \code{keys}.}
 \item{\code{\link[=vw_reset_zoom]{vw_reset_zoom()}}}{Restore the original (full) view.}

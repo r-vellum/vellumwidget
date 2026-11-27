@@ -46,6 +46,9 @@ export interface WidgetState {
   condTagVals: Record<string, (string | null)[] | null>;
   filtSelElems: Record<string, string[]>; // filter selection -> keys of its target view
   joinOf: Record<string, string>; // key -> cross-view join id (compositions)
+  // X-15: row key -> the keys of the multi-row marks (line, path, polygon
+  // series) that draw that row, from their `row_keys`. Empty without any.
+  rowOwners: Record<string, string[]>;
   lastHoverKeys: string[];
   // What the last full pointer-hover pass drew: the hover mode, the primary key
   // and the highlighted set, joined. A move that resolves to the same signature
@@ -398,6 +401,7 @@ export function createState(el: HTMLElement): WidgetState {
     condTagVals: {},
     filtSelElems: {},
     joinOf: {},
+    rowOwners: {},
     lastHoverKeys: [],
     hoverSig: "",
     hovering: false,

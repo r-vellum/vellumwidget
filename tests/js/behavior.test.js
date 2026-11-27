@@ -638,6 +638,126 @@ ok(!elL.querySelector('[data-key="q1"]').classList.contains("vellumwidget-select
   ok(!qh("legend:color:t").classList.contains("vellumwidget-legend-off"), "VW-67: under legend_click = 'hide' an emptied swatch's click is a no-op");
 }
 
+// ===================== X-15: a line series under a cross-filter / linked selection =====================
+{
+  // three line series keyed by their first row (r1, r11, r21), each listing its
+  // rows; plus a point layer sharing the data_id (its r1 shares the a line's key)
+  const T = window.__vellumwidgetTest;
+  const rk = (lo, hi) => { const o = []; for (let i = lo; i <= hi; i++) o.push("r" + i); return o; };
+  const dec = T && T.decodeRowKeys;
+  ok(typeof dec === "function", "X-15: decodeRowKeys is exposed for tests");
+  if (dec) {
+    const d = dec({ at: [0, 2], v: [[["r", 1, 3], "x"], [["p1-1:l2:", 9, 2]]] }, 3);
+    ok(JSON.stringify(d) === JSON.stringify([["r1", "r2", "r3", "x"], null, ["p1-1:l2:9", "p1-1:l2:10"]]),
+      "X-15: row-key runs decode to their keys (" + JSON.stringify(d) + ")");
+    const one = dec({ at: 1, v: [[["r", 11, 2]]] }, 2);
+    ok(one && one[0] === null && JSON.stringify(one[1]) === '["r11","r12"]', "X-15: a lone entry (unboxed at) decodes");
+  }
+  function mountLines(group, extra) {
+    return mount({
+      svg:
+        '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
+        '<path data-key="r1" d="M1 1L30 1" class="la"/><path data-key="r11" d="M1 10L30 10"/><path data-key="r21" d="M1 20L30 20"/>' +
+        (extra ? '<circle data-key="r1" cx="1" cy="1" r="1" class="pa"/><circle data-key="r5" cx="12" cy="1" r="1"/>' : "") +
+        "</svg>",
+      elements: {
+        key: ["r1", "r11", "r21"].concat(extra ? ["r1", "r5"] : []),
+        mark: ["line", "line", "line"].concat(extra ? ["point", "point"] : []),
+        x0: [1, 1, 1].concat(extra ? [0, 11] : []), y0: [0, 9, 19].concat(extra ? [0, 0] : []),
+        x1: [30, 30, 30].concat(extra ? [2, 13] : []), y1: [2, 11, 21].concat(extra ? [2, 2] : []),
+        row_keys: { at: [0, 1, 2], v: [[["r", 1, 10]], [["r", 11, 10]], [["r", 21, 10]]] }
+      },
+      options: { tooltip: true, hover: true, select: true, nearest: false, selectMode: "multiple", crosstalk: group }
+    });
+  }
+  const el = mountLines("X15");
+  const q = (k) => el.querySelector('[data-key="' + k + '"]');
+  const filt = new window.crosstalk.FilterHandle("X15");
+  filt.set(["r2", "r3", "r4", "r5", "r11", "r12", "r13"]);
+  ok(!q("r1").classList.contains("vellumwidget-filtered"), "X-15: a filter keeping r2-r5 keeps the a line (keyed by its dropped first row)");
+  ok(!q("r11").classList.contains("vellumwidget-filtered"), "X-15: a filter keeping r11-r13 keeps the b line");
+  ok(q("r21").classList.contains("vellumwidget-filtered"), "X-15: a line none of whose rows is kept is hidden");
+  filt.set(["r21", "r22"]);
+  ok(q("r1").classList.contains("vellumwidget-filtered") && q("r11").classList.contains("vellumwidget-filtered") &&
+     !q("r21").classList.contains("vellumwidget-filtered"), "X-15: a filter keeping r21-r22 keeps only the c line");
+  filt.set(["r30"]);
+  ok(!q("r21").classList.contains("vellumwidget-filtered"), "X-15: a filter keeping only a series' last row keeps it");
+  filt.set(null);
+  // linked selection: a row in a peer selects the line through it; a selected
+  // line goes out as all its rows
+  const peer = new window.crosstalk.SelectionHandle("X15");
+  let sent = null;
+  peer.on("change", (e) => { if (e.sender !== peer) sent = e.value; });
+  peer.set(["r13"]);
+  ok(q("r11").classList.contains("vellumwidget-selected") && !q("r1").classList.contains("vellumwidget-selected"),
+    "X-15: an incoming selection of row r13 selects the b line");
+  fireOn(el.querySelector("svg"), "click", q("r21"));
+  ok(sent && sent.length === 20 && sent.indexOf("r11") >= 0 && sent.indexOf("r30") >= 0 && sent.indexOf("r12") >= 0,
+    "X-15: a selected line is broadcast as every row it draws (" + (sent && sent.length) + " keys)");
+  // a point layer sharing the data_id: hiding r1's point never takes the a line with it
+  const elP = mountLines("X15b", true);
+  const qp = (k) => elP.querySelectorAll('[data-key="' + k + '"]');
+  new window.crosstalk.FilterHandle("X15b").set(["r5"]);
+  ok(!qp("r1")[0].classList.contains("vellumwidget-filtered"), "X-15: a kept line keeps its key even when its first-row point is filtered out");
+  ok(qp("r11")[0].classList.contains("vellumwidget-filtered") && !qp("r5")[0].classList.contains("vellumwidget-filtered"),
+    "X-15: the other series and kept points behave as before");
+}
+
+// ===================== VW-73: a legend swatch key never leaves the widget =====================
+{
+  const calls = [];
+  window.Shiny = { setInputValue: (iid, v, o) => calls.push({ id: iid, v: v, o: o }) };
+  HTMLWidgets.shinyMode = true;
+  const e = document.createElement("div");
+  e.id = "vw73";
+  document.body.appendChild(e);
+  const inst = widgetDef.factory(e, 100, 100);
+  inst.renderValue({
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
+      '<path data-key="p1" d="M1 1h5v5z"/><path data-key="q1" d="M20 1h5v5z"/>' +
+      '<path data-key="legend:color:s" d="M70 1h5v5z"/></svg>',
+    elements: [
+      { key: "p1", legend: ["color:s"], x0: 1, y0: 1, x1: 6, y1: 6 },
+      { key: "q1", legend: ["color:t"], x0: 20, y0: 1, x1: 25, y1: 6 },
+      { key: "legend:color:s", legend_for: "color:s", tooltip: "s", x0: 70, y0: 1, x1: 75, y1: 6 }
+    ],
+    options: { tooltip: true, hover: true, select: true, nearest: false, selectMode: "multiple", crosstalk: "VW73", group: "VW73bus" }
+  });
+  let ct = null;
+  const peer = new window.crosstalk.SelectionHandle("VW73");
+  peer.on("change", (ev) => { if (ev.sender !== peer) ct = ev.value; });
+  const sw = e.querySelector('[data-key="legend:color:s"]');
+  fireOn(e.querySelector("svg"), "click", sw, { clientX: 72, clientY: 3 });
+  ok(e.querySelector('[data-key="p1"]').classList.contains("vellumwidget-selected"), "VW-73 setup: a swatch click selects its series");
+  ok(sw.classList.contains("vellumwidget-selected"), "VW-73: the swatch keeps its own selected styling");
+  ok(JSON.stringify(ct) === '["p1"]', "VW-73: crosstalk gets the series' data keys only (" + JSON.stringify(ct) + ")");
+  const sel = calls.filter((c) => c.id === "vw73_selected").pop();
+  ok(sel && JSON.stringify(sel.v) === '["p1"]', "VW-73: input$<id>_selected carries no legend key (" + JSON.stringify(sel && sel.v) + ")");
+  HTMLWidgets.shinyMode = false;
+  delete window.Shiny;
+}
+
+// ===================== VW-71: raster mode without a display list ignores a cross-filter =====================
+{
+  const e = document.createElement("div");
+  document.body.appendChild(e);
+  const inst = widgetDef.factory(e, 120, 20);
+  inst.renderValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="20" viewBox="0 0 120 20"><image width="120" height="20" href="data:,"/></svg>',
+    elements: { key: ["k0", "k1", "k2"], x0: [0, 10, 20], y0: [0, 0, 0], x1: [4, 14, 24], y1: [4, 4, 4] },
+    options: { hover: true, select: true, nearest: true, raster: true, selectMode: "multiple", crosstalk: "VW71" }
+  });
+  new window.crosstalk.FilterHandle("VW71").set(["k0"]);
+  ok(inst._test.rasterMode() && inst._test.displayListSize() === 0, "VW-71 setup: raster mode, no display list");
+  ok(!inst._test.inert("k1") && !inst._test.inert("k2"),
+    "VW-71: a crosstalk filter leaves the (still drawn) marks pickable, as filter_by() does");
+  inst._call("filter", ["k0"]);
+  ok(!inst._test.inert("k1"), "VW-71: vw_filter() likewise");
+  inst._call("select", ["k1"]);
+  ok(e.querySelector(".vellumwidget-dim-layer").querySelectorAll("circle").length === 1, "VW-71: a filtered-out mark can still be selected");
+}
+
 // ===================== VW-69: a scene-sized widget follows the svg's height =====================
 {
   const svg69 = '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300" viewBox="0 0 900 300"><path data-key="k" d="M1 1h5v5z"/></svg>';
@@ -6645,6 +6765,18 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   const short = mountRuns({ runHrefs: ["data:image/png;base64,RUN1"] });
   ok(!short.inst._test.runsAttached() && short.inst._test.listExact() === false, "VW-30 fallback: one raster short of the runs -> unchanged");
   short.restore();
+  // VW-72: without the run rasters (more than .MAX_FLAGGED_RUNS runs, or an
+  // older vellum) a zoom with every mark in view under detail_marks never
+  // builds the detail tier, whose loop skips flagged records: the list is
+  // inexact, so the tier stays mid and the mark PNG (which draws the flagged
+  // marks) stays shown.
+  for (const o of [{ noFlagged: true }, { noRuns: true }]) {
+    const t = mountRuns(Object.assign({ detailMarks: 100 }, o));
+    t.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); t.inst._test.evalTier();
+    ok(t.inst._test.markTier() === "mid" && marksShown(t) && !t.el.querySelector(".vellumwidget-detail"),
+      "VW-72: " + Object.keys(o)[0] + ": flagged marks without run rasters keep the PNG; no detail tier drops them");
+    t.restore();
+  }
   const blend = mountRuns({ flags: [0, 36, 0, 8] });
   ok(!blend.inst._test.runsAttached() && blend.inst._test.listExact() === false, "VW-30 fallback: a blend-mode mark (flag 32) keeps the PNG path");
   blend.restore();

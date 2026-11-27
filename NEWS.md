@@ -2,6 +2,23 @@
 
 ## Bug fixes
 
+* A crosstalk filter or `vw_filter()` no longer hides a whole line series
+  because its first row was filtered out, nor keeps one whose first row
+  alone was kept. A line, path or polygon drawn from several rows (keyed by
+  its first row) now stays while any of its rows is kept. A linked selection
+  of any of its rows selects it, and selecting it sends all its rows to
+  crosstalk and linked widgets, so a linked table or scatter shows the whole
+  series. This needs a vellumplot that ships each such mark's row keys
+  (X-15); with an older one the widget behaves as before.
+* Clicking a legend swatch no longer sends the swatch's own key
+  (`"legend:color:s"`) to crosstalk, linked widgets or
+  `input$<id>_selected`. Only the series' data keys go out; the swatch still
+  shows as selected (VW-73).
+* In raster mode without the display list (more marks than
+  `render_options(max_marks)`, or an older vellum), a crosstalk filter or
+  `vw_filter()` now leaves the marks visible and pickable, as
+  `vellumplot::filter_by()` already did. The image can't hide them, and they
+  used to stay drawn but ignore hover, tooltips and clicks (VW-71).
 * A crosstalk filter (or `vw_filter()`, or a `vellumplot::filter_by()`
   cross-filter) no longer hides the legend swatches. It used to hide every
   swatch, the kept series' included, in SVG and raster mode, because swatch

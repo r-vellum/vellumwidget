@@ -564,6 +564,29 @@
     }
     return { x0, y0, x1, y1 };
   }
+  function decodeRowKeys(v, n) {
+    if (v == null || typeof v !== "object" || Array.isArray(v)) return null;
+    const o = v;
+    if (o.at == null || o.v == null) return null;
+    const at = asColumn(o.at);
+    const vals = Array.isArray(o.v) ? o.v : [o.v];
+    const out = new Array(n).fill(null);
+    for (let i = 0; i < at.length && i < vals.length; i++) {
+      const idx = at[i];
+      if (!(idx >= 0 && idx < n)) continue;
+      const toks = Array.isArray(vals[i]) ? vals[i] : [vals[i]];
+      const keys = [];
+      for (let t = 0; t < toks.length; t++) {
+        const tk = toks[t];
+        if (Array.isArray(tk) && tk.length === 3) {
+          const pre = String(tk[0]), first = Number(tk[1]), count = Number(tk[2]);
+          for (let m = 0; m < count; m++) keys.push(pre + String(first + m));
+        } else if (tk != null) keys.push(String(tk));
+      }
+      if (keys.length) out[idx] = keys;
+    }
+    return out;
+  }
   function normalizeElements(raw) {
     if (raw == null) return [];
     if (Array.isArray(raw)) return raw;
@@ -602,6 +625,7 @@
     );
     const ixd = col("ixd");
     const iyd = col("iyd");
+    const rowKeys = decodeRowKeys(c.row_keys, n);
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       const e = { key: String(key[i]) };
@@ -645,6 +669,7 @@
       }
       if (ixd && ixd[i] != null) e.ixd = String(ixd[i]);
       if (iyd && iyd[i] != null) e.iyd = String(iyd[i]);
+      if (rowKeys && rowKeys[i]) e.row_keys = rowKeys[i];
       out[i] = e;
     }
     return out;
@@ -9963,6 +9988,7 @@ void main() {
       ws.condTagVals = {};
       ws.filtSelElems = {};
       ws.joinOf = {};
+      ws.rowOwners = {};
       ws.lastHoverKeys = [];
       ws.hoverSig = "";
       ws.calib = null;
@@ -10003,6 +10029,13 @@ void main() {
           }
         }
         if (e.legend_for != null) (ws.legendSwatch[e.legend_for] = ws.legendSwatch[e.legend_for] || []).push(e.key);
+        if (e.row_keys) {
+          for (let r = 0; r < e.row_keys.length; r++) {
+            const rk = e.row_keys[r];
+            const own = ws.rowOwners[rk] || (ws.rowOwners[rk] = []);
+            if (own[own.length - 1] !== e.key) own.push(e.key);
+          }
+        }
       }
       const sels = ws.interactions && ws.interactions.selections || [];
       for (let i = 0; i < sels.length; i++) {
@@ -10222,11 +10255,56 @@ void main() {
     function selectedKeys() {
       return Object.keys(ws.selected).filter((k) => ws.selected[k]);
     }
+    function isSwatch(k) {
+      const m = ws.meta[k];
+      return m != null && m.legend_for != null || k.lastIndexOf("legend:", 0) === 0;
+    }
+    function dataKeys(keys) {
+      const out = [];
+      const seen = {};
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (isSwatch(k)) continue;
+        if (!seen[k]) {
+          seen[k] = true;
+          out.push(k);
+        }
+        const m = ws.meta[k];
+        const rk = m && m.row_keys;
+        if (!rk) continue;
+        for (let r = 0; r < rk.length; r++) if (!seen[rk[r]]) {
+          seen[rk[r]] = true;
+          out.push(rk[r]);
+        }
+      }
+      return out;
+    }
+    function markKeys(keys) {
+      let any = false;
+      for (const _ in ws.rowOwners) {
+        any = true;
+        break;
+      }
+      if (!any) return keys;
+      const out = keys.slice();
+      const seen = {};
+      for (let i = 0; i < keys.length; i++) seen[keys[i]] = true;
+      for (let i = 0; i < keys.length; i++) {
+        const own = ws.rowOwners[keys[i]];
+        if (!own) continue;
+        for (let j = 0; j < own.length; j++) if (!seen[own[j]]) {
+          seen[own[j]] = true;
+          out.push(own[j]);
+        }
+      }
+      return out;
+    }
     function broadcast() {
-      const keys = selectedKeys();
+      const own = selectedKeys().filter((k) => !isSwatch(k));
+      const keys = dataKeys(own);
       if (ws.group) busPublish(ws.group, ws.selfToken, keys);
       if (ws.ctSel) ws.ctSel.set(keys);
-      shinyInput("selected", keys);
+      shinyInput("selected", own);
     }
     function toggleSelect(k) {
       const ks = ws.fx.linkedKeys(k);
@@ -10242,6 +10320,7 @@ void main() {
       broadcast();
     }
     function setSelection(keys) {
+      keys = markKeys(keys);
       ws.selected = {};
       for (let i = 0; i < keys.length; i++) ws.selected[keys[i]] = true;
       refreshSelected();
@@ -10255,6 +10334,7 @@ void main() {
       if (hadInterval) shinyInput("brush", null, { priority: "event" });
     }
     function applyLinkedSelection(keys) {
+      keys = markKeys(keys);
       ws.selected = {};
       for (let i = 0; i < keys.length; i++) ws.selected[keys[i]] = true;
       refreshSelected();
@@ -10266,14 +10346,23 @@ void main() {
       ws.fx.clearClass("vellumwidget-legend-empty");
       ws.filteredKeySet = {};
       ws.emptySwatchSet = {};
-      if (showKeys != null) {
+      if (showKeys != null && !(ws.rasterMode && !ws.dl)) {
         const show = {};
         for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
+        const anyShown = function(rk) {
+          for (let r = 0; r < rk.length; r++) if (show[rk[r]]) return true;
+          return false;
+        };
+        const kept = {};
+        for (let i = 0; i < ws.elements.length; i++) {
+          const e = ws.elements[i];
+          if (show[e.key] || e.row_keys && anyShown(e.row_keys)) kept[e.key] = true;
+        }
         for (let i = 0; i < ws.elements.length; i++) {
           const e = ws.elements[i];
           if (e.legend_for != null) continue;
           const key = e.key;
-          if (!show[key]) {
+          if (!kept[key] && !ws.filteredKeySet[key]) {
             ws.fx.addClassForKeys([key], "vellumwidget-filtered");
             ws.filteredKeySet[key] = true;
           }
@@ -10803,6 +10892,7 @@ void main() {
       condTagVals: {},
       filtSelElems: {},
       joinOf: {},
+      rowOwners: {},
       lastHoverKeys: [],
       hoverSig: "",
       hovering: false,
@@ -11244,6 +11334,7 @@ void main() {
     idSelector,
     findWidgetById,
     normalizeElements,
+    decodeRowKeys,
     decodeBbox,
     isZoomedIn,
     userToCanvas,

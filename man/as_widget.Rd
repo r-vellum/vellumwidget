@@ -116,7 +116,14 @@ links correctly even across differently-sized plots (e.g. small multiples).}
 string) to link this widget with the crosstalk ecosystem (plotly, leaflet,
 DT, and crosstalk's \verb{filter_*} inputs). The widget's \code{data_id}s must match the
 SharedData's keys. A crosstalk filter hides the non-matching elements
-(display-tier cross-filter). Requires the crosstalk package.}
+(display-tier cross-filter). A line, path or polygon series drawn from
+several rows stays while any of its rows is kept; a selection of any of
+its rows selects it, and selecting it sends all its rows to the linked
+views. A legend swatch's own key is never sent. In raster mode without
+the display list (an older vellum, or more marks than
+\code{render_options(max_marks)}), the image can't hide marks, so a filter
+leaves them all visible and pickable, as \code{vellumplot::filter_by()} does.
+Requires the crosstalk package.}
 
 \item{select_mode}{\code{"multiple"} (default; click toggles each element) or
 \code{"single"} (click replaces the selection).}

@@ -107,7 +107,14 @@
 #'   string) to link this widget with the crosstalk ecosystem (plotly, leaflet,
 #'   DT, and crosstalk's `filter_*` inputs). The widget's `data_id`s must match the
 #'   SharedData's keys. A crosstalk filter hides the non-matching elements
-#'   (display-tier cross-filter). Requires the crosstalk package.
+#'   (display-tier cross-filter). A line, path or polygon series drawn from
+#'   several rows stays while any of its rows is kept; a selection of any of
+#'   its rows selects it, and selecting it sends all its rows to the linked
+#'   views. A legend swatch's own key is never sent. In raster mode without
+#'   the display list (an older vellum, or more marks than
+#'   `render_options(max_marks)`), the image can't hide marks, so a filter
+#'   leaves them all visible and pickable, as `vellumplot::filter_by()` does.
+#'   Requires the crosstalk package.
 #' @param render How the marks are drawn, from [render_options()]: per-element
 #'   SVG or a single raster image (`mode`), the element count at which `"auto"`
 #'   switches to the image (`raster_threshold`), and how SVG text is written
@@ -833,7 +840,12 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     join = meta_col("join"),
     # Continuous colorbar filter value, kept numeric so the runtime can
     # range-test it.
-    filter_value = .meta_num(field("filter_value"))
+    filter_value = .meta_num(field("filter_value")),
+    # The row keys a multi-row mark (a line, path or polygon series) draws
+    # (X-15): vellum keys it by its first row, so a crosstalk filter or
+    # selection matches its other rows through these. Sparse, each element's
+    # keys as integer runs (`.meta_row_keys()`).
+    row_keys = .meta_row_keys(field("row_keys"))
   )
   # Interval-selection data values (from a vellumplot `select_interval()`): the
   # element's value on each brushed position channel -- numeric `ix`/`iy` (with
@@ -904,7 +916,8 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   keys <- cols$key
   kpos <- .key_int_pos(keys)
   cols$key <- .encode_keys(keys, kpos)
-  for (f in setdiff(names(cols), c("key", "bbox"))) {
+  # `row_keys` is already in its compact form (`.meta_row_keys()`).
+  for (f in setdiff(names(cols), c("key", "bbox", "row_keys"))) {
     v <- cols[[f]]
     # `cond_value` (VW-46): one CSS colour (or opacity) column per tag, each
     # encoded as a column of its own (a tag on few elements goes sparse).
@@ -1443,6 +1456,61 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   out <- rep(NA_character_, length(v))
   out[set] <- as.character(transform(as.character(v[set])))
   out
+}
+
+# The `row_keys` meta field (X-15): for each multi-row mark, the keys of the
+# rows it draws. Few elements carry it (one per line series) but each can hold
+# many keys, so it ships sparse, `{at, v}` (0-based element indices and their
+# entries), and each entry compacts its keys into runs (`.compact_row_keys()`).
+# NULL when no element carries it.
+.meta_row_keys <- function(v) {
+  if (is.null(v) || !is.list(v)) {
+    return(NULL)
+  }
+  set <- which(lengths(v) > 0L)
+  if (!length(set)) {
+    return(NULL)
+  }
+  list(
+    at = set - 1L,
+    v = lapply(v[set], function(k) .compact_row_keys(as.character(k)))
+  )
+}
+
+# One element's row keys as a list of tokens: a run of keys that share a text
+# prefix and count up by one from an integer suffix is `list(prefix, first,
+# count)` ("r1".."r10" -> ["r", 1, 10]); any other key is itself, a string.
+# The runtime expands each run to `paste0(prefix, first + 0:(count - 1))`, so
+# a suffix is only taken when that gives back the key exactly (no leading
+# zero, at most 9 digits).
+.compact_row_keys <- function(k) {
+  k <- k[!is.na(k)]
+  n <- length(k)
+  if (!n) {
+    return(list())
+  }
+  m <- regexpr("(0|[1-9][0-9]{0,8})$", k)
+  num <- rep(NA_real_, n)
+  pre <- rep(NA_character_, n)
+  hit <- m > 0L
+  num[hit] <- as.numeric(substring(k[hit], m[hit]))
+  pre[hit] <- substring(k[hit], 1L, m[hit] - 1L)
+  # a new run starts wherever a key does not continue the previous one
+  cont <- c(
+    FALSE,
+    hit[-1L] &
+      hit[-n] &
+      pre[-1L] == pre[-n] &
+      num[-1L] == num[-n] + 1
+  )
+  cont[is.na(cont)] <- FALSE
+  start <- which(!cont)
+  len <- diff(c(start, n + 1L))
+  lapply(seq_along(start), function(r) {
+    i <- start[[r]]
+    # (a key without a suffix never continues a run, so its run is itself)
+    if (len[[r]] < 2L) k[[i]] else list(pre[[i]], num[[i]], len[[r]])
+  })
 }
 
 # One numeric meta field (`NA` where absent or empty), or NULL when no element

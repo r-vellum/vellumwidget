@@ -273,3 +273,81 @@ test_that("two legend aesthetics no longer ship the list form in raster mode (VW
   expect_false(is.null(lg$levels))
   expect_true(all(lengths(lg$levels) == 2L))
 })
+
+test_that("row keys compact into integer runs (X-15)", {
+  expand <- function(toks) {
+    unlist(lapply(toks, function(t) {
+      if (is.list(t)) paste0(t[[1]], t[[2]] + seq_len(t[[3]]) - 1) else t
+    }))
+  }
+  k <- c(
+    paste0("r", 1:10),
+    "x",
+    "r007",
+    "r008",
+    "p1-1:l2:9",
+    "p1-1:l2:10",
+    "r5",
+    "r5",
+    "r123456789",
+    "r1234567890"
+  )
+  toks <- .compact_row_keys(k)
+  expect_identical(expand(toks), k)
+  expect_identical(toks[[1]], list("r", 1, 10L))
+  expect_identical(toks[[2]], "x")
+  expect_identical(.compact_row_keys(character()), list())
+  # each run is exact: no leading zeros, at most 9 digits
+  odd <- c("a0", "a1", "a01", "a02", "b999999999", "b1000000000")
+  expect_identical(expand(.compact_row_keys(odd)), odd)
+
+  # sparse over the elements: only multi-row marks carry it
+  rk <- .meta_row_keys(list(NULL, paste0("r", 11:20), NULL, c("a", "b")))
+  expect_identical(rk$at, c(1L, 3L))
+  expect_identical(rk$v[[1]], list(list("r", 11, 10L)))
+  expect_identical(rk$v[[2]], list("a", "b"))
+  expect_null(.meta_row_keys(list(NULL, NULL)))
+  expect_null(.meta_row_keys(NULL))
+  json <- as.character(htmlwidgets:::toJSON(rk))
+  expect_identical(json, '{"at":[1,3],"v":[[["r",11,10]],["a","b"]]}')
+})
+
+test_that("a line series ships the keys of the rows it draws (X-15)", {
+  skip_if_not_installed("vellumplot")
+  d <- data.frame(
+    id = paste0("r", 1:30),
+    t = rep(1:10, 3),
+    y = sin(1:30),
+    g = rep(c("a", "b", "c"), each = 10)
+  )
+  p <- vellumplot::mark_line(
+    vellumplot::vplot(d),
+    x = t,
+    y = y,
+    color = g,
+    data_id = id
+  )
+  model <- vellum::scene_model(vellum::as_vellum_scene(p), meta = "columns")
+  skip_if(
+    !"row_keys" %in% names(model$elements$meta),
+    "vellumplot without row_keys (X-15)"
+  )
+  for (mode in c("svg", "raster")) {
+    w <- as_widget(p, render = render_options(mode = mode))
+    rk <- w$x$elements$row_keys
+    expect_false(is.null(rk), info = mode)
+    keys <- if (is.list(w$x$elements$key)) NULL else w$x$elements$key
+    if (!is.null(keys)) {
+      expect_identical(keys[rk$at + 1L], c("r1", "r11", "r21"))
+    }
+    expect_identical(
+      rk$v,
+      list(
+        list(list("r", 1, 10L)),
+        list(list("r", 11, 10L)),
+        list(list("r", 21, 10L))
+      ),
+      info = mode
+    )
+  }
+})

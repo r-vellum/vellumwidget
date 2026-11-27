@@ -290,6 +290,7 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     ws.condTagVals = {};
     ws.filtSelElems = {};
     ws.joinOf = {};
+    ws.rowOwners = {};
     ws.lastHoverKeys = [];
     ws.hoverSig = "";
     ws.calib = null;
@@ -332,6 +333,13 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
         }
       }
       if (e.legend_for != null) (ws.legendSwatch[e.legend_for] = ws.legendSwatch[e.legend_for] || []).push(e.key);
+      if (e.row_keys) {
+        for (let r = 0; r < e.row_keys.length; r++) {
+          const rk = e.row_keys[r];
+          const own = ws.rowOwners[rk] || (ws.rowOwners[rk] = []);
+          if (own[own.length - 1] !== e.key) own.push(e.key);
+        }
+      }
     }
     // A declared select_neighbours() selection turns on graph-neighbourhood
     // projection in linkedKeys / selectionMembers.
