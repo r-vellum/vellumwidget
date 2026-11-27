@@ -34,6 +34,8 @@ export const VELLUMWIDGET_CSS = `
 [data-key].vellumwidget-legend-hidden { display: none; }
 [data-key].vellumwidget-legend-muted { opacity: 0.12; }
 [data-key].vellumwidget-legend.vellumwidget-legend-off { opacity: 0.4; }
+/* A swatch whose whole series a cross-filter hides (VW-67): dimmed, and inert. */
+[data-key].vellumwidget-legend.vellumwidget-legend-empty { opacity: 0.4; cursor: default; }
 .vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
 .vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
 /* Conditional encoding (condition()): a non-member of an active selection with no

@@ -293,6 +293,8 @@ export function pointerFeature(
       k = ws.fx.nearestKeyAt(u.x, u.y, rad);
       if (k != null && ws.fx.inert(k)) k = null; // don't click-snap to a hidden/filtered mark
     }
+    // A legend swatch whose whole series is filtered out does nothing (VW-67).
+    if (k != null && ws.emptySwatchSet[k]) return;
     // A click is a discrete event (fires every time, even on the same mark);
     // `key` is null for an empty-space click.
     ws.fx.shinyInput("click", { key: k }, { priority: "event" });
@@ -365,6 +367,7 @@ export function pointerFeature(
         return;
       }
       if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
+        if (ws.emptySwatchSet[k]) { ev.preventDefault(); return; } // VW-67: nothing left to act on
         const series = ws.fx.swatchSeries(k);
         if (series != null && ws.fx.legendPolicy() !== "select") {
           ws.fx.legendToggle(series);

@@ -1347,17 +1347,21 @@ test_that("the flagged layer falls back to the PNG path when it can't be used (V
   expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
   dl$record$run <- list(type = "u8", n = 1L, const = 1)
   dl$runs <- .MAX_FLAGGED_RUNS + 1L
-  expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
+  # too many runs: NULL, with a message saying the state won't show (VW-68)
+  expect_message(
+    expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks)),
+    "will not show on any mark"
+  )
   # a blend-mode mark (flag 32) can't be composited from its own raster
   # without the run's blend mode (an older vellum), or with one the runtime
   # doesn't know (VW-32)
   dl$runs <- 1L
   dl$record$flags <- list(type = "u8", n = 1L, const = 36)
-  expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
+  expect_message(expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks)), "blend mode")
   dl$run_blend <- ""
-  expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
+  expect_message(expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks)), "blend mode")
   dl$run_blend <- "plus-lighter"
-  expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks))
+  expect_message(expect_null(.raster_flagged(.flagged_scene(), NULL, dl, marks)), "blend mode")
   expect_true(.run_blend_ok(modifyList(dl, list(run_blend = "multiply")), 1L))
   expect_true(.run_blend_ok(modifyList(dl, list(run_blend = NULL, record = list(flags = list(type = "u8", n = 1L, const = 4)))), 1L))
 })

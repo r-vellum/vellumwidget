@@ -130,11 +130,14 @@ navigator_options <- function(height = 56) {
 #'   drawn on a canvas from the list. With a current vellum this includes
 #'   gradient fills, clip paths and grouped (opacity) marks, which the list
 #'   draws itself, and the marks it flags (masks, effects, hatches, patterns,
-#'   text, gradient strokes), which are restyled from their own SVG. Flagged
-#'   marks interleaved with the rest more than 8 times, or whose SVG would
-#'   exceed 4 MB, keep their own look under these states. Without the list (an older vellum, or
-#'   more marks than `max_marks`) the marks are a fixed image: these states do
-#'   not show on them, and there is no detail tier.
+#'   text, gradient strokes), which are restyled from their own SVG. If that
+#'   SVG would exceed 4 MB, the flagged marks keep their own look under these
+#'   states while the other marks follow them. If the flagged marks are
+#'   interleaved with the rest more than 8 times, or use a blend mode the
+#'   browser can't composite on its own, all the marks stay one image: these
+#'   states show on none of them, at any zoom, and there is no detail tier
+#'   (the widget says so with a message). The same holds without the list (an
+#'   older vellum, or more marks than `max_marks`).
 #' @param raster_threshold Keyed-element count above which `mode = "auto"`
 #'   switches to the raster image (default `20000`).
 #' @param max_marks In raster mode with a vellum that has the marks-only display

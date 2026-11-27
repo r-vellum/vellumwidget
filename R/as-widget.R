@@ -2089,12 +2089,18 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     return(NULL)
   }
   runs <- dl$runs
-  if (
-    is.null(runs) ||
-      is.null(dl$record$run) ||
-      runs < 1L ||
-      runs > .MAX_FLAGGED_RUNS
-  ) {
+  if (is.null(runs) || is.null(dl$record$run) || runs < 1L) {
+    return(NULL)
+  }
+  # Too many runs, or (below) a run that can't be composited: the list stays
+  # inexact, so the marks stay one image and per-key state reaches none of
+  # them. Say so, as the too-big-SVG path below does.
+  if (runs > .MAX_FLAGGED_RUNS) {
+    .inform_flagged_inexact(sprintf(
+      "Its masked, patterned or blended marks and text are interleaved with the others in %d stretches (more than %d).",
+      runs,
+      .MAX_FLAGGED_RUNS
+    ))
     return(NULL)
   }
   # A mark under a blend mode (flag 32) mixes with what is beneath it. Its
@@ -2102,6 +2108,9 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
   # composite it only with the run's blend mode: with a vellum that reports
   # it (`run_blend`, VW-32) and a mode it knows. Otherwise keep the PNG path.
   if (!.run_blend_ok(dl, runs)) {
+    .inform_flagged_inexact(
+      "It has marks with a blend mode the browser can't composite on its own."
+    )
     return(NULL)
   }
   hrefs <- vapply(
@@ -2144,6 +2153,16 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
     width = marks$width,
     height = marks$height
   )
+}
+
+# The flagged marks can't be drawn apart from the rest (VW-68): the raster
+# marks stay one image, so per-key state shows on none of them.
+.inform_flagged_inexact <- function(why) {
+  cli::cli_inform(c(
+    "i" = "This raster widget draws its marks as one image. {why}",
+    "*" = "Conditions, filters, dimming and legend hide/mute will not show on any mark, at any zoom, and there is no detail tier.",
+    "*" = "Use {.code render_options(mode = \"svg\")} if you need them."
+  ))
 }
 
 # The CSS blend modes the runtime composites a run with (VW-32).

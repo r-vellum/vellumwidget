@@ -33,6 +33,8 @@
 [data-key].vellumwidget-legend-hidden { display: none; }
 [data-key].vellumwidget-legend-muted { opacity: 0.12; }
 [data-key].vellumwidget-legend.vellumwidget-legend-off { opacity: 0.4; }
+/* A swatch whose whole series a cross-filter hides (VW-67): dimmed, and inert. */
+[data-key].vellumwidget-legend.vellumwidget-legend-empty { opacity: 0.4; cursor: default; }
 .vellumwidget-hovering [data-key]:not(.vellumwidget-legend) { opacity: var(--vellumwidget-dim-opacity, 0.28); }
 .vellumwidget-hovering [data-key].vellumwidget-hl { opacity: 1; }
 /* Conditional encoding (condition()): a non-member of an active selection with no
@@ -5385,6 +5387,15 @@
       return out;
     }
     function linkedKeys(k) {
+      const ks = projection(k);
+      let inert = false;
+      for (let i = 0; i < ks.length; i++) if (ks[i] !== k && ws.fx.inert(ks[i])) {
+        inert = true;
+        break;
+      }
+      return inert ? ks.filter((x) => x === k || !ws.fx.inert(x)) : ks;
+    }
+    function projection(k) {
       const m = ws.meta[k];
       if (m && m.legend_for != null) return (ws.legendIndex[m.legend_for] || []).concat([k]);
       if (ws.neighbourExpand) {
@@ -7075,6 +7086,7 @@
         k = ws.fx.nearestKeyAt(u.x, u.y, rad);
         if (k != null && ws.fx.inert(k)) k = null;
       }
+      if (k != null && ws.emptySwatchSet[k]) return;
       ws.fx.shinyInput("click", { key: k }, { priority: "event" });
       if (ws.provenance && ws.provenance.on === "click") ws.fx.emitSource(ev.target);
       const series = ws.fx.swatchSeries(k);
@@ -7128,6 +7140,10 @@
           return;
         }
         if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
+          if (ws.emptySwatchSet[k]) {
+            ev.preventDefault();
+            return;
+          }
           const series = ws.fx.swatchSeries(k);
           if (series != null && ws.fx.legendPolicy() !== "select") {
             ws.fx.legendToggle(series);
@@ -9933,8 +9949,8 @@ void main() {
         ws.opts.brush = false;
         ws.opts.lasso = false;
       }
-      const hw = HTMLWidgets;
-      ws.el.classList.toggle("vellumwidget-fit", !!ws.opts.fitHeight && !hw.shinyMode);
+      const shinyOutput = ws.el.classList.contains("html-widget-output") || ws.el.classList.contains("shiny-bound-output");
+      ws.el.classList.toggle("vellumwidget-fit", !!ws.opts.fitHeight && !shinyOutput);
       ws.elements = normalizeElements(x.elements);
       ws.dl = x.options && x.options.raster && x.displayList ? decodeDisplayList(x.displayList, ws.elements.map((e) => e.key)) : null;
       ws.runSvg = null;
@@ -9961,6 +9977,7 @@ void main() {
       ws.legendOff = {};
       ws.hiddenKeySet = {};
       ws.filteredKeySet = {};
+      ws.emptySwatchSet = {};
       ws.selected = {};
       ws.lastBrush = null;
       ws.intervals = {};
@@ -10246,7 +10263,9 @@ void main() {
     function applyFilter(showKeys) {
       ws.calib = null;
       ws.fx.clearClass("vellumwidget-filtered");
+      ws.fx.clearClass("vellumwidget-legend-empty");
       ws.filteredKeySet = {};
+      ws.emptySwatchSet = {};
       if (showKeys != null) {
         const show = {};
         for (let i = 0; i < showKeys.length; i++) show[showKeys[i]] = true;
@@ -10259,11 +10278,18 @@ void main() {
             ws.filteredKeySet[key] = true;
           }
         }
+        for (const s in ws.legendSwatch) {
+          const members = ws.legendIndex[s] || [];
+          if (!members.length || !members.every((k) => ws.filteredKeySet[k])) continue;
+          const sw = ws.legendSwatch[s];
+          for (let i = 0; i < sw.length; i++) ws.emptySwatchSet[sw[i]] = true;
+          ws.fx.addClassForKeys(sw, "vellumwidget-legend-empty");
+        }
       }
       if (ws.rasterMode) ws.fx.updateMarkStates();
     }
     function inert(k) {
-      return !!ws.hiddenKeySet[k] || !!ws.filteredKeySet[k] || !!ws.colorHiddenSet[k];
+      return !!ws.hiddenKeySet[k] || !!ws.filteredKeySet[k] || !!ws.colorHiddenSet[k] || !!ws.emptySwatchSet[k];
     }
     function dropInert(keys) {
       return keys.filter((k) => !inert(k));
@@ -10794,6 +10820,7 @@ void main() {
       legendOff: {},
       hiddenKeySet: {},
       filteredKeySet: {},
+      emptySwatchSet: {},
       elements: [],
       panels: [],
       selected: {},

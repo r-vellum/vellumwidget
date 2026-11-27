@@ -76,8 +76,17 @@ export function highlightFeature(
   // series (`legend_for` -> the marks whose `legend` contains it). Under a
   // select_neighbours() preset, a graph edge drives its two endpoint nodes and a
   // graph node drives its neighbourhood. Otherwise a mark projects by its
-  // `hover_group`, else just itself.
+  // `hover_group`, else just itself. Inert keys (hidden by a filter or the
+  // legend) are left out, so a partly filtered series only touches its visible
+  // marks (VW-67); `k` itself always stays.
   function linkedKeys(k: string): string[] {
+    const ks = projection(k);
+    let inert = false;
+    for (let i = 0; i < ks.length; i++) if (ks[i] !== k && ws.fx.inert(ks[i])) { inert = true; break; }
+    return inert ? ks.filter((x) => x === k || !ws.fx.inert(x)) : ks;
+  }
+
+  function projection(k: string): string[] {
     const m = ws.meta[k];
     if (m && m.legend_for != null) return (ws.legendIndex[m.legend_for] || []).concat([k]);
     if (ws.neighbourExpand) {
