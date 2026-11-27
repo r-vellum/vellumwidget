@@ -5351,7 +5351,7 @@
       for (let i = 0; i < ws.elements.length; i++) {
         if (!hide[ws.elements[i].key]) show.push(ws.elements[i].key);
       }
-      ws.fx.applyFilter(show);
+      ws.fx.applyFilter(show, true);
       return true;
     }
     function reevaluateInteractions() {
@@ -10340,7 +10340,7 @@ void main() {
       refreshSelected();
       shinyInput("selected", selectedKeys());
     }
-    function applyFilter(showKeys) {
+    function applyFilter(showKeys, byKey) {
       ws.calib = null;
       ws.fx.clearClass("vellumwidget-filtered");
       ws.fx.clearClass("vellumwidget-legend-empty");
@@ -10356,7 +10356,7 @@ void main() {
         const kept = {};
         for (let i = 0; i < ws.elements.length; i++) {
           const e = ws.elements[i];
-          if (show[e.key] || e.row_keys && anyShown(e.row_keys)) kept[e.key] = true;
+          if (show[e.key] || !byKey && e.row_keys && anyShown(e.row_keys)) kept[e.key] = true;
         }
         for (let i = 0; i < ws.elements.length; i++) {
           const e = ws.elements[i];

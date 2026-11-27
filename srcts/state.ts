@@ -249,7 +249,7 @@ export interface WidgetFns {
   addClassForKeys: (keys: string[], cls: string) => void;
   announce: (msg: string) => void;
   applyAspect: () => void;
-  applyFilter: (showKeys: string[] | null) => void;
+  applyFilter: (showKeys: string[] | null, byKey?: boolean) => void;
   applyIntervalBrush: (rect: Bbox) => { keys: string[]; band: Bbox; fields: Record<string, unknown> } | null;
   applyLegend: () => void;
   applyScaleBinds: () => void;

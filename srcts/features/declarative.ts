@@ -230,7 +230,7 @@ export function declarativeFeature(
     for (let i = 0; i < ws.elements.length; i++) {
       if (!hide[ws.elements[i].key]) show.push(ws.elements[i].key);
     }
-    ws.fx.applyFilter(show);
+    ws.fx.applyFilter(show, true); // a show set of element keys: no row matching (X-15)
     return true;
   }
 

@@ -157,13 +157,14 @@ export function selectionFeature(
   // on them through its own sets. A swatch whose whole series is filtered out
   // is dimmed and inert (`emptySwatchSet`): hovering or clicking it is a no-op.
   // A multi-row mark (a line series, keyed by its first row) stays while any
-  // row it draws is shown (X-15).
+  // row it draws is shown (X-15). `byKey` (filter_by(), whose show set lists
+  // element keys, not rows) turns that off.
   //
   // Raster mode without a display list (above `max_marks`, or an older vellum)
   // can't take marks off its image, so a filter there changes nothing: the
   // marks stay visible and pickable, as filter_by() leaves them (VW-71),
   // rather than drawn but dead to the pointer.
-  function applyFilter(showKeys: string[] | null): void {
+  function applyFilter(showKeys: string[] | null, byKey?: boolean): void {
     ws.calib = null; // the set of measurable (non-inert) marks changed
     ws.fx.clearClass("vellumwidget-filtered");
     ws.fx.clearClass("vellumwidget-legend-empty");
@@ -182,7 +183,7 @@ export function selectionFeature(
       const kept: Record<string, boolean> = {};
       for (let i = 0; i < ws.elements.length; i++) {
         const e = ws.elements[i];
-        if (show[e.key] || (e.row_keys && anyShown(e.row_keys))) kept[e.key] = true;
+        if (show[e.key] || (!byKey && e.row_keys && anyShown(e.row_keys))) kept[e.key] = true;
       }
       for (let i = 0; i < ws.elements.length; i++) {
         const e = ws.elements[i];
