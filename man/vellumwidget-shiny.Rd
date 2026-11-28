@@ -38,13 +38,22 @@ your data by that key.
 (click / brush / keyboard, and any selection arriving from a linked widget).
 A selected line, path or polygon series reports all its rows' keys, as
 crosstalk and linked widgets get them; a legend swatch's key is never
-reported. Updates as state — re-selecting the same set is a no-op.
+reported. In a composition the keys are the marks' \code{data_id}s without
+their cell prefix. After a selection from a linked widget or crosstalk
+it holds the keys that arrived and that this widget draws (a mark's key,
+or a row of a line it draws); keys it has no mark for are left out.
+Updates as state — re-selecting the same set is a no-op.
 \code{character(0)} when nothing is selected.}
 \item{\code{input$plot_click}}{A list \code{list(key=)} for each click; \code{key} is \code{NULL}
 for a click on empty space. An event input — fires on every click, even the
 same mark twice.}
 \item{\code{input$plot_hover}}{The hovered key, or \code{NULL} when the pointer leaves a
 mark. Updates as state (re-fires only when the hovered key changes).}
+\item{Legend swatches in \verb{_click} and \verb{_hover}}{These two report the
+element under the pointer, so a click on or hover over a legend swatch
+reports the swatch's own key (\code{"legend:<aes>:<value>"}, e.g.
+\code{"legend:color:s"}). Tell it apart from a data key by that prefix.
+\verb{_selected}, crosstalk and linked widgets never carry it.}
 \item{\code{input$plot_brush}}{A list \code{list(keys=, x0=, y0=, x1=, y1=)} when a
 brush (or lasso) gesture completes: the selected keys and the region's
 bounding rectangle in the scene's device-pixel (viewBox) coordinates. A

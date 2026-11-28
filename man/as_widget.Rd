@@ -81,7 +81,10 @@ again to restore all) — the reflexive legend interaction in plotly / ECharts /
 Highcharts. \code{"mute"} is the same but dims the series instead of removing it
 (its layout is kept). Hovering a swatch still highlights its series under every
 policy. Applies only where the plot draws an interactive legend (a discrete
-\code{color} / \code{shape} scale in \code{vellumplot}).}
+\code{color} / \code{shape} scale in \code{vellumplot}). In Shiny, \verb{input$<id>_click} and
+\verb{input$<id>_hover} report the swatch's own key (\code{"legend:color:s"}), as
+they report whatever element is under the pointer; \verb{input$<id>_selected},
+crosstalk and linked widgets get only the series' data keys.}
 
 \item{a11y}{Accessibility (default \code{TRUE}). Makes the widget a keyboard- and
 screen-reader-navigable chart: the SVG is labelled as an interactive chart
@@ -123,7 +126,12 @@ any part of it) sends all its rows to the linked views and to
 \verb{input$<id>_selected}. This needs a vellumplot that lists each series'
 rows (\code{row_keys}), which it does up to 1000 runs of keys (\code{r1} to
 \code{r20000}, in any order, is one run); a series beyond that cap is matched
-by its first row only. A legend swatch's own key is never sent. In raster mode without
+by its first row only. A legend swatch's own key is never sent. In a
+composition (\code{hconcat()}, \code{vconcat()}, \code{wrap_plots()}) the widget sends
+and matches each mark's \code{data_id} as given, without the cell prefix its
+key carries (\code{"p1"}, not \code{"cell-1:p1"}), so a filter or selection reaches
+that row in every cell. A widget on both a linking \code{group} and a
+crosstalk group hears a linked vellumwidget's selection once. In raster mode without
 the display list (an older vellum, or more marks than
 \code{render_options(max_marks)}), the image can't hide marks, so a filter
 leaves them all visible and pickable, as \code{vellumplot::filter_by()} does.

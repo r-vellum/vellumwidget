@@ -18,7 +18,7 @@ export function declarativeFeature(
     ws.condTagElems = {};
     ws.condTagVals = {};
     ws.filtSelElems = {};
-    ws.joinOf = {};
+    // ws.joinOf is built with the other per-render indexes (render.ts): crosstalk needs it too
     if (!ws.interactions) return;
     // Per tag, the keys' own if_false colours (VW-46), kept only for a tag
     // where some key has one.
@@ -40,7 +40,6 @@ export function declarativeFeature(
           (ws.filtSelElems[e.filt[t]] = ws.filtSelElems[e.filt[t]] || []).push(e.key);
         }
       }
-      if (e.join != null) ws.joinOf[e.key] = e.join;
     }
     for (const tag in vals) ws.condTagVals[tag] = any[tag] ? vals[tag] : null;
   }

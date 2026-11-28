@@ -2,6 +2,24 @@
 
 ## Bug fixes
 
+* Crosstalk and linked selections now work in compositions (`hconcat()`,
+  `vconcat()`, `wrap_plots()`). A crosstalk filter used to hide every mark
+  and selections never matched, because the marks' keys carry their cell's
+  prefix (`"cell-1:p1"`). The widget now matches and sends each mark's
+  `data_id` without it, so a filter or selection of `"p1"` reaches that row
+  in every cell, and `input$<id>_selected` reports `"p1"` (VW-74).
+* In raster mode, zoomed in on a plot with marks the display list can't
+  draw itself (text, hatches, masks) and no per-run images for them (more
+  than 8 interleaved runs, or an older vellum), the sharp redraw no longer
+  paints marks over the labels drawn after them. It now redraws only marks
+  painted after every such mark and leaves the rest to the image (VW-75).
+* A widget on both a linking `group` and a crosstalk group applies a linked
+  vellumwidget's selection once instead of twice, so
+  `input$<id>_selected` no longer fires twice (VW-76).
+* After a selection from a linked widget or crosstalk,
+  `input$<id>_selected` holds only the keys this widget draws (a mark, or a
+  row of a line it draws), not every key that arrived (VW-77).
+
 * A crosstalk filter or `vw_filter()` no longer hides a whole line series
   because its first row was filtered out, nor keeps one whose first row
   alone was kept. A line, path or polygon drawn from several rows now stays
@@ -57,6 +75,10 @@
   with a message when its flagged marks (more than 8 runs, or a blend mode the
   browser can't composite) keep every mark one image, so that conditions,
   filters and legend hide/mute won't show on them (VW-68).
+* `as_widget()` and `?vellumwidget-shiny` now say that `input$<id>_click`
+  and `input$<id>_hover` report a legend swatch's own key
+  (`"legend:color:s"`) when the pointer is on the swatch, unlike
+  `input$<id>_selected` (VW-78).
 
 # vellumwidget 0.20.1
 

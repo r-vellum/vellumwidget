@@ -46,6 +46,13 @@ export interface WidgetState {
   condTagVals: Record<string, (string | null)[] | null>;
   filtSelElems: Record<string, string[]>; // filter selection -> keys of its target view
   joinOf: Record<string, string>; // key -> cross-view join id (compositions)
+  byJoin: Record<string, string[]>; // join id -> the element keys carrying it (VW-74)
+  // VW-77: the data ids the widget draws (a mark's join, else its key; a
+  // multi-row mark's row joins, else its row keys), legend swatches aside.
+  dataIds: Record<string, boolean>;
+  // VW-76: the id of the last linked selection applied, so the same message
+  // arriving over both the bus and crosstalk is applied once.
+  linkedMsg: string | null;
   // X-15: row key -> the keys of the multi-row marks (line, path, polygon
   // series) that draw that row, from their `row_keys`. Empty without any.
   rowOwners: Record<string, string[]>;
@@ -405,6 +412,9 @@ export function createState(el: HTMLElement): WidgetState {
     condTagVals: {},
     filtSelElems: {},
     joinOf: {},
+    byJoin: {},
+    dataIds: {},
+    linkedMsg: null,
     rowOwners: {},
     rowKeysOf: {},
     rowJoinsOf: {},

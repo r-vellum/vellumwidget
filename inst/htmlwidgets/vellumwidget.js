@@ -756,6 +756,7 @@
       keys: [],
       panels: asColumn(raw.panels).map(String),
       exact: true,
+      above: 0,
       group: raw.record.group ? u32(dlColumn(raw.record.group)) : new Uint32Array(n),
       run: raw.record.run ? u32(dlColumn(raw.record.run)) : new Uint32Array(n),
       nRuns: Number(raw.runs) || 0,
@@ -866,6 +867,7 @@
         dl.flags[i] |= 1;
         dl.exact = false;
       }
+      if (dl.flags[i] & ~DL_FLAG_PICK) dl.above = i + 1;
       if (dl.flags[i] & ~DL_FLAG_PICK && !(dl.run[i] > 0 && dl.run[i] <= dl.nRuns)) dl.covered = false;
       if (dl.flags[i] & DL_FLAG_BLEND && !dl.runBlend) dl.covered = false;
       const kd = kind[i];
@@ -5215,7 +5217,6 @@
       ws.condTagElems = {};
       ws.condTagVals = {};
       ws.filtSelElems = {};
-      ws.joinOf = {};
       if (!ws.interactions) return;
       const vals = {};
       const any = {};
@@ -5235,7 +5236,6 @@
             (ws.filtSelElems[e.filt[t]] = ws.filtSelElems[e.filt[t]] || []).push(e.key);
           }
         }
-        if (e.join != null) ws.joinOf[e.key] = e.join;
       }
       for (const tag in vals) ws.condTagVals[tag] = any[tag] ? vals[tag] : null;
     }
@@ -8948,6 +8948,7 @@ void main() {
         glPaths = !glWhy && glHasPaths(dl);
       }
       if (glWhy) return glWhy;
+      if (!dl.exact && dl.above > 0) return "flagged marks";
       if (ws.msActive && ws.msColor) {
         if (glStyleRev !== ws.msRev) {
           glStyleRev = ws.msRev;
@@ -9013,7 +9014,7 @@ void main() {
       const styled = ws.msActive && !!ws.msFlags && !!ws.msColor;
       const blending = dl.exact && !!dl.runImgs && dl.blendRuns;
       const raising = dl.exact && !!ws.fx.raiseOrder(dl);
-      if (!(zoomed || styled && dl.exact || blending || raising) || !dl.n) {
+      if (!(zoomed || styled && dl.exact || blending || raising) || !dl.n || !dl.exact && dl.above >= dl.n) {
         glLast = "image shown";
         hideCanvas();
         showMarksLayer(true);
@@ -9370,6 +9371,7 @@ void main() {
       let curGroup = 0;
       tgt.save();
       const ord = ws.fx.raiseOrder(dl);
+      const from = dl.exact ? 0 : dl.above;
       for (let q = 0; q < dl.n; q++) {
         const i = ord ? ord[q] : q;
         if (runImgs && dl.run[i] > 0) {
@@ -9403,6 +9405,7 @@ void main() {
           continue;
         }
         if (dl.flags[i]) continue;
+        if (i < from) continue;
         let ov = 0, alpha = 1;
         if (flags) {
           const k = dl.key[i], f = flags[k];
@@ -10025,6 +10028,9 @@ void main() {
       ws.condTagVals = {};
       ws.filtSelElems = {};
       ws.joinOf = {};
+      ws.byJoin = {};
+      ws.dataIds = {};
+      ws.linkedMsg = null;
       ws.rowOwners = {};
       ws.rowKeysOf = {};
       ws.rowJoinsOf = {};
@@ -10068,15 +10074,28 @@ void main() {
           }
         }
         if (e.legend_for != null) (ws.legendSwatch[e.legend_for] = ws.legendSwatch[e.legend_for] || []).push(e.key);
+        if (e.join != null) {
+          ws.joinOf[e.key] = e.join;
+          const js = ws.byJoin[e.join] || (ws.byJoin[e.join] = []);
+          if (js.indexOf(e.key) < 0) js.push(e.key);
+        }
+        const own = function(rk) {
+          const o = ws.rowOwners[rk] || (ws.rowOwners[rk] = []);
+          if (o.indexOf(e.key) < 0) o.push(e.key);
+        };
         if (e.row_keys) {
-          for (let r = 0; r < e.row_keys.length; r++) {
-            const rk = e.row_keys[r];
-            const own = ws.rowOwners[rk] || (ws.rowOwners[rk] = []);
-            if (own.indexOf(e.key) < 0) own.push(e.key);
-          }
+          for (let r = 0; r < e.row_keys.length; r++) own(e.row_keys[r]);
           unionInto(ws.rowKeysOf, e.key, e.row_keys);
         }
-        if (e.row_joins) unionInto(ws.rowJoinsOf, e.key, e.row_joins);
+        if (e.row_joins) {
+          for (let r = 0; r < e.row_joins.length; r++) own(e.row_joins[r]);
+          unionInto(ws.rowJoinsOf, e.key, e.row_joins);
+        }
+        if (e.legend_for == null) {
+          const rows = e.row_joins || e.row_keys;
+          if (rows) for (let r = 0; r < rows.length; r++) ws.dataIds[rows[r]] = true;
+          else ws.dataIds[e.join != null ? e.join : e.key] = true;
+        }
       }
       const sels = ws.interactions && ws.interactions.selections || [];
       for (let i = 0; i < sels.length; i++) {
@@ -10221,10 +10240,10 @@ void main() {
     }
     return live;
   }
-  function busPublish(group, sender, keys) {
+  function busPublish(group, sender, keys, msg) {
     const members = liveMembers(group);
     for (let i = 0; i < members.length; i++) {
-      if (members[i].token !== sender) members[i].onSelect(keys);
+      if (members[i].token !== sender) members[i].onSelect(keys, msg);
     }
   }
   function busPublishView(group, sender, v) {
@@ -10273,6 +10292,7 @@ void main() {
   }
 
   // srcts/features/selection.ts
+  var msgSeq = 0;
   function selectionFeature(ws) {
     function shinyInput(event, value, opts) {
       const hw = HTMLWidgets;
@@ -10300,17 +10320,25 @@ void main() {
       const m = ws.meta[k];
       return m != null && m.legend_for != null || k.lastIndexOf("legend:", 0) === 0;
     }
+    function dataId(k) {
+      const j = ws.joinOf[k];
+      return j != null ? j : k;
+    }
+    function rowIds(k) {
+      return ws.rowJoinsOf[k] || ws.rowKeysOf[k];
+    }
     function dataKeys(keys) {
       const out = [];
       const seen = {};
       for (let i = 0; i < keys.length; i++) {
         const k = keys[i];
         if (isSwatch(k)) continue;
-        const rk = ws.rowKeysOf[k];
+        const rk = rowIds(k);
         if (!rk) {
-          if (!seen[k]) {
-            seen[k] = true;
-            out.push(k);
+          const id = dataId(k);
+          if (!seen[id]) {
+            seen[id] = true;
+            out.push(id);
           }
           continue;
         }
@@ -10322,29 +10350,29 @@ void main() {
       return out;
     }
     function markKeys(keys) {
-      let any = false;
-      for (const _ in ws.rowOwners) {
-        any = true;
-        break;
-      }
-      if (!any) return keys;
-      const out = keys.slice();
+      const out = [];
       const seen = {};
-      for (let i = 0; i < keys.length; i++) seen[keys[i]] = true;
-      for (let i = 0; i < keys.length; i++) {
-        const own = ws.rowOwners[keys[i]];
-        if (!own) continue;
-        for (let j = 0; j < own.length; j++) if (!seen[own[j]]) {
-          seen[own[j]] = true;
-          out.push(own[j]);
+      const add = function(k) {
+        if (!seen[k]) {
+          seen[k] = true;
+          out.push(k);
         }
+      };
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        const js = ws.byJoin[k];
+        if (js) for (let j = 0; j < js.length; j++) add(js[j]);
+        if (ws.meta[k] || !js) add(k);
+        const own = ws.rowOwners[k];
+        if (own) for (let j = 0; j < own.length; j++) add(own[j]);
       }
       return out;
     }
     function broadcast() {
       const keys = dataKeys(selectedKeys());
-      if (ws.group) busPublish(ws.group, ws.selfToken, keys);
-      if (ws.ctSel) ws.ctSel.set(keys);
+      const msg = "vw" + ++msgSeq;
+      if (ws.group) busPublish(ws.group, ws.selfToken, keys, msg);
+      if (ws.ctSel) ws.ctSel.set(keys, { vellumwidgetMsg: msg });
       shinyInput("selected", keys);
     }
     function toggleSelect(k) {
@@ -10374,12 +10402,25 @@ void main() {
       broadcast();
       if (hadInterval) shinyInput("brush", null, { priority: "event" });
     }
-    function applyLinkedSelection(incoming) {
+    function applyLinkedSelection(incoming, msg) {
+      if (msg != null) {
+        if (msg === ws.linkedMsg) return;
+        ws.linkedMsg = msg;
+      }
       const keys = markKeys(incoming);
       ws.selected = {};
       for (let i = 0; i < keys.length; i++) ws.selected[keys[i]] = true;
       refreshSelected();
-      shinyInput("selected", dataKeys(incoming));
+      const own = [];
+      const seen = {};
+      for (let i = 0; i < incoming.length; i++) {
+        const k = incoming[i];
+        if (ws.dataIds[k] && !seen[k]) {
+          seen[k] = true;
+          own.push(k);
+        }
+      }
+      shinyInput("selected", own);
     }
     function applyFilter(showKeys, byKey) {
       ws.calib = null;
@@ -10397,8 +10438,13 @@ void main() {
         const kept = {};
         for (let i = 0; i < ws.elements.length; i++) {
           const e = ws.elements[i];
-          const rk = ws.rowKeysOf[e.key];
-          if (show[e.key] || !byKey && rk && anyShown(rk)) kept[e.key] = true;
+          if (show[e.key]) {
+            kept[e.key] = true;
+            continue;
+          }
+          if (byKey) continue;
+          const rk = rowIds(e.key);
+          if (rk && anyShown(rk) || !rk && show[dataId(e.key)]) kept[e.key] = true;
         }
         for (let i = 0; i < ws.elements.length; i++) {
           const e = ws.elements[i];
@@ -10455,7 +10501,7 @@ void main() {
               teardownLinking();
               return;
             }
-            if (e.sender !== sel) applyLinkedSelection(e.value || []);
+            if (e.sender !== sel) applyLinkedSelection(e.value || [], e.vellumwidgetMsg);
           });
           filt.on("change", function(e) {
             if (ws.ctFilt !== filt) return;
@@ -10934,6 +10980,9 @@ void main() {
       condTagVals: {},
       filtSelElems: {},
       joinOf: {},
+      byJoin: {},
+      dataIds: {},
+      linkedMsg: null,
       rowOwners: {},
       rowKeysOf: {},
       rowJoinsOf: {},

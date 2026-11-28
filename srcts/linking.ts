@@ -19,7 +19,9 @@ export interface ViewFraction {
 }
 export interface BusMember {
   token: object;
-  onSelect: (keys: string[]) => void;
+  // `msg`: the sending broadcast's id, shared with its crosstalk copy, so a
+  // member on both channels can tell the two apart from a new selection (VW-76)
+  onSelect: (keys: string[], msg?: string) => void;
   onView?: (v: ViewFraction) => void; // linked pan/zoom (optional)
   el?: Element; // the widget's element: a member whose element left the page is dropped
   onGone?: () => void; // called instead of a bare leave when that happens
@@ -49,10 +51,10 @@ function liveMembers(group: string): BusMember[] {
   }
   return live;
 }
-export function busPublish(group: string, sender: object, keys: string[]): void {
+export function busPublish(group: string, sender: object, keys: string[], msg?: string): void {
   const members = liveMembers(group);
   for (let i = 0; i < members.length; i++) {
-    if (members[i].token !== sender) members[i].onSelect(keys);
+    if (members[i].token !== sender) members[i].onSelect(keys, msg);
   }
 }
 // Broadcast a view change to the group's other members (linked pan/zoom).
@@ -99,8 +101,9 @@ export function watchRemoval(el: Element, cb: () => void): () => void {
 // Minimal shape of the crosstalk globals we use (loaded as an htmlwidgets
 // dependency when a SharedData is passed; absent otherwise).
 export interface CrosstalkHandle {
-  on: (type: string, cb: (e: { value: string[] | null; sender?: unknown }) => void) => void;
-  set: (keys: string[] | null, extra?: unknown) => void;
+  // crosstalk copies `set()`'s extra info onto the event (`vellumwidgetMsg`, VW-76)
+  on: (type: string, cb: (e: { value: string[] | null; sender?: unknown; vellumwidgetMsg?: string }) => void) => void;
+  set: (keys: string[] | null, extra?: Record<string, unknown>) => void;
   close?: () => void; // crosstalk >= 1.0: removes the handle's listeners
 }
 export interface Crosstalk {

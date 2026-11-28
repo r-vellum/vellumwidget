@@ -127,6 +127,10 @@ export interface DisplayList {
   keys: string[];
   panels: string[];
   exact: boolean; // every mark is drawn: no record is flagged (pick-only aside), or every flagged one is in a loaded run image
+  // The first record painted after every flagged (painting) record, 0 when
+  // none is flagged. While the list is inexact only records from here on can
+  // be redrawn over the mark image without covering a flagged mark (VW-75).
+  above: number;
   // Flagged runs (VW-30): per record its run (1-based, 0 = none), the count,
   // whether every flagged record is in a run (`covered`), and once the run
   // rasters are loaded, the images (scene px frame runW x runH) and their URIs.
@@ -183,7 +187,7 @@ export function decodeDisplayList(raw: DLPayload | null | undefined, elemKeys?: 
     rx: f32(dlColumn(rc.x)), ry: f32(dlColumn(rc.y)), rw: f32(dlColumn(rc.w)), rh: f32(dlColumn(rc.h)),
     xy: f32(dlColumn(pa.xy)), runOff: u32(dlColumn(pa.run_offset)), pathOff: u32(dlColumn(pa.path_offset)),
     closed: u8(dlColumn(pa.closed)), evenodd: u8(dlColumn(pa.evenodd)),
-    paints: [], clips: [], keys: [], panels: asColumn(raw.panels).map(String), exact: true,
+    paints: [], clips: [], keys: [], panels: asColumn(raw.panels).map(String), exact: true, above: 0,
     group: raw.record.group ? u32(dlColumn(raw.record.group)) : new Uint32Array(n),
     run: raw.record.run ? u32(dlColumn(raw.record.run)) : new Uint32Array(n),
     nRuns: Number(raw.runs) || 0, covered: true, runImgs: null, runHref: null, runW: 0, runH: 0,
@@ -270,6 +274,7 @@ export function decodeDisplayList(raw: DLPayload | null | undefined, elemKeys?: 
     if (dl.flags[i] & ~DL_FLAG_PICK) dl.exact = false;
     const pg = dl.paints[dl.paint[i]];
     if ((pg && pg.grad < 0) || dl.group[i] > dl.groups.length) { dl.flags[i] |= 1; dl.exact = false; }
+    if (dl.flags[i] & ~DL_FLAG_PICK) dl.above = i + 1;
     if ((dl.flags[i] & ~DL_FLAG_PICK) && !(dl.run[i] > 0 && dl.run[i] <= dl.nRuns)) dl.covered = false;
     // Under a blend mode: only with a vellum that composites runs by blend
     // root (VW-32); the record's run then carries its mode.

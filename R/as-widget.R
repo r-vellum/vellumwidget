@@ -76,7 +76,10 @@
 #'   Highcharts. `"mute"` is the same but dims the series instead of removing it
 #'   (its layout is kept). Hovering a swatch still highlights its series under every
 #'   policy. Applies only where the plot draws an interactive legend (a discrete
-#'   `color` / `shape` scale in `vellumplot`).
+#'   `color` / `shape` scale in `vellumplot`). In Shiny, `input$<id>_click` and
+#'   `input$<id>_hover` report the swatch's own key (`"legend:color:s"`), as
+#'   they report whatever element is under the pointer; `input$<id>_selected`,
+#'   crosstalk and linked widgets get only the series' data keys.
 #' @param a11y Accessibility (default `TRUE`). Makes the widget a keyboard- and
 #'   screen-reader-navigable chart: the SVG is labelled as an interactive chart
 #'   (`role="graphics-document"`), each mark is a focusable `graphics-symbol` with
@@ -114,7 +117,12 @@
 #'   `input$<id>_selected`. This needs a vellumplot that lists each series'
 #'   rows (`row_keys`), which it does up to 1000 runs of keys (`r1` to
 #'   `r20000`, in any order, is one run); a series beyond that cap is matched
-#'   by its first row only. A legend swatch's own key is never sent. In raster mode without
+#'   by its first row only. A legend swatch's own key is never sent. In a
+#'   composition (`hconcat()`, `vconcat()`, `wrap_plots()`) the widget sends
+#'   and matches each mark's `data_id` as given, without the cell prefix its
+#'   key carries (`"p1"`, not `"cell-1:p1"`), so a filter or selection reaches
+#'   that row in every cell. A widget on both a linking `group` and a
+#'   crosstalk group hears a linked vellumwidget's selection once. In raster mode without
 #'   the display list (an older vellum, or more marks than
 #'   `render_options(max_marks)`), the image can't hide marks, so a filter
 #'   leaves them all visible and pickable, as `vellumplot::filter_by()` does.
@@ -2592,13 +2600,22 @@ drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 #'     (click / brush / keyboard, and any selection arriving from a linked widget).
 #'     A selected line, path or polygon series reports all its rows' keys, as
 #'     crosstalk and linked widgets get them; a legend swatch's key is never
-#'     reported. Updates as state — re-selecting the same set is a no-op.
+#'     reported. In a composition the keys are the marks' `data_id`s without
+#'     their cell prefix. After a selection from a linked widget or crosstalk
+#'     it holds the keys that arrived and that this widget draws (a mark's key,
+#'     or a row of a line it draws); keys it has no mark for are left out.
+#'     Updates as state — re-selecting the same set is a no-op.
 #'     `character(0)` when nothing is selected.}
 #'   \item{`input$plot_click`}{A list `list(key=)` for each click; `key` is `NULL`
 #'     for a click on empty space. An event input — fires on every click, even the
 #'     same mark twice.}
 #'   \item{`input$plot_hover`}{The hovered key, or `NULL` when the pointer leaves a
 #'     mark. Updates as state (re-fires only when the hovered key changes).}
+#'   \item{Legend swatches in `_click` and `_hover`}{These two report the
+#'     element under the pointer, so a click on or hover over a legend swatch
+#'     reports the swatch's own key (`"legend:<aes>:<value>"`, e.g.
+#'     `"legend:color:s"`). Tell it apart from a data key by that prefix.
+#'     `_selected`, crosstalk and linked widgets never carry it.}
 #'   \item{`input$plot_brush`}{A list `list(keys=, x0=, y0=, x1=, y1=)` when a
 #'     brush (or lasso) gesture completes: the selected keys and the region's
 #'     bounding rectangle in the scene's device-pixel (viewBox) coordinates. A

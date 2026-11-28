@@ -299,6 +299,9 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
     ws.condTagVals = {};
     ws.filtSelElems = {};
     ws.joinOf = {};
+    ws.byJoin = {};
+    ws.dataIds = {};
+    ws.linkedMsg = null;
     ws.rowOwners = {};
     ws.rowKeysOf = {};
     ws.rowJoinsOf = {};
@@ -344,15 +347,35 @@ export function renderFeature(ws: WidgetState): Pick<WidgetFns, "renderValue" | 
         }
       }
       if (e.legend_for != null) (ws.legendSwatch[e.legend_for] = ws.legendSwatch[e.legend_for] || []).push(e.key);
+      // A composition cell's element carries its cross-view id (`join`, the
+      // data_id without the cell's key prefix): crosstalk, the bus and
+      // vw_select()/vw_filter() speak in those ids (VW-74).
+      if (e.join != null) {
+        ws.joinOf[e.key] = e.join;
+        const js = ws.byJoin[e.join] || (ws.byJoin[e.join] = []);
+        if (js.indexOf(e.key) < 0) js.push(e.key);
+      }
+      // A row is owned by its multi-row marks under its key and, in a
+      // composition, under its join too.
+      const own = function (rk: string): void {
+        const o = ws.rowOwners[rk] || (ws.rowOwners[rk] = []);
+        if (o.indexOf(e.key) < 0) o.push(e.key);
+      };
       if (e.row_keys) {
-        for (let r = 0; r < e.row_keys.length; r++) {
-          const rk = e.row_keys[r];
-          const own = ws.rowOwners[rk] || (ws.rowOwners[rk] = []);
-          if (own.indexOf(e.key) < 0) own.push(e.key);
-        }
+        for (let r = 0; r < e.row_keys.length; r++) own(e.row_keys[r]);
         unionInto(ws.rowKeysOf, e.key, e.row_keys);
       }
-      if (e.row_joins) unionInto(ws.rowJoinsOf, e.key, e.row_joins);
+      if (e.row_joins) {
+        for (let r = 0; r < e.row_joins.length; r++) own(e.row_joins[r]);
+        unionInto(ws.rowJoinsOf, e.key, e.row_joins);
+      }
+      // The data ids this widget draws (VW-77): a mark's id, or a multi-row
+      // mark's rows; never a legend swatch.
+      if (e.legend_for == null) {
+        const rows = e.row_joins || e.row_keys;
+        if (rows) for (let r = 0; r < rows.length; r++) ws.dataIds[rows[r]] = true;
+        else ws.dataIds[e.join != null ? e.join : e.key] = true;
+      }
     }
     // A declared select_neighbours() selection turns on graph-neighbourhood
     // projection in linkedKeys / selectionMembers.
