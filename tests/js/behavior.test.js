@@ -414,9 +414,10 @@ ok(
       self.closed = true; self._ls = [];
       const arr = ch(group, kind); const i = arr.indexOf(self); if (i >= 0) arr.splice(i, 1);
     };
-    this.set = function (v) {
+    // as crosstalk, set()'s extra info is copied onto the event
+    this.set = function (v, extra) {
       ch(group, kind).forEach(function (h) {
-        h._ls.forEach(function (cb) { cb({ value: v, sender: self }); });
+        h._ls.forEach(function (cb) { cb(Object.assign({}, extra || {}, { value: v, sender: self })); });
       });
     };
   }
@@ -761,8 +762,8 @@ ok(!elL.querySelector('[data-key="q1"]').classList.contains("vellumwidget-select
     const e = document.createElement("div");
     document.body.appendChild(e);
     const inst = widgetDef.factory(e, 100, 100);
-    const pk = ["subplot-1:r1", "subplot-1:r2", "subplot-1:r3", "subplot-1:r11"];
-    const lk = [S("subplot-2:r1"), S("subplot-2:r11")];
+    const pk = ["cell-1:r1", "cell-1:r2", "cell-1:r3", "cell-1:r11"];
+    const lk = [S("cell-2:r1"), S("cell-2:r11")];
     const keys = pk.concat(lk);
     inst.renderValue({
       svg: '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
@@ -771,20 +772,103 @@ ok(!elL.querySelector('[data-key="q1"]').classList.contains("vellumwidget-select
         key: keys, x0: [0, 3, 6, 9, 20, 20], y0: [0, 0, 0, 0, 0, 10], x1: [2, 5, 8, 11, 40, 40], y1: [2, 2, 2, 2, 2, 12],
         join: ["r1", "r2", "r3", "r11", "r1", "r11"],
         filt: [null, null, null, null, ["pick"], ["pick"]],
-        row_keys: { at: [4, 5], v: [[["subplot-2:r", 1, 10]], [["subplot-2:r", 11, 10]]] },
+        row_keys: { at: [4, 5], v: [[["cell-2:r", 1, 10]], [["cell-2:r", 11, 10]]] },
         row_joins: { at: [4, 5], v: [[["r", 1, 10]], [["r", 11, 10]]] }
       },
       interactions: { selections: [{ name: "pick", kind: "point", on: "click", empty: true }], conditions: [], filters: [{ selection: "pick" }] },
       options: { tooltip: true, hover: true, select: true, nearest: false, selectMode: "multiple" }
     });
     const qf = (k) => e.querySelector('[data-key="' + k + '"]');
-    inst._call("select", ["subplot-1:r3"]);
+    inst._call("select", ["cell-1:r3"]);
     ok(!qf(lk[0]).classList.contains("vellumwidget-filtered") && qf(lk[1]).classList.contains("vellumwidget-filtered"),
       "X-15 (F2): filter_by() keeps the line through the selected row r3 (joined across cells) and hides the other");
-    inst._call("select", ["subplot-1:r11"]);
+    inst._call("select", ["cell-1:r11"]);
     ok(qf(lk[0]).classList.contains("vellumwidget-filtered") && !qf(lk[1]).classList.contains("vellumwidget-filtered"),
       "X-15 (F2): selecting its first row keeps only line b");
   }
+}
+
+// ===================== VW-74 / VW-76 / VW-77: crosstalk in compositions, deduped and own keys =====================
+{
+  const S = (k, l) => k + "␟s" + (l || 1);
+  // a two-cell composition: points p1..p3 in each cell (keys "cell-<k>:p<i>",
+  // joins "p<i>") and, in cell 2, a line through all three rows
+  function mountComp(id, opts) {
+    const pk = ["cell-1:p1", "cell-1:p2", "cell-1:p3", "cell-2:p1", "cell-2:p2", "cell-2:p3"];
+    const keys = pk.concat([S("cell-2:p1", 2)]);
+    const e = document.createElement("div");
+    e.id = id;
+    document.body.appendChild(e);
+    const inst = widgetDef.factory(e, 100, 100);
+    inst.renderValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="30" viewBox="0 0 90 30">' +
+        keys.map((k, i) => i < 6 ? '<circle data-key="' + k + '" cx="' + (i * 10 + 3) + '" cy="5" r="2"/>' : '<path data-key="' + k + '" d="M30 20L80 20"/>').join("") + "</svg>",
+      elements: {
+        key: keys, mark: ["point", "point", "point", "point", "point", "point", "line"],
+        x0: [1, 11, 21, 31, 41, 51, 30], y0: [3, 3, 3, 3, 3, 3, 19], x1: [5, 15, 25, 35, 45, 55, 80], y1: [7, 7, 7, 7, 7, 7, 21],
+        join: ["p1", "p2", "p3", "p1", "p2", "p3", "p1"],
+        row_keys: { at: 6, v: [[["cell-2:p", 1, 3]]] },
+        row_joins: { at: 6, v: [[["p", 1, 3]]] }
+      },
+      options: Object.assign({ tooltip: true, hover: true, select: true, nearest: false, selectMode: "multiple" }, opts)
+    });
+    return { el: e, inst: inst, q: (k) => e.querySelector('[data-key="' + k + '"]') };
+  }
+  const C = mountComp("vw74", { crosstalk: "VW74" });
+  const isF = (k) => C.q(k).classList.contains("vellumwidget-filtered");
+  const isS = (k) => C.q(k).classList.contains("vellumwidget-selected");
+  const line = S("cell-2:p1", 2);
+  const f74 = new window.crosstalk.FilterHandle("VW74");
+  f74.set(["p1", "p2"]);
+  ok(!isF("cell-1:p1") && !isF("cell-2:p2") && isF("cell-1:p3") && isF("cell-2:p3") && !isF(line),
+    "VW-74: a crosstalk filter matches composition marks by their join (p1, p2 kept in both cells, p3 hidden)");
+  f74.set(["p3"]);
+  ok(isF("cell-1:p1") && isF("cell-2:p2") && !isF("cell-1:p3") && !isF(line),
+    "VW-74: a line in a cell stays while any of its rows' joins is kept");
+  f74.set(["cell-1:p2"]);
+  ok(!isF("cell-1:p2") && isF("cell-2:p2"), "VW-74: an element key (vw_filter() with a prefixed key) still matches that mark alone");
+  f74.set(null);
+  const calls = [];
+  window.Shiny = { setInputValue: (iid, v) => calls.push({ id: iid, v: v }) };
+  HTMLWidgets.shinyMode = true;
+  const last = (id) => { const c = calls.filter((x) => x.id === id + "_selected"); return c.length ? c[c.length - 1].v : undefined; };
+  const s74 = new window.crosstalk.SelectionHandle("VW74");
+  let sent = null;
+  s74.on("change", (ev) => { if (ev.sender !== s74) sent = ev.value; });
+  s74.set(["p2"]);
+  ok(isS("cell-1:p2") && isS("cell-2:p2") && isS(line) && !isS("cell-1:p1"),
+    "VW-74: a peer selecting p2 selects p2 in both cells and the line through it");
+  ok(JSON.stringify(last("vw74")) === '["p2"]', "VW-74: Shiny hears p2 (" + JSON.stringify(last("vw74")) + ")");
+  C.inst._call("clearSelection");
+  fireOn(C.el.querySelector("svg"), "click", C.q("cell-1:p3"));
+  ok(JSON.stringify(sent) === '["p3"]' && JSON.stringify(last("vw74")) === '["p3"]',
+    "VW-74: clicking a composition mark sends its join, not its prefixed key (" + JSON.stringify(sent) + ")");
+  C.inst._call("clearSelection");
+  fireOn(C.el.querySelector("svg"), "click", C.q(line));
+  ok(JSON.stringify(sent) === '["p1","p2","p3"]', "VW-74: a selected line in a cell is sent as its rows' joins (" + JSON.stringify(sent) + ")");
+  C.inst._call("clearSelection");
+  // VW-77: Shiny hears only the incoming keys this widget draws
+  s74.set(["p1", "p9", "legend:color:a"]);
+  ok(JSON.stringify(last("vw74")) === '["p1"]', "VW-77: a linked selection reports only keys the widget draws (" + JSON.stringify(last("vw74")) + ")");
+
+  // VW-76: two widgets on one bus group and one crosstalk group: a click in
+  // A reaches B over both, and B applies and reports it once
+  const A = mountComp("vw76a", { crosstalk: "VW76", group: "vw76bus" });
+  const B = mountComp("vw76b", { crosstalk: "VW76", group: "vw76bus" });
+  calls.length = 0;
+  fireOn(A.el.querySelector("svg"), "click", A.q("cell-1:p2"));
+  const bSel = calls.filter((x) => x.id === "vw76b_selected");
+  ok(bSel.length === 1 && JSON.stringify(bSel[0].v) === '["p2"]' && B.q("cell-2:p2").classList.contains("vellumwidget-selected"),
+    "VW-76: a peer on both the bus and crosstalk applies and reports a selection once (" + JSON.stringify(bSel) + ")");
+  // a crosstalk sender that isn't a vellumwidget (no message id) is never taken for a duplicate
+  calls.length = 0;
+  const other = new window.crosstalk.SelectionHandle("VW76");
+  other.set(["p3"]);
+  other.set(["p1"]);
+  const bv = calls.filter((x) => x.id === "vw76b_selected").map((x) => x.v.join()).join("|");
+  ok(bv === "p3|p1", "VW-76: selections from other crosstalk senders still apply (" + bv + ")");
+  HTMLWidgets.shinyMode = false;
+  delete window.Shiny;
 }
 
 // ===================== VW-73: a legend swatch key never leaves the widget =====================
@@ -6840,9 +6924,18 @@ const slowChecks = []; // promises resolved after timers (settle redraws)
   const none = mountRuns({ noFlagged: true });
   none.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); none.inst._test.evalTier();
   ok(!none.inst._test.runsAttached() && none.inst._test.listExact() === false && none.inst._test.markTier() === "mid" &&
-    marksShown(none) && seq(none.ctx) === "fill:25/125",
+    marksShown(none) && seq(none.ctx) === "" && none.el.querySelector("canvas.vellumwidget-canvas").style.display !== "block",
     "VW-30 fallback: no run rasters (older vellum) -> inexact list, mark PNG kept, no detail");
   none.restore();
+  // VW-75: the zoomed canvas over the kept PNG redraws only the records
+  // painted after every flagged one; p1 and p3 sit under the flagged p4 (a
+  // label on a point, say), so above it was the PNG alone. With the flagged
+  // record first (p2 only), p3 and p4 are above it and still redrawn.
+  const under = mountRuns({ noFlagged: true, flags: [0, 4, 0, 0] });
+  under.inst._test.setView({ x: 20, y: 0, w: 160, h: 80 }); under.inst._test.evalTier();
+  ok(under.inst._test.listExact() === false && marksShown(under) && seq(under.ctx) === "fill:125/175",
+    "VW-75: an inexact list redraws only the records above its last flagged one (p3, p4; not p1)");
+  under.restore();
   const old = mountRuns({ noRuns: true });
   ok(!old.inst._test.runsAttached() && old.inst._test.listExact() === false, "VW-30 fallback: a list without runs ignores the rasters");
   old.restore();

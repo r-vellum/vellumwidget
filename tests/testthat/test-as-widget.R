@@ -516,6 +516,23 @@ test_that("crosstalk = SharedData wires the group + loads crosstalk deps (Phase 
   )))
 })
 
+test_that("a composition ships the join crosstalk matches on (VW-74)", {
+  skip_if_not_installed("crosstalk")
+  skip_if_not_installed("vellumplot")
+  df <- data.frame(x = 1:3, y = c(2, 1, 3), id = paste0("p", 1:3))
+  sd <- crosstalk::SharedData$new(df, key = ~id, group = "ctcomp")
+  p <- vellumplot::vplot(df) |>
+    vellumplot::mark_point(x = x, y = y, data_id = id)
+  w <- as_widget(vellumplot::hconcat(p, p), crosstalk = sd)
+  el <- w$x$elements
+  keyed <- !startsWith(el$key, "legend:")
+  # every cell's mark keeps its crosstalk key as its join, whatever prefix
+  # its own key carries
+  expect_setequal(unique(el$join[keyed]), df$id)
+  expect_false(any(el$key[keyed] %in% df$id))
+  expect_equal(sum(el$join[keyed] == "p1"), 2L)
+})
+
 test_that("crosstalk accepts a bare group name; absent by default", {
   scene <- vellum::vl_scene(1, 1, dpi = 100) |>
     vellum::draw(vellum::points_grob(

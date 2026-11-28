@@ -155,7 +155,10 @@ after it on the next; the stage gets `vellumwidget-blend-iso` = `isolation:
 isolate`; `hideCanvas()` hides them all); in the export, extra images
 (`exportMarksImage().layers`) stacked with `mix-blend-mode`. The canvas also
 replaces the mark PNG at the overview while blend runs exist. Blend modes (flag 32), a flagged record outside every run, more than
-`.MAX_FLAGGED_RUNS` runs or an older vellum keep the old behaviour.
+`.MAX_FLAGGED_RUNS` runs or an older vellum keep the old behaviour: the
+list stays inexact, the mark PNG stays shown, and the zoomed canvas redraws
+only the records after the last flagged one (`dl.above`), so it never covers
+a flagged mark (VW-75); the GL painter declines such a list.
 Selected marks draw above their layer's non-members (VW-53,
 `features/raise.ts`): in SVG mode and the detail tier member nodes move to the
 end of their run of keyed siblings (or of the layer's last plain series group,

@@ -4,6 +4,10 @@
 import { busJoin, busLeave, busPublish, getCrosstalk, watchRemoval } from "../linking";
 import type { WidgetFns, WidgetState } from "../state";
 
+// Broadcast ids (VW-76): page-unique, so a selection sent over both the bus
+// and crosstalk reaches a member of both as one message.
+let msgSeq = 0;
+
 export function selectionFeature(
   ws: WidgetState
 ): Pick<
@@ -59,21 +63,36 @@ export function selectionFeature(
     return (m != null && m.legend_for != null) || k.lastIndexOf("legend:", 0) === 0;
   }
 
+  // A mark's data id outside the widget: its composition join (the data_id
+  // without the cell's key prefix, VW-74), else its key.
+  function dataId(k: string): string {
+    const j = ws.joinOf[k];
+    return j != null ? j : k;
+  }
+
+  // The rows a multi-row mark draws, as data ids (their joins in a
+  // composition), or undefined for a one-row mark.
+  function rowIds(k: string): string[] | undefined {
+    return ws.rowJoinsOf[k] || ws.rowKeysOf[k];
+  }
+
   // The data keys a selection stands for when it leaves the widget: the
-  // selected keys without legend swatches (VW-73), and each multi-row mark (a
-  // line series) as the rows it draws (X-15), so a linked table or scatter
-  // sees the whole series, not only its first row. Such a mark's own key is a
-  // series key, not a row (vellumplot's "<first row>\u241fs<layer>"), so it
-  // never goes out itself.
+  // selected keys without legend swatches (VW-73), each as its data id (the
+  // join in a composition, VW-74), and each multi-row mark (a line series) as
+  // the rows it draws (X-15), so a linked table or scatter sees the whole
+  // series, not only its first row. Such a mark's own key is a series key,
+  // not a row (vellumplot's "<first row>\u241fs<layer>"), so it never goes
+  // out itself.
   function dataKeys(keys: string[]): string[] {
     const out: string[] = [];
     const seen: Record<string, boolean> = {};
     for (let i = 0; i < keys.length; i++) {
       const k = keys[i];
       if (isSwatch(k)) continue;
-      const rk = ws.rowKeysOf[k];
+      const rk = rowIds(k);
       if (!rk) {
-        if (!seen[k]) { seen[k] = true; out.push(k); }
+        const id = dataId(k);
+        if (!seen[id]) { seen[id] = true; out.push(id); }
         continue;
       }
       for (let r = 0; r < rk.length; r++) if (!seen[rk[r]]) { seen[rk[r]] = true; out.push(rk[r]); }
@@ -81,20 +100,22 @@ export function selectionFeature(
     return out;
   }
 
-  // Incoming data keys (a linked view, crosstalk, vw_select()) as this
-  // widget's marks: each key, plus every multi-row mark that draws that row
-  // (X-15), so selecting row r3 elsewhere selects the line through it.
+  // Incoming keys (a linked view, crosstalk, vw_select()) as this widget's
+  // marks: an element key as itself, a data id as every mark carrying it
+  // (each composition cell's, VW-74), plus every multi-row mark that draws
+  // that row (X-15), so selecting row r3 elsewhere selects the line through it.
   function markKeys(keys: string[]): string[] {
-    let any = false;
-    for (const _ in ws.rowOwners) { any = true; break; }
-    if (!any) return keys;
-    const out = keys.slice();
+    const out: string[] = [];
     const seen: Record<string, boolean> = {};
-    for (let i = 0; i < keys.length; i++) seen[keys[i]] = true;
+    const add = function (k: string): void { if (!seen[k]) { seen[k] = true; out.push(k); } };
     for (let i = 0; i < keys.length; i++) {
-      const own = ws.rowOwners[keys[i]];
-      if (!own) continue;
-      for (let j = 0; j < own.length; j++) if (!seen[own[j]]) { seen[own[j]] = true; out.push(own[j]); }
+      const k = keys[i];
+      const js = ws.byJoin[k];
+      if (js) for (let j = 0; j < js.length; j++) add(js[j]);
+      // an element key (or a key no mark draws: kept, it styles nothing)
+      if (ws.meta[k] || !js) add(k);
+      const own = ws.rowOwners[k];
+      if (own) for (let j = 0; j < own.length; j++) add(own[j]);
     }
     return out;
   }
@@ -103,10 +124,13 @@ export function selectionFeature(
   // only from local mutations; the incoming appliers below never broadcast, so
   // there is no feedback loop. Shiny, the bus and crosstalk all get the same
   // data keys (`dataKeys()`): no legend swatch (VW-73), a line as its rows.
+  // Bus and crosstalk carry one id per broadcast, so a peer on both hears it
+  // once (VW-76).
   function broadcast(): void {
     const keys = dataKeys(selectedKeys());
-    if (ws.group) busPublish(ws.group, ws.selfToken, keys);
-    if (ws.ctSel) ws.ctSel.set(keys);
+    const msg = "vw" + (++msgSeq);
+    if (ws.group) busPublish(ws.group, ws.selfToken, keys, msg);
+    if (ws.ctSel) ws.ctSel.set(keys, { vellumwidgetMsg: msg });
     shinyInput("selected", keys); // deduped state -> input$<id>_selected
   }
 
@@ -144,14 +168,27 @@ export function selectionFeature(
   // A selection arriving from a linked view — apply WITHOUT re-broadcasting to
   // the JS bus (feedback-loop guard), but still surface it to Shiny so the
   // server sees this widget's true current selection regardless of source.
-  // Shiny hears the data keys that arrived (no swatch key, VW-73), not the
-  // series keys they selected here.
-  function applyLinkedSelection(incoming: string[]): void {
+  // Shiny hears the data keys that arrived and that this widget draws (a
+  // mark's id or a line's row, VW-77; never a swatch key, VW-73), not the
+  // series keys they selected here. A widget on both the bus and crosstalk
+  // gets a vellumwidget peer's broadcast on each: `msg`, the broadcast's id,
+  // lets the second copy go (VW-76).
+  function applyLinkedSelection(incoming: string[], msg?: string): void {
+    if (msg != null) {
+      if (msg === ws.linkedMsg) return;
+      ws.linkedMsg = msg;
+    }
     const keys = markKeys(incoming);
     ws.selected = {};
     for (let i = 0; i < keys.length; i++) ws.selected[keys[i]] = true;
     refreshSelected();
-    shinyInput("selected", dataKeys(incoming));
+    const own: string[] = [];
+    const seen: Record<string, boolean> = {};
+    for (let i = 0; i < incoming.length; i++) {
+      const k = incoming[i];
+      if (ws.dataIds[k] && !seen[k]) { seen[k] = true; own.push(k); }
+    }
+    shinyInput("selected", own);
   }
 
   // Cross-filter (display tier): hide keyed elements whose key is not in the
@@ -161,8 +198,10 @@ export function selectionFeature(
   // on them through its own sets. A swatch whose whole series is filtered out
   // is dimmed and inert (`emptySwatchSet`): hovering or clicking it is a no-op.
   // A multi-row mark (a line series, keyed by its first row) stays while any
-  // row it draws is shown (X-15). `byKey` (filter_by(), whose show set lists
-  // element keys, not rows) turns that off.
+  // row it draws is shown (X-15). In a composition a mark is matched by its
+  // join, the data_id without the cell's key prefix, as crosstalk sends it
+  // (VW-74); an element key matches too. `byKey` (filter_by(), whose show set
+  // lists element keys, not rows) turns the row and join matching off.
   //
   // Raster mode without a display list (above `max_marks`, or an older vellum)
   // can't take marks off its image, so a filter there changes nothing: the
@@ -187,8 +226,10 @@ export function selectionFeature(
       const kept: Record<string, boolean> = {};
       for (let i = 0; i < ws.elements.length; i++) {
         const e = ws.elements[i];
-        const rk = ws.rowKeysOf[e.key];
-        if (show[e.key] || (!byKey && rk && anyShown(rk))) kept[e.key] = true;
+        if (show[e.key]) { kept[e.key] = true; continue; }
+        if (byKey) continue;
+        const rk = rowIds(e.key);
+        if ((rk && anyShown(rk)) || (!rk && show[dataId(e.key)])) kept[e.key] = true;
       }
       for (let i = 0; i < ws.elements.length; i++) {
         const e = ws.elements[i];
@@ -252,7 +293,7 @@ export function selectionFeature(
         sel.on("change", function (e) {
           if (ws.ctSel !== sel) return; // a closed handle (crosstalk without close())
           if (!ws.el.isConnected) { teardownLinking(); return; }
-          if (e.sender !== sel) applyLinkedSelection(e.value || []);
+          if (e.sender !== sel) applyLinkedSelection(e.value || [], e.vellumwidgetMsg);
         });
         filt.on("change", function (e) {
           if (ws.ctFilt !== filt) return;

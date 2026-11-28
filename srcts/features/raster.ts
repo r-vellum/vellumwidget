@@ -328,6 +328,8 @@ export function rasterFeature(
       glPaths = !glWhy && glHasPaths(dl);
     }
     if (glWhy) return glWhy;
+    // the GL painter draws every exact record: none may sit under a flagged one (VW-75)
+    if (!dl.exact && dl.above > 0) return "flagged marks";
     if (ws.msActive && ws.msColor) {
       if (glStyleRev !== ws.msRev) { glStyleRev = ws.msRev; glStyleOk = glStyleReadable(ws.msColor, ws.msPalette); }
       if (!glStyleOk) return "condition colours";
@@ -391,7 +393,13 @@ export function rasterFeature(
     // canvas draws them above it, standing in for the image (which can't
     // reorder its pixels) at the overview zoom too.
     const raising = dl.exact && !!ws.fx.raiseOrder(dl);
-    if (!(zoomed || (styled && dl.exact) || blending || raising) || !dl.n) {
+    // An inexact list (flagged marks with no run images: more than
+    // .MAX_FLAGGED_RUNS runs, or an older vellum) keeps the mark image, which
+    // alone holds the flagged marks. The canvas then redraws only the records
+    // painted after every flagged one, so paint order holds: a label layer
+    // over points keeps its labels (VW-75). With none after them the scaled
+    // image is the whole view.
+    if (!(zoomed || (styled && dl.exact) || blending || raising) || !dl.n || (!dl.exact && dl.above >= dl.n)) {
       glLast = "image shown";
       hideCanvas();
       showMarksLayer(true);
@@ -769,6 +777,7 @@ export function rasterFeature(
     tgt.save();
     // Selected marks after the rest of their segment (VW-53, raise.ts).
     const ord = ws.fx.raiseOrder(dl);
+    const from = dl.exact ? 0 : dl.above;
     for (let q = 0; q < dl.n; q++) {
       const i = ord ? ord[q] : q;
       if (runImgs && dl.run[i] > 0) {
@@ -800,6 +809,7 @@ export function rasterFeature(
         continue;
       }
       if (dl.flags[i]) continue; // not reproducible here: the image draws it
+      if (i < from) continue; // beneath a flagged mark the image draws (VW-75)
       let ov = 0, alpha = 1;
       if (flags) {
         const k = dl.key[i], f = flags[k];
